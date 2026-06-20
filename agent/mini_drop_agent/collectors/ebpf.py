@@ -52,6 +52,7 @@ class EBPFCollector:
                 [bpftrace, "-o", output_file, script_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None,  # 独立进程组（仅 Unix）
             )
             try:
                 proc.wait(timeout=task.duration_sec)
@@ -73,7 +74,7 @@ class EBPFCollector:
                     reason=f"bpftrace 执行失败 (exit={proc.returncode}): {stderr_text[:200]}",
                 )
 
-        except Exception as exc:
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
             return CollectorResult(
                 ok=False,
                 reason=f"bpftrace 异常: {exc}",

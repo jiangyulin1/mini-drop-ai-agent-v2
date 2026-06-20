@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     perl \
     && rm -rf /var/lib/apt/lists/*
 
+# 创建非 root 用户运行服务
+RUN useradd --create-home --shell /bin/bash mini-drop
+
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
@@ -20,5 +23,8 @@ COPY proto/ ./proto/
 RUN cd proto && bash compile.sh
 
 EXPOSE 8191 50051
+
+# 非 root 运行
+USER mini-drop
 
 CMD ["python", "-m", "server.app.main"]

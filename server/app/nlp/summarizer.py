@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from server.app.ai_provider import chat_completions, get_ai_settings, is_feature_enabled
+from server.app.logging_utils import log_event
 
 SUMMARIZE_SYSTEM_PROMPT = """你是 Mini-Drop 性能诊断报告撰写助手。
 
@@ -51,8 +52,8 @@ def summarize(
         )
         if resp.status_code == 200:
             return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_event("warning", "ai_summarizer_failed", error=str(exc)[:200])
 
     return _template_summary(top_functions, suggestions or [])
 

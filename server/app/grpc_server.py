@@ -3,10 +3,16 @@
 在后台线程中运行 gRPC server（端口 50051），
 与 FastAPI HTTP server（端口 8191）共存于同一进程。
 两者共享同一个 Repository 实例。
+
+TLS 支持：
+  设置 MINI_DROP_GRPC_SECURE=1 启用 TLS。
+  设置 MINI_DROP_GRPC_CERT_FILE / MINI_DROP_GRPC_KEY_FILE 指定证书路径。
+  未设置时使用 insecure 模式（仅适用于开发/演示环境）。
 """
 
 from __future__ import annotations
 
+import os
 from concurrent import futures
 from typing import Any
 
@@ -25,21 +31,50 @@ from server.app.grpc_services.hotmethod_service import HotmethodService
 from server.app.grpc_services.init_service import InitAgentService
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(int(default))).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _add_port(server: grpc.Server, address: str) -> None:
+    """Add a gRPC port, optionally secured with TLS."""
+    if _env_bool("MINI_DROP_GRPC_SECURE", default=False):
+        cert_file = os.getenv("MINI_DROP_GRPC_CERT_FILE", "").strip()
+        key_file = os.getenv("MINI_DROP_GRPC_KEY_FILE", "").strip()
+        if not cert_file or not key_file:
+            raise RuntimeError(
+                "MINI_DROP_GRPC_SECURE=1 requires MINI_DROP_GRPC_CERT_FILE and MINI_DROP_GRPC_KEY_FILE"
+            )
+        with open(key_file, "rb") as fh:
+            private_key = fh.read()
+        with open(cert_file, "rb") as fh:
+            certificate_chain = fh.read()
+        server_credentials = grpc.ssl_server_credentials([(private_key, certificate_chain)])
+        server.add_secure_port(address, server_credentials)
+    else:
+        server.add_insecure_port(address)
+
+
+def _build_server() -> grpc.Server:
+    return grpc.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        interceptors=[GrpcAuthInterceptor()],
+    )
+
+
 def serve(repo: Any, port: int = 50051) -> grpc.Server:
     """创建并启动 gRPC server。
 
     Returns:
         grpc.Server 实例，调用方负责在进程退出时调用 server.stop()。
     """
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), interceptors=[GrpcAuthInterceptor()])
+    server = _build_server()
 
     init_pb2_grpc.add_InitAgentServicer_to_server(InitAgentService(repo), server)
     healthcheck_pb2_grpc.add_HealthCheckServicer_to_server(HealthCheckService(repo), server)
     hotmethod_pb2_grpc.add_HotmethodServicer_to_server(HotmethodService(repo), server)
     control_pb2_grpc.add_ControlServicer_to_server(ControlService(repo), server)
 
-    address = f"0.0.0.0:{port}"
-    server.add_insecure_port(address)
+    _add_port(server, f"0.0.0.0:{port}")
     server.start()
     return server
 
@@ -47,14 +82,14 @@ def serve(repo: Any, port: int = 50051) -> grpc.Server:
 def serve_in_background(repo: Any, port: int = 50051) -> grpc.Server:
     """在后台守护线程启动 gRPC server，主线程继续执行 HTTP server。"""
 
-    grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), interceptors=[GrpcAuthInterceptor()])
+    grpc_server = _build_server()
 
     init_pb2_grpc.add_InitAgentServicer_to_server(InitAgentService(repo), grpc_server)
     healthcheck_pb2_grpc.add_HealthCheckServicer_to_server(HealthCheckService(repo), grpc_server)
     hotmethod_pb2_grpc.add_HotmethodServicer_to_server(HotmethodService(repo), grpc_server)
     control_pb2_grpc.add_ControlServicer_to_server(ControlService(repo), grpc_server)
 
-    grpc_server.add_insecure_port(f"0.0.0.0:{port}")
+    _add_port(grpc_server, f"0.0.0.0:{port}")
     grpc_server.start()
 
     return grpc_server

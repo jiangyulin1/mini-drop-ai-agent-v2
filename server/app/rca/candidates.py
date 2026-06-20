@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from server.app.rca.models import CandidateCause, EvidenceInput, FeedbackPrior
+
+logger = logging.getLogger(__name__)
 
 RULES_PATH = Path(__file__).with_name("rules.json")
 
@@ -27,8 +30,9 @@ def generate_candidates(
     for rule in load_rules():
         try:
             matched = _match_rule(rule, evidence)
-        except Exception:
+        except Exception as exc:
             matched = False
+            logger.warning("rule match failed for %s: %s", rule.get("candidate_id", "?"), exc)
 
         if not matched:
             continue
@@ -62,12 +66,46 @@ def generate_candidates(
 def load_rules(path: str | None = None) -> list[dict[str, Any]]:
     """加载外部规则配置。测试可传入 path 或 clear cache 后重载。"""
     rules_path = Path(path) if path else RULES_PATH
-    data = json.loads(rules_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(rules_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        logger.error("RCA rules.json 格式错误: %s", exc)
+        raise ValueError(f"RCA 规则文件 JSON 解析失败: {rules_path}") from exc
+    except FileNotFoundError:
+        logger.warning("RCA rules.json 未找到: %s，使用内置默认规则", rules_path)
+        return _builtin_rules()
     if not isinstance(data, list):
         raise ValueError("RCA 规则文件必须是数组")
-    for item in data:
+    # 过滤掉以 _comment 开头仅用于分组的条目
+    rules = [item for item in data if "candidate_id" in item]
+    for item in rules:
         _validate_rule(item)
-    return data
+    if not rules:
+        logger.warning("RCA rules.json 没有有效规则，使用内置默认规则")
+        return _builtin_rules()
+    return rules
+
+
+def _builtin_rules() -> list[dict[str, Any]]:
+    """内置默认规则（当 rules.json 缺失或损坏时使用）。"""
+    return [
+        {
+            "candidate_id": "cpu_hotspot_default",
+            "description": "CPU 热点函数占比过高（默认规则）",
+            "match_type": "top_function_keyword",
+            "params": {"min_percent": 40, "keywords": ["hotspot", "fib", "recursive", "compute"]},
+            "rule_score": 0.70,
+            "evidence_refs": ["top_functions[0]"],
+        },
+        {
+            "candidate_id": "io_wait_default",
+            "description": "IO 延迟异常（默认规则）",
+            "match_type": "ebpf_latency_present",
+            "params": {},
+            "rule_score": 0.65,
+            "evidence_refs": ["ebpf_metrics"],
+        },
+    ]
 
 
 def _validate_rule(rule: dict[str, Any]) -> None:
@@ -120,12 +158,161 @@ def _match_failure_contains(evidence: EvidenceInput, params: dict[str, Any]) -> 
     return any(keyword.lower() in joined for keyword in params.get("keywords", []))
 
 
+# ── 多维指标匹配器 ──────────────────────────────────────────
+
+
+def _match_sys_metric_threshold(evidence: EvidenceInput, params: dict[str, Any]) -> bool:
+    """通过 sys_metrics 多维度阈值触发规则。
+
+    params 支持的字段（任意组合，全部满足才触发）:
+      metric_path: 期字段路径，如 "summary.thread_count", "summary.fd_trend"
+      op: 比较操作符 "gt"/"lt"/"gte"/"lte"/"eq"/"contains"
+      value: 比较值
+      min_samples: 最少样本数
+    """
+    if not evidence.sys_metrics:
+        return False
+    sm = evidence.sys_metrics
+    path = params.get("metric_path", "")
+    op = params.get("op", "gt")
+    expected = params.get("value")
+    min_samples = params.get("min_samples", 1)
+
+    # 检查样本数
+    if sm.get("sample_count", 0) < min_samples:
+        return False
+
+    # 解析路径获取值
+    val = _resolve_path(sm, path)
+    if val is None:
+        return False
+
+    if op == "contains":
+        return str(expected or "").lower() in str(val).lower()
+    if op == "gt":
+        return float(val) > float(expected or 0)
+    if op == "lt":
+        return float(val) < float(expected or 0)
+    if op == "gte":
+        return float(val) >= float(expected or 0)
+    if op == "lte":
+        return float(val) <= float(expected or 0)
+    if op == "eq":
+        return str(val) == str(expected)
+    return False
+
+
+def _match_multi_metric(evidence: EvidenceInput, params: dict[str, Any]) -> bool:
+    """多指标组合匹配——所有子条件都满足才触发。
+
+    params.conditions:
+      [{"metric_path": "...", "op": "gt", "value": N}, ...]
+    """
+    conditions = params.get("conditions", [])
+    if not conditions:
+        return False
+    for cond in conditions:
+        if not _match_sys_metric_threshold(evidence, cond):
+            return False
+    return True
+
+
+def _match_fd_trend(evidence: EvidenceInput, params: dict[str, Any]) -> bool:
+    """FD 趋势检测——专门检查文件描述符是否持续增长。"""
+    if not evidence.sys_metrics:
+        return False
+    summary = evidence.sys_metrics.get("summary", {})
+    min_count = params.get("min_fd_count", 0)
+    if summary.get("fd_count", 0) < min_count:
+        return False
+    trend = summary.get("fd_trend", "")
+    return trend == "increasing"
+
+
+def _match_thread_trend(evidence: EvidenceInput, params: dict[str, Any]) -> bool:
+    """线程数趋势检测。"""
+    if not evidence.sys_metrics:
+        return False
+    summary = evidence.sys_metrics.get("summary", {})
+    min_count = params.get("min_threads", 50)
+    if summary.get("thread_count", 0) < min_count:
+        return False
+    trend = summary.get("thread_trend", "")
+    return trend == "increasing"
+
+
+def _match_cross_evidence(evidence: EvidenceInput, params: dict[str, Any]) -> bool:
+    """跨证据交叉验证：多个采集器或指标维度同时异常时触发。
+
+    params.signals: list[str] — 信号名称列表
+      支持的信号: cpu_hotspot, io_high, fd_growth, thread_growth,
+                 memory_growth, net_high, sys_cpu_high, iowait_high
+    所有 signals 都触发才算匹配。
+    """
+    signals = params.get("signals", [])
+    if not signals:
+        return False
+
+    for sig in signals:
+        if not _check_signal(sig, evidence):
+            return False
+    return True
+
+
+_SIGNAL_CHECKERS: dict[str, Any] = {}
+
+
+def _check_signal(signal: str, evidence: EvidenceInput) -> bool:
+    """检查单个信号是否触发。"""
+    if signal == "cpu_hotspot":
+        return bool(evidence.top_functions) and float(
+            evidence.top_functions[0].get("percent", 0)) > 30 if evidence.top_functions else False
+    if signal == "io_high":
+        ebpf = evidence.ebpf_metrics or {}
+        lat = ebpf.get("io_latency_us", {}) if isinstance(ebpf, dict) else {}
+        return len(lat) > 0
+    if signal == "fd_growth":
+        return (evidence.sys_metrics or {}).get("summary", {}).get("fd_trend") == "increasing"
+    if signal == "thread_growth":
+        return (evidence.sys_metrics or {}).get("summary", {}).get("thread_trend") == "increasing"
+    if signal == "memory_growth":
+        return (evidence.sys_metrics or {}).get("summary", {}).get("vmrss_mb", 0) > 100
+    if signal == "net_high":
+        net_rx = (evidence.sys_metrics or {}).get("summary", {}).get("net_rx_kbps", 0)
+        net_tx = (evidence.sys_metrics or {}).get("summary", {}).get("net_tx_kbps", 0)
+        return float(net_rx) > 5000 or float(net_tx) > 5000
+    if signal == "sys_cpu_high":
+        return (evidence.sys_metrics or {}).get("summary", {}).get("avg_cpu_sys_pct", 0) > 30
+    if signal == "iowait_high":
+        return (evidence.sys_metrics or {}).get("summary", {}).get("avg_cpu_iowait_pct", 0) > 10
+    if signal == "ctx_high":
+        return (evidence.sys_metrics or {}).get("summary", {}).get("ctx_nonvoluntary_rate", 0) > 1000
+    return False
+
+
+def _resolve_path(data: dict, path: str) -> Any:
+    """按 '.' 分隔的路径解析嵌套字典，如 summary.fd_trend。"""
+    parts = path.split(".")
+    cur: Any = data
+    for part in parts:
+        if isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+
 _MATCHERS = {
     "top_function_keyword": _match_top_function_keyword,
     "ebpf_latency_present": _match_ebpf_latency_present,
     "collector_or_suggestion": _match_collector_or_suggestion,
     "agent_cpu_overhead": _match_agent_cpu_overhead,
     "failure_contains": _match_failure_contains,
+    "sys_metric_threshold": _match_sys_metric_threshold,
+    "multi_metric": _match_multi_metric,
+    "fd_trend": _match_fd_trend,
+    "thread_trend": _match_thread_trend,
+    "cross_evidence": _match_cross_evidence,
 }
 
 
@@ -139,6 +326,8 @@ def _ref_available(ref: str, evidence: EvidenceInput) -> bool:
         return bool(evidence.top_functions)
     if top == "ebpf_metrics":
         return bool(evidence.ebpf_metrics)
+    if top == "sys_metrics":
+        return bool(evidence.sys_metrics)
     if top == "baseline_diff":
         return bool(evidence.baseline_diff)
     if top == "agent_stats":
@@ -160,8 +349,10 @@ def _detect_missing_evidence(candidate_id: str, evidence: EvidenceInput) -> list
     missing: list[str] = []
     if not evidence.top_functions and candidate_id in ("cpu_hotspot_recursive", "python_userland_hotspot"):
         missing.append("缺少 TopN 热点函数数据")
-    if not evidence.ebpf_metrics and candidate_id == "io_wait_high":
+    if not evidence.ebpf_metrics and candidate_id in ("io_wait_high",):
         missing.append("缺少 eBPF IO 延迟分布数据")
+    if not evidence.sys_metrics and candidate_id.startswith(("fd_", "thread_", "memory_", "sys_cpu_", "network_", "multi_", "cross_")):
+        missing.append("缺少系统多维指标数据 (sys_metrics)")
     if not evidence.baseline_diff and candidate_id in ("cpu_hotspot_recursive", "io_wait_high"):
         missing.append("缺少历史基线对比数据")
     return missing

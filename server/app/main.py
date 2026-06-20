@@ -8,6 +8,8 @@ Web 通过 HTTP API 即时可见。
 
 from __future__ import annotations
 
+import server.app._env  # noqa: F401 — 自动加载 .env
+
 import json as _json_mod
 import os
 import secrets
@@ -22,6 +24,7 @@ from fastapi.responses import JSONResponse
 import asyncio
 import json as _json
 import queue as _queue
+from typing import Optional
 
 from server.app.common_utils import status_value
 from server.app.database import init_db, new_session
@@ -178,14 +181,23 @@ def _requires_api_auth(request: Request) -> bool:
     if os.getenv("MINI_DROP_API_AUTH_ENABLED", "0").strip().lower() not in {"1", "true", "yes", "on"}:
         return False
     path = request.url.path
-    return path.startswith("/api/") and path not in {"/api/healthz", "/api/metrics"}
+    return path.startswith("/api/") and path not in {"/api/healthz", "/api/metrics", "/api/auth/set-cookie", "/api/auth/clear-cookie"}
 
 
 def _extract_api_token(request: Request) -> str | None:
+    # 1. Authorization: Bearer <token> header
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
-    return request.headers.get("x-api-key")
+    # 2. X-API-Key header
+    key = request.headers.get("x-api-key")
+    if key:
+        return key.strip()
+    # 3. HttpOnly cookie (preferred for browser clients — resists XSS exfiltration)
+    cookie = request.cookies.get("mini_drop_api_key")
+    if cookie:
+        return cookie.strip()
+    return None
 
 
 # ── 通用 ──────────────────────────────────────────────────────
@@ -293,6 +305,42 @@ def current_user() -> APIResponse:
     })
 
 
+@app.post("/api/auth/set-cookie")
+def auth_set_cookie(request: Request, body: dict) -> APIResponse:
+    """通过 HttpOnly cookie 设置 API Key（比 localStorage 更安全）。
+
+    POST /api/auth/set-cookie
+    {"api_key": "sk-..."}
+
+    浏览器将自动在后续请求中携带该 cookie，
+    JavaScript 无法通过 document.cookie 读取（HttpOnly）。
+    """
+    from fastapi.responses import JSONResponse as _JsonResp
+    api_key = (body or {}).get("api_key", "").strip()
+    if not api_key:
+        return APIResponse(code=400, message="api_key 不能为空")
+    resp = _JsonResp(content={"code": 0, "message": "ok", "data": None})
+    resp.set_cookie(
+        key="mini_drop_api_key",
+        value=api_key,
+        httponly=True,
+        samesite="lax",
+        secure=False,  # 开发环境 HTTP；生产环境应设为 True 配合 HTTPS
+        max_age=7 * 24 * 3600,  # 7 天
+        path="/api",
+    )
+    return resp
+
+
+@app.post("/api/auth/clear-cookie")
+def auth_clear_cookie() -> APIResponse:
+    """清除 HttpOnly cookie。"""
+    from fastapi.responses import JSONResponse as _JsonResp
+    resp = _JsonResp(content={"code": 0, "message": "ok", "data": None})
+    resp.delete_cookie(key="mini_drop_api_key", path="/api")
+    return resp
+
+
 # ── Agent（查询面） ────────────────────────────────────────────
 
 
@@ -305,6 +353,8 @@ def list_agents(
 
     调用前自动检查离线。可通过 ?limit=50&offset=0 分页。
     """
+    limit = min(max(limit, 1), 1000)
+    offset = max(offset, 0)
     repo.mark_offline_agents()
     all_items = []
     for agent in repo.agents.values():
@@ -322,6 +372,8 @@ def list_audit_logs(
     offset: int = 0,
 ) -> APIResponse:
     """返回审计日志列表。支持分页。"""
+    limit = min(max(limit, 1), 1000)
+    offset = max(offset, 0)
     all_items = [repo.as_dict(log) for log in repo.audit_logs]
     total = len(all_items)
     page = all_items[offset:offset + limit] if offset < total else []
@@ -333,6 +385,10 @@ def list_audit_logs(
 
 @app.post("/api/tasks")
 def create_task(payload: CreateTaskRequest) -> APIResponse:
+    if payload.target_pid <= 0:
+        raise HTTPException(status_code=400, detail="target_pid 必须为正整数")
+    if payload.target_pid > 4194304:  # Linux pid_max 上限
+        raise HTTPException(status_code=400, detail=f"target_pid 超出有效范围: {payload.target_pid}")
     if payload.duration_sec <= 0:
         raise HTTPException(status_code=400, detail="duration_sec 必须为正整数")
     if payload.duration_sec > MAX_TASK_DURATION_SEC:
@@ -357,6 +413,8 @@ def list_tasks(
 
     可通过 ?limit=50&offset=0 分页。
     """
+    limit = min(max(limit, 1), 1000)
+    offset = max(offset, 0)
     all_items = [_task_view(t).model_dump() for t in repo.tasks.values()]
     total = len(all_items)
     page = all_items[offset:offset + limit] if offset < total else []
@@ -642,6 +700,8 @@ def nlp_parse_intent(body: dict) -> APIResponse:
     query = body.get("query", "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query 不能为空")
+    if len(query) > 500:
+        raise HTTPException(status_code=400, detail="query 不能超过 500 字符")
 
     intent = parse_intent(query)
     candidates = resolve_pid(intent.process_name)
@@ -693,6 +753,56 @@ def nlp_summarize_task(body: dict) -> APIResponse:
         "summary": summary,
         "followup_questions": questions,
     })
+
+
+# ── ChatOps 测试（通过 Server 持有的 WS 连接发送）─────────────
+
+
+@app.post("/api/chatops/test")
+def chatops_test_endpoint(body: Optional[dict] = None) -> APIResponse:
+    """通过 Server 持有的 ChatOps 连接发送测试消息。"""
+    from server.app.chatops.dispatcher import is_enabled as _co_enabled, _get_provider_name, _get_webhook_url
+    from server.app.chatops.providers import PROVIDERS
+    from server.app.chatops.base import ChatopsMessage
+    from datetime import datetime, timezone
+
+    if not _co_enabled():
+        return APIResponse(code=400, message="ChatOps 未启用")
+
+    provider = PROVIDERS[_get_provider_name()]
+    webhook_url = _get_webhook_url()
+    msg = ChatopsMessage(
+        title="Mini-Drop ChatOps 连接测试",
+        content="这是一条来自 Mini-Drop 性能诊断平台的测试消息。\n\n如果你收到这条消息，说明 ChatOps 配置正确 ✅",
+        level="info",
+        extra_fields=[
+            {"label": "平台", "value": _get_provider_name()},
+            {"label": "时间", "value": datetime.now(timezone.utc).isoformat()},
+        ],
+    )
+    ok = provider.send(msg, webhook_url)
+    return APIResponse(data={"ok": ok, "provider": _get_provider_name()})
+
+
+@app.post("/api/chatops/notify")
+def chatops_notify_endpoint(body: dict) -> APIResponse:
+    """通过 Server 持有的 ChatOps 连接发送自定义通知。"""
+    from server.app.chatops.dispatcher import is_enabled as _co_enabled, _get_provider_name, _get_webhook_url
+    from server.app.chatops.providers import PROVIDERS
+    from server.app.chatops.base import ChatopsMessage
+
+    if not _co_enabled():
+        return APIResponse(code=400, message="ChatOps 未启用")
+
+    provider = PROVIDERS[_get_provider_name()]
+    webhook_url = _get_webhook_url()
+    msg = ChatopsMessage(
+        title=body.get("title", "通知"),
+        content=body.get("content", ""),
+        level=body.get("level", "info"),
+    )
+    ok = provider.send(msg, webhook_url)
+    return APIResponse(data={"ok": ok, "provider": _get_provider_name()})
 
 
 # ── 启动入口 ──────────────────────────────────────────────────

@@ -41,12 +41,21 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
 
     @staticmethod
     def _profiler_type(collector_type: str) -> int:
-        """将 collector_type 字符串映射为 protobuf profiler_type 枚举值。"""
+        """将 collector_type 字符串映射为 protobuf profiler_type 值。
+
+        Proto 定义（hotmethod.proto）:
+          0=perf, 1=async-profiler(Java), 2=pprof(Go), 3=py-spy, 4=bpftrace
+          5=memory_smaps, 6=sys_metrics, 7=continuous_perf
+        """
         mapping: dict[str, int] = {
             "perf_cpu": 0,
-            "ebpf_io": 4,       # 4 = bpftrace
-            "pyspy": 3,         # 3 = py-spy
-            "continuous_perf": 0,  # 同样是 perf
+            "java_async": 1,
+            "go_pprof": 2,
+            "pyspy": 3,
+            "ebpf_io": 4,
+            "memory_smaps": 5,
+            "sys_metrics": 6,
+            "continuous_perf": 7,
         }
         return mapping.get(collector_type, 0)
 

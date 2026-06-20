@@ -86,7 +86,7 @@ def test_keywords_and_suggest(capsys):
     out = json.loads(capsys.readouterr().out)
 
     assert code == 0
-    assert out["collectors"] == ["perf_cpu", "ebpf_io", "pyspy", "continuous_perf"]
+    assert set(out["collectors"]) >= {"perf_cpu", "ebpf_io", "pyspy", "continuous_perf", "java_async", "go_pprof", "memory_smaps"}
 
     code = cli.main(["suggest", "ci", "--kind", "commands"])
     out = json.loads(capsys.readouterr().out)

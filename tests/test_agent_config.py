@@ -112,7 +112,8 @@ class TestAgentCollectorDispatch:
 
     def test_capabilities_match_registered_collectors(self):
         assert CAPABILITIES == sorted(COLLECTORS.keys())
-        assert CAPABILITIES == ["continuous_perf", "ebpf_io", "perf_cpu", "pyspy"]
+        assert CAPABILITIES == sorted(COLLECTORS.keys())  # capacity list auto-expands with registered collectors
+        assert set(CAPABILITIES) >= {"continuous_perf", "ebpf_io", "go_pprof", "java_async", "memory_smaps", "perf_cpu", "pyspy"}
 
     def test_unregistered_collector_reports_failure_without_artifact(self):
         ok, reason, artifacts = _run_collector({

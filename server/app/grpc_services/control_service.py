@@ -50,7 +50,20 @@ class ControlService(control_pb2_grpc.ControlServicer):
             response.agent_status = "UNKNOWN"
         return response
 
-    @staticmethod
-    def _collector_type(profiler_type: int) -> str:
-        mapping = {0: "perf_cpu", 1: "pyspy", 3: "pyspy", 4: "ebpf_io"}
-        return mapping.get(profiler_type, "perf_cpu")
+    _PROFILER_MAP: dict[int, str] = {
+        0: "perf_cpu",     # perf
+        1: "java_async",   # async-profiler (Java)
+        2: "go_pprof",     # pprof (Go)
+        3: "pyspy",        # py-spy (Python)
+        4: "ebpf_io",      # bpftrace (eBPF)
+    }
+
+    @classmethod
+    def _collector_type(cls, profiler_type: int) -> str:
+        ct = cls._PROFILER_MAP.get(profiler_type)
+        if ct is None:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("unknown profiler_type=%s, defaulting to perf_cpu", profiler_type)
+            return "perf_cpu"
+        return ct

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Empty, Skeleton } from "antd";
 import ReactECharts from "echarts-for-react";
 import { COLORS } from "../theme";
+import { escapeHtml } from "../utils/html";
 
 /**
  * 热力渐变色：低占比冷色 → 高占比暖色。
@@ -129,10 +130,6 @@ export default function TopNChart({
       animationEasing: "cubicOut",
     };
   }, [data, names, values, samples, maxPct]);
-
-  function escapeHtml(str) {
-    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
 
   const onEvents = useMemo(() => {
     if (!onBarClick) return {};

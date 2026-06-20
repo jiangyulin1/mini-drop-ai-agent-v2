@@ -144,6 +144,7 @@ class SqlRepository:
                 )
                 session.add(agent)
 
+            # 保持与 InMemoryRepository 接口一致（SqlRepository.heartbeat 直接查 DB，不使用此队列）
             if ip_addr not in self._task_queues:
                 self._task_queues[ip_addr] = deque()
 

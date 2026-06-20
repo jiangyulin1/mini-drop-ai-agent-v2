@@ -1,15 +1,33 @@
 [
+  {"_comment": "══════ CPU 维度 ══════"},
+
   {
     "candidate_id": "cpu_hotspot_recursive",
     "description": "单一计算函数占 CPU 采样数比例过高，可能存在递归或密集型计算瓶颈",
     "match_type": "top_function_keyword",
-    "params": {
-      "min_percent": 40,
-      "keywords": ["fib", "recursive", "loop", "compute", "hotspot"]
-    },
+    "params": { "min_percent": 40, "keywords": ["fib", "recursive", "loop", "compute", "hotspot"] },
     "rule_score": 0.83,
     "evidence_refs": ["top_functions[0]", "tool_results.get_flamegraph_top", "baseline_diff"]
   },
+  {
+    "candidate_id": "cpu_sys_kernel_overhead",
+    "description": "系统 CPU 时间（system%）占比过高，大量时间消耗在内核态，可能涉及系统调用风暴或内核模块问题",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.avg_cpu_sys_pct", "op": "gt", "value": 30, "min_samples": 3 },
+    "rule_score": 0.76,
+    "evidence_refs": ["sys_metrics.summary.avg_cpu_sys_pct", "sys_metrics.summary.ctx_nonvoluntary_rate", "top_functions"]
+  },
+  {
+    "candidate_id": "cpu_userland_hotspot",
+    "description": "用户态 CPU 时间过高（>50%），热点集中在应用层代码",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.avg_cpu_user_pct", "op": "gt", "value": 50, "min_samples": 3 },
+    "rule_score": 0.71,
+    "evidence_refs": ["sys_metrics.summary.avg_cpu_user_pct", "top_functions"]
+  },
+
+  {"_comment": "══════ IO 维度 ══════"},
+
   {
     "candidate_id": "io_wait_high",
     "description": "块设备 IO 延迟异常，可能是磁盘带宽或 IOPS 达到上限",
@@ -19,23 +37,208 @@
     "evidence_refs": ["ebpf_metrics.io_latency_us", "tool_results.get_ebpf_latency_summary", "baseline_diff"]
   },
   {
+    "candidate_id": "io_iowait_system_wide",
+    "description": "系统级 iowait 占比超过 10%，CPU 因等待 IO 而空转，磁盘可能是瓶颈",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.avg_cpu_iowait_pct", "op": "gt", "value": 10, "min_samples": 3 },
+    "rule_score": 0.80,
+    "evidence_refs": ["sys_metrics.summary.avg_cpu_iowait_pct", "ebpf_metrics", "sys_metrics.summary.avg_cpu_sys_pct"]
+  },
+
+  {"_comment": "══════ 内存维度 ══════"},
+
+  {
+    "candidate_id": "memory_leak_rss_growth",
+    "description": "进程 RSS 持续增长（采样区间内最后值 > 初始值的 1.1 倍），疑似内存泄漏",
+    "match_type": "multi_metric",
+    "params": {
+      "conditions": [
+        { "metric_path": "summary.vmrss_mb", "op": "gt", "value": 200 },
+        { "metric_path": "sample_count", "op": "gte", "value": 5 }
+      ]
+    },
+    "rule_score": 0.82,
+    "evidence_refs": ["sys_metrics.summary.vmrss_mb", "sys_metrics.summary.vmrss_mb_max", "sys_metrics.samples"]
+  },
+  {
+    "candidate_id": "memory_swap_pressure",
+    "description": "系统负载高且 iowait 显著（>5%），结合 RSS 增长趋势可能存在 swap 抖动",
+    "match_type": "multi_metric",
+    "params": {
+      "conditions": [
+        { "metric_path": "summary.load1m", "op": "gt", "value": 2 },
+        { "metric_path": "summary.avg_cpu_iowait_pct", "op": "gt", "value": 5 }
+      ]
+    },
+    "rule_score": 0.74,
+    "evidence_refs": ["sys_metrics.summary.load1m", "sys_metrics.summary.avg_cpu_iowait_pct", "sys_metrics.summary.vmrss_mb"]
+  },
+  {
+    "candidate_id": "memory_peak_near_limit",
+    "description": "RSS 峰值超过 2GB，可能接近容器或系统内存限制",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.vmrss_mb_max", "op": "gt", "value": 2048, "min_samples": 1 },
+    "rule_score": 0.69,
+    "evidence_refs": ["sys_metrics.summary.vmrss_mb_max", "sys_metrics.summary.vmrss_mb"]
+  },
+
+  {"_comment": "══════ 文件描述符维度 ══════"},
+
+  {
+    "candidate_id": "fd_leak_detected",
+    "description": "文件描述符数量持续增长（趋势 increasing），可能发生了 FD 泄漏",
+    "match_type": "fd_trend",
+    "params": { "min_fd_count": 30 },
+    "rule_score": 0.85,
+    "evidence_refs": ["sys_metrics.summary.fd_count", "sys_metrics.summary.fd_max", "sys_metrics.summary.fd_trend"]
+  },
+  {
+    "candidate_id": "fd_high_watermark",
+    "description": "文件描述符数量超过 500，接近系统或进程 fd 限制",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.fd_max", "op": "gt", "value": 500, "min_samples": 1 },
+    "rule_score": 0.75,
+    "evidence_refs": ["sys_metrics.summary.fd_max", "sys_metrics.summary.fd_count"]
+  },
+  {
+    "candidate_id": "fd_exhaustion_risk",
+    "description": "FD 数 > 200 且仍在增长，存在耗尽风险",
+    "match_type": "multi_metric",
+    "params": {
+      "conditions": [
+        { "metric_path": "summary.fd_count", "op": "gt", "value": 200 },
+        { "metric_path": "summary.fd_trend", "op": "eq", "value": "increasing" }
+      ]
+    },
+    "rule_score": 0.88,
+    "evidence_refs": ["sys_metrics.summary.fd_count", "sys_metrics.summary.fd_max", "sys_metrics.summary.fd_trend"]
+  },
+
+  {"_comment": "══════ 线程/上下文切换维度 ══════"},
+
+  {
+    "candidate_id": "thread_growth_unbounded",
+    "description": "线程数持续增长，可能线程创建过快或线程池未正确回收",
+    "match_type": "thread_trend",
+    "params": { "min_threads": 50 },
+    "rule_score": 0.81,
+    "evidence_refs": ["sys_metrics.summary.thread_count", "sys_metrics.summary.thread_trend"]
+  },
+  {
+    "candidate_id": "thread_count_excessive",
+    "description": "线程数超过 200，线程上下文切换开销可能显著影响性能",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.thread_count", "op": "gt", "value": 200, "min_samples": 1 },
+    "rule_score": 0.73,
+    "evidence_refs": ["sys_metrics.summary.thread_count", "sys_metrics.summary.ctx_nonvoluntary_rate"]
+  },
+  {
+    "candidate_id": "context_switch_storm",
+    "description": "非自愿上下文切换速率超过 10000/s，进程可能频繁被抢占",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.ctx_nonvoluntary_rate", "op": "gt", "value": 10000, "min_samples": 3 },
+    "rule_score": 0.77,
+    "evidence_refs": ["sys_metrics.summary.ctx_nonvoluntary_rate", "sys_metrics.summary.ctx_voluntary_rate"]
+  },
+  {
+    "candidate_id": "thread_pool_starvation",
+    "description": "非自愿切换增加但线程数不变，线程池可能过小导致任务排队",
+    "match_type": "multi_metric",
+    "params": {
+      "conditions": [
+        { "metric_path": "summary.ctx_nonvoluntary_rate", "op": "gt", "value": 5000 },
+        { "metric_path": "summary.thread_trend", "op": "eq", "value": "stable" }
+      ]
+    },
+    "rule_score": 0.68,
+    "evidence_refs": ["sys_metrics.summary.thread_count", "sys_metrics.summary.ctx_nonvoluntary_rate"]
+  },
+
+  {"_comment": "══════ 网络维度 ══════"},
+
+  {
+    "candidate_id": "network_bandwidth_saturation",
+    "description": "网络吞吐超过 50MB/s，可能接近网卡带宽上限",
+    "match_type": "sys_metric_threshold",
+    "params": { "metric_path": "summary.net_rx_kbps", "op": "gt", "value": 51200, "min_samples": 3 },
+    "rule_score": 0.72,
+    "evidence_refs": ["sys_metrics.summary.net_rx_kbps", "sys_metrics.summary.net_tx_kbps"]
+  },
+  {
+    "candidate_id": "network_io_correlation",
+    "description": "网络收发速率同时偏高，可能是网络密集型应用或反向代理瓶颈",
+    "match_type": "multi_metric",
+    "params": {
+      "conditions": [
+        { "metric_path": "summary.net_rx_kbps", "op": "gt", "value": 10000 },
+        { "metric_path": "summary.net_tx_kbps", "op": "gt", "value": 10000 }
+      ]
+    },
+    "rule_score": 0.67,
+    "evidence_refs": ["sys_metrics.summary.net_rx_kbps", "sys_metrics.summary.net_tx_kbps"]
+  },
+
+  {"_comment": "══════ 交叉证据（多维度联合诊断）══════"},
+
+  {
+    "candidate_id": "cross_cpu_plus_memory_leak",
+    "description": "CPU 高负载与 RSS 持续增长同时发生，可能存在内存泄漏导致频繁 GC 或 swap 回收",
+    "match_type": "cross_evidence",
+    "params": { "signals": ["cpu_hotspot", "memory_growth"] },
+    "rule_score": 0.86,
+    "evidence_refs": ["top_functions", "sys_metrics.summary.vmrss_mb", "sys_metrics.summary.vmrss_mb_max"]
+  },
+  {
+    "candidate_id": "cross_fd_plus_thread_escalation",
+    "description": "FD 泄漏与线程数增长同时发生，可能是连接池或资源管理异常——FD 和线程同时泄露",
+    "match_type": "cross_evidence",
+    "params": { "signals": ["fd_growth", "thread_growth"] },
+    "rule_score": 0.91,
+    "evidence_refs": ["sys_metrics.summary.fd_trend", "sys_metrics.summary.thread_trend", "sys_metrics.summary.fd_count", "sys_metrics.summary.thread_count"]
+  },
+  {
+    "candidate_id": "cross_io_plus_cpu_wait",
+    "description": "IO 延迟异常与 CPU iowait 高同时出现，磁盘或存储系统确定是瓶颈",
+    "match_type": "cross_evidence",
+    "params": { "signals": ["io_high", "iowait_high"] },
+    "rule_score": 0.88,
+    "evidence_refs": ["ebpf_metrics", "sys_metrics.summary.avg_cpu_iowait_pct", "sys_metrics.summary.avg_cpu_sys_pct"]
+  },
+  {
+    "candidate_id": "cross_network_plus_cpu_sys",
+    "description": "网络高吞吐 + 系统 CPU（sys%）偏高，大量时间消耗在网络协议栈处理",
+    "match_type": "cross_evidence",
+    "params": { "signals": ["net_high", "sys_cpu_high"] },
+    "rule_score": 0.79,
+    "evidence_refs": ["sys_metrics.summary.net_rx_kbps", "sys_metrics.summary.avg_cpu_sys_pct"]
+  },
+  {
+    "candidate_id": "cross_cpu_ctx_contention",
+    "description": "CPU 热点 + 高上下文切换率，可能存在锁竞争或过多的线程间同步",
+    "match_type": "cross_evidence",
+    "params": { "signals": ["cpu_hotspot", "ctx_high"] },
+    "rule_score": 0.84,
+    "evidence_refs": ["top_functions", "sys_metrics.summary.ctx_nonvoluntary_rate", "sys_metrics.summary.thread_count"]
+  },
+
+  {"_comment": "══════ Python / Java / Go 专用 ══════"},
+
+  {
     "candidate_id": "python_userland_hotspot",
     "description": "Python 用户态函数热点，与 perf 系统级热点一致，根因在应用层",
     "match_type": "collector_or_suggestion",
-    "params": {
-      "collector_type": "pyspy",
-      "suggestion_keyword": "python"
-    },
+    "params": { "collector_type": "pyspy", "suggestion_keyword": "python" },
     "rule_score": 0.72,
     "evidence_refs": ["top_functions", "tool_results.get_flamegraph_top", "suggestions"]
   },
+
+  {"_comment": "══════ 失败/异常 ══════"},
+
   {
     "candidate_id": "agent_overhead",
     "description": "采集 Agent 自身资源开销过高，可能影响目标进程性能",
     "match_type": "agent_cpu_overhead",
-    "params": {
-      "min_cpu_percent": 10
-    },
+    "params": { "min_cpu_percent": 10 },
     "rule_score": 0.55,
     "evidence_refs": ["agent_stats", "tool_results.check_agent_health"]
   },
@@ -43,21 +246,15 @@
     "candidate_id": "collector_permission_denied",
     "description": "采集权限不足导致采集失败或结果异常",
     "match_type": "failure_contains",
-    "params": {
-      "status": "FAILED",
-      "keywords": ["permission", "权限"]
-    },
-    "rule_score": 0.9,
+    "params": { "status": "FAILED", "keywords": ["permission", "权限"] },
+    "rule_score": 0.90,
     "evidence_refs": ["failure_events", "task_metadata.status", "tool_results.inspect_task_events"]
   },
   {
     "candidate_id": "target_pid_invalid",
     "description": "目标 PID 不存在或在采集期间退出",
     "match_type": "failure_contains",
-    "params": {
-      "status": "FAILED",
-      "keywords": ["不存在", "exited", "not found"]
-    },
+    "params": { "status": "FAILED", "keywords": ["不存在", "exited", "not found"] },
     "rule_score": 0.95,
     "evidence_refs": ["failure_events", "task_metadata.target_pid", "tool_results.inspect_task_events"]
   }

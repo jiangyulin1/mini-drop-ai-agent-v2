@@ -1,7 +1,14 @@
-"""gRPC connection management for the Agent."""
+"""gRPC connection management for the Agent.
+
+Supports both insecure (default, for dev/demo) and TLS-secured channels.
+Set AGENT_GRPC_SECURE=1 to enable TLS with default system root CAs.
+Set AGENT_GRPC_CA_CERT to specify a custom CA certificate path.
+"""
 
 from __future__ import annotations
 
+import os
+import time
 from collections import namedtuple
 from dataclasses import dataclass, field
 from typing import Callable, Sequence, TypeVar
@@ -10,10 +17,34 @@ import grpc
 
 T = TypeVar("T")
 
+# gRPC status codes worth retrying (transient failures)
+_RETRYABLE_CODES = frozenset({
+    grpc.StatusCode.UNAVAILABLE,
+    grpc.StatusCode.DEADLINE_EXCEEDED,
+    grpc.StatusCode.RESOURCE_EXHAUSTED,
+})
+
 _ClientCallDetails = namedtuple(
     "_ClientCallDetails",
     ("method", "timeout", "metadata", "credentials", "wait_for_ready", "compression"),
 )
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(int(default))).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_channel(address: str) -> grpc.Channel:
+    """Create a gRPC channel, optionally secured with TLS."""
+    if _env_bool("AGENT_GRPC_SECURE", default=False):
+        ca_cert = os.getenv("AGENT_GRPC_CA_CERT", "").strip()
+        if ca_cert:
+            with open(ca_cert, "rb") as fh:
+                creds = grpc.ssl_channel_credentials(root_certificates=fh.read())
+        else:
+            creds = grpc.ssl_channel_credentials()
+        return grpc.secure_channel(address, creds)
+    return grpc.insecure_channel(address)
 
 
 class _AuthClientInterceptor(grpc.UnaryUnaryClientInterceptor):
@@ -42,7 +73,7 @@ class GrpcConnection:
     @property
     def channel(self) -> grpc.Channel:
         if self._channel is None:
-            channel = grpc.insecure_channel(self.address)
+            channel = _build_channel(self.address)
             if self.auth_token:
                 channel = grpc.intercept_channel(channel, _AuthClientInterceptor(self.auth_token))
             self._channel = channel
@@ -56,14 +87,21 @@ class GrpcConnection:
     def reconnect(self) -> None:
         self.close()
 
-    def call_with_retry(self, func: Callable[[], T], max_retries: int = 1) -> T:
+    def call_with_retry(self, func: Callable[[], T], max_retries: int = 3, backoff_sec: float = 1.0) -> T:
+        """Call a gRPC function with retry and exponential backoff.
+
+        Retries on transient errors: UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED.
+        """
         last_exc: grpc.RpcError | None = None
+        delay = backoff_sec
         for attempt in range(max_retries + 1):
             try:
                 return func()
             except grpc.RpcError as exc:
                 last_exc = exc
-                if attempt >= max_retries or exc.code() != grpc.StatusCode.UNAVAILABLE:
+                if attempt >= max_retries or exc.code() not in _RETRYABLE_CODES:
                     raise
                 self.reconnect()
+                time.sleep(delay)
+                delay *= 2
         raise last_exc

@@ -74,7 +74,7 @@ class PerfCollector:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setpgrp,  # 独立进程组，便于超时清理
+                preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None,  # 独立进程组，便于超时清理（仅 Unix）
             )
             stdout, stderr = proc.communicate(timeout=timeout)
 
@@ -116,19 +116,32 @@ class PerfCollector:
             )
 
         except subprocess.TimeoutExpired:
-            # 超时 → kill 进程组 → wait 回收
+            # 超时 → kill 进程组 → 清理管道防止 fd 泄露
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                 proc.wait(timeout=5)
             except Exception:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                proc.wait()
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait()
+                except Exception:
+                    pass
+            # 清理管道，释放文件描述符
+            try:
+                proc.communicate(timeout=5)
+            except Exception:
+                pass
             return CollectorResult(
                 ok=False,
                 reason=f"perf record 超时 (>{timeout}s)，已强制终止",
             )
 
         except Exception as exc:
+            # 清理管道，防止 fd 泄露
+            try:
+                proc.communicate(timeout=5)
+            except Exception:
+                pass
             return CollectorResult(
                 ok=False,
                 reason=f"perf record 异常: {exc}",

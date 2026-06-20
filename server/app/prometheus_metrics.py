@@ -113,9 +113,8 @@ def record_task_transition(from_status: str, to_status: str) -> None:
 
 
 def record_agent_status(status: str) -> None:
-    """记录 Agent 在线状态计数（Gauge）。"""
-    # Gauge 直接由调用方定期刷新
-    pass
+    """记录 Agent 状态变更事件（Counter）。"""
+    REGISTRY.counter_inc("mini_drop_agent_status_changes_total", {"status": status})
 
 
 def set_agent_count(online: int, offline: int) -> None:

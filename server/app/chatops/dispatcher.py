@@ -209,7 +209,7 @@ def init_chatops() -> None:
                 event = queue.get()
                 dispatch_event(event["event"], event["data"])
             except Exception:
-                pass
+                log_event("error", "chatops_listen_loop_error", detail="unhandled exception in event dispatch loop")
 
     t = threading.Thread(target=_listen_loop, daemon=True)
     t.start()

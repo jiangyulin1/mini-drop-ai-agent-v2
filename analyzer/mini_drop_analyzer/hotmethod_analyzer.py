@@ -185,7 +185,7 @@ def _flamegraph_svg(collapsed: Path, output: Path) -> None:
             check=True,
             timeout=60,
         )
-    except Exception:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         output.write_text(_fallback_svg("火焰图生成失败"))
 
 

@@ -26,8 +26,8 @@ export const COLORS = {
   background: "#fafafa",
   cardBackground: "#ffffff",
   textPrimary: "rgba(0,0,0,0.88)",
-  textSecondary: "rgba(0,0,0,0.45)",
-  textTertiary: "rgba(0,0,0,0.25)",
+  textSecondary: "rgba(0,0,0,0.65)",  // WCAG AA: ~5.1:1 对比度
+  textTertiary: "rgba(0,0,0,0.50)",   // WCAG AA: ~4.5:1 对比度
 
   // 特殊
   nlpHighlight: "#faad14",

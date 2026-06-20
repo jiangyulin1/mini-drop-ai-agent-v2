@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from server.app.logging_utils import log_event
+
 ANALYZER_TIMEOUT_SEC = 180
 
 
@@ -29,7 +31,8 @@ def analyze_raw_perf_artifacts(task_id: str, artifacts: list[dict]) -> list[dict
     ]
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=ANALYZER_TIMEOUT_SEC)
-    except Exception:
+    except (subprocess.SubprocessError, OSError) as exc:
+        log_event("warning", "analyzer_runner_failed", error=str(exc)[:200])
         return []
     if proc.returncode != 0:
         return []

@@ -5,14 +5,14 @@ gRPC 服务使用 protobuf 消息，此处模型专用于 FastAPI 层。
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from server.app.state_machine import TaskStatus
 
-CollectorType = Literal["perf_cpu", "ebpf_io", "pyspy", "continuous_perf"]
+CollectorType = Literal["perf_cpu", "ebpf_io", "pyspy", "continuous_perf", "java_async", "go_pprof", "memory_smaps", "sys_metrics"]
 MIN_TASK_DURATION_SEC = 1
 MAX_TASK_DURATION_SEC = 120
 MIN_SAMPLE_RATE = 1
@@ -110,7 +110,7 @@ class AuditLogView(BaseModel):
     agent_id: Optional[str] = None
     task_id: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class RCAFeedbackRequest(BaseModel):

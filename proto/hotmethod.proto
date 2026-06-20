@@ -24,13 +24,14 @@ service Hotmethod {
 message TaskDesc {
   string task_id         = 1;  // 全局唯一任务 ID
   uint32 task_type       = 2;  // 任务大类: 0=通用 1=Java 2=Tracing 4=MemCheck 6=JavaHeap
-  uint32 profiler_type   = 3;  // 采集工具: 0=perf 1=async-profiler 2=pprof 3=py-spy 4=bpftrace
+  uint32 profiler_type   = 3;  // 采集工具: 0=perf 1=async-profiler(Java) 2=pprof(Go) 3=py-spy 4=bpftrace
   RecordArgv sample_argv = 4;  // 采集参数
   string container_name  = 5;  // 容器/Pod 名称（非容器场景为空）
   uint32 container_type  = 6;  // 容器运行时类型
   uint32 timeout_sec     = 7;  // 任务超时秒数，Agent 应在此时限内完成采集
   CosConfig cos_config   = 8;  // 对象存储上传凭证（本次任务专用，覆盖全局配置）
   string script_content  = 9;  // 仅 ScriptExec 类任务使用，存放脚本内容
+  reserved 10 to 19;            // 预留给未来采集器参数
 }
 
 

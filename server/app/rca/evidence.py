@@ -16,6 +16,7 @@ def collect_evidence(
     task_record,
     top_functions: list[dict] | None = None,
     ebpf_metrics: dict | None = None,
+    sys_metrics: dict | None = None,
     suggestions: list[str] | None = None,
     failure_events: list[str] | None = None,
     baseline_diff: dict | None = None,
@@ -29,6 +30,7 @@ def collect_evidence(
         task_record: DB/内存中的任务记录（TaskModel 或 TaskRecord）。
         top_functions: Analyzer 产出的 TopN 列表。
         ebpf_metrics: eBPF 采集器产出的 IO 延迟 histogram。
+        sys_metrics: SysMetrics 采集器产出的系统多维指标。
         suggestions: 规则引擎产出的建议文本。
         failure_events: 失败原因列表（来自 task_status_events）。
         baseline_diff: 与历史基线的差异。
@@ -52,6 +54,7 @@ def collect_evidence(
         },
         top_functions=top_functions or [],
         ebpf_metrics=ebpf_metrics,
+        sys_metrics=sys_metrics,
         baseline_diff=baseline_diff,
         agent_stats=agent_stats or {},
         tool_results=tool_results or [],
@@ -74,6 +77,13 @@ def evidence_to_json(evidence: EvidenceInput) -> str:
 
     if evidence.ebpf_metrics:
         parts["ebpf_metrics"] = evidence.ebpf_metrics
+
+    if evidence.sys_metrics:
+        sm = dict(evidence.sys_metrics)
+        # 截断 samples 数组避免超过 LLM token 限制
+        if "samples" in sm and isinstance(sm["samples"], list) and len(sm["samples"]) > 20:
+            sm["samples"] = sm["samples"][:20]
+        parts["sys_metrics"] = sm
 
     if evidence.baseline_diff:
         parts["baseline_diff"] = evidence.baseline_diff

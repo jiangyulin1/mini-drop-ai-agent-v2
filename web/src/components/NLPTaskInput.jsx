@@ -8,6 +8,10 @@ const COLLECTOR_LABELS = {
   ebpf_io: "eBPF IO 延迟",
   pyspy: "py-spy Python 火焰图",
   continuous_perf: "持续周期采样",
+  java_async: "Java async-profiler",
+  go_pprof: "Go pprof 分析",
+  memory_smaps: "内存分析 (smaps)",
+  sys_metrics: "系统多维指标",
 };
 
 export default function NLPTaskInput({ onTaskCreated }) {

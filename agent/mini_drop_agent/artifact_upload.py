@@ -20,11 +20,14 @@ def maybe_upload_artifacts(task_id: str, artifacts: list[dict], config: AgentCon
 def _minio_client(config: AgentConfig):
     from minio import Minio
 
+    # Use HTTPS unless explicitly opted out via MINIO_SECURE=0
+    secure = os.getenv("MINIO_SECURE", "1").strip().lower() not in {"0", "false", "no", "off"}
+
     return Minio(
         endpoint=config.minio_endpoint,
         access_key=config.minio_access_key,
         secret_key=config.minio_secret_key,
-        secure=False,
+        secure=secure,
     )
 
 

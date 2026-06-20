@@ -83,7 +83,7 @@ class ContinuousCollector:
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    preexec_fn=os.setpgrp,
+                    preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None,
                 )
                 try:
                     proc.communicate(timeout=timeout)
@@ -92,8 +92,16 @@ class ContinuousCollector:
                         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                         proc.wait(timeout=5)
                     except Exception:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                        proc.wait()
+                        try:
+                            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                            proc.wait()
+                        except Exception:
+                            pass
+                    # 清理管道，释放文件描述符
+                    try:
+                        proc.communicate(timeout=5)
+                    except Exception:
+                        pass
                     win = _Window(index=i, start_ts=start, end_ts=time.time(),
                                   output_dir=window_dir, ok=False,
                                   reason=f"window {i} 超时")
@@ -118,6 +126,11 @@ class ContinuousCollector:
                 windows.append(win)
 
             except Exception as exc:
+                # 清理管道，防止 fd 泄露
+                try:
+                    proc.communicate(timeout=5)
+                except Exception:
+                    pass
                 windows.append(_Window(index=i, start_ts=start, end_ts=time.time(),
                                        output_dir=window_dir, ok=False, reason=str(exc)))
 

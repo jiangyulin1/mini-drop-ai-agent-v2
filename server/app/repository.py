@@ -263,6 +263,8 @@ class InMemoryRepository:
         校验由 build_status_event 内部完成，不合法时抛出 ValueError。
         """
         with self._lock:
+            if task_id not in self.tasks:
+                raise ValueError(f"任务不存在: {task_id}")
             task = self.tasks[task_id]
             event = build_status_event(
                 task_id, task.status, to_status, reason, actor, metadata,

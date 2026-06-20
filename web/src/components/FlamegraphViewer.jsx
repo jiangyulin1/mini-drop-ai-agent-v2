@@ -11,6 +11,7 @@ import * as d3 from "d3";
 import { flamegraph } from "d3-flame-graph";
 import "d3-flame-graph/dist/d3-flamegraph.css";
 import { getTaskArtifactContent } from "../api/client";
+import { escapeHtml } from "../utils/html";
 import { COLORS, FLAMEGRAPH as FG } from "../theme";
 
 /**
@@ -42,10 +43,6 @@ function tooltipContent(d) {
       <span style="color:#888">占比:</span> ${pct}%
     </div>
   `;
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**

@@ -22,8 +22,8 @@ def _client(endpoint: str | None = None, secure: bool | None = None) -> Any:
     )
     return Minio(
         endpoint=endpoint,
-        access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
-        secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
+        access_key=os.getenv("MINIO_ACCESS_KEY", ""),
+        secret_key=os.getenv("MINIO_SECRET_KEY", ""),
         secure=inferred_secure if secure is None else secure,
         region=os.getenv("MINIO_REGION", "us-east-1"),
     )

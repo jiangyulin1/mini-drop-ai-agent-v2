@@ -26,8 +26,9 @@ export default function usePolling(callback, { interval = 10000, enabled = true 
     try {
       await callbackRef.current();
       setLastRefreshed(Date.now());
-    } catch {
-      // 静默忽略轮询期间的错误，避免每 10 秒弹错误提示
+    } catch (err) {
+      // 避免每 N 秒弹错误提示，但记录到 console 便于调试
+      console.warn("usePolling tick failed:", err?.message || err);
     }
   }, []);
 

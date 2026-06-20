@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import server.app._env  # noqa: F401 — 自动加载 .env
+
 import json
 import os
 import signal
@@ -24,8 +26,12 @@ import grpc
 from agent.mini_drop_agent.collectors.base import CollectorTask
 from agent.mini_drop_agent.collectors.continuous import ContinuousCollector
 from agent.mini_drop_agent.collectors.ebpf import EBPFCollector
+from agent.mini_drop_agent.collectors.java_async import JavaAsyncProfilerCollector
+from agent.mini_drop_agent.collectors.memory import MemoryCollector
 from agent.mini_drop_agent.collectors.perf import PerfCollector
+from agent.mini_drop_agent.collectors.pprof import PprofCollector
 from agent.mini_drop_agent.collectors.pyspy import PySpyCollector
+from agent.mini_drop_agent.collectors.sys_metrics import SysMetricsCollector
 from agent.mini_drop_agent.artifact_upload import maybe_upload_artifacts
 from agent.mini_drop_agent.connection import GrpcConnection
 from agent.mini_drop_agent.config import AgentConfig, load_config
@@ -47,6 +53,10 @@ COLLECTORS = {
     "ebpf_io": EBPFCollector(),
     "pyspy": PySpyCollector(),
     "continuous_perf": ContinuousCollector(),
+    "java_async": JavaAsyncProfilerCollector(),
+    "go_pprof": PprofCollector(),
+    "memory_smaps": MemoryCollector(),
+    "sys_metrics": SysMetricsCollector(),
 }
 
 CAPABILITIES = sorted(COLLECTORS.keys())
@@ -59,18 +69,29 @@ def _run_collector(task_payload: dict[str, Any], config: AgentConfig | None = No
     """执行采集任务：构造 CollectorTask 后分发到注册的采集器。
 
     如果 collector_type 不在 COLLECTORS 中，明确上报失败。
+    输入值经过安全裁剪防止资源耗尽。
     """
     collector_type = task_payload.get("collector_type", "perf_cpu")
     collector = COLLECTORS.get(collector_type)
     if collector is None:
         return False, f"collector {collector_type} 未在此 Agent 构建中注册", []
 
+    # 安全裁剪：防止服务器下发恶意参数
+    target_pid = task_payload.get("target_pid", 0)
+    if not isinstance(target_pid, int) or target_pid <= 0:
+        return False, f"无效的 target_pid: {target_pid}", []
+    if target_pid == os.getpid():
+        return False, "拒绝自剖析请求 (target_pid 与 Agent 自身 PID 相同)", []
+
+    sample_rate = max(1, min(task_payload.get("sample_rate", 99), 10000))
+    duration_sec = max(1, min(task_payload.get("duration_sec", 15), 600))
+
     collector_task = CollectorTask(
-        id=task_payload["id"],
+        id=task_payload.get("id", ""),
         collector_type=collector_type,
-        target_pid=task_payload["target_pid"],
-        sample_rate=task_payload.get("sample_rate", 99),
-        duration_sec=task_payload.get("duration_sec", 15),
+        target_pid=target_pid,
+        sample_rate=sample_rate,
+        duration_sec=duration_sec,
         options=task_payload.get("request_params", {}).get("options", {}),
     )
     result = collector.collect(collector_task)
@@ -138,9 +159,15 @@ def _heartbeat(
         timeout=5,
     )
     if resp.pending and resp.task_desc.task_id:
+        task_type = resp.task_desc.task_type
+        # task_type 优先路由（如 MemCheck → memory_smaps）
+        if task_type in _TASK_TYPE_COLLECTOR:
+            collector_type = _TASK_TYPE_COLLECTOR[task_type]
+        else:
+            collector_type = _profiler_to_collector(resp.task_desc.profiler_type)
         return {
             "id": resp.task_desc.task_id,
-            "collector_type": _profiler_to_collector(resp.task_desc.profiler_type),
+            "collector_type": collector_type,
             "target_pid": resp.task_desc.sample_argv.pid,
             "sample_rate": resp.task_desc.sample_argv.hz,
             "duration_sec": resp.task_desc.sample_argv.duration,
@@ -185,11 +212,50 @@ def _notify_result(
 # ── 主循环 ─────────────────────────────────────────────────────────
 
 _should_exit = False
+_signal_count = 0  # 信号计数器：第一次优雅退出，第二次强制终止
 
 
 def _on_signal(signum, frame):
-    global _should_exit
+    global _should_exit, _signal_count
+    _signal_count += 1
+    if _signal_count >= 2:
+        # 第二次信号：强制退出（采集器子进程可能残留，但操作系统会回收）
+        log_event("warning", "agent_force_exit", signal=_signal_count)
+        os._exit(1)
     _should_exit = True
+    log_event("info", "agent_graceful_shutdown", signal=_signal_count,
+              hint="再次发送 SIGTERM 强制退出")
+
+
+def _init_register_with_retry(conn, config: AgentConfig, max_retries: int = 5, backoff_sec: float = 2.0) -> AgentConfig:
+    """注册 Agent 并拉取配置，支持指数退避重试。
+
+    生产环境中 Server 可能尚未就绪，重试避免 Agent 启动即崩溃。
+    """
+    last_exc = None
+    delay = backoff_sec
+    for attempt in range(max_retries + 1):
+        try:
+            init_stub = init_pb2_grpc.InitAgentStub(conn.channel)
+            _register(init_stub, config)
+            config = _fetch_config(init_stub, config)
+            log_event("info", "agent_registered", agent_id=config.agent_id, ip_addr=config.agent_ip_addr)
+            return config
+        except grpc.RpcError as exc:
+            last_exc = exc
+            if attempt >= max_retries:
+                raise
+            log_event(
+                "warning",
+                "agent_init_retry",
+                attempt=attempt + 1,
+                max_retries=max_retries,
+                code=exc.code(),
+                delay=delay,
+            )
+            time.sleep(delay)
+            delay *= 2
+    raise last_exc
 
 
 def main() -> None:
@@ -201,10 +267,8 @@ def main() -> None:
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
 
-    init_stub = init_pb2_grpc.InitAgentStub(conn.channel)
-    _register(init_stub, config)
-    config = _fetch_config(init_stub, config)
-    log_event("info", "agent_registered", agent_id=config.agent_id, ip_addr=config.agent_ip_addr)
+    # 初始化注册 + 拉取配置（带重试）
+    config = _init_register_with_retry(conn, config)
 
     while not _should_exit:
         try:
@@ -256,9 +320,27 @@ def main() -> None:
 # ── 辅助 ───────────────────────────────────────────────────────────
 
 
+# profiler_type → collector_type 映射（与 proto hotmethod.proto + healthcheck_service.py 对齐）
+_PROFILER_TO_COLLECTOR: dict[int, str] = {
+    0: "perf_cpu",        # perf
+    1: "java_async",      # async-profiler (Java)
+    2: "go_pprof",         # pprof (Go)
+    3: "pyspy",            # py-spy (Python)
+    4: "ebpf_io",          # bpftrace (eBPF)
+    5: "memory_smaps",     # memory smaps
+    6: "sys_metrics",      # system multi-metrics
+    7: "continuous_perf",  # continuous perf
+}
+
+# task_type → collector_type 映射（MemCheck 等需要特殊路由的场景）
+_TASK_TYPE_COLLECTOR: dict[int, str] = {
+    4: "memory_smaps",     # MemCheck
+}
+
+
 def _profiler_to_collector(profiler_type: int) -> str:
-    mapping = {0: "perf_cpu", 3: "pyspy", 4: "ebpf_io"}
-    return mapping.get(profiler_type, "perf_cpu")
+    """根据 profiler_type 获取 collector_type 字符串。"""
+    return _PROFILER_TO_COLLECTOR.get(profiler_type, "perf_cpu")
 
 
 def _fill_pid_stats(message, stats: dict[str, Any]) -> None:

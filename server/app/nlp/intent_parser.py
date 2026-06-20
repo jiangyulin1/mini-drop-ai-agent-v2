@@ -15,7 +15,7 @@ from server.app.schemas import MAX_SAMPLE_RATE, MAX_TASK_DURATION_SEC, MIN_SAMPL
 # 参数硬约束（不受 LLM 输出影响）
 CLAMP_DURATION = (5, MAX_TASK_DURATION_SEC)
 CLAMP_SAMPLE_RATE = (MIN_SAMPLE_RATE, MAX_SAMPLE_RATE)
-VALID_COLLECTORS = {"perf_cpu", "ebpf_io", "pyspy", "continuous_perf"}
+VALID_COLLECTORS = {"perf_cpu", "ebpf_io", "pyspy", "continuous_perf", "java_async", "go_pprof", "memory_smaps", "sys_metrics"}
 
 
 class StructuredIntent:
@@ -71,7 +71,9 @@ def parse_intent(user_input: str) -> StructuredIntent:
                 "type": "function",
                 "function": CREATE_PROFILING_TASK_SCHEMA,
             }],
-            "tool_choice": {"type": "function", "function": {"name": "create_profiling_task"}},
+            # 不传 tool_choice：deepseek-v4-flash 等推理模型
+            # 不支持强制 tool_choice，让模型自主决定。
+            # 当只有一个 tool 且 system prompt 指示调用时，模型通常会调用。
         }
         resp = chat_completions(payload, timeout=20)
 
@@ -127,10 +129,22 @@ def _keyword_fallback(text: str) -> StructuredIntent:
     """
     text_lower = text.lower()
 
-    # 按优先级检测：continuous > pyspy > ebpf > perf_cpu（兜底）
+    # 按优先级检测：continuous > memory > java > go > pyspy > ebpf > perf_cpu（兜底）
     if any(kw in text_lower for kw in ("持续", "监控", "长期", "趋势", "continuous")):
         collector = "continuous_perf"
         reason = "关键词匹配：持续/监控相关描述 → continuous_perf"
+    elif any(kw in text_lower for kw in ("内存", "oom", "泄漏", "swap", "rss", "pss")):
+        collector = "memory_smaps"
+        reason = "关键词匹配：内存相关描述 → memory_smaps"
+    elif any(kw in text_lower for kw in ("fd", "文件描述符", "线程", "网络", "指标", "多维", "系统")):
+        collector = "sys_metrics"
+        reason = "关键词匹配：系统指标/多维监控 → sys_metrics"
+    elif any(kw in text_lower for kw in ("java", "jvm", "spring", "tomcat", "async")):
+        collector = "java_async"
+        reason = "关键词匹配：Java/JVM 相关描述 → java_async"
+    elif any(kw in text_lower for kw in ("golang", "goroutine", "pprof")):
+        collector = "go_pprof"
+        reason = "关键词匹配：Go 相关描述 → go_pprof"
     elif any(kw in text_lower for kw in ("python", "django", "flask", "pytorch")):
         collector = "pyspy"
         reason = "关键词匹配：Python 相关描述 → py-spy"

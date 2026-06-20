@@ -7,6 +7,8 @@ automation, CI checks, batch jobs and diff analysis.
 
 from __future__ import annotations
 
+import server.app._env  # noqa: F401 — 自动加载 .env
+
 import argparse
 import json
 import time
@@ -433,43 +435,80 @@ def _cmd_chatops_config(_args) -> int:
 
 
 def _cmd_chatops_test(_args) -> int:
-    from server.app.chatops.dispatcher import is_enabled, _get_provider_name, _get_webhook_url
-    from server.app.chatops.providers import PROVIDERS
-    from server.app.chatops.base import ChatopsMessage
-    if not is_enabled():
+    """通过 Server API 发送测试消息（Server 持有 ChatOps 连接）。"""
+    import urllib.request
+    import urllib.error
+
+    if not _chatops_enabled_check():
         _print_json({"ok": False, "error": "ChatOps 未启用，请设置 MINI_DROP_CHATOPS_ENABLED=1 和相关环境变量"})
         return 2
-    provider = PROVIDERS[_get_provider_name()]
-    msg = ChatopsMessage(
-        title="Mini-Drop ChatOps 连接测试",
-        content="这是一条来自 Mini-Drop 性能诊断平台的测试消息。\n\n如果你收到这条消息，说明 ChatOps Webhook 配置正确 ✅",
-        level="info",
-        extra_fields=[
-            {"label": "平台", "value": _get_provider_name()},
-            {"label": "时间", "value": __import__("datetime").datetime.now().isoformat()},
-        ],
-    )
-    ok = provider.send(msg, _get_webhook_url())
-    _print_json({"ok": ok, "provider": _get_provider_name()})
-    return 0 if ok else 1
+
+    try:
+        server_url = _chatops_server_url()
+        req = urllib.request.Request(
+            f"{server_url}/api/chatops/test",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+        data = result.get("data", result)
+        _print_json(data)
+        return 0 if data.get("ok") else 1
+    except urllib.error.URLError as exc:
+        _print_json({"ok": False, "error": f"无法连接 Server: {exc.reason}", "hint": "请先启动 micro-drop serve"})
+        return 1
+    except Exception as exc:
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
 
 
 def _cmd_chatops_notify(args) -> int:
-    from server.app.chatops.dispatcher import is_enabled, _get_provider_name, _get_webhook_url
-    from server.app.chatops.providers import PROVIDERS
-    from server.app.chatops.base import ChatopsMessage
-    if not is_enabled():
+    """通过 Server API 发送自定义 ChatOps 通知。"""
+    import urllib.request
+    import urllib.error
+
+    if not _chatops_enabled_check():
         _print_json({"ok": False, "error": "ChatOps 未启用"})
         return 2
-    provider = PROVIDERS[_get_provider_name()]
-    msg = ChatopsMessage(
-        title=args.title,
-        content=args.content,
-        level=args.level,
-    )
-    ok = provider.send(msg, _get_webhook_url())
-    _print_json({"ok": ok, "provider": _get_provider_name()})
-    return 0 if ok else 1
+
+    payload = json.dumps({
+        "title": args.title,
+        "content": args.content,
+        "level": args.level,
+    }).encode("utf-8")
+
+    try:
+        server_url = _chatops_server_url()
+        req = urllib.request.Request(
+            f"{server_url}/api/chatops/notify",
+            data=payload,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+        data = result.get("data", result)
+        _print_json(data)
+        return 0 if data.get("ok") else 1
+    except urllib.error.URLError as exc:
+        _print_json({"ok": False, "error": f"无法连接 Server: {exc.reason}", "hint": "请先启动 micro-drop serve"})
+        return 1
+    except Exception as exc:
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
+
+
+def _chatops_enabled_check() -> bool:
+    """检查 ChatOps 是否已启用。"""
+    from server.app.chatops.dispatcher import is_enabled
+    return is_enabled()
+
+
+def _chatops_server_url() -> str:
+    """获取 Server 地址。"""
+    import os as _os
+    return _os.getenv("MINI_DROP_SERVER_URL", "http://localhost:8191").rstrip("/")
 
 
 def _completion_words() -> list[str]:
