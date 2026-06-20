@@ -54,10 +54,14 @@ function tooltipContent(d) {
  * - 搜索高亮
  * - 重置缩放
  *
- * @param {{ taskId: string }} props
+ * @param {{ taskId: string, artifactType?: string, artifactIndex?: number }} props
  * @param {React.Ref} ref — 暴露 search(text) 方法供 TopNChart 联动
  */
-const FlamegraphViewer = forwardRef(function FlamegraphViewer({ taskId }, ref) {
+const FlamegraphViewer = forwardRef(function FlamegraphViewer({
+  taskId,
+  artifactType = "flamegraph_json",
+  artifactIndex = null,
+}, ref) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const dataRef = useRef(null);
@@ -94,7 +98,8 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({ taskId }, ref) {
     setLoading(true);
     setError("");
     try {
-      const tree = await getTaskArtifactContent(taskId, "flamegraph_json");
+      const params = artifactIndex === null || artifactIndex === undefined ? {} : { index: artifactIndex };
+      const tree = await getTaskArtifactContent(taskId, artifactType, params);
       if (tree && tree.name) {
         dataRef.current = tree;
         setHasData(true);
@@ -107,7 +112,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({ taskId }, ref) {
     } finally {
       setLoading(false);
     }
-  }, [taskId]);
+  }, [taskId, artifactType, artifactIndex]);
 
   useEffect(() => {
     load();

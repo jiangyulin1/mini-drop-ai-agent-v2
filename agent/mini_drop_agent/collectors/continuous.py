@@ -15,6 +15,7 @@ import json
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -83,7 +84,7 @@ class ContinuousCollector:
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None,
+                    start_new_session=hasattr(os, "setsid"),
                 )
                 try:
                     proc.communicate(timeout=timeout)
@@ -110,16 +111,18 @@ class ContinuousCollector:
 
                 end = time.time()
                 if proc.returncode == 0 and os.path.isfile(perf_data) and os.path.getsize(perf_data) > 0:
+                    artifacts = [{
+                        "artifact_type": "continuous_window",
+                        "filename": f"window_{i:03d}/perf.data",
+                        "local_path": perf_data,
+                        "content_type": "application/octet-stream",
+                        "size_bytes": os.path.getsize(perf_data),
+                        "metadata": {"window_index": i, "start_ts": start, "end_ts": end},
+                    }]
+                    artifacts.extend(self._analyze_window(i, perf_data, task_base))
                     win = _Window(index=i, start_ts=start, end_ts=end, output_dir=window_dir, ok=True,
                                   reason="perf record 完成",
-                                  artifacts=[{
-                                      "artifact_type": "continuous_window",
-                                      "filename": f"window_{i:03d}/perf.data",
-                                      "local_path": perf_data,
-                                      "content_type": "application/octet-stream",
-                                      "size_bytes": os.path.getsize(perf_data),
-                                      "metadata": {"window_index": i, "start_ts": start, "end_ts": end},
-                                  }])
+                                  artifacts=artifacts)
                 else:
                     win = _Window(index=i, start_ts=start, end_ts=end, output_dir=window_dir,
                                   ok=False, reason=f"perf record exit={proc.returncode}")
@@ -176,3 +179,45 @@ class ContinuousCollector:
     @staticmethod
     def _pid_exists(pid: int) -> bool:
         return os.path.isdir(f"/proc/{pid}")
+
+    @staticmethod
+    def _analyze_window(index: int, perf_data: str, task_base: str) -> list[dict]:
+        window_name = f"window_{index:03d}"
+        cmd = [
+            sys.executable,
+            "-m",
+            "analyzer.mini_drop_analyzer.hotmethod_analyzer",
+            "--task-id",
+            window_name,
+            "--perf-data",
+            perf_data,
+            "--output-dir",
+            task_base,
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, timeout=120)
+        except Exception:
+            return []
+        if proc.returncode != 0:
+            return []
+
+        output_dir = os.path.join(task_base, window_name)
+        generated = {
+            "continuous_flamegraph_json": ("flamegraph.json", "application/json"),
+            "continuous_flamegraph_svg": ("flamegraph.svg", "image/svg+xml"),
+            "continuous_top_json": ("top.json", "application/json"),
+        }
+        artifacts: list[dict] = []
+        for artifact_type, (filename, content_type) in generated.items():
+            path = os.path.join(output_dir, filename)
+            if not os.path.isfile(path):
+                continue
+            artifacts.append({
+                "artifact_type": artifact_type,
+                "filename": f"{window_name}/{filename}",
+                "local_path": path,
+                "content_type": content_type,
+                "size_bytes": os.path.getsize(path),
+                "metadata": {"window_index": index},
+            })
+        return artifacts

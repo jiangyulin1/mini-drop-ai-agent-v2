@@ -58,9 +58,27 @@ async def _lifespan(_app: FastAPI):
     if os.getenv("MINIO_AUTO_CREATE_BUCKET", "0") == "1":
         _ensure_minio_bucket_with_retry(os.getenv("MINIO_BUCKET", "mini-drop"))
     _grpc = serve_in_background(repo)
+    _offline_task = asyncio.create_task(_offline_sweeper())
     init_chatops()
-    yield
-    _grpc.stop(grace=None).wait(timeout=5)
+    try:
+        yield
+    finally:
+        _offline_task.cancel()
+        try:
+            await _offline_task
+        except asyncio.CancelledError:
+            pass
+        _grpc.stop(grace=None).wait(timeout=5)
+
+
+async def _offline_sweeper() -> None:
+    timeout_sec = int(os.getenv("AGENT_OFFLINE_TIMEOUT_SEC", "30"))
+    interval_sec = max(1, min(timeout_sec // 2, 15))
+    while True:
+        repo.mark_offline_agents(timeout_sec=timeout_sec)
+        if hasattr(repo, "persist_agent_metric_snapshots"):
+            repo.persist_agent_metric_snapshots()
+        await asyncio.sleep(interval_sec)
 
 
 def _ensure_minio_bucket_with_retry(bucket: str) -> None:
@@ -445,11 +463,13 @@ def get_task_artifacts(task_id: str) -> APIResponse:
 
 
 @app.get("/api/tasks/{task_id}/artifacts/{artifact_type}/content")
-def get_task_artifact_content(task_id: str, artifact_type: str) -> APIResponse:
+def get_task_artifact_content(task_id: str, artifact_type: str, index: int | None = None) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     for artifact in repo.artifacts.get(task_id, []):
         if artifact.get("artifact_type") != artifact_type:
+            continue
+        if index is not None and artifact.get("metadata", {}).get("window_index") != index:
             continue
         local_path = artifact.get("local_path")
         path = _resolve_artifact_path_or_none(local_path)

@@ -20,15 +20,28 @@ def maybe_upload_artifacts(task_id: str, artifacts: list[dict], config: AgentCon
 def _minio_client(config: AgentConfig):
     from minio import Minio
 
-    # Use HTTPS unless explicitly opted out via MINIO_SECURE=0
-    secure = os.getenv("MINIO_SECURE", "1").strip().lower() not in {"0", "false", "no", "off"}
+    endpoint, inferred_secure = _normalize_endpoint(config.minio_endpoint)
+    secure_raw = os.getenv("MINIO_SECURE", "").strip().lower()
+    if secure_raw:
+        secure = secure_raw in {"1", "true", "yes", "on"}
+    else:
+        secure = inferred_secure
 
     return Minio(
-        endpoint=config.minio_endpoint,
+        endpoint=endpoint,
         access_key=config.minio_access_key,
         secret_key=config.minio_secret_key,
         secure=secure,
     )
+
+
+def _normalize_endpoint(endpoint: str) -> tuple[str, bool]:
+    endpoint = (endpoint or "").strip()
+    if endpoint.startswith("https://"):
+        return endpoint.removeprefix("https://"), True
+    if endpoint.startswith("http://"):
+        return endpoint.removeprefix("http://"), False
+    return endpoint, False
 
 
 def _upload_one(client, task_id: str, artifact: dict, config: AgentConfig) -> dict:

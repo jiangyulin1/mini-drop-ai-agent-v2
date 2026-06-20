@@ -28,6 +28,7 @@ message HealthCheckRequest {
   string agent_version     = 4;  // 当前版本
   PidStats self_pstats     = 5;  // Agent 自身资源开销
   PidStats children_pstats = 6;  // 采集器子进程聚合开销
+  bool busy                = 7;  // Agent 正在执行任务时只心跳，不拉取新任务
 }
 
 

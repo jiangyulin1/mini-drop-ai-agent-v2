@@ -56,6 +56,9 @@ class ControlService(control_pb2_grpc.ControlServicer):
         2: "go_pprof",     # pprof (Go)
         3: "pyspy",        # py-spy (Python)
         4: "ebpf_io",      # bpftrace (eBPF)
+        5: "memory_smaps",
+        6: "sys_metrics",
+        7: "continuous_perf",
     }
 
     @classmethod

@@ -66,7 +66,7 @@ export default function DiagnosisHistory() {
         recent.map((t) => listTaskDiagnoses(t.id))
       );
 
-      const all: any[] = [];
+      const all = [];
       results.forEach((r, i) => {
         if (r.status === "fulfilled" && Array.isArray(r.value)) {
           r.value.forEach((d) => {

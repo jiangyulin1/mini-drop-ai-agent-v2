@@ -52,12 +52,17 @@ class PerfCollector:
         perf_data = os.path.join(output_dir, "perf.data")
 
         callgraph = task.options.get("callgraph", "fp")
-        event = task.options.get("event", "cpu-cycles")
+        event = task.options.get("event", "cpu-cycles:u")
+        all_user = task.options.get("all_user", True)
         hz = task.sample_rate
         duration = task.duration_sec
 
         cmd = [
             perf_path, "record",
+        ]
+        if all_user:
+            cmd.append("--all-user")
+        cmd.extend([
             "-F", str(hz),
             "-g",
             "--call-graph", callgraph,
@@ -65,7 +70,7 @@ class PerfCollector:
             "-p", str(task.target_pid),
             "-o", perf_data,
             "--", "sleep", str(duration),
-        ]
+        ])
 
         timeout = duration + 30
 
@@ -74,7 +79,7 @@ class PerfCollector:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None,  # 独立进程组，便于超时清理（仅 Unix）
+                start_new_session=hasattr(os, "setsid"),
             )
             stdout, stderr = proc.communicate(timeout=timeout)
 

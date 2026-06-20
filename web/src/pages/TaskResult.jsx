@@ -10,6 +10,7 @@ import {
   message,
   Progress,
   Row,
+  Select,
   Skeleton,
   Space,
   Spin,
@@ -61,6 +62,7 @@ export default function TaskResult() {
   const [diagnosing, setDiagnosing] = useState(false);
   const [analysis, setAnalysis] = useState({ top: [], svg: "", hasFlameJson: false });
   const [analysisLoading, setAnalysisLoading] = useState(true);
+  const [selectedContinuousIndex, setSelectedContinuousIndex] = useState(null);
 
   // ── 数据加载 ──────────────────────────────────────────
 
@@ -215,6 +217,15 @@ export default function TaskResult() {
     (item) => item.artifact_type === "continuous_summary"
   );
   const continuousWindows = continuousSummary?.metadata?.windows || [];
+  const continuousFlameArtifacts = artifacts.filter(
+    (item) => item.artifact_type === "continuous_flamegraph_json"
+  );
+
+  useEffect(() => {
+    if (selectedContinuousIndex === null && continuousWindows.length > 0) {
+      setSelectedContinuousIndex(continuousWindows[0].window_index);
+    }
+  }, [continuousWindows, selectedContinuousIndex]);
 
   const artifactColumns = [
     {
@@ -463,7 +474,21 @@ export default function TaskResult() {
         {/* 持续采样窗口 */}
         {continuousWindows.length > 0 && (
           <div style={{ marginTop: 12 }}>
-            <Typography.Text strong>连续采样窗口</Typography.Text>
+            <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
+              <Typography.Text strong>连续采样窗口</Typography.Text>
+              {continuousFlameArtifacts.length > 0 && (
+                <Select
+                  size="small"
+                  style={{ width: 180 }}
+                  value={selectedContinuousIndex}
+                  onChange={setSelectedContinuousIndex}
+                  options={continuousWindows.map((item) => ({
+                    value: item.window_index,
+                    label: `窗口 ${item.window_index}`,
+                  }))}
+                />
+              )}
+            </Space>
             <Table
               rowKey={(record) => record.window_index}
               dataSource={continuousWindows}
@@ -504,6 +529,18 @@ export default function TaskResult() {
                 { title: "说明", dataIndex: "reason", ellipsis: true },
               ]}
             />
+            {continuousFlameArtifacts.length > 0 && selectedContinuousIndex !== null && (
+              <div style={{ marginTop: 12 }}>
+                <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
+                  当前窗口火焰图
+                </Typography.Text>
+                <FlamegraphViewer
+                  taskId={taskId}
+                  artifactType="continuous_flamegraph_json"
+                  artifactIndex={selectedContinuousIndex}
+                />
+              </div>
+            )}
           </div>
         )}
       </Card>

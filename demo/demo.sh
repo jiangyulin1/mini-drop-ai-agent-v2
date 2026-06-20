@@ -12,8 +12,13 @@
 
 set -euo pipefail
 
-API="http://localhost:8191/api"
+API="${MINI_DROP_API_URL:-http://localhost/api}"
 AGENT_ID="${AGENT_ID:-agent_docker_demo}"
+API_KEY="${MINI_DROP_API_KEY:-}"
+AUTH_ARGS=()
+if [ -n "$API_KEY" ]; then
+  AUTH_ARGS=(-H "X-API-Key: $API_KEY")
+fi
 
 echo "=== Mini-Drop 端到端演示 ==="
 echo ""
@@ -31,6 +36,7 @@ echo ""
 echo "[2/4] 创建 perf 采集任务..."
 RESP=$(curl -s -X POST "$API/tasks" \
   -H "Content-Type: application/json" \
+  "${AUTH_ARGS[@]}" \
   -d "{
     \"name\": \"demo perf profiling\",
     \"agent_id\": \"$AGENT_ID\",
@@ -46,7 +52,7 @@ echo ""
 # 3. 轮询任务状态
 echo "[3/4] 等待采集完成..."
 for i in $(seq 1 30); do
-  STATUS=$(curl -s "$API/tasks/$TASK_ID" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['status'])" 2>/dev/null || echo "PENDING")
+  STATUS=$(curl -s "${AUTH_ARGS[@]}" "$API/tasks/$TASK_ID" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['status'])" 2>/dev/null || echo "PENDING")
   echo "  状态: $STATUS (${i}/30)"
   if [ "$STATUS" = "DONE" ] || [ "$STATUS" = "FAILED" ]; then
     break
@@ -57,15 +63,15 @@ echo ""
 
 # 4. 验证产物
 echo "[4/4] 验证产物..."
-ARTIFACTS=$(curl -s "$API/tasks/$TASK_ID/artifacts")
+ARTIFACTS=$(curl -s "${AUTH_ARGS[@]}" "$API/tasks/$TASK_ID/artifacts")
 ARTIFACT_COUNT=$(echo "$ARTIFACTS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['data']))" 2>/dev/null || echo "0")
 echo "  产物数量: $ARTIFACT_COUNT"
 
-TASK_DETAIL=$(curl -s "$API/tasks/$TASK_ID")
+TASK_DETAIL=$(curl -s "${AUTH_ARGS[@]}" "$API/tasks/$TASK_ID")
 STATUS_FINAL=$(echo "$TASK_DETAIL" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['status'])" 2>/dev/null || echo "UNKNOWN")
 echo "  最终状态: $STATUS_FINAL"
 
-EVENTS=$(curl -s "$API/tasks/$TASK_ID/events")
+EVENTS=$(curl -s "${AUTH_ARGS[@]}" "$API/tasks/$TASK_ID/events")
 EVENT_COUNT=$(echo "$EVENTS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['data']))" 2>/dev/null || echo "0")
 echo "  状态事件数: $EVENT_COUNT"
 

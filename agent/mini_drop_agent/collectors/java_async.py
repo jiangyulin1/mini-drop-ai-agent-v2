@@ -83,7 +83,7 @@ class JavaAsyncProfilerCollector:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None,
+                start_new_session=hasattr(os, "setsid"),
             )
             stdout, stderr = proc.communicate(timeout=timeout)
 

@@ -79,6 +79,12 @@ def _has_analysis_result(artifacts: list[dict]) -> bool:
         "top_json",
         "ebpf_metrics",
         "continuous_summary",
+        "continuous_flamegraph_json",
+        "continuous_top_json",
+        "java_flamegraph_html",
+        "memory_json",
+        "pprof_raw",
+        "sys_metrics",
     } & artifact_types)
 
 

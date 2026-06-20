@@ -30,21 +30,22 @@ class AISettings:
 
 def get_ai_settings() -> AISettings:
     mode = os.getenv("MINI_DROP_AI_ENABLED", "full").strip().lower()
-    provider = os.getenv("MINI_DROP_AI_PROVIDER", os.getenv("DEEPSEEK_PROVIDER", "deepseek"))
-    base_url = os.getenv("MINI_DROP_AI_BASE_URL", os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com"))
-    api_key = os.getenv("MINI_DROP_AI_API_KEY", os.getenv("DEEPSEEK_API_KEY", ""))
-    model = os.getenv("MINI_DROP_AI_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
+    provider = _first_non_empty("MINI_DROP_AI_PROVIDER", "DEEPSEEK_PROVIDER", default="deepseek")
+    base_url = _first_non_empty("MINI_DROP_AI_BASE_URL", "DEEPSEEK_API_BASE", default="https://api.deepseek.com")
+    api_key = _first_non_empty("MINI_DROP_AI_API_KEY", "DEEPSEEK_API_KEY", default="")
+    model = _first_non_empty("MINI_DROP_AI_MODEL", "DEEPSEEK_MODEL", default="deepseek-chat")
 
     defaults = _mode_defaults(mode)
+    feature_flags = _apply_feature_overrides(defaults)
     return AISettings(
         enabled=mode,
         provider=provider,
         base_url=base_url.rstrip("/"),
         api_key=api_key,
         model=model,
-        nlp_enabled=_feature_enabled("MINI_DROP_NLP_ENABLED", defaults["nlp"]),
-        rca_enabled=_feature_enabled("MINI_DROP_RCA_ENABLED", defaults["rca"]),
-        summarize_enabled=_feature_enabled("MINI_DROP_SUMMARIZE_ENABLED", defaults["summarize"]),
+        nlp_enabled=feature_flags["nlp"],
+        rca_enabled=feature_flags["rca"],
+        summarize_enabled=feature_flags["summarize"],
     )
 
 
@@ -90,10 +91,29 @@ def _mode_defaults(mode: str) -> dict[str, bool]:
     return {"nlp": True, "rca": True, "summarize": True}
 
 
-def _feature_enabled(env_name: str, mode_default: bool) -> bool:
-    if not mode_default:
-        return False
-    return env_bool(env_name, True)
+def _first_non_empty(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value.strip():
+            return value.strip()
+    return default
+
+
+def _apply_feature_overrides(mode_defaults: dict[str, bool]) -> dict[str, bool]:
+    """Apply per-feature env flags without bypassing the global AI mode.
+
+    MINI_DROP_AI_ENABLED is the upper bound. For example, `none` always disables
+    every feature even if `.env` still contains MINI_DROP_NLP_ENABLED=true.
+    """
+    env_names = {
+        "nlp": "MINI_DROP_NLP_ENABLED",
+        "rca": "MINI_DROP_RCA_ENABLED",
+        "summarize": "MINI_DROP_SUMMARIZE_ENABLED",
+    }
+    result: dict[str, bool] = {}
+    for feature, default_enabled in mode_defaults.items():
+        result[feature] = bool(default_enabled) and env_bool(env_names[feature], default_enabled)
+    return result
 
 
 def _post_json(url: str, headers: dict, json: dict, timeout: int):

@@ -214,6 +214,26 @@ class TestHealthCheck:
         refreshed = grpc_fix.repo.tasks[task.id]
         assert refreshed.status == TaskStatus.RUNNING
 
+    def test_busy_heartbeat_does_not_pull_task(self, grpc_fix: GrpcFixture):
+        self._register(grpc_fix)
+        task = grpc_fix.repo.create_task(
+            CreateTaskRequest(
+                name="busy-test", agent_id=self.AGENT_ID,
+                target_pid=1234, collector_type="perf_cpu",
+            )
+        )
+
+        resp = grpc_fix.hc_stub.Do(
+            healthcheck_pb2.HealthCheckRequest(
+                agent_id=self.AGENT_ID,
+                ip_addr=self.IP,
+                busy=True,
+            )
+        )
+
+        assert resp.pending is False
+        assert grpc_fix.repo.tasks[task.id].status == TaskStatus.PENDING
+
     def test_heartbeat_updates_timestamp(self, grpc_fix: GrpcFixture):
         self._register(grpc_fix)
         before = grpc_fix.repo.agents[self.AGENT_ID].last_heartbeat_at

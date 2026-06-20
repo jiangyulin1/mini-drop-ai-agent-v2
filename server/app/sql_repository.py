@@ -180,6 +180,17 @@ class SqlRepository:
             task.status = TaskStatus.RUNNING.value
             return task
 
+    def heartbeat_only(self, agent_id: str, ip_addr: str) -> None:
+        """Update heartbeat timestamp without dispatching a new task."""
+        with self._write_session() as session:
+            agent = session.get(AgentModel, agent_id)
+            if agent is None:
+                return
+            agent.ip_addr = ip_addr or agent.ip_addr
+            agent.status = "ONLINE"
+            agent.last_heartbeat_at = now_utc()
+            agent.updated_at = now_utc()
+
     def mark_offline_agents(self, timeout_sec: int = 30) -> list[AgentModel]:
         with self._write_session() as session:
             cutoff = now_utc() - timedelta(seconds=timeout_sec)
@@ -646,7 +657,7 @@ class SqlRepository:
             task.finished_at = now_utc()
 
         # 发布 SSE 事件
-        notify_task_changed(task_id, task.status, to_status.value, reason)
+        notify_task_changed(task_id, from_status, to_status.value, reason)
 
     def as_dict(self, value: Any) -> dict[str, Any]:
         if isinstance(value, StatusEvent):

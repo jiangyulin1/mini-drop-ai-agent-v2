@@ -174,6 +174,16 @@ class InMemoryRepository:
 
             return None
 
+    def heartbeat_only(self, agent_id: str, ip_addr: str) -> None:
+        """只记录心跳，不派发任务。用于 Agent 忙碌时保持在线。"""
+        with self._lock:
+            agent = self.agents.get(agent_id)
+            if agent is None:
+                return
+            agent.status = "ONLINE"
+            agent.last_heartbeat_at = now_utc()
+            agent.updated_at = now_utc()
+
     def mark_offline_agents(self, timeout_sec: int = 30) -> list[AgentRecord]:
         """将超时未心跳的 Agent 标记为 OFFLINE。"""
         with self._lock:

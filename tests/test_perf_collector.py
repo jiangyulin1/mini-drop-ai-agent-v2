@@ -91,6 +91,58 @@ class TestPerfExecution:
         assert result.artifacts[0]["artifact_type"] == "raw"
         assert result.artifacts[0]["size_bytes"] > 0
 
+    def test_perf_defaults_to_user_space_cycles(self, collector: PerfCollector, task: CollectorTask, tmp_path):
+        collector.OUTPUT_BASE = str(tmp_path)
+        task = CollectorTask(
+            id=task.id,
+            collector_type=task.collector_type,
+            target_pid=task.target_pid,
+            sample_rate=task.sample_rate,
+            duration_sec=task.duration_sec,
+            options={"callgraph": "fp"},
+        )
+        perf_data = tmp_path / task.id / "perf.data"
+        perf_data.parent.mkdir(parents=True, exist_ok=True)
+        perf_data.write_text("perf data")
+        mock_proc = _mock_popen_complete()
+
+        with mock.patch("shutil.which", return_value="/usr/bin/perf"), \
+             mock.patch.object(collector, "_check_perf_paranoid", return_value=True), \
+             mock.patch.object(collector, "_pid_exists", return_value=True), \
+             mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
+             mock.patch.object(collector, "_analyze_perf_data", return_value=([], "")):
+            result = collector.collect(task)
+
+        assert result.ok is True
+        cmd = mock_popen.call_args.args[0]
+        assert "--all-user" in cmd
+        assert cmd[cmd.index("-e") + 1] == "cpu-cycles:u"
+
+    def test_perf_can_disable_user_space_only_mode(self, collector: PerfCollector, task: CollectorTask, tmp_path):
+        collector.OUTPUT_BASE = str(tmp_path)
+        task = CollectorTask(
+            id=task.id,
+            collector_type=task.collector_type,
+            target_pid=task.target_pid,
+            sample_rate=task.sample_rate,
+            duration_sec=task.duration_sec,
+            options={"callgraph": "fp", "all_user": False},
+        )
+        perf_data = tmp_path / task.id / "perf.data"
+        perf_data.parent.mkdir(parents=True, exist_ok=True)
+        perf_data.write_text("perf data")
+        mock_proc = _mock_popen_complete()
+
+        with mock.patch("shutil.which", return_value="/usr/bin/perf"), \
+             mock.patch.object(collector, "_check_perf_paranoid", return_value=True), \
+             mock.patch.object(collector, "_pid_exists", return_value=True), \
+             mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
+             mock.patch.object(collector, "_analyze_perf_data", return_value=([], "")):
+            result = collector.collect(task)
+
+        assert result.ok is True
+        assert "--all-user" not in mock_popen.call_args.args[0]
+
     def test_perf_attaches_analyzer_artifacts(self, collector: PerfCollector, task: CollectorTask, tmp_path):
         collector.OUTPUT_BASE = str(tmp_path)
 

@@ -19,7 +19,7 @@ COPY pyproject.toml README.md ./
 COPY server/ ./server/
 COPY agent/ ./agent/
 COPY analyzer/ ./analyzer/
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e . "grpcio-tools>=1.80"
 
 COPY proto/ ./proto/
 RUN cd proto && bash compile.sh

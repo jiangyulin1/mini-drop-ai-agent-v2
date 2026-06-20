@@ -136,8 +136,8 @@ export function getTaskArtifacts(taskId) {
   return api.get(`/tasks/${taskId}/artifacts`);
 }
 
-export function getTaskArtifactContent(taskId, artifactType) {
-  return api.get(`/tasks/${taskId}/artifacts/${artifactType}/content`);
+export function getTaskArtifactContent(taskId, artifactType, params = {}) {
+  return api.get(`/tasks/${taskId}/artifacts/${artifactType}/content`, { params });
 }
 
 export function triggerDiagnose(taskId) {

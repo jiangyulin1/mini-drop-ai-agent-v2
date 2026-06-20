@@ -15,10 +15,16 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
         # 记录心跳，检查有无待执行任务
         if hasattr(self._repo, "record_agent_metrics"):
             self._repo.record_agent_metrics(request.agent_id, _metrics_from_request(request))
-        task = self._repo.heartbeat(request.agent_id, request.ip_addr)
-
         response = healthcheck_pb2.HealthCheckResponse()
         response.status = healthcheck_pb2.HealthCheckResponse.SERVING
+
+        if getattr(request, "busy", False):
+            if hasattr(self._repo, "heartbeat_only"):
+                self._repo.heartbeat_only(request.agent_id, request.ip_addr)
+            response.pending = False
+            return response
+
+        task = self._repo.heartbeat(request.agent_id, request.ip_addr)
 
         if task is None:
             response.pending = False

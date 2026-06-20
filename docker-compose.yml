@@ -70,9 +70,9 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-mini_drop_secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
       MINIO_AUTO_CREATE_BUCKET: ${MINIO_AUTO_CREATE_BUCKET:-1}
-      MINI_DROP_API_AUTH_ENABLED: ${MINI_DROP_API_AUTH_ENABLED:-1}
+      MINI_DROP_API_AUTH_ENABLED: ${MINI_DROP_API_AUTH_ENABLED:-0}
       MINI_DROP_API_KEY: ${MINI_DROP_API_KEY:-}
-      MINI_DROP_GRPC_AUTH_ENABLED: ${MINI_DROP_GRPC_AUTH_ENABLED:-1}
+      MINI_DROP_GRPC_AUTH_ENABLED: ${MINI_DROP_GRPC_AUTH_ENABLED:-0}
       MINI_DROP_GRPC_TOKEN: ${MINI_DROP_GRPC_TOKEN:-}
     expose:
       - "8191"
@@ -109,6 +109,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-mini_drop}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-mini_drop_secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
+      MINIO_SECURE: ${MINIO_SECURE:-0}
     depends_on:
       server:
         condition: service_healthy
@@ -116,13 +117,17 @@ services:
         condition: service_healthy
     # 注意: 生产环境应评估是否需要 privileged + host PID
     # 最小权限方案：仅 cap_add SYS_PTRACE + PERFMON + /proc 只读挂载
-    privileged: false
+    privileged: true
     pid: host
     cap_add:
       - SYS_PTRACE
       - PERFMON
+      - SYS_ADMIN
+      - BPF
+      - SYS_RESOURCE
     security_opt:
       - no-new-privileges:true
+      - seccomp:unconfined
     read_only: false
     restart: unless-stopped
     deploy:

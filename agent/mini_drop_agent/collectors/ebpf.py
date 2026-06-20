@@ -52,7 +52,7 @@ class EBPFCollector:
                 [bpftrace, "-o", output_file, script_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None,  # 独立进程组（仅 Unix）
+                start_new_session=hasattr(os, "setsid"),
             )
             try:
                 proc.wait(timeout=task.duration_sec)

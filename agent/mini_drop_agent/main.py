@@ -15,8 +15,10 @@ import server.app._env  # noqa: F401 — 自动加载 .env
 
 import json
 import os
+import queue
 import signal
 import socket
+import threading
 import time
 from dataclasses import replace
 from typing import Any
@@ -143,6 +145,7 @@ def _heartbeat(
     stub: healthcheck_pb2_grpc.HealthCheckStub,
     config: AgentConfig,
     sampler: ProcessStatsSampler | None = None,
+    busy: bool = False,
 ) -> dict[str, Any] | None:
     """通过 gRPC HealthCheck.Do 发送心跳，返回待执行任务或 None。"""
     request = healthcheck_pb2.HealthCheckRequest(
@@ -150,6 +153,7 @@ def _heartbeat(
         hostname=socket.gethostname(),
         ip_addr=config.agent_ip_addr,
         agent_version="0.1.0",
+        busy=busy,
     )
     if sampler is not None:
         _fill_pid_stats(request.self_pstats, sampler.sample_self())
@@ -179,6 +183,22 @@ def _heartbeat(
             },
         }
     return None
+
+
+def _collector_worker(work_queue, result_queue, config: AgentConfig) -> None:
+    """Run collectors away from the heartbeat loop."""
+    while True:
+        task = work_queue.get()
+        try:
+            if task is None:
+                return
+            ok, reason, artifacts = _run_collector(task, config)
+            result_queue.put((task, ok, reason, artifacts))
+        except Exception as exc:
+            if task is not None:
+                result_queue.put((task, False, f"collector worker crashed: {exc}", []))
+        finally:
+            work_queue.task_done()
 
 
 def _notify_result(
@@ -270,10 +290,58 @@ def main() -> None:
     # 初始化注册 + 拉取配置（带重试）
     config = _init_register_with_retry(conn, config)
 
+    work_queue = queue.Queue(maxsize=1)
+    result_queue = queue.Queue()
+    worker = threading.Thread(
+        target=_collector_worker,
+        args=(work_queue, result_queue, config),
+        name="collector-worker",
+        daemon=True,
+    )
+    worker.start()
+    active_task: dict[str, Any] | None = None
+
     while not _should_exit:
         try:
+            finished_task, ok, reason, artifacts = result_queue.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            try:
+                conn.call_with_retry(
+                    lambda: _notify_result(
+                        hotmethod_pb2_grpc.HotmethodStub(conn.channel),
+                        finished_task["id"],
+                        ok,
+                        reason,
+                        artifacts,
+                    )
+                )
+                if ok:
+                    log_event("info", "task_completed", task_id=finished_task["id"], artifact_count=len(artifacts))
+                else:
+                    log_event("error", "task_failed", task_id=finished_task["id"], reason=reason)
+            except grpc.RpcError as exc:
+                log_event(
+                    "error",
+                    "notify_result_failed",
+                    task_id=finished_task["id"],
+                    code=exc.code(),
+                    details=exc.details(),
+                )
+            finally:
+                if active_task and active_task.get("id") == finished_task.get("id"):
+                    active_task = None
+                result_queue.task_done()
+
+        try:
             task = conn.call_with_retry(
-                lambda: _heartbeat(healthcheck_pb2_grpc.HealthCheckStub(conn.channel), config, sampler)
+                lambda: _heartbeat(
+                    healthcheck_pb2_grpc.HealthCheckStub(conn.channel),
+                    config,
+                    sampler,
+                    busy=active_task is not None,
+                )
             )
         except grpc.RpcError as exc:
             log_event("error", "heartbeat_failed", code=exc.code(), details=exc.details())
@@ -284,6 +352,16 @@ def main() -> None:
             time.sleep(config.heartbeat_interval_sec)
             continue
 
+        if active_task is not None:
+            log_event(
+                "warning",
+                "task_received_while_busy",
+                active_task_id=active_task.get("id"),
+                dropped_task_id=task.get("id"),
+            )
+            time.sleep(config.heartbeat_interval_sec)
+            continue
+
         log_event(
             "info",
             "task_pulled",
@@ -291,29 +369,13 @@ def main() -> None:
             collector=task["collector_type"],
             pid=task["target_pid"],
         )
-        ok, reason, artifacts = _run_collector(task, config)
-
-        try:
-            conn.call_with_retry(
-                lambda: _notify_result(
-                    hotmethod_pb2_grpc.HotmethodStub(conn.channel),
-                    task["id"],
-                    ok,
-                    reason,
-                    artifacts,
-                )
-            )
-        except grpc.RpcError as exc:
-            log_event("error", "notify_result_failed", task_id=task["id"], code=exc.code(), details=exc.details())
-            continue
-
-        if ok:
-            log_event("info", "task_completed", task_id=task["id"], artifact_count=len(artifacts))
-        else:
-            log_event("error", "task_failed", task_id=task["id"], reason=reason)
+        active_task = task
+        work_queue.put(task)
 
         time.sleep(config.heartbeat_interval_sec)
 
+    work_queue.put(None)
+    worker.join(timeout=5)
     conn.close()
 
 
