@@ -70,7 +70,9 @@ export default function DiagnosisHistory() {
       results.forEach((r, i) => {
         if (r.status === "fulfilled" && Array.isArray(r.value)) {
           r.value.forEach((d) => {
-            all.push({ ...d, _task_name: recent[i]?.name || recent[i]?.id });
+            // listTaskDiagnoses returns flat keys, getDiagnosis nests under .run
+            const item = d.run ? d : { ...d, run: { task_id: d.task_id, status: d.status, model_name: d.model_name, created_at: d.created_at, summary: d.summary } };
+            all.push({ ...item, _task_name: recent[i]?.name || recent[i]?.id });
           });
         }
       });
