@@ -30,7 +30,8 @@ class InitAgentService(init_pb2_grpc.InitAgentServicer):
         # NOTE: 生产环境必须启用 gRPC TLS (MINI_DROP_GRPC_SECURE=1)，否则凭证明文传输。
         return init_pb2.FetchConfigResponse(
             cos_config=init_pb2.common__pb2.CosConfig(
-                endpoint=os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                # 对 Agent 下发 MinIO 外部地址（而非 Docker 内部服务名）
+                endpoint=os.getenv("MINIO_PUBLIC_ENDPOINT", os.getenv("MINIO_ENDPOINT", "minio:9000")),
                 access_key=os.getenv("MINIO_ACCESS_KEY", ""),
                 secret_key=os.getenv("MINIO_SECRET_KEY", ""),
                 bucket=os.getenv("MINIO_BUCKET", "mini-drop"),
