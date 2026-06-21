@@ -45,6 +45,13 @@ function tooltipContent(d) {
   `;
 }
 
+function hasRenderableFlamegraph(tree) {
+  if (!tree || !tree.name) return false;
+  const value = Number(tree.value || 0);
+  const children = Array.isArray(tree.children) ? tree.children : [];
+  return value > 0 || children.length > 0;
+}
+
 /**
  * 交互式火焰图查看器。
  *
@@ -100,10 +107,11 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
     try {
       const params = artifactIndex === null || artifactIndex === undefined ? {} : { index: artifactIndex };
       const tree = await getTaskArtifactContent(taskId, artifactType, params);
-      if (tree && tree.name) {
+      if (hasRenderableFlamegraph(tree)) {
         dataRef.current = tree;
         setHasData(true);
       } else {
+        dataRef.current = null;
         setHasData(false);
       }
     } catch (err) {
@@ -234,7 +242,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
   }
 
   if (!hasData) {
-    return <Empty description="暂无火焰图数据，请确认采集任务已生成分析产物" />;
+    return <Empty description="火焰图采样为空，未发现可渲染的热点调用栈" />;
   }
 
   return (

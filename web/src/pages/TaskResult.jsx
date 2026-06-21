@@ -420,22 +420,28 @@ export default function TaskResult() {
                   <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
                     📊 热点 Top {Math.min(analysis.top.length, 10)}
                   </Typography.Text>
-                  <TopNChart
-                    data={analysis.top.slice(0, 10)}
-                    loading={analysisLoading}
-                    height={FLAMEGRAPH_HEIGHT}
-                    onBarClick={(funcName) => {
-                      if (flameRef.current) {
-                        flameRef.current.search(funcName);
-                      }
-                    }}
-                  />
-                  <Typography.Text
-                    type="secondary"
-                    style={{ fontSize: 11, display: "block", marginTop: 4, textAlign: "center" }}
-                  >
-                    点击柱状图 → 火焰图中高亮对应函数
-                  </Typography.Text>
+                  {analysisLoading || analysis.top.length > 0 ? (
+                    <>
+                      <TopNChart
+                        data={analysis.top.slice(0, 10)}
+                        loading={analysisLoading}
+                        height={FLAMEGRAPH_HEIGHT}
+                        onBarClick={(funcName) => {
+                          if (flameRef.current) {
+                            flameRef.current.search(funcName);
+                          }
+                        }}
+                      />
+                      <Typography.Text
+                        type="secondary"
+                        style={{ fontSize: 11, display: "block", marginTop: 4, textAlign: "center" }}
+                      >
+                        点击柱状图 → 火焰图中高亮对应函数
+                      </Typography.Text>
+                    </>
+                  ) : (
+                    <Empty description="暂无热点函数数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  )}
                 </Col>
               )}
             </Row>
