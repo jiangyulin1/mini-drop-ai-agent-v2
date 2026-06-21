@@ -40,6 +40,7 @@ import {
 } from "../api/client";
 import FlamegraphViewer from "../components/FlamegraphViewer";
 import TopNChart from "../components/TopNChart";
+import EBPFHistogram from "../components/EBPFHistogram";
 import StatusTag from "../components/StatusTag";
 import ErrorAlert from "../components/ErrorAlert";
 import usePolling from "../hooks/usePolling";
@@ -195,6 +196,7 @@ export default function TaskResult() {
   const memoryArtifact = artifacts.find((item) => item.artifact_type === "memory_json");
   const pprofArtifact = artifacts.find((item) => item.artifact_type === "pprof_raw");
   const sysMetricsArtifact = artifacts.find((item) => item.artifact_type === "sys_metrics");
+  const ebpfArtifact = artifacts.find((item) => item.artifact_type === "ebpf_metrics");
   const suggestionArtifact = artifacts.find(
     (item) => item.artifact_type === "suggestions_md"
   );
@@ -534,6 +536,13 @@ export default function TaskResult() {
       {javaHtmlArtifact && (
         <Card title="Java 火焰图" size="small">
           <JavaFlameViewer taskId={taskId} artifact={javaHtmlArtifact} />
+        </Card>
+      )}
+
+      {/* eBPF IO 延迟分布 */}
+      {ebpfArtifact && (
+        <Card title="eBPF IO 延迟分布" size="small">
+          <EBPFHistogramChart taskId={taskId} artifact={ebpfArtifact} />
         </Card>
       )}
 
@@ -1024,4 +1033,28 @@ function MemoryChart({ taskId, artifact }) {
       <div ref={chartRef} style={{ width: "100%", height: 300 }} />
     </div>
   );
+}
+
+// ── 辅助组件：eBPF IO 延迟分布 Histogram ─────────────────────
+
+function EBPFHistogramChart({ taskId, artifact }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const content = await getTaskArtifactContent(taskId, "ebpf_metrics");
+        if (!cancelled) setData(content || null);
+      } catch {
+        if (!cancelled) setData(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [taskId]);
+
+  return <EBPFHistogram data={data} loading={loading} />;
 }
