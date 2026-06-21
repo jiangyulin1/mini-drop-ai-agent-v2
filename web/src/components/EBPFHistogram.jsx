@@ -97,7 +97,7 @@ export default function EBPFHistogram({ data, loading = false, height = 340 }) {
       series: [
         {
           type: "bar",
-          data: values.map((v) => ({
+          data: values.map((v, i) => ({
             value: v,
             itemStyle: {
               // 低延迟 = 绿色，高延迟 = 红色
