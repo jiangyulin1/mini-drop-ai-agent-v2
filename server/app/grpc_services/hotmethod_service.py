@@ -65,7 +65,7 @@ class HotmethodService(hotmethod_pb2_grpc.HotmethodServicer):
         if _has_analysis_result(artifacts):
             self._repo.transition_task(
                 task_id, TaskStatus.DONE,
-                "Analyzer 已生成火焰图和热点分析结果", Actor.ANALYZER,
+                _analysis_done_reason(artifacts), Actor.ANALYZER,
             )
 
         return Empty()
@@ -86,6 +86,25 @@ def _has_analysis_result(artifacts: list[dict]) -> bool:
         "pprof_raw",
         "sys_metrics",
     } & artifact_types)
+
+
+def _analysis_done_reason(artifacts: list[dict]) -> str:
+    artifact_types = {item.get("artifact_type") for item in artifacts}
+    if "ebpf_metrics" in artifact_types:
+        return "eBPF IO 延迟分布已生成"
+    if "memory_json" in artifact_types:
+        return "内存时间序列分析已生成"
+    if "sys_metrics" in artifact_types:
+        return "系统多维指标分析已生成"
+    if "continuous_summary" in artifact_types:
+        return "连续采样窗口分析已生成"
+    if "java_flamegraph_html" in artifact_types:
+        return "Java 火焰图已生成"
+    if "pprof_raw" in artifact_types:
+        return "pprof 原始数据已记录"
+    if {"flamegraph_json", "flamegraph_svg", "top_json"} & artifact_types:
+        return "Analyzer 已生成火焰图和热点分析结果"
+    return "分析结果已生成"
 
 
 def _sanitize_artifacts(raw_artifacts) -> list[dict]:

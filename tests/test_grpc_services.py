@@ -370,6 +370,22 @@ class TestHotmethodNotifyResult:
         assert TaskStatus.ANALYZING in events
         assert TaskStatus.DONE in events
 
+    def test_notify_ebpf_metrics_uses_ebpf_done_reason(self, grpc_fix: GrpcFixture):
+        task_id = self._create_and_start_task(grpc_fix)
+        grpc_fix.hotmethod_stub.NotifyResult(
+            hotmethod_pb2.TaskResult(
+                task_id=task_id,
+                error_message="",
+                artifact_metadata_json=(
+                    '[{"artifact_type":"ebpf_metrics","filename":"ebpf_metrics.json"},'
+                    '{"artifact_type":"ebpf_raw","filename":"io_latency.txt"}]'
+                ),
+            )
+        )
+        task = grpc_fix.repo.tasks[task_id]
+        assert task.status == TaskStatus.DONE
+        assert task.status_reason == "eBPF IO 延迟分布已生成"
+
     def test_notify_failure_transitions_to_failed(self, grpc_fix: GrpcFixture):
         task_id = self._create_and_start_task(grpc_fix)
         grpc_fix.hotmethod_stub.NotifyResult(

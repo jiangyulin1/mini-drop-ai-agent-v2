@@ -207,6 +207,8 @@ export default function TaskResult() {
   const continuousFlameArtifacts = artifacts.filter(
     (item) => item.artifact_type === "continuous_flamegraph_json"
   );
+  const hasFlameOrTop = Boolean(flameArtifact || topArtifact);
+  const hasPrimaryAnalysis = Boolean(hasFlameOrTop || ebpfArtifact);
 
   useEffect(() => {
     if (selectedContinuousIndex === null && continuousWindows.length > 0) {
@@ -380,62 +382,74 @@ export default function TaskResult() {
         }
         size="small"
       >
-        {flameArtifact || topArtifact ? (
-          <Row gutter={SPACING.lg}>
-            {/* 火焰图 */}
-            <Col xs={24} lg={topArtifact ? 16 : 24}>
-              <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
-                🔥 火焰图
-              </Typography.Text>
-              {analysis.hasFlameJson ? (
-                <FlamegraphViewer ref={flameRef} taskId={taskId} />
-              ) : analysis.hasJavaHtml ? (
-                <JavaFlameViewer taskId={taskId} artifact={javaHtmlArtifact} />
-              ) : analysis.svg ? (
-                <iframe
-                  srcDoc={analysis.svg}
-                  sandbox=""
-                  title="火焰图"
-                  style={{
-                    width: "100%",
-                    height: FLAMEGRAPH_HEIGHT,
-                    border: `1px solid ${COLORS.border}`,
-                    borderRadius: 6,
-                    background: "#fff",
-                  }}
-                />
-              ) : analysisLoading ? (
-                <Skeleton.Input active block style={{ height: FLAMEGRAPH_HEIGHT, borderRadius: 8 }} />
-              ) : (
-                <Empty description="暂无火焰图，请等待分析完成" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              )}
-            </Col>
-
-            {/* TopN 柱状图 */}
-            {topArtifact && (
-              <Col xs={24} lg={8}>
+        {hasPrimaryAnalysis ? (
+          hasFlameOrTop ? (
+            <Row gutter={SPACING.lg}>
+              {/* 火焰图 */}
+              <Col xs={24} lg={topArtifact ? 16 : 24}>
                 <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
-                  📊 热点 Top {Math.min(analysis.top.length, 10)}
+                  🔥 火焰图
                 </Typography.Text>
-                <TopNChart
-                  data={analysis.top.slice(0, 10)}
-                  loading={analysisLoading}
-                  height={FLAMEGRAPH_HEIGHT}
-                  onBarClick={(funcName) => {
-                    if (flameRef.current) {
-                      flameRef.current.search(funcName);
-                    }
-                  }}
-                />
-                <Typography.Text
-                  type="secondary"
-                  style={{ fontSize: 11, display: "block", marginTop: 4, textAlign: "center" }}
-                >
-                  点击柱状图 → 火焰图中高亮对应函数
-                </Typography.Text>
+                {analysis.hasFlameJson ? (
+                  <FlamegraphViewer ref={flameRef} taskId={taskId} />
+                ) : analysis.hasJavaHtml ? (
+                  <JavaFlameViewer taskId={taskId} artifact={javaHtmlArtifact} />
+                ) : analysis.svg ? (
+                  <iframe
+                    srcDoc={analysis.svg}
+                    sandbox=""
+                    title="火焰图"
+                    style={{
+                      width: "100%",
+                      height: FLAMEGRAPH_HEIGHT,
+                      border: `1px solid ${COLORS.border}`,
+                      borderRadius: 6,
+                      background: "#fff",
+                    }}
+                  />
+                ) : analysisLoading ? (
+                  <Skeleton.Input active block style={{ height: FLAMEGRAPH_HEIGHT, borderRadius: 8 }} />
+                ) : (
+                  <Empty description="暂无火焰图，请等待分析完成" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                )}
               </Col>
-            )}
-          </Row>
+
+              {/* TopN 柱状图 */}
+              {topArtifact && (
+                <Col xs={24} lg={8}>
+                  <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
+                    📊 热点 Top {Math.min(analysis.top.length, 10)}
+                  </Typography.Text>
+                  <TopNChart
+                    data={analysis.top.slice(0, 10)}
+                    loading={analysisLoading}
+                    height={FLAMEGRAPH_HEIGHT}
+                    onBarClick={(funcName) => {
+                      if (flameRef.current) {
+                        flameRef.current.search(funcName);
+                      }
+                    }}
+                  />
+                  <Typography.Text
+                    type="secondary"
+                    style={{ fontSize: 11, display: "block", marginTop: 4, textAlign: "center" }}
+                  >
+                    点击柱状图 → 火焰图中高亮对应函数
+                  </Typography.Text>
+                </Col>
+              )}
+            </Row>
+          ) : (
+            <div>
+              <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
+                eBPF IO 延迟分布
+              </Typography.Text>
+              <EBPFHistogramChart taskId={taskId} artifact={ebpfArtifact} />
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 8 }}>
+                当前任务类型为 eBPF IO 采集，结果以延迟直方图和原始 bpftrace 输出呈现，不会生成 CPU 火焰图。
+              </Typography.Text>
+            </div>
+          )
         ) : (
           <Empty
             description={
@@ -540,7 +554,7 @@ export default function TaskResult() {
       )}
 
       {/* eBPF IO 延迟分布 */}
-      {ebpfArtifact && (
+      {ebpfArtifact && hasFlameOrTop && (
         <Card title="eBPF IO 延迟分布" size="small">
           <EBPFHistogramChart taskId={taskId} artifact={ebpfArtifact} />
         </Card>
