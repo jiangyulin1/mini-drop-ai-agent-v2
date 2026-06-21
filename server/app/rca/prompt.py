@@ -139,6 +139,43 @@ _SHOT_INSUFFICIENT = """
 """
 
 
+# ── Few-Shot 样例 4: 任务失败 / PID 不存在 ──
+
+_SHOT_FAILURE = """
+【样例 4：任务失败场景（PID 不存在 / 采集权限不足）】
+
+输入证据：
+  task_metadata: {"collector_type":"perf_cpu","duration_sec":5,"sample_rate":99,"status":"FAILED","status_reason":"目标 PID 999999 不存在","target_pid":999999}
+  top_functions: []
+  failure_events: []
+  candidates_json: [{"candidate_id":"target_pid_invalid","description":"目标 PID 不存在或在采集期间退出","rule_score":0.95,"evidence_refs":["task_metadata.target_pid","task_metadata.status"]}]
+
+期望输出：
+{
+  "summary": "任务执行失败：目标 PID 999999 在 Agent 执行采集时不存在。规则引擎以高置信度（0.95）匹配到 target_pid_invalid。",
+  "ranked_causes": [
+    {
+      "cause_id": "target_pid_invalid",
+      "confidence": 0.95,
+      "claim": "目标进程 PID 999999 在执行采集时已退出或从未存在，无法获取性能数据。",
+      "evidence_refs": ["task_metadata.target_pid", "task_metadata.status"],
+      "uncertainties": [],
+      "verification_steps": ["确认目标进程是否仍在运行: ps -p 999999", "若为容器进程，确认 Agent 与目标 PID 在同一 PID namespace"]
+    }
+  ],
+  "facts": ["目标 PID 999999 不存在", "任务状态 FAILED", "规则引擎以 0.95 置信度匹配 target_pid_invalid"],
+  "not_enough_evidence": false
+}
+
+注意：evidence_refs 只能使用当前证据中实际存在的字段路径，例如：
+- task_metadata.status / task_metadata.target_pid / task_metadata.status_reason
+- top_functions[0].name / top_functions[0].percent
+- ebpf_metrics.io_latency_us
+- tool_results 数组中每个元素的 tool_name / status / evidence_ref / output
+不得引用不存在的路径如 "failure_events"（如果当前证据中不存在该字段）。
+"""
+
+
 def build_system_prompt(model_name: str = "deepseek-chat") -> str:
     """构造完整 system prompt：约束 + schema + few-shot 样例。
 
@@ -161,6 +198,8 @@ def build_system_prompt(model_name: str = "deepseek-chat") -> str:
 {_SHOT_IO}
 
 {_SHOT_INSUFFICIENT}
+
+{_SHOT_FAILURE}
 
 {_CORE_CONSTRAINTS}
 """

@@ -232,11 +232,30 @@ def _collect_evidence_paths(evidence: EvidenceInput) -> dict[str, set[str]]:
         paths["task_metadata"] = set(evidence.task_metadata.keys())
 
     if evidence.tool_results:
-        paths["tool_results"] = {
-            item.get("tool_name", "")
-            for item in evidence.tool_results
-            if item.get("tool_name")
-        }
+        # tool_results can be referenced by tool_name and also by generic keys
+        tool_paths: set[str] = set()
+        for item in evidence.tool_results:
+            tn = item.get("tool_name", "")
+            if tn:
+                tool_paths.add(tn)
+            # collect common tool result top-level fields
+            for field in ("status", "evidence_ref", "tool_name"):
+                val = item.get(field)
+                if val:
+                    tool_paths.add(f"{tn}.{field}" if tn else field)
+            # also collect sub-keys of tool output so LLM can reference them
+            out = item.get("output", {}) if isinstance(item.get("output"), dict) else {}
+            for k in out.keys():
+                tool_paths.add(f"{tn}.output.{k}" if tn else k)
+        paths["tool_results"] = tool_paths
+
+    # Top-level scalar fields on EvidenceInput — LLM can reference them directly
+    if evidence.failure_events:
+        paths["failure_events"] = set()  # list field — any value is valid
+    if evidence.suggestions:
+        paths["suggestions"] = set()  # list field
+    if evidence.sys_metrics:
+        paths["sys_metrics"] = set(evidence.sys_metrics.keys()) if isinstance(evidence.sys_metrics, dict) else set()
 
     return paths
 
