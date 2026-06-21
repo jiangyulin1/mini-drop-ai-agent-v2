@@ -263,25 +263,46 @@ def _collect_evidence_paths(evidence: EvidenceInput) -> dict[str, set[str]]:
 def _ref_exists(ref: str, valid_paths: dict[str, set[str]]) -> bool:
     """检查 evidence_ref 是否在有效路径集合中。
 
-    支持两种格式：
-      - "top_functions" → 检查顶层 key 存在
-      - "top_functions[0]" → 检查顶层 key 存在且是列表
+    支持格式：
+      - "top_functions[0]" → 索引被去掉，检查顶层 key 存在
       - "task_metadata.status" → 检查嵌套路径
+      - "tool_results[3].output.failure_reasons" → LLM 用索引引用 tool_results，
+        校验时去掉索引 + tool_name 前缀做 lenient 匹配
     """
     # 去掉索引后缀: "top_functions[0]" → "top_functions"
     base = re.sub(r"\[\d+\]", "", ref)
-    # 取顶层 key: "task_metadata.status" → "task_metadata"
+    # 取顶层 key
     top = base.split(".")[0]
 
     if top not in valid_paths:
         return False
 
-    # 如果有二级字段，检查是否在有效子路径中
-    if "." in base:
-        sub = base.split(".", 1)[1]
-        return sub in valid_paths[top]
+    # 没有子路径 → 顶层 key 存在即通过
+    if "." not in base:
+        return True
 
-    return True
+    sub = base.split(".", 1)[1]
+    sub_paths = valid_paths[top]
+
+    # 精确匹配
+    if sub in sub_paths:
+        return True
+
+    # Lenient: tool_results 的 LLM 可能用索引或省略 tool_name 前缀
+    #   e.g. ref="tool_results.output.failure_reasons"
+    #   而 valid path 是 "inspect_task_events.output.failure_reasons"
+    #   检查是否有任何 valid path 末尾段匹配
+    if top == "tool_results":
+        for valid_sub in sub_paths:
+            if valid_sub.endswith("." + sub.split(".", 1)[-1] if "." in sub else sub):
+                return True
+            # Also check if ref's output.{key} matches valid's output.{key}
+            if sub.startswith("output."):
+                out_key = sub.split("output.", 1)[-1]
+                if valid_sub.endswith(f".output.{out_key}"):
+                    return True
+
+    return False
 
 
 def _fallback_report(task_id: str, evidence: EvidenceInput, candidates_json: str = "[]") -> ValidatedReport:
