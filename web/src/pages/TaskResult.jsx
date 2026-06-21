@@ -203,12 +203,27 @@ export default function TaskResult() {
   const continuousSummary = artifacts.find(
     (item) => item.artifact_type === "continuous_summary"
   );
-  const continuousWindows = continuousSummary?.metadata?.windows || [];
+  const continuousWindowArtifacts = artifacts.filter(
+    (item) => item.artifact_type === "continuous_window"
+  );
+  const continuousWindows =
+    continuousSummary?.metadata?.windows?.length > 0
+      ? continuousSummary.metadata.windows
+      : continuousWindowArtifacts
+          .map((item, index) => ({
+            window_index: item.metadata?.window_index ?? index,
+            start_ts: item.metadata?.start_ts,
+            end_ts: item.metadata?.end_ts,
+            ok: item.metadata?.ok ?? true,
+            reason: item.metadata?.reason || item.filename || item.object_key || "",
+          }))
+          .sort((a, b) => a.window_index - b.window_index);
   const continuousFlameArtifacts = artifacts.filter(
     (item) => item.artifact_type === "continuous_flamegraph_json"
   );
   const hasFlameOrTop = Boolean(flameArtifact || topArtifact);
-  const hasPrimaryAnalysis = Boolean(hasFlameOrTop || ebpfArtifact);
+  const hasContinuousAnalysis = continuousFlameArtifacts.length > 0;
+  const hasPrimaryAnalysis = Boolean(hasFlameOrTop || ebpfArtifact || hasContinuousAnalysis);
 
   useEffect(() => {
     if (selectedContinuousIndex === null && continuousWindows.length > 0) {
@@ -445,7 +460,7 @@ export default function TaskResult() {
                 </Col>
               )}
             </Row>
-          ) : (
+          ) : ebpfArtifact ? (
             <div>
               <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
                 eBPF IO 延迟分布
@@ -455,6 +470,11 @@ export default function TaskResult() {
                 当前任务类型为 eBPF IO 采集，结果以延迟直方图和原始 bpftrace 输出呈现，不会生成 CPU 火焰图。
               </Typography.Text>
             </div>
+          ) : (
+            <Empty
+              description="连续采样任务已生成窗口化火焰图，请在下方“连续采样窗口”选择窗口查看"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
           )
         ) : (
           <Empty

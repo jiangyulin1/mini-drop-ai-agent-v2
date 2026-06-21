@@ -52,6 +52,26 @@ function hasRenderableFlamegraph(tree) {
   return value > 0 || children.length > 0;
 }
 
+function normalizeFlamegraphPayload(payload) {
+  let value = payload;
+  for (let i = 0; i < 3; i += 1) {
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return payload;
+      }
+      continue;
+    }
+    if (value && typeof value === "object" && value.code === 0 && value.data !== undefined) {
+      value = value.data;
+      continue;
+    }
+    break;
+  }
+  return value;
+}
+
 /**
  * 交互式火焰图查看器。
  *
@@ -106,7 +126,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
     setError("");
     try {
       const params = artifactIndex === null || artifactIndex === undefined ? {} : { index: artifactIndex };
-      const tree = await getTaskArtifactContent(taskId, artifactType, params);
+      const tree = normalizeFlamegraphPayload(await getTaskArtifactContent(taskId, artifactType, params));
       if (hasRenderableFlamegraph(tree)) {
         dataRef.current = tree;
         setHasData(true);
