@@ -15,6 +15,7 @@ import {
   WifiOutlined,
 } from "@ant-design/icons";
 import { getStoredApiKey, saveApiKey, createEventSource } from "../api/client";
+import ErrorBoundary from "../components/ErrorBoundary";
 import { COLORS, LAYOUT, SPACING, FONT_SIZES } from "../theme";
 
 const { Sider, Header, Content } = Layout;
@@ -295,7 +296,9 @@ export default function AppLayout() {
             transition: "background 0.3s ease, border-color 0.3s ease",
           }}
         >
-          <Outlet />
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </Content>
       </Layout>
     </Layout>

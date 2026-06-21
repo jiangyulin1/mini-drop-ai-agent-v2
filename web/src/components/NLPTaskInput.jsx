@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Button, Card, Descriptions, Input, Select, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Input, Select, Space, Tag, Typography, message } from "antd";
 import { ThunderboltOutlined } from "@ant-design/icons";
 import { nlpParse, createTask, listAgents } from "../api/client";
 
@@ -47,7 +47,16 @@ export default function NLPTaskInput({ onTaskCreated }) {
     setError("");
     try {
       const agents = await listAgents();
-      const agent = agents.find((item) => item.status === "ONLINE") || agents[0];
+      if (!agents || agents.length === 0) {
+        setError("暂无可用 Agent，请先启动 Agent 后再创建采集任务");
+        return;
+      }
+      // 优先选择在线 + 具有对应采集器能力的 Agent
+      const online = agents.filter((a) => a.status === "ONLINE");
+      const capable = (online.length > 0 ? online : agents).filter((a) =>
+        (a.capabilities || []).includes(result.collector_type)
+      );
+      const agent = capable[0] || online[0] || agents[0];
       if (!agent?.id) {
         setError("暂无可用 Agent，请先启动 Agent 后再创建采集任务");
         return;
@@ -61,9 +70,10 @@ export default function NLPTaskInput({ onTaskCreated }) {
         duration_sec: result.duration_sec,
         options: { nlp_query: query.trim() },
       });
-      onTaskCreated?.(taskResp.task_id);
       setResult(null);
       setQuery("");
+      message.success(`任务已创建 → Agent: ${agent.id}`);
+      onTaskCreated?.(taskResp.task_id);
     } catch (err) {
       setError(err.message);
     } finally {

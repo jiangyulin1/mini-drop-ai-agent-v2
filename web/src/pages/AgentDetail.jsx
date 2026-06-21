@@ -1,16 +1,16 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   Button,
   Card,
   Col,
   Descriptions,
   Empty,
+  Input,
   Row,
   Skeleton,
   Space,
   Table,
   Tag,
-  Timeline,
   Typography,
 } from "antd";
 import {
@@ -19,9 +19,10 @@ import {
   ReloadOutlined,
   ApiOutlined,
   HddOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 import { useParams, useNavigate } from "react-router-dom";
-import { listAgents, listTasks, getTask } from "../api/client";
+import { listAgents, listTasks } from "../api/client";
 import StatusTag from "../components/StatusTag";
 import ErrorAlert from "../components/ErrorAlert";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
@@ -35,9 +36,11 @@ export default function AgentDetail() {
   const [error, setError] = useState("");
   const [agent, setAgent] = useState(null);
   const [agentTasks, setAgentTasks] = useState([]);
+  const [taskSearch, setTaskSearch] = useState("");
   const [cpuHistory, setCpuHistory] = useState([]);
   const [rssHistory, setRssHistory] = useState([]);
   const chartRef = useRef(null);
+  const chartInst = useRef(null);
 
   const load = useCallback(async () => {
     setError("");
@@ -88,9 +91,16 @@ export default function AgentDetail() {
     if (!chartRef.current || cpuHistory.length < 2) return;
     let cancelled = false;
 
+    // 先销毁旧实例
+    if (chartInst.current) {
+      chartInst.current.dispose();
+      chartInst.current = null;
+    }
+
     import("echarts").then((echarts) => {
       if (cancelled || !chartRef.current) return;
-      const inst = echarts.init(chartRef.current);
+      chartInst.current = echarts.init(chartRef.current);
+      const inst = chartInst.current;
 
       const cpuData = cpuHistory.map((p) => [
         new Date(p.ts).toLocaleTimeString(),
@@ -133,13 +143,31 @@ export default function AgentDetail() {
 
       const onResize = () => inst.resize();
       window.addEventListener("resize", onResize);
-      return () => window.removeEventListener("resize", onResize);
+      return () => {
+        window.removeEventListener("resize", onResize);
+        if (chartInst.current) {
+          chartInst.current.dispose();
+          chartInst.current = null;
+        }
+      };
     });
 
     return () => {
       cancelled = true;
     };
   }, [cpuHistory, rssHistory]);
+
+  // 任务搜索过滤
+  const filteredTasks = useMemo(() => {
+    if (!taskSearch.trim()) return agentTasks;
+    const q = taskSearch.toLowerCase();
+    return agentTasks.filter(
+      (t) =>
+        (t.name || "").toLowerCase().includes(q) ||
+        (t.id || "").toLowerCase().includes(q) ||
+        (t.collector_type || "").toLowerCase().includes(q)
+    );
+  }, [agentTasks, taskSearch]);
 
   const taskColumns = [
     {
@@ -357,15 +385,34 @@ export default function AgentDetail() {
       </Row>
 
       {/* 关联任务 */}
-      <Card title="历史任务" size="small">
+      <Card
+        title={
+          <Space>
+            历史任务
+            <Tag>{filteredTasks.length}</Tag>
+          </Space>
+        }
+        size="small"
+        extra={
+          <Input
+            size="small"
+            style={{ width: 200 }}
+            placeholder="搜索任务…"
+            prefix={<SearchOutlined />}
+            allowClear
+            value={taskSearch}
+            onChange={(e) => setTaskSearch(e.target.value)}
+          />
+        }
+      >
         <Table
           rowKey="id"
           columns={taskColumns}
-          dataSource={agentTasks}
-          pagination={{ pageSize: 10, showSizeChanger: false }}
+          dataSource={filteredTasks}
+          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           size="middle"
           scroll={{ x: 700 }}
-          locale={{ emptyText: "该 Agent 暂无任务记录" }}
+          locale={{ emptyText: taskSearch ? "无匹配任务" : "该 Agent 暂无任务记录" }}
         />
       </Card>
     </Space>

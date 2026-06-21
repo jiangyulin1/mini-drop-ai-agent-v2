@@ -78,7 +78,6 @@ export default function TaskResult() {
       const [taskResp, eventResp, artifactResp, diagnosisList] = results.map(
         (r) => (r.status === "fulfilled" ? r.value : null)
       );
-      // 收集失败信息
       const failedNames = ["task", "events", "artifacts", "diagnoses"].filter((_, i) => results[i].status === "rejected");
       if (failedNames.length > 0 && failedNames.length < 4) {
         console.warn("部分数据加载失败:", failedNames.join(", "));
@@ -91,7 +90,26 @@ export default function TaskResult() {
       setTask(taskResp);
       setEvents(eventResp || []);
       setArtifacts(artifactResp || []);
-      await loadAnalysisArtifacts(artifactResp || []);
+
+      // 内联加载分析产物
+      const resp = artifactResp || [];
+      setAnalysisLoading(true);
+      const hasTop = resp.some((item) => item.artifact_type === "top_json");
+      const hasFlameJson = resp.some((item) => item.artifact_type === "flamegraph_json");
+      const hasSvg = resp.some((item) => item.artifact_type === "flamegraph_svg");
+      const hasJavaHtml = resp.some((item) => item.artifact_type === "java_flamegraph_html");
+      const next = { top: [], svg: "", hasFlameJson: false, hasJavaHtml: false };
+      if (hasTop) {
+        try { next.top = await getTaskArtifactContent(taskId, "top_json"); } catch { next.top = []; }
+      }
+      if (hasFlameJson) { next.hasFlameJson = true; }
+      if (hasSvg && !hasFlameJson) {
+        try { const c = await getTaskArtifactContent(taskId, "flamegraph_svg"); next.svg = c.text || ""; } catch { next.svg = ""; }
+      }
+      if (hasJavaHtml) { next.hasJavaHtml = true; }
+      setAnalysis(next);
+      setAnalysisLoading(false);
+
       setDiagnoses(diagnosisList || []);
       if (diagnosisList?.[0]?.id) {
         try {
@@ -106,6 +124,7 @@ export default function TaskResult() {
       setError(err.message);
     } finally {
       setLoading(false);
+      setAnalysisLoading(false);
     }
   }, [taskId]);
 
@@ -116,40 +135,6 @@ export default function TaskResult() {
   // 任务活跃时每 5 秒自动刷新
   const isActive = isTaskActive(task?.status);
   usePolling(loadAll, { interval: 5000, enabled: isActive });
-
-  async function loadAnalysisArtifacts(artifactResp) {
-    setAnalysisLoading(true);
-    const hasTop = artifactResp.some((item) => item.artifact_type === "top_json");
-    const hasFlameJson = artifactResp.some((item) => item.artifact_type === "flamegraph_json");
-    const hasSvg = artifactResp.some((item) => item.artifact_type === "flamegraph_svg");
-    const hasJavaHtml = artifactResp.some((item) => item.artifact_type === "java_flamegraph_html");
-    const next = { top: [], svg: "", hasFlameJson: false, hasJavaHtml: false };
-
-    if (hasTop) {
-      try {
-        next.top = await getTaskArtifactContent(taskId, "top_json");
-      } catch {
-        next.top = [];
-      }
-    }
-    if (hasFlameJson) {
-      next.hasFlameJson = true;
-    }
-    if (hasSvg && !hasFlameJson) {
-      // 仅在无交互式火焰图时加载 SVG 作为降级
-      try {
-        const content = await getTaskArtifactContent(taskId, "flamegraph_svg");
-        next.svg = content.text || "";
-      } catch {
-        next.svg = "";
-      }
-    }
-    if (hasJavaHtml) {
-      next.hasJavaHtml = true;
-    }
-    setAnalysis(next);
-    setAnalysisLoading(false);
-  }
 
   // ── 诊断操作 ──────────────────────────────────────────
 

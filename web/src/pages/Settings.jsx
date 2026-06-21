@@ -5,13 +5,13 @@ import {
   Card,
   Col,
   Descriptions,
+  Input,
+  message,
   Row,
   Skeleton,
   Space,
-  Switch,
   Tag,
   Typography,
-  message,
 } from "antd";
 import {
   SettingOutlined,
@@ -22,7 +22,10 @@ import {
   ReloadOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  SendOutlined,
+  ExperimentOutlined,
 } from "@ant-design/icons";
+import axios from "axios";
 import {
   healthz,
   getAIConfig,
@@ -38,6 +41,9 @@ export default function Settings() {
   const [health, setHealth] = useState(null);
   const [aiConfig, setAiConfig] = useState(null);
   const [apiKey, setApiKey] = useState(getStoredApiKey() || "");
+  const [savingKey, setSavingKey] = useState(false);
+  const [testingChatops, setTestingChatops] = useState(false);
+  const [testingAI, setTestingAI] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
@@ -67,6 +73,51 @@ export default function Settings() {
     ) : (
       <Tag icon={<CloseCircleOutlined />} color="default">已禁用</Tag>
     );
+
+  async function handleSaveKey() {
+    setSavingKey(true);
+    try {
+      await saveApiKey(apiKey.trim());
+      setApiKey(apiKey.trim());
+      message.success(apiKey.trim() ? "API Key 已保存" : "API Key 已清除");
+    } catch (err) {
+      message.error(err.message);
+    } finally {
+      setSavingKey(false);
+    }
+  }
+
+  async function testChatops() {
+    setTestingChatops(true);
+    try {
+      const resp = await axios.post("/api/chatops/test");
+      if (resp.data?.data?.ok) {
+        message.success("ChatOps 测试消息已发送");
+      } else {
+        message.warning(resp.data?.message || "ChatOps 可能未启用");
+      }
+    } catch (err) {
+      message.error(err.response?.data?.detail || err.message || "ChatOps 测试失败");
+    } finally {
+      setTestingChatops(false);
+    }
+  }
+
+  async function testAI() {
+    setTestingAI(true);
+    try {
+      const resp = await axios.post("/api/nlp/parse", { query: "hello" });
+      if (resp.data?.code === 0) {
+        message.success(`AI Provider 响应正常（策略: ${resp.data.data?.reasoning?.slice(0, 30) || "关键词匹配"}…）`);
+      } else {
+        message.warning(resp.data?.message || "AI 响应异常");
+      }
+    } catch (err) {
+      message.error(err.response?.data?.detail || err.message || "AI 测试失败");
+    } finally {
+      setTestingAI(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -221,6 +272,16 @@ export default function Settings() {
           </Space>
         }
         size="small"
+        extra={
+          <Button
+            size="small"
+            icon={<SendOutlined />}
+            loading={testingChatops}
+            onClick={testChatops}
+          >
+            发送测试消息
+          </Button>
+        }
       >
         <Alert
           type="info"
@@ -233,6 +294,38 @@ export default function Settings() {
               <br />
               服务启动后，任务状态变更、Agent 上下线、诊断完成将自动推送到配置的 IM 渠道。
             </span>
+          }
+          showIcon
+        />
+      </Card>
+
+      {/* AI 测试 */}
+      <Card
+        title={
+          <Space>
+            <RobotOutlined style={{ color: COLORS.warning }} />
+            AI 连通性测试
+          </Space>
+        }
+        size="small"
+        extra={
+          <Button
+            size="small"
+            icon={<ExperimentOutlined />}
+            loading={testingAI}
+            onClick={testAI}
+          >
+            测试 AI 响应
+          </Button>
+        }
+      >
+        <Alert
+          type={aiConfig?.has_api_key ? "success" : "warning"}
+          message={aiConfig?.has_api_key ? `AI Provider: ${aiConfig.provider} / ${aiConfig.model}` : "AI Provider 未配置"}
+          description={
+            aiConfig?.has_api_key
+              ? `策略模式: ${aiConfig.enabled} · NLP: ${aiConfig.features?.nlp ? "开" : "关"} · RCA: ${aiConfig.features?.rca ? "开" : "关"} · 摘要: ${aiConfig.features?.summarize ? "开" : "关"}`
+              : "请设置 MINI_DROP_AI_API_KEY 等环境变量启用 AI 功能"
           }
           showIcon
         />
@@ -255,15 +348,46 @@ export default function Settings() {
           )
         }
       >
-        <Alert
-          type="info"
-          message="API Key 同时保存在 HttpOnly Cookie（优先）和 localStorage（降级）中"
-          showIcon
-          style={{ marginBottom: SPACING.sm }}
-        />
-        <Typography.Paragraph type="secondary" style={{ fontSize: FONT_SIZES.sm }}>
-          清除 Key 后需要重新在顶栏输入框设置，否则无法访问受保护的 API。
-        </Typography.Paragraph>
+        <Space direction="vertical" style={{ width: "100%" }} size={12}>
+          <Alert
+            type="info"
+            message="API Key 同时保存在 HttpOnly Cookie（优先）和 localStorage（降级）中"
+            showIcon
+          />
+          <Input.Password
+            placeholder="输入 API Key（留空清除）"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            onPressEnter={handleSaveKey}
+            allowClear
+          />
+          <Space size={8}>
+            <Button
+              type="primary"
+              size="small"
+              loading={savingKey}
+              onClick={handleSaveKey}
+            >
+              保存
+            </Button>
+            {apiKey && (
+              <Button
+                size="small"
+                danger
+                onClick={async () => {
+                  setApiKey("");
+                  await saveApiKey("");
+                  message.success("API Key 已清除");
+                }}
+              >
+                清除 Key
+              </Button>
+            )}
+          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: FONT_SIZES.sm }}>
+            清除 Key 后需要重新设置才能访问受保护的 API。
+          </Typography.Text>
+        </Space>
       </Card>
     </Space>
   );
