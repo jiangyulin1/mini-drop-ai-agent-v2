@@ -1,35 +1,25 @@
-/* io_latency.bt — 块设备 IO 延迟观测脚本
+/* io_latency.bt — 块设备 IO 延迟观测脚本 (兼容 bpftrace 0.14+)
 
-通过 kprobe 挂载 blk_mq_start_request 和 blk_update_request 两个内核函数，
+通过 kprobe 挂载 blk_mq_start_request 和 blk_account_io_done，
 统计每个 IO 请求从提交到完成的延迟分布（单位 μs）。
 
 用法:
   bpftrace io_latency.bt -o io_latency.txt
-  Ctrl-C 停止时打印 histogram。
+  Ctrl-C / SIGTERM 停止
 
-演示:
-  # 终端 1: 启动 eBPF 采集
-  bpftrace io_latency.bt
-
-  # 终端 2: 制造 IO 压力
-  dd if=/dev/zero of=/tmp/test bs=4M count=256 oflag=direct
+注: 此内核的 bpftrace 不支持 BEGIN/END 特殊探针，
+    改用 interval 定时打印 + collector 端 SIGTERM 终止。
 */
-
-BEGIN {
-    printf("Tracing block IO latency... Hit Ctrl-C to end.\n");
-}
 
 kprobe:blk_mq_start_request {
     @start[arg0] = nsecs;
 }
 
-kprobe:blk_update_request /@start[arg0]/ {
+kprobe:blk_account_io_done /@start[arg0]/ {
     @latency_us = hist((nsecs - @start[arg0]) / 1000);
     delete(@start[arg0]);
 }
 
-END {
+interval:s:1 {
     print(@latency_us);
-    clear(@start);
-    clear(@latency_us);
 }

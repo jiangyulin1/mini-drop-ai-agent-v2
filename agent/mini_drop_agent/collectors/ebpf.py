@@ -68,7 +68,9 @@ class EBPFCollector:
                 _, stderr = proc.communicate(timeout=10)
                 stderr_text = stderr.decode("utf-8", errors="replace").strip()
 
-            if proc.returncode != 0 and proc.returncode != -2:
+            # bpftrace 可能因信号退出返回非零码（-2=SIGINT, -9=SIGKILL, -15=SIGTERM, 255=unknown）
+            _allowed_exits = {0, -2, -9, -15, 255}
+            if proc.returncode not in _allowed_exits:
                 return CollectorResult(
                     ok=False,
                     reason=f"bpftrace 执行失败 (exit={proc.returncode}): {stderr_text[:200]}",
@@ -133,6 +135,7 @@ class EBPFCollector:
 
         with open(path, "r", encoding="utf-8") as fh:
             content = fh.read()
+        # interval:s 模式会多次打印 histogram，取最后一次出现的值（最完整）
         pattern = re.compile(
             r"\[\s*(\d+[KkMm]?)\s*,\s*(\d+[KkMm]?)\s*\)\s+(\d+)"
         )
@@ -141,7 +144,7 @@ class EBPFCollector:
             upper = EBPFCollector._normalize_bucket_value(match.group(2))
             count = int(match.group(3))
             key = f"[{lower}, {upper})"
-            result[key] = count
+            result[key] = count  # 相同 key 后者覆盖前者
 
         return result
 
