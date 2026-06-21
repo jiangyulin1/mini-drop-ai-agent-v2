@@ -33,7 +33,16 @@ warn()   { echo -e "  ${YELLOW}⚠️  $1${NC}"; }
 fail()   { echo -e "  ${RED}❌ $1${NC}"; }
 info()   { echo -e "     $1"; }
 
-API_BASE="http://localhost:8191"
+API_BASE="${API_BASE:-http://localhost:8191}"
+
+# ── 分离部署模式 ─────────────────────────────────────────────
+# API 在 Windows 宿主机、Agent 在 Linux VM
+# 用法: SPLIT_HOST=172.17.144.1 bash demo/demo.sh
+if [ -n "${SPLIT_HOST:-}" ]; then
+    API_BASE="http://${SPLIT_HOST}:8191"
+    info "分离部署模式 → API_BASE=$API_BASE"
+fi
+
 ARTIFACT_ROOT="${MINI_DROP_ARTIFACT_ROOT:-/tmp/mini-drop}"
 
 # ── 检测运行模式 ──────────────────────────────────────────
