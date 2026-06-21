@@ -5,8 +5,11 @@ import {
   Button,
   Card,
   Col,
+  Input,
+  Modal,
   notification,
   Row,
+  Select,
   Skeleton,
   Space,
   Statistic,
@@ -24,12 +27,15 @@ import {
   SyncOutlined,
   ClockCircleOutlined,
   ExperimentOutlined,
-  BellOutlined,
+  DeleteOutlined,
+  SearchOutlined,
+  SortAscendingOutlined,
+  ExclamationCircleOutlined,
   ThunderboltOutlined,
   HddOutlined,
 } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
-import { healthz, listAgents, listTasks } from "../api/client";
+import { healthz, listAgents, listTasks, deleteTask } from "../api/client";
 import NLPTaskInput from "../components/NLPTaskInput";
 import StatusTag from "../components/StatusTag";
 import ErrorAlert from "../components/ErrorAlert";
@@ -97,14 +103,25 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState([]);
   const [agents, setAgents] = useState([]);
 
+  // ── 搜索 / 排序 ──────────────────────────────────────
+
+  const [searchText, setSearchText] = useState("");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortOrder, setSortOrder] = useState("desc");
+
   // ── 数据加载 ──────────────────────────────────────────
 
   const refresh = useCallback(async () => {
     setError("");
     try {
+      const params = {};
+      if (searchText.trim()) params.search = searchText.trim();
+      params.sort_by = sortBy;
+      params.sort_order = sortOrder;
+
       const [healthRes, taskRes, agentRes] = await Promise.allSettled([
         healthz(),
-        listTasks(),
+        listTasks(params),
         listAgents(),
       ]);
       if (healthRes.status === "fulfilled") setService(healthRes.value);
@@ -115,7 +132,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [searchText, sortBy, sortOrder]);
 
   useEffect(() => {
     refresh();
@@ -123,6 +140,44 @@ export default function Dashboard() {
 
   // 每 10 秒自动轮询（SSE 断线时兜底）
   const { isPolling } = usePolling(refresh, { interval: 10000, enabled: !loading });
+
+  // ── 删除任务 ──────────────────────────────────────────
+
+  const [deleting, setDeleting] = useState("");
+
+  const handleDeleteTask = useCallback((task) => {
+    Modal.confirm({
+      title: "确认删除任务？",
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>将删除以下任务及其火焰图、事件、诊断结果：</p>
+          <p><strong>{task.name || task.id}</strong></p>
+          <p style={{ color: "#999", fontSize: 12 }}>
+            PID: {task.target_pid} · {task.collector_type} · {new Date(task.created_at).toLocaleString()}
+          </p>
+          <p style={{ color: "#ff4d4f", fontSize: 12 }}>
+            仅 DONE/FAILED 终态任务可删除，此操作不可撤销。
+          </p>
+        </div>
+      ),
+      okText: "确认删除",
+      okType: "danger",
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          setDeleting(task.id);
+          await deleteTask(task.id);
+          notification.success({ message: "删除成功", description: `任务 ${task.name || task.id} 已删除`, placement: "bottomRight", duration: 3 });
+          refresh();
+        } catch (err) {
+          notification.error({ message: "删除失败", description: err.message, placement: "bottomRight", duration: 5 });
+        } finally {
+          setDeleting("");
+        }
+      },
+    });
+  }, [refresh]);
 
   // ── SSE 实时事件 ──────────────────────────────────────
 
@@ -234,8 +289,27 @@ export default function Dashboard() {
         width: 170,
         render: (v) => (v ? new Date(v).toLocaleString() : "-"),
       },
+      {
+        title: "操作",
+        width: 80,
+        render: (_, record) => {
+          const isActive = ["PENDING", "RUNNING", "UPLOADING", "ANALYZING"].includes(record.status);
+          return (
+            <Button
+              type="link"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              loading={deleting === record.id}
+              disabled={isActive}
+              onClick={() => handleDeleteTask(record)}
+              title={isActive ? "仅终态任务（DONE/FAILED）可删除" : "删除此任务"}
+            />
+          );
+        },
+      },
     ],
-    [navigate]
+    [navigate, deleting, handleDeleteTask]
   );
 
   const agentColumns = useMemo(
@@ -503,9 +577,44 @@ export default function Dashboard() {
         }
         size="small"
         extra={
-          <Button size="small" type="link" onClick={() => navigate("/diagnoses")}>
-            <ExperimentOutlined /> 诊断历史
-          </Button>
+          <Space size={8} wrap>
+            <Input
+              style={{ width: 180 }}
+              size="small"
+              placeholder="搜索任务名…"
+              prefix={<SearchOutlined />}
+              allowClear
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              onPressEnter={refresh}
+            />
+            <Select
+              size="small"
+              style={{ width: 110 }}
+              value={sortBy}
+              onChange={(v) => setSortBy(v)}
+              suffixIcon={<SortAscendingOutlined />}
+            >
+              <Select.Option value="created_at">创建时间</Select.Option>
+              <Select.Option value="name">任务名</Select.Option>
+              <Select.Option value="status">状态</Select.Option>
+              <Select.Option value="agent_id">Agent</Select.Option>
+              <Select.Option value="collector_type">采集器</Select.Option>
+              <Select.Option value="target_pid">PID</Select.Option>
+            </Select>
+            <Select
+              size="small"
+              style={{ width: 80 }}
+              value={sortOrder}
+              onChange={(v) => setSortOrder(v)}
+            >
+              <Select.Option value="desc">↓ 降序</Select.Option>
+              <Select.Option value="asc">↑ 升序</Select.Option>
+            </Select>
+            <Button size="small" type="link" onClick={() => navigate("/diagnoses")}>
+              <ExperimentOutlined /> 诊断历史
+            </Button>
+          </Space>
         }
       >
         <Table
@@ -514,7 +623,7 @@ export default function Dashboard() {
           dataSource={tasks}
           pagination={{ pageSize: 8, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           size="middle"
-          scroll={{ x: 800 }}
+          scroll={{ x: 880 }}
           locale={{ emptyText: "暂无任务，使用上方 NLP 输入或 API 创建第一个采集任务" }}
         />
       </Card>

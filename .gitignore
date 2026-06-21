@@ -57,6 +57,6 @@ deploy/napcat/*.exe
 deploy/napcat/*.dll
 deploy/napcat/*.zip
 deploy/napcat/bootmain/
-deploy/napcat/NapCat.*.Shell/
+deploy/napcat/NapCat.*/
 !deploy/napcat/README.md
 !deploy/napcat/start.cmd

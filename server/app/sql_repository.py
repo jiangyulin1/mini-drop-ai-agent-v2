@@ -274,6 +274,35 @@ class SqlRepository:
     # Task
     # ------------------------------------------------------------------
 
+    def delete_task(self, task_id: str) -> bool:
+        """删除任务及其关联数据（事件、产物、诊断结果）。返回是否实际删除。"""
+        with self._write_session() as session:
+            task = session.get(TaskModel, task_id)
+            if task is None:
+                return False
+            # 级联删除关联数据
+            session.query(StatusEventModel).filter(
+                StatusEventModel.task_id == task_id
+            ).delete()
+            session.query(ArtifactModel).filter(
+                ArtifactModel.task_id == task_id
+            ).delete()
+            session.query(DiagnosisRunModel).filter(
+                DiagnosisRunModel.task_id == task_id
+            ).delete()
+            session.delete(task)
+            # 插入审计日志
+            self._write_audit(
+                session,
+                event_type="task_deleted",
+                task_id=task_id,
+                message=f"任务 {task.name or task_id} 已删除",
+            )
+            # 清除缓存，下次读取时重新查询
+            self._cache.pop("tasks", None)
+            self._cache.pop("events", None)
+            return True
+
     def create_task(self, payload: CreateTaskRequest) -> TaskModel:
         with self._write_session() as session:
             ts = now_utc()

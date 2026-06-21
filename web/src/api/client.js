@@ -120,12 +120,16 @@ export function createTask(payload) {
   return api.post("/tasks", payload);
 }
 
-export function listTasks() {
-  return api.get("/tasks").then(itemsOf);
+export function listTasks(params = {}) {
+  return api.get("/tasks", { params }).then(itemsOf);
 }
 
 export function getTask(taskId) {
   return api.get(`/tasks/${taskId}`);
+}
+
+export function deleteTask(taskId) {
+  return api.delete(`/tasks/${taskId}`);
 }
 
 export function getTaskEvents(taskId) {

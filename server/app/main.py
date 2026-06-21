@@ -426,14 +426,30 @@ def create_task(payload: CreateTaskRequest) -> APIResponse:
 def list_tasks(
     limit: int = 1000,
     offset: int = 0,
+    search: str = "",
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
 ) -> APIResponse:
-    """返回任务列表。支持分页。
+    """返回任务列表。支持分页、搜索、排序。
 
-    可通过 ?limit=50&offset=0 分页。
+    可通过 ?limit=50&offset=0&search=perf&sort_by=name&sort_order=asc 过滤。
     """
     limit = min(max(limit, 1), 1000)
     offset = max(offset, 0)
+
     all_items = [_task_view(t).model_dump() for t in repo.tasks.values()]
+
+    # 搜索：按任务名称模糊匹配
+    if search:
+        q = search.lower()
+        all_items = [t for t in all_items if q in (t.get("name") or "").lower() or q in (t.get("id") or "").lower()]
+
+    # 排序
+    sort_keys = {"name", "status", "created_at", "agent_id", "collector_type", "target_pid"}
+    by = sort_by if sort_by in sort_keys else "created_at"
+    reverse = sort_order.lower() == "desc"
+    all_items.sort(key=lambda x: x.get(by, "") or "", reverse=reverse)
+
     total = len(all_items)
     page = all_items[offset:offset + limit] if offset < total else []
     return APIResponse(data={"items": page, "total": total, "offset": offset, "limit": limit})
@@ -445,6 +461,25 @@ def get_task(task_id: str) -> APIResponse:
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return APIResponse(data=_task_view(task).model_dump())
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str) -> APIResponse:
+    """删除任务及其关联的事件、产物和诊断结果。"""
+    task = repo.tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    # 终态保护：RUNNING/ANALYZING 不允许删除
+    active_statuses = {"PENDING", "RUNNING", "UPLOADING", "ANALYZING"}
+    if status_value(task.status) in active_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"任务状态为 {status_value(task.status)}，请等待任务完成或失败后再删除",
+        )
+    deleted = repo.delete_task(task_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return APIResponse(data={"task_id": task_id, "deleted": True})
 
 
 @app.get("/api/tasks/{task_id}/events")
