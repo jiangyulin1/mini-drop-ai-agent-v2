@@ -261,6 +261,12 @@ class Collector(Protocol):
 
 **如果重做：** 当前 5 层是线性管道（~8s 端到端）。若改为 DAG 并行模式（证据采集 + 候选生成同时启动，LLM 收到第一批证据就流式输出），预计降到 ~2s。另外 `rules.json` 目前是镜像固化的静态文件，可加 gRPC stream 推送通道——Server 更新规则后实时推给所有 Agent，本地热加载，不停机不重启。
 
+### AI 集群诊断控制层
+
+`/api/v1/diagnoses` 是独立于单个 Task 的可恢复诊断会话，覆盖自然语言意图、历史拓扑快照、候选假设、已有证据复用、受控探针、预算、R2 单次审批、证据血缘和等级置信报告。模型只负责意图理解；探针必须来自服务端注册表，R3 重启/迁移/配置修改不会自动执行。
+
+当前轻量版由请求上下文提供服务实例与宿主机映射；没有可靠映射时进入 `NEEDS_SCOPE_CONFIRMATION`，不会向 Agent 扩散采集。后台扫描器使用持久化状态和短租约恢复会话，完成的探针通过 `diagnosis_step_id` 幂等关联，避免重复下发。
+
 ---
 
 ## 任务状态机
@@ -285,6 +291,7 @@ PENDING → RUNNING → UPLOADING → ANALYZING → DONE
 |------|------|------|
 | 任务面板 | `/` | 统计卡片、NLP 输入、任务搜索/排序/删除、Agent 列表、SSE 实时通知 |
 | 任务详情 | `/task/:id` | D3 交互式火焰图 + ECharts TopN 联动、eBPF IO Histogram、状态时间线、AI 归因 |
+| AI 集群诊断 | `/ai-diagnosis` | 自然语言诊断、拓扑目标、假设、受控探针审批、证据血缘与等级置信报告 |
 | 诊断历史 | `/diagnoses` | 全量诊断记录、置信度筛选、搜索过滤 |
 | Agent 详情 | `/agent/:id` | 资源趋势折线图、采集能力标签、关联任务搜索 |
 | 审计日志 | `/audit` | 事件筛选、自由搜索、时间倒序 |
@@ -385,6 +392,10 @@ GET    /api/tasks/{id}/diagnoses           # 诊断历史
 ```bash
 GET    /api/diagnoses/{id}                 # 诊断详情（报告+工具+修复计划）
 POST   /api/diagnoses/{id}/feedback        # 提交反馈
+POST   /api/v1/diagnoses                    # 创建 AI 集群诊断会话
+GET    /api/v1/diagnoses/{id}               # 会话详情并推进可恢复工作流
+POST   /api/v1/diagnoses/{id}/approvals     # R2 探针单次批准/拒绝
+GET    /api/v1/probes                       # 受控探针注册表
 GET    /api/agents                         # Agent 列表（含离线检测）
 GET    /api/audit-logs                     # 审计日志
 POST   /api/nlp/parse                      # 自然语言解析
@@ -489,6 +500,7 @@ MINIO_PUBLIC_ENDPOINT=172.17.144.1:9000
 | **产物读取** | 沙箱限制在 `MINI_DROP_ARTIFACT_ROOT` 内 |
 | **预签名 URL** | 有效期可配，限制 `tasks/` 前缀 |
 | **Agent 保护** | 拒绝自剖析（target_pid == self PID 时拒绝）；参数 clamp 防资源耗尽 |
+| **AI 诊断控制层** | Pydantic 拒绝未知字段、服务范围白名单、固定探针注册表、R2 人工审批、主机/实例/并发/时长预算 |
 | **密钥管理** | `.env` 已 gitignore，`.env.example` 仅模板占位符 |
 | **Nginx** | CSP / HSTS / X-Frame-Options / 速率限制 |
 
@@ -595,6 +607,7 @@ mini-drop/
 │   ├── grpc_services/    4 个 gRPC 服务实现（Init/HealthCheck/Hotmethod/Control）
 │   ├── nlp/              自然语言意图解析 + 进程 PID 匹配 + AI 总结 + 追问
 │   ├── rca/              5 层归因引擎（evidence → candidates → calibrator → LLM → repair）
+│   ├── diagnosis/        集群诊断会话（intent → topology → hypotheses → probes → evidence）
 │   ├── chatops/          5 平台 IM 通知（dingtalk/feishu/wecom/slack/qqbot）
 │   ├── models.py         SQLAlchemy ORM 模型
 │   ├── sql_repository.py 数据库仓储层（读写分离 + TTL 缓存 + 级联删除）

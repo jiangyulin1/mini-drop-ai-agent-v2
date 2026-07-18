@@ -17,7 +17,7 @@ COPY server/ ./server/
 COPY agent/ ./agent/
 COPY analyzer/ ./analyzer/
 
-RUN pip install --no-cache-dir -e ".[chatops]" "grpcio-tools>=1.80"
+RUN pip install --no-cache-dir -e ".[chatops]" "grpcio-tools>=1.80,<1.81"
 
 COPY proto/ ./proto/
 RUN cd proto && bash compile.sh

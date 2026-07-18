@@ -327,3 +327,203 @@ class AgentMetricSnapshotModel(Base):
             "children_count": self.children_count,
             "created_at": self.created_at,
         }
+
+
+# ── AI 集群诊断控制层 ────────────────────────────────────────────
+
+
+class TopologySnapshotModel(Base):
+    """诊断创建时冻结的服务/实例/宿主机拓扑。"""
+
+    __tablename__ = "topology_snapshots"
+
+    id = Column(String(128), primary_key=True)
+    effective_at = Column(DateTime(timezone=True), nullable=False)
+    generated_at = Column(DateTime(timezone=True), nullable=False)
+    nodes_json = Column(JSON, default=list)
+    edges_json = Column(JSON, default=list)
+    source_versions_json = Column(JSON, default=dict)
+    confidence_summary_json = Column(JSON, default=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "snapshot_id": self.id,
+            "effective_at": self.effective_at,
+            "generated_at": self.generated_at,
+            "nodes": self.nodes_json or [],
+            "edges": self.edges_json or [],
+            "source_versions": self.source_versions_json or {},
+            "confidence_summary": self.confidence_summary_json or {},
+        }
+
+
+class DiagnosisSessionModel(Base):
+    """独立于单个采集 Task 的、可恢复的诊断工作流。"""
+
+    __tablename__ = "diagnosis_sessions"
+
+    id = Column(String(128), primary_key=True)
+    creator_id = Column(String(128), nullable=False)
+    raw_query = Column(Text, nullable=False)
+    normalized_intent_json = Column(JSON, default=dict)
+    target_scope_json = Column(JSON, default=dict)
+    requested_time_range_json = Column(JSON, default=dict)
+    effective_time_range_json = Column(JSON, default=dict)
+    topology_snapshot_id = Column(
+        String(128), ForeignKey("topology_snapshots.id"), nullable=True, index=True,
+    )
+    baseline_snapshot_id = Column(String(128), nullable=True)
+    status = Column(String(32), nullable=False)
+    policy_profile = Column(String(64), nullable=False)
+    risk_budget_json = Column(JSON, default=dict)
+    resource_budget_json = Column(JSON, default=dict)
+    budget_used_json = Column(JSON, default=dict)
+    hypothesis_graph_json = Column(JSON, default=dict)
+    child_task_ids_json = Column(JSON, default=list)
+    conclusion_versions_json = Column(JSON, default=list)
+    model_version = Column(String(128), nullable=False)
+    planner_version = Column(String(64), nullable=False)
+    lease_owner = Column(String(128), nullable=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "diagnosis_id": self.id,
+            "creator_id": self.creator_id,
+            "raw_query": self.raw_query,
+            "normalized_intent": self.normalized_intent_json or {},
+            "target_scope": self.target_scope_json or {},
+            "requested_time_range": self.requested_time_range_json or {},
+            "effective_time_range": self.effective_time_range_json or {},
+            "topology_snapshot_id": self.topology_snapshot_id,
+            "baseline_snapshot_id": self.baseline_snapshot_id,
+            "status": self.status,
+            "policy_profile": self.policy_profile,
+            "risk_budget": self.risk_budget_json or {},
+            "resource_budget": self.resource_budget_json or {},
+            "budget_used": self.budget_used_json or {},
+            "hypothesis_graph": self.hypothesis_graph_json or {},
+            "child_task_ids": self.child_task_ids_json or [],
+            "conclusion_versions": self.conclusion_versions_json or [],
+            "model_version": self.model_version,
+            "planner_version": self.planner_version,
+            "lease_owner": self.lease_owner,
+            "lease_until": self.lease_until,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class DiagnosisEventModel(Base):
+    __tablename__ = "diagnosis_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    diagnosis_id = Column(
+        String(128), ForeignKey("diagnosis_sessions.id"), nullable=False, index=True,
+    )
+    event_type = Column(String(64), nullable=False)
+    from_status = Column(String(32), nullable=True)
+    to_status = Column(String(32), nullable=False)
+    payload_json = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "diagnosis_id": self.diagnosis_id,
+            "event_type": self.event_type,
+            "from_status": self.from_status,
+            "to_status": self.to_status,
+            "payload": self.payload_json or {},
+            "created_at": self.created_at,
+        }
+
+
+class ProbeExecutionModel(Base):
+    """一次受控探针计划/审批/执行记录；step id 同时作为幂等键。"""
+
+    __tablename__ = "diagnosis_probe_executions"
+
+    id = Column(String(128), primary_key=True)
+    diagnosis_id = Column(
+        String(128), ForeignKey("diagnosis_sessions.id"), nullable=False, index=True,
+    )
+    probe_id = Column(String(128), nullable=False)
+    target_json = Column(JSON, default=dict)
+    parameters_json = Column(JSON, default=dict)
+    reason = Column(Text, nullable=False)
+    risk_level = Column(String(8), nullable=False)
+    status = Column(String(32), nullable=False)
+    requires_approval = Column(Integer, default=0)
+    task_id = Column(String(128), ForeignKey("tasks.id"), nullable=True, index=True)
+    approved_by = Column(String(128), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "step_id": self.id,
+            "diagnosis_id": self.diagnosis_id,
+            "probe_id": self.probe_id,
+            "target": self.target_json or {},
+            "parameters": self.parameters_json or {},
+            "reason": self.reason,
+            "risk_level": self.risk_level,
+            "status": self.status,
+            "requires_approval": bool(self.requires_approval),
+            "task_id": self.task_id,
+            "approved_by": self.approved_by,
+            "approved_at": self.approved_at,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class DiagnosisEvidenceModel(Base):
+    """可追溯到 Task/Artifact 的不可变证据摘要。"""
+
+    __tablename__ = "diagnosis_evidence"
+
+    id = Column(String(128), primary_key=True)
+    diagnosis_id = Column(
+        String(128), ForeignKey("diagnosis_sessions.id"), nullable=False, index=True,
+    )
+    source_type = Column(String(32), nullable=False)
+    source_system = Column(String(64), nullable=False)
+    target_json = Column(JSON, default=dict)
+    event_time_range_json = Column(JSON, default=dict)
+    ingestion_time = Column(DateTime(timezone=True), nullable=False)
+    query_or_probe = Column(String(256), nullable=False)
+    raw_artifact_ref = Column(String(512), nullable=True)
+    derived_artifact_ref = Column(String(512), nullable=True)
+    derivation_version = Column(String(64), nullable=False)
+    observed_value_json = Column(JSON, default=dict)
+    baseline_value_json = Column(JSON, default=dict)
+    anomaly_score_json = Column(JSON, default=dict)
+    data_quality_json = Column(JSON, default=dict)
+    integrity_hash = Column(String(80), nullable=False)
+    claim_links_json = Column(JSON, default=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "evidence_id": self.id,
+            "diagnosis_id": self.diagnosis_id,
+            "source_type": self.source_type,
+            "source_system": self.source_system,
+            "target": self.target_json or {},
+            "event_time_range": self.event_time_range_json or {},
+            "ingestion_time": self.ingestion_time,
+            "query_or_probe": self.query_or_probe,
+            "raw_artifact_ref": self.raw_artifact_ref,
+            "derived_artifact_ref": self.derived_artifact_ref,
+            "derivation_version": self.derivation_version,
+            "observed_value": self.observed_value_json or {},
+            "baseline_value": self.baseline_value_json or {},
+            "anomaly_score": self.anomaly_score_json or {},
+            "data_quality": self.data_quality_json or {},
+            "integrity_hash": self.integrity_hash,
+            "claim_links": self.claim_links_json or [],
+        }

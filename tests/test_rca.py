@@ -483,3 +483,32 @@ class TestFallback:
                                    top_functions=[{"name": "fib", "samples": 100, "percent": 68.5}])
             assert result is not None
             assert result.model_name == "rule-engine-only"
+
+    def test_run_diagnosis_passes_sys_metrics_to_rules(self):
+        task = _StubTask()
+        sys_metrics = {
+            "sample_count": 10,
+            "summary": {
+                "avg_cpu_user_pct": 92.0,
+                "avg_cpu_sys_pct": 5.0,
+                "avg_cpu_iowait_pct": 1.0,
+                "load1m": 8.0,
+                "thread_count": 20,
+                "thread_trend": "stable",
+                "fd_count": 20,
+                "fd_trend": "stable",
+                "fd_max": 25,
+                "vmrss_mb": 200,
+                "vmrss_mb_max": 210,
+                "ctx_nonvoluntary_rate": 10,
+                "net_rx_kbps": 10,
+                "net_tx_kbps": 10,
+            },
+        }
+        with mock.patch.dict("os.environ", {}, clear=True):
+            result = run_diagnosis(
+                task_id="t1",
+                task_record=task,
+                sys_metrics=sys_metrics,
+            )
+        assert result.report.ranked_causes[0].cause_id == "cpu_userland_hotspot"

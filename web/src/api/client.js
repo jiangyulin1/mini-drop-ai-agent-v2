@@ -160,6 +160,28 @@ export function submitDiagnosisFeedback(diagnosisId, payload) {
   return api.post(`/diagnoses/${diagnosisId}/feedback`, payload);
 }
 
+// ── AI 集群诊断会话 ──────────────────────────────────────────────
+
+export function createDiagnosisSession(payload) {
+  return api.post("/v1/diagnoses", payload);
+}
+
+export function listDiagnosisSessions(params = {}) {
+  return api.get("/v1/diagnoses", { params }).then(itemsOf);
+}
+
+export function getDiagnosisSession(diagnosisId) {
+  return api.get(`/v1/diagnoses/${diagnosisId}`);
+}
+
+export function approveDiagnosisProbe(diagnosisId, payload) {
+  return api.post(`/v1/diagnoses/${diagnosisId}/approvals`, payload);
+}
+
+export function listProbeDefinitions() {
+  return api.get("/v1/probes");
+}
+
 // ── NLP 自然语言采集 ────────────────────────────────────────────
 
 export function nlpParse(query) {

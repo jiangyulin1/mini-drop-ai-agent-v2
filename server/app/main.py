@@ -36,6 +36,9 @@ from server.app.logging_utils import log_event
 from server.app.nlp.intent_parser import parse_intent
 from server.app.nlp.process_resolver import resolve_pid
 from server.app.nlp.summarizer import summarize, suggest_followup
+from server.app.diagnosis import DiagnosisOrchestrator
+from server.app.diagnosis.probe_registry import list_probes as list_registered_probes
+from server.app.diagnosis.schemas import ApprovalRequest, CreateDiagnosisRequest
 from server.app.rca.report import run_diagnosis_context
 from server.app.schemas import (
     APIResponse,
@@ -49,6 +52,7 @@ from server.app.sql_repository import SqlRepository
 from server.app import storage as store
 
 repo = SqlRepository()
+diagnosis_orchestrator = DiagnosisOrchestrator(repo)
 
 
 @asynccontextmanager
@@ -78,6 +82,7 @@ async def _offline_sweeper() -> None:
         repo.mark_offline_agents(timeout_sec=timeout_sec)
         if hasattr(repo, "persist_agent_metric_snapshots"):
             repo.persist_agent_metric_snapshots()
+        diagnosis_orchestrator.advance_active()
         await asyncio.sleep(interval_sec)
 
 
@@ -498,7 +503,7 @@ def get_task_artifacts(task_id: str) -> APIResponse:
 
 
 @app.get("/api/tasks/{task_id}/artifacts/{artifact_type}/content")
-def get_task_artifact_content(task_id: str, artifact_type: str, index: int | None = None) -> APIResponse:
+def get_task_artifact_content(task_id: str, artifact_type: str, index: Optional[int] = None) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     for artifact in repo.artifacts.get(task_id, []):
@@ -542,6 +547,7 @@ def diagnose_task(task_id: str) -> APIResponse:
     artifacts = repo.artifacts.get(task_id, [])
     top_functions = _extract_artifact_json(artifacts, "top_json")
     ebpf_metrics = _extract_artifact_json(artifacts, "ebpf_metrics")
+    sys_metrics = _extract_artifact_json(artifacts, "sys_metrics")
 
     task_events = [repo.as_dict(e) for e in repo.events if e.task_id == task_id]
     agent_record = repo.agents.get(task.agent_id)
@@ -553,6 +559,7 @@ def diagnose_task(task_id: str) -> APIResponse:
         task_record=task,
         top_functions=top_functions,
         ebpf_metrics=ebpf_metrics,
+        sys_metrics=sys_metrics,
         failure_events=[event.get("reason", "") for event in task_events if event.get("reason")],
         feedback_priors=repo.get_feedback_priors(),
         task_events=task_events,
@@ -656,6 +663,58 @@ def submit_diagnosis_feedback(diagnosis_id: str, payload: RCAFeedbackRequest) ->
         feedback_note=payload.feedback_note,
     )
     return APIResponse(data={"diagnosis_id": diagnosis_id, "feedback_saved": True})
+
+
+# ── AI 集群诊断会话（v1）──────────────────────────────────────
+
+
+@app.post("/api/v1/diagnoses")
+def create_diagnosis_session(payload: CreateDiagnosisRequest) -> APIResponse:
+    """创建独立诊断会话，并只编排注册表中的受控探针。"""
+    try:
+        data = diagnosis_orchestrator.create(payload, creator_id="demo_user")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=data)
+
+
+@app.get("/api/v1/diagnoses")
+def list_diagnosis_sessions(limit: int = 100, offset: int = 0) -> APIResponse:
+    limit = min(max(limit, 1), 1000)
+    offset = max(offset, 0)
+    items = diagnosis_orchestrator.list(limit=limit, offset=offset)
+    return APIResponse(data={
+        "items": items,
+        "total": diagnosis_orchestrator.store.count_sessions(),
+        "offset": offset,
+        "limit": limit,
+    })
+
+
+@app.get("/api/v1/diagnoses/{diagnosis_id}")
+def get_diagnosis_session(diagnosis_id: str) -> APIResponse:
+    data = diagnosis_orchestrator.get(diagnosis_id, advance=True)
+    if data is None:
+        raise HTTPException(status_code=404, detail="诊断会话不存在")
+    return APIResponse(data=data)
+
+
+@app.post("/api/v1/diagnoses/{diagnosis_id}/approvals")
+def approve_diagnosis_probe(diagnosis_id: str, payload: ApprovalRequest) -> APIResponse:
+    try:
+        data = diagnosis_orchestrator.approve(diagnosis_id, payload)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "不存在" in message else 409
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    return APIResponse(data=data)
+
+
+@app.get("/api/v1/probes")
+def list_probe_definitions() -> APIResponse:
+    return APIResponse(data=[probe.model_dump(mode="json") for probe in list_registered_probes()])
 
 
 def _extract_artifact_json(artifacts: list[dict], artifact_type: str) -> dict | None:

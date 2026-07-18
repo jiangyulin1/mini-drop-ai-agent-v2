@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 const AuditLogs = lazy(() => import("./pages/AuditLogs"));
 const TaskResult = lazy(() => import("./pages/TaskResult"));
 const DiagnosisHistory = lazy(() => import("./pages/DiagnosisHistory"));
+const AIDiagnosis = lazy(() => import("./pages/AIDiagnosis"));
 const AgentDetail = lazy(() => import("./pages/AgentDetail"));
 const Settings = lazy(() => import("./pages/Settings"));
 
@@ -29,6 +30,10 @@ export default function Router() {
           <Route
             path="/task/:taskId"
             element={<Lazy><TaskResult /></Lazy>}
+          />
+          <Route
+            path="/ai-diagnosis"
+            element={<Lazy><AIDiagnosis /></Lazy>}
           />
           <Route
             path="/diagnoses"
