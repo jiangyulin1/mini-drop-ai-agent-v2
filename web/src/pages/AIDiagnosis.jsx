@@ -278,6 +278,8 @@ export default function AIDiagnosis() {
 function DiagnosisDetail({ detail, onDecision }) {
   const conclusion = detail.latest_conclusion;
   const candidates = conclusion?.root_cause_candidates || [];
+  const assessment = conclusion?.cluster_assessment;
+  const commands = conclusion?.diagnostic_commands || [];
   const hypotheses = detail.hypothesis_graph?.hypotheses || [];
   const probes = detail.probes || [];
   const evidence = detail.evidence || [];
@@ -305,6 +307,25 @@ function DiagnosisDetail({ detail, onDecision }) {
             description={`置信等级：${conclusion.confidence_level}`}
             style={{ marginBottom: 12 }}
           />
+          {assessment && (
+            <Descriptions
+              size="small"
+              bordered
+              column={{ xs: 1, md: 3 }}
+              style={{ marginBottom: 12 }}
+            >
+              <Descriptions.Item label="跨节点判断">{assessment.classification}</Descriptions.Item>
+              <Descriptions.Item label="判断置信度">{assessment.confidence}</Descriptions.Item>
+              <Descriptions.Item label="对比目标">{assessment.compared_targets?.length || 0}</Descriptions.Item>
+              <Descriptions.Item label="证据引用" span={3}>
+                <Space wrap>
+                  {(assessment.evidence_refs || []).map((ref) => (
+                    <Tag key={ref} color={evidenceMap.has(ref) ? "blue" : "red"}>{ref}</Tag>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+            </Descriptions>
+          )}
           <Table
             rowKey="candidate_id"
             size="small"
@@ -325,6 +346,43 @@ function DiagnosisDetail({ detail, onDecision }) {
           {conclusion.limitations?.length > 0 && (
             <Alert type="warning" message="限制与缺失证据" description={conclusion.limitations.join("；")} style={{ marginTop: 12 }} />
           )}
+        </Card>
+      )}
+
+      {commands.length > 0 && (
+        <Card title="可审核命令">
+          <Alert
+            showIcon
+            type="warning"
+            message="以下命令仅供人工审核，不会由 AI 自动执行；R2/R3 操作必须单次确认。"
+            style={{ marginBottom: 12 }}
+          />
+          <Table
+            rowKey="command_id"
+            size="small"
+            pagination={false}
+            dataSource={commands}
+            columns={[
+              { title: "用途", dataIndex: "title", width: 180 },
+              {
+                title: "风险",
+                dataIndex: "risk_level",
+                width: 90,
+                render: (value, record) => (
+                  <Space>
+                    <Tag color={value === "R2" || value === "R3" ? "orange" : "green"}>{value}</Tag>
+                    {record.requires_approval && <Tag color="purple">需审批</Tag>}
+                  </Space>
+                ),
+              },
+              {
+                title: "命令",
+                dataIndex: "command",
+                render: (value) => <Typography.Text copyable code>{value}</Typography.Text>,
+              },
+              { title: "审核注释", dataIndex: "comment" },
+            ]}
+          />
         </Card>
       )}
 

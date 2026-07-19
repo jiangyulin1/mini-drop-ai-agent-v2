@@ -42,6 +42,8 @@
 → Analyzer 结构化结果
 → Evidence ID + SHA-256
 → 规则候选排序
+→ 目标/同宿主/下游跨节点对比
+→ 可审核诊断命令建议
 → 等级置信报告 / INSUFFICIENT_EVIDENCE
 ```
 
@@ -59,6 +61,13 @@
 ```
 
 恢复时先按 `diagnosis_step_id` 查找已有任务，再决定是否创建，避免工作流重启造成重复采样。
+
+## 本轮 AI 应用增强
+
+- `cluster_assessment`：将目标实例、同宿主机其他实例和一跳下游实例放在同一结论中比较，输出 `self_code_or_process_pressure`、`same_host_noisy_neighbor`、`host_resource_contention`、`downstream_dependency` 或 `insufficient_evidence`。
+- `diagnostic_commands`：对模糊自然语言或证据不足场景生成可审核命令，每条包含审核注释、风险等级、审批要求、置信度、`evidence_refs` 和 `auto_execute=false`。
+- `ruled_out`：当证据支持某类跨节点原因时，同步记录被排除的候选及对应证据，避免把最先告警节点直接当作根因。
+- Web `AI 集群诊断` 页面展示跨节点判断、证据引用和命令审核表，R2 深度探针仍走单次审批。
 
 ## API
 
@@ -104,6 +113,7 @@ GET  /api/v1/probes
 - TaskAttempt、Transactional Outbox、独立 Analyzer 队列和完整对象存储对账。
 - 多跳 Trace 因果分析和经过演练集校准的概率输出。
 - 自动修复；当前 R3 始终只提供人工建议。
+- 压测预测目前尚未接入容量模型；当前只给安全诊断命令和证据对比，后续可基于历史拓扑、资源曲线和发布计划增加预测压力评估。
 
 这些边界不会被 LLM 猜测填补。缺少实例映射时进入 `NEEDS_SCOPE_CONFIRMATION`，缺少区分性证据时进入 `INSUFFICIENT_EVIDENCE`。
 

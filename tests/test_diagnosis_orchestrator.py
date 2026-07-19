@@ -53,6 +53,42 @@ def _payload(query: str = "服务 service-a CPU 飙高，请定位原因") -> di
     }
 
 
+def _finish_sys_metrics_task(task_id: str, summary: dict):
+    repo.transition_task(task_id, TaskStatus.RUNNING, "agent accepted", Actor.SERVER)
+    repo.transition_task(task_id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+    repo.transition_task(task_id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+    repo.add_artifacts(task_id, [{
+        "artifact_type": "sys_metrics",
+        "object_key": f"tasks/{task_id}/sys_metrics.json",
+        "metadata": {
+            "data": {
+                "sample_count": 10,
+                "summary": summary,
+            },
+        },
+    }])
+    repo.transition_task(task_id, TaskStatus.DONE, "analysis complete", Actor.ANALYZER)
+
+
+def _normal_summary() -> dict:
+    return {
+        "avg_cpu_user_pct": 18.0,
+        "avg_cpu_sys_pct": 4.0,
+        "avg_cpu_iowait_pct": 1.0,
+        "load1m": 0.8,
+        "thread_count": 20,
+        "thread_trend": "stable",
+        "fd_count": 20,
+        "fd_trend": "stable",
+        "fd_max": 25,
+        "vmrss_mb": 200,
+        "vmrss_mb_max": 220,
+        "ctx_nonvoluntary_rate": 10,
+        "net_rx_kbps": 10,
+        "net_tx_kbps": 10,
+    }
+
+
 class TestDiagnosisSessionAPI:
     def test_missing_instance_mapping_requires_scope_confirmation(self, client: TestClient):
         response = client.post("/api/v1/diagnoses", json={
@@ -64,6 +100,8 @@ class TestDiagnosisSessionAPI:
         assert data["status"] == "NEEDS_SCOPE_CONFIRMATION"
         assert data["child_task_ids"] == []
         assert data["normalized_intent"]["ambiguities"] == ["service_instance_mapping"]
+        assert data["latest_conclusion"]["diagnostic_commands"]
+        assert all(cmd["auto_execute"] is False for cmd in data["latest_conclusion"]["diagnostic_commands"])
 
     def test_create_schedules_only_registered_low_risk_probe(self, client: TestClient):
         response = client.post("/api/v1/diagnoses", json=_payload())
@@ -136,6 +174,9 @@ class TestDiagnosisSessionAPI:
         detail = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
         assert detail["status"] == "COMPLETED"
         assert detail["latest_conclusion"]["root_cause_candidates"]
+        assert detail["latest_conclusion"]["cluster_assessment"]["evidence_refs"]
+        assert detail["latest_conclusion"]["diagnostic_commands"]
+        assert all(cmd["auto_execute"] is False for cmd in detail["latest_conclusion"]["diagnostic_commands"])
         candidate = detail["latest_conclusion"]["root_cause_candidates"][0]
         assert candidate["confidence_level"] in {"低", "中", "高"}
         assert candidate["evidence_refs"]
@@ -198,3 +239,48 @@ class TestDiagnosisSessionAPI:
         assert probes
         assert all("command" not in probe for probe in probes)
         assert {probe["risk_level"] for probe in probes}.issubset({"R0", "R1", "R2", "R3"})
+
+    def test_same_host_noisy_neighbor_assessment_uses_multiple_agents(self, client: TestClient):
+        repo.register_agent(
+            "a2", "host-1", "10.0.0.2",
+            capabilities=["sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps"],
+        )
+        payload = _payload("service-a 变慢，判断是不是被同宿主其他服务影响")
+        payload["context"]["instances"].append({
+            "service_id": "service-b",
+            "instance_id": "service-b-1",
+            "host_id": "host-1",
+            "agent_id": "a2",
+            "pid": 4321,
+            "environment": "production",
+        })
+
+        data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+        probes = {
+            item["target"]["instance_id"]: item
+            for item in data["probes"]
+            if item["probe_id"] == "host_process_metrics"
+        }
+        assert set(probes) == {"service-a-1", "service-b-1"}
+
+        noisy_summary = _normal_summary()
+        noisy_summary.update({
+            "avg_cpu_user_pct": 86.0,
+            "avg_cpu_sys_pct": 9.0,
+            "avg_cpu_iowait_pct": 24.0,
+            "load1m": 9.0,
+        })
+        _finish_sys_metrics_task(probes["service-a-1"]["task_id"], _normal_summary())
+        _finish_sys_metrics_task(probes["service-b-1"]["task_id"], noisy_summary)
+
+        detail = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+        assessment = detail["latest_conclusion"]["cluster_assessment"]
+        assert detail["status"] == "COMPLETED"
+        assert assessment["classification"] == "same_host_noisy_neighbor"
+        assert assessment["confidence_level"] in {"中", "高"}
+        assert len(assessment["compared_targets"]) == 2
+        evidence_ids = {item["evidence_id"] for item in detail["evidence"]}
+        assert set(assessment["evidence_refs"]).issubset(evidence_ids)
+        commands = detail["latest_conclusion"]["diagnostic_commands"]
+        assert any(cmd["risk_level"] == "R2" and cmd["requires_approval"] for cmd in commands)
+        assert all(cmd["execution_policy"] == "human_review_required" for cmd in commands)

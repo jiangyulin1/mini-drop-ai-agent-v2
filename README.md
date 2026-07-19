@@ -264,6 +264,8 @@ class Collector(Protocol):
 
 当前轻量版由请求上下文提供服务实例与宿主机映射；没有可靠映射时进入 `NEEDS_SCOPE_CONFIRMATION`，不会向 Agent 扩散采集。后台扫描器使用持久化状态和短租约恢复会话，完成的探针通过 `diagnosis_step_id` 幂等关联，避免重复下发。
 
+诊断结论包含 `cluster_assessment`，会把目标实例、同宿主机实例和一跳下游实例的系统指标放在同一证据平面比较，用于区分自身代码热点、噪声邻居、宿主机资源争抢和下游依赖问题。模糊输入不会被自动执行；系统只返回带审核注释的 `diagnostic_commands`，每条命令都有风险等级、`evidence_refs`、置信度和 `auto_execute=false`。
+
 ---
 
 ## 任务状态机
@@ -491,7 +493,7 @@ MINIO_PUBLIC_ENDPOINT=172.17.144.1:9000
 | **产物读取** | 沙箱限制在 `MINI_DROP_ARTIFACT_ROOT` 内 |
 | **预签名 URL** | 有效期可配，限制 `tasks/` 前缀 |
 | **Agent 保护** | 拒绝自剖析（target_pid == self PID 时拒绝）；参数 clamp 防资源耗尽 |
-| **AI 诊断控制层** | Pydantic 拒绝未知字段、服务范围白名单、固定探针注册表、R2 人工审批、主机/实例/并发/时长预算 |
+| **AI 诊断控制层** | Pydantic 拒绝未知字段、服务范围白名单、固定探针注册表、R2 人工审批、主机/实例/并发/时长预算、多机证据对比、命令仅建议不执行 |
 | **密钥管理** | `.env` 已 gitignore，`.env.example` 仅模板占位符 |
 | **Nginx** | CSP / HSTS / X-Frame-Options / 速率限制 |
 
@@ -603,6 +605,8 @@ mini-drop/
 - **采集器即插件** — 统一 `Collector(Protocol)` 接口，Server 不绑定工具
 - **LLM 工具约束** — AI 只能调预定义 tool，不做自由决策；输出过 Schema + 引用校验
 - **归因可追溯** — 每条 claim 带 `evidence_refs`，指向原始证据字段
+- **多机因果区分** — 目标实例、同宿主实例和下游实例一起比较，避免把最先告警节点误判为根因
+- **人机协同执行** — 模糊自然语言只生成带注释的可审核命令，高风险变更始终人工确认
 - **状态机驱动** — `ALLOWED_TRANSITIONS` 白名单，每步迁移必带 `reason` + `actor`
 - **降级友好** — AI 不可用时核心功能不受影响
 - **防御性编程** — 路径沙箱、参数 clamp、预签名白名单、拒绝自剖析

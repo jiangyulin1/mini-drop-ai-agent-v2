@@ -100,6 +100,7 @@ class DiagnosisOrchestrator:
                 "scope_confirmation_required",
                 {"ambiguities": intent.ambiguities},
             )
+            self._append_scope_help_conclusion(diagnosis_id, request.query, intent.ambiguities)
             return self.store.get_detail(diagnosis_id) or {}
 
         self._transition(diagnosis_id, DiagnosisStatus.PLANNING, "plan_created")
@@ -485,6 +486,7 @@ class DiagnosisOrchestrator:
 
     def _analyze_tasks(self, diagnosis_id: str, tasks: list[Any]) -> bool:
         all_candidates: list[dict[str, Any]] = []
+        task_observations: list[dict[str, Any]] = []
         missing: list[str] = []
         failed_targets: list[str] = []
         for task in tasks:
@@ -503,6 +505,9 @@ class DiagnosisOrchestrator:
                 continue
 
             values = {kind: value for kind, value, _ in structured}
+            task_observations.append(
+                self._build_task_observation(diagnosis_id, task, values, evidence_ids)
+            )
             task_events = [self.repo.as_dict(event) for event in self.repo.events if event.task_id == task.id]
             evidence = collect_evidence(
                 task_id=task.id,
@@ -532,7 +537,7 @@ class DiagnosisOrchestrator:
                     "sort_score": candidate.final_confidence,
                 })
 
-        if not all_candidates:
+        if not all_candidates and not task_observations:
             return False
         all_candidates.sort(key=lambda item: item["sort_score"], reverse=True)
         deduped: list[dict[str, Any]] = []
@@ -553,13 +558,21 @@ class DiagnosisOrchestrator:
             if len(deduped) >= 3:
                 break
 
+        cluster_assessment = self._build_cluster_assessment(diagnosis_id, task_observations)
+        diagnostic_commands = self._build_reviewable_commands(
+            diagnosis_id,
+            task_observations,
+            cluster_assessment,
+        )
         conclusion = {
             "version": len((self.store.get_session(diagnosis_id) or {}).get("conclusion_versions", [])) + 1,
             "generated_at": utcnow().isoformat(),
-            "summary": f"形成 {len(deduped)} 个有证据关联的根因候选；结论仍需结合反证和人工确认。",
-            "confidence_level": deduped[0]["confidence_level"] if deduped else "不可判断",
+            "summary": cluster_assessment["summary"] or f"形成 {len(deduped)} 个有证据关联的根因候选；结论仍需结合反证和人工确认。",
+            "confidence_level": cluster_assessment["confidence_level"] or (deduped[0]["confidence_level"] if deduped else "不可判断"),
+            "cluster_assessment": cluster_assessment,
             "root_cause_candidates": deduped,
-            "ruled_out": [],
+            "ruled_out": cluster_assessment["ruled_out"],
+            "diagnostic_commands": diagnostic_commands,
             "recommendations": [{
                 "action": "由人工依据证据确认根因后再执行变更；本诊断不会自动重启、迁移或修改配置。",
                 "risk_level": "R3",
@@ -575,6 +588,251 @@ class DiagnosisOrchestrator:
         self._append_conclusion(diagnosis_id, conclusion)
         self._update_hypotheses(diagnosis_id, deduped)
         return True
+
+    def _build_task_observation(
+        self,
+        diagnosis_id: str,
+        task,
+        values: dict[str, Any],
+        evidence_refs: list[str],
+    ) -> dict[str, Any]:
+        target = self._target_for_task(diagnosis_id, task)
+        summary = _sys_summary(values.get("sys_metrics"))
+        top_items = values.get("top_json") if isinstance(values.get("top_json"), list) else []
+        top_name = str((top_items[0] or {}).get("name", "")) if top_items else ""
+        top_percent = float((top_items[0] or {}).get("percent", 0.0) or 0.0) if top_items else 0.0
+        pressure = _pressure_flags(summary, values)
+        return {
+            "task_id": task.id,
+            "collector_type": task.collector_type,
+            "target": target,
+            "summary": summary,
+            "top_function": {"name": top_name, "percent": top_percent},
+            "pressure": pressure,
+            "evidence_refs": evidence_refs,
+        }
+
+    def _target_for_task(self, diagnosis_id: str, task) -> dict[str, Any]:
+        session = self.store.get_session(diagnosis_id) or {}
+        probes = self.store.list_probes(diagnosis_id)
+        for probe in probes:
+            if probe.get("task_id") == task.id:
+                return dict(probe.get("target", {}))
+        for item in session.get("target_scope", {}).get("instances", []):
+            if item.get("agent_id") == task.agent_id and int(item.get("pid", 0) or 0) == int(task.target_pid):
+                return dict(item)
+        return {
+            "service_id": "unknown",
+            "instance_id": f"{task.agent_id}:{task.target_pid}",
+            "host_id": "unknown",
+            "agent_id": task.agent_id,
+            "pid": task.target_pid,
+        }
+
+    def _build_cluster_assessment(
+        self,
+        diagnosis_id: str,
+        observations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        session = self.store.get_session(diagnosis_id) or {}
+        scope = session.get("target_scope", {})
+        target_service = scope.get("target_service")
+        same_host_ids = set(scope.get("same_host_instance_ids", []))
+        downstream_services = set(scope.get("downstream_service_ids", []))
+        target_obs = [
+            obs for obs in observations
+            if obs["target"].get("service_id") == target_service
+        ]
+        same_host_obs = [
+            obs for obs in observations
+            if obs["target"].get("instance_id") in same_host_ids
+        ]
+        downstream_obs = [
+            obs for obs in observations
+            if obs["target"].get("service_id") in downstream_services
+        ]
+        all_refs = _unique_refs(obs for obs in observations)
+        compared = [
+            {
+                "instance_id": obs["target"].get("instance_id"),
+                "service_id": obs["target"].get("service_id"),
+                "host_id": obs["target"].get("host_id"),
+                "pressure": obs["pressure"],
+                "evidence_refs": obs["evidence_refs"],
+            }
+            for obs in observations
+        ]
+
+        classification = "insufficient_evidence"
+        confidence = 0.3
+        summary = "已有证据不足以区分自身代码、同宿主噪声邻居或下游依赖问题。"
+        ruled_out: list[dict[str, Any]] = []
+
+        target_hot = any(_has_self_hotspot(obs) for obs in target_obs)
+        target_pressure = any(_has_pressure(obs) for obs in target_obs)
+        neighbor_pressure = any(_has_pressure(obs) for obs in same_host_obs)
+        downstream_pressure = any(_has_pressure(obs) for obs in downstream_obs)
+        shared_iowait = (
+            any(obs["pressure"].get("io_wait") for obs in target_obs)
+            and any(obs["pressure"].get("io_wait") for obs in same_host_obs)
+        )
+
+        if shared_iowait:
+            classification = "host_resource_contention"
+            confidence = 0.7
+            summary = "目标实例和同宿主实例同时表现出 I/O 等待，倾向于宿主机或共享块设备争抢。"
+        elif same_host_obs and neighbor_pressure and not target_hot:
+            classification = "same_host_noisy_neighbor"
+            confidence = 0.78 if target_obs else 0.62
+            summary = "同宿主其他实例存在明显资源压力，当前更像被噪声邻居或宿主机资源争抢拖累。"
+            ruled_out.append({
+                "hypothesis": "self_code_regression",
+                "reason": "目标实例缺少高占比代码热点，且同宿主实例压力更明显。",
+                "evidence_refs": all_refs,
+            })
+        elif downstream_obs and downstream_pressure and not target_hot:
+            classification = "downstream_dependency"
+            confidence = 0.72
+            summary = "下游依赖实例出现资源压力，根因节点可能不在最先告警的服务上。"
+            ruled_out.append({
+                "hypothesis": "same_host_noisy_neighbor",
+                "reason": "当前证据更集中在一跳下游，而不是同宿主横向干扰。",
+                "evidence_refs": all_refs,
+            })
+        elif target_hot or target_pressure:
+            classification = "self_code_or_process_pressure"
+            confidence = 0.68 if target_hot else 0.58
+            summary = "证据主要集中在目标实例自身，优先检查代码热点、线程竞争或进程资源压力。"
+            if same_host_obs:
+                ruled_out.append({
+                    "hypothesis": "same_host_noisy_neighbor",
+                    "reason": "同宿主观测未显示更强资源压力。",
+                    "evidence_refs": all_refs,
+                })
+
+        return {
+            "classification": classification,
+            "confidence": round(confidence, 2),
+            "confidence_level": _confidence_label(confidence),
+            "summary": summary,
+            "evidence_refs": all_refs,
+            "compared_targets": compared,
+            "ruled_out": ruled_out,
+        }
+
+    def _build_reviewable_commands(
+        self,
+        diagnosis_id: str,
+        observations: list[dict[str, Any]],
+        assessment: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        commands = [
+            _command_suggestion(
+                "cmd_review_session",
+                "回看诊断证据链",
+                f"curl -s http://localhost:8191/api/v1/diagnoses/{diagnosis_id}",
+                "只读查询当前诊断会话，核对 cluster_assessment、evidence_refs 和探针状态。",
+                "R0",
+                assessment.get("evidence_refs", []),
+                confidence=0.95,
+            )
+        ]
+        target_obs = observations[0] if observations else None
+        if target_obs:
+            agent_id = target_obs["target"].get("agent_id")
+            pid = target_obs["target"].get("pid")
+            commands.append(_command_suggestion(
+                "cmd_low_risk_metrics",
+                "补充低风险系统指标",
+                f"micro-drop collect --agent {agent_id} --pid {pid} --collector sys_metrics --duration 15 --sample-rate 11 --watch",
+                "低开销采集 CPU、内存、线程、FD、网络与 I/O 等待趋势，适合复核当前判断。",
+                "R1",
+                target_obs.get("evidence_refs", []),
+                confidence=0.82,
+            ))
+            if assessment.get("classification") in {
+                "self_code_or_process_pressure",
+                "insufficient_evidence",
+            }:
+                commands.append(_command_suggestion(
+                    "cmd_cpu_profile",
+                    "申请一次 CPU Profile",
+                    f"micro-drop collect --agent {agent_id} --pid {pid} --collector perf_cpu --duration 15 --sample-rate 49 --watch",
+                    "中风险深度采样，可能带来额外开销；必须由人确认窗口和目标后再执行。",
+                    "R2",
+                    target_obs.get("evidence_refs", []),
+                    requires_approval=True,
+                    confidence=0.72,
+                ))
+            if assessment.get("classification") in {
+                "same_host_noisy_neighbor",
+                "host_resource_contention",
+                "insufficient_evidence",
+            }:
+                commands.append(_command_suggestion(
+                    "cmd_io_latency",
+                    "申请一次 I/O 延迟探针",
+                    f"micro-drop collect --agent {agent_id} --pid {pid} --collector ebpf_io --duration 15 --sample-rate 11 --watch",
+                    "中风险 eBPF 探针，用于确认块设备延迟和宿主机级 I/O 争抢；需要人工审批。",
+                    "R2",
+                    assessment.get("evidence_refs", []),
+                    requires_approval=True,
+                    confidence=0.68,
+                ))
+        return commands
+
+    def _append_scope_help_conclusion(
+        self,
+        diagnosis_id: str,
+        query: str,
+        ambiguities: list[str],
+    ) -> None:
+        """没有可靠拓扑时，只给可审核排查命令，不假装已经诊断。"""
+        conclusion = {
+            "version": 1,
+            "generated_at": utcnow().isoformat(),
+            "summary": "当前缺少服务实例到 Agent/PID 的映射，无法安全扩散采集范围。",
+            "confidence_level": "不可判断",
+            "cluster_assessment": {
+                "classification": "scope_unresolved",
+                "confidence": 0.0,
+                "confidence_level": "不可判断",
+                "summary": "请先补充服务实例、宿主机、Agent 和 PID 映射。",
+                "evidence_refs": [],
+                "compared_targets": [],
+                "ruled_out": [],
+            },
+            "root_cause_candidates": [],
+            "ruled_out": [],
+            "diagnostic_commands": [
+                _command_suggestion(
+                    "cmd_list_agents",
+                    "列出可用 Agent",
+                    "micro-drop status --agents",
+                    "确认哪些 Agent 在线，以及它们是否具备 sys_metrics/perf_cpu/ebpf_io 等诊断能力。",
+                    "R0",
+                    [],
+                    confidence=0.9,
+                ),
+                _command_suggestion(
+                    "cmd_parse_intent",
+                    "解析自然语言意图",
+                    f"micro-drop parse {json.dumps(query, ensure_ascii=False)}",
+                    "仅解析意图，不创建采集任务；适合人工核对服务名、采集器和安全参数。",
+                    "R0",
+                    [],
+                    confidence=0.75,
+                ),
+            ],
+            "recommendations": [{
+                "action": "补充 context.instances 后重新创建诊断会话；AI 不会猜测 PID 或跨服务扩散采集。",
+                "risk_level": "R0",
+                "execution": "manual_confirmation_required",
+            }],
+            "limitations": ambiguities or ["service_instance_mapping"],
+            "coverage": {"task_count": 0, "evidence_count": 0},
+        }
+        self._append_conclusion(diagnosis_id, conclusion)
 
     def _ensure_insufficient_conclusion(self, diagnosis_id: str, tasks: list[Any]) -> None:
         session = self.store.get_session(diagnosis_id) or {}
@@ -945,6 +1203,112 @@ def _quality(value: float) -> str:
     if value >= 0.4:
         return "medium"
     return "low"
+
+
+def _confidence_label(value: float) -> str:
+    if value >= 0.75:
+        return "高"
+    if value >= 0.5:
+        return "中"
+    if value > 0:
+        return "低"
+    return "不可判断"
+
+
+def _command_suggestion(
+    command_id: str,
+    title: str,
+    command: str,
+    comment: str,
+    risk_level: str,
+    evidence_refs: list[str],
+    *,
+    requires_approval: bool = False,
+    confidence: float = 0.5,
+) -> dict[str, Any]:
+    return {
+        "command_id": command_id,
+        "title": title,
+        "command": command,
+        "comment": comment,
+        "risk_level": risk_level,
+        "requires_approval": requires_approval,
+        "auto_execute": False,
+        "execution_policy": "human_review_required",
+        "evidence_refs": list(dict.fromkeys(evidence_refs)),
+        "confidence": round(confidence, 2),
+    }
+
+
+def _sys_summary(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict) and isinstance(value.get("summary"), dict):
+        return value["summary"]
+    return {}
+
+
+def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str, bool]:
+    cpu_user = _num(summary.get("avg_cpu_user_pct"))
+    cpu_sys = _num(summary.get("avg_cpu_sys_pct"))
+    cpu_iowait = _num(summary.get("avg_cpu_iowait_pct"))
+    load1m = _num(summary.get("load1m"))
+    rss_mb = _num(summary.get("vmrss_mb"))
+    rss_max = _num(summary.get("vmrss_mb_max"))
+    fd_count = _num(summary.get("fd_count"))
+    fd_max = _num(summary.get("fd_max"))
+    threads = _num(summary.get("thread_count"))
+    top_items = values.get("top_json") if isinstance(values.get("top_json"), list) else []
+    top_percent = _num((top_items[0] or {}).get("percent")) if top_items else 0.0
+    return {
+        "cpu": cpu_user + cpu_sys >= 75 or top_percent >= 45,
+        "io_wait": cpu_iowait >= 20 or _has_ebpf_latency(values.get("ebpf_metrics")),
+        "memory": rss_mb >= 1024 or (rss_max > 0 and rss_mb / max(rss_max, 1.0) >= 0.9),
+        "fd": fd_count >= 1000 or (fd_max > 0 and fd_count / max(fd_max, 1.0) >= 0.9),
+        "thread": threads >= 512,
+        "load": load1m >= 4,
+    }
+
+
+def _has_ebpf_latency(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    summary = value.get("summary")
+    if isinstance(summary, dict) and _num(summary.get("p95_us")) >= 10000:
+        return True
+    hist = value.get("io_latency_us")
+    if not isinstance(hist, dict):
+        return False
+    for bucket, count in hist.items():
+        if _num(count) <= 0:
+            continue
+        if any(token in str(bucket) for token in ("8192", "16384", "32768", "65536")):
+            return True
+    return False
+
+
+def _has_self_hotspot(observation: dict[str, Any]) -> bool:
+    top = observation.get("top_function", {})
+    return bool(top.get("name")) and _num(top.get("percent")) >= 35
+
+
+def _has_pressure(observation: dict[str, Any]) -> bool:
+    pressure = observation.get("pressure", {})
+    return any(bool(value) for value in pressure.values())
+
+
+def _unique_refs(observations) -> list[str]:
+    refs: list[str] = []
+    for obs in observations:
+        for ref in obs.get("evidence_refs", []):
+            if ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def _num(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _iso(value: datetime | None) -> str | None:
