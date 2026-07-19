@@ -89,6 +89,14 @@ def _normal_summary() -> dict:
     }
 
 
+def _sys_metric_probe_by_instance(data: dict) -> dict:
+    return {
+        item["target"]["instance_id"]: item
+        for item in data["probes"]
+        if item["probe_id"] == "host_process_metrics"
+    }
+
+
 class TestDiagnosisSessionAPI:
     def test_missing_instance_mapping_requires_scope_confirmation(self, client: TestClient):
         response = client.post("/api/v1/diagnoses", json={
@@ -284,3 +292,76 @@ class TestDiagnosisSessionAPI:
         commands = detail["latest_conclusion"]["diagnostic_commands"]
         assert any(cmd["risk_level"] == "R2" and cmd["requires_approval"] for cmd in commands)
         assert all(cmd["execution_policy"] == "human_review_required" for cmd in commands)
+
+    def test_shared_io_wait_prefers_host_contention_over_generic_neighbor(self, client: TestClient):
+        repo.register_agent(
+            "a2", "host-1", "10.0.0.2",
+            capabilities=["sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps"],
+        )
+        payload = _payload("service-a 变慢，检查同宿主 I/O 争抢")
+        payload["context"]["instances"].append({
+            "service_id": "service-b",
+            "instance_id": "service-b-1",
+            "host_id": "host-1",
+            "agent_id": "a2",
+            "pid": 4321,
+            "environment": "production",
+        })
+
+        data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+        probes = _sys_metric_probe_by_instance(data)
+        target_io = _normal_summary()
+        target_io.update({"avg_cpu_iowait_pct": 28.0, "load1m": 6.0})
+        neighbor_io = _normal_summary()
+        neighbor_io.update({"avg_cpu_iowait_pct": 34.0, "load1m": 7.0})
+        _finish_sys_metrics_task(probes["service-a-1"]["task_id"], target_io)
+        _finish_sys_metrics_task(probes["service-b-1"]["task_id"], neighbor_io)
+
+        detail = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+        assessment = detail["latest_conclusion"]["cluster_assessment"]
+        assert detail["status"] == "COMPLETED"
+        assert assessment["classification"] == "host_resource_contention"
+        assert any(target["pressure"]["io_wait"] for target in assessment["compared_targets"])
+        assert any(cmd["command_id"] == "cmd_io_latency" for cmd in detail["latest_conclusion"]["diagnostic_commands"])
+
+    def test_downstream_pressure_is_reported_as_root_cause_node_not_first_alert(self, client: TestClient):
+        repo.register_agent(
+            "a2", "host-2", "10.0.0.2",
+            capabilities=["sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps"],
+        )
+        payload = _payload("service-a 延迟升高，逐层检查调用链真正根因")
+        payload["context"]["instances"].append({
+            "service_id": "service-b",
+            "instance_id": "service-b-1",
+            "host_id": "host-2",
+            "agent_id": "a2",
+            "pid": 4321,
+            "environment": "production",
+        })
+        payload["context"]["dependencies"] = [{
+            "source_service": "service-a",
+            "target_service": "service-b",
+            "relation": "CALLS",
+            "confidence": "high",
+            "source": "test_topology",
+        }]
+
+        data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+        probes = _sys_metric_probe_by_instance(data)
+        downstream_hot = _normal_summary()
+        downstream_hot.update({"avg_cpu_user_pct": 91.0, "avg_cpu_sys_pct": 6.0, "load1m": 12.0})
+        _finish_sys_metrics_task(probes["service-a-1"]["task_id"], _normal_summary())
+        _finish_sys_metrics_task(probes["service-b-1"]["task_id"], downstream_hot)
+
+        detail = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+        assessment = detail["latest_conclusion"]["cluster_assessment"]
+        assert detail["status"] == "COMPLETED"
+        assert assessment["classification"] == "downstream_dependency"
+        assert "service-b" in detail["target_scope"]["downstream_service_ids"]
+        assert any(
+            target["service_id"] == "service-b" and target["pressure"]["cpu"]
+            for target in assessment["compared_targets"]
+        )
+        assert any(item["hypothesis"] == "same_host_noisy_neighbor" for item in assessment["ruled_out"])
+        evidence_ids = {item["evidence_id"] for item in detail["evidence"]}
+        assert set(assessment["evidence_refs"]).issubset(evidence_ids)
