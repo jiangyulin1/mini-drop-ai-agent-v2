@@ -82,13 +82,6 @@ def main(argv: list[str] | None = None) -> int:
     p_completion = sub.add_parser("completion", help="print shell completion script")
     p_completion.add_argument("--shell", choices=["bash", "zsh", "powershell"], required=True)
 
-    p_chatops_config = sub.add_parser("chatops-config", help="print ChatOps provider and webhook configuration")
-    p_chatops_test = sub.add_parser("chatops-test", help="send a test message to the configured ChatOps webhook")
-    p_chatops_notify = sub.add_parser("chatops-notify", help="send a custom notification via ChatOps")
-    p_chatops_notify.add_argument("--title", required=True)
-    p_chatops_notify.add_argument("--content", required=True)
-    p_chatops_notify.add_argument("--level", choices=["info", "warning", "error", "success"], default="info")
-
     # ── 新增命令 ──────────────────────────────────────────────
 
     p_collect = sub.add_parser("collect", help="one-shot remote collection via Server API")
@@ -420,95 +413,6 @@ def _completion_script(shell: str) -> str:
         f"  @({ps_words}) | Where-Object {{ $_ -like \"$wordToComplete*\" }}\n"
         "}\n"
     )
-
-
-def _cmd_chatops_config(_args) -> int:
-    from server.app.chatops.dispatcher import is_enabled, _get_provider_name, _get_webhook_url
-    from server.app.chatops.providers import PROVIDERS
-    _print_json({
-        "enabled": is_enabled(),
-        "provider": _get_provider_name(),
-        "webhook_url": _get_webhook_url()[:40] + "…" if _get_webhook_url() else "",
-        "available_providers": sorted(PROVIDERS.keys()),
-    })
-    return 0
-
-
-def _cmd_chatops_test(_args) -> int:
-    """通过 Server API 发送测试消息（Server 持有 ChatOps 连接）。"""
-    import urllib.request
-    import urllib.error
-
-    if not _chatops_enabled_check():
-        _print_json({"ok": False, "error": "ChatOps 未启用，请设置 MINI_DROP_CHATOPS_ENABLED=1 和相关环境变量"})
-        return 2
-
-    try:
-        server_url = _chatops_server_url()
-        req = urllib.request.Request(
-            f"{server_url}/api/chatops/test",
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-        data = result.get("data", result)
-        _print_json(data)
-        return 0 if data.get("ok") else 1
-    except urllib.error.URLError as exc:
-        _print_json({"ok": False, "error": f"无法连接 Server: {exc.reason}", "hint": "请先启动 micro-drop serve"})
-        return 1
-    except Exception as exc:
-        _print_json({"ok": False, "error": str(exc)})
-        return 1
-
-
-def _cmd_chatops_notify(args) -> int:
-    """通过 Server API 发送自定义 ChatOps 通知。"""
-    import urllib.request
-    import urllib.error
-
-    if not _chatops_enabled_check():
-        _print_json({"ok": False, "error": "ChatOps 未启用"})
-        return 2
-
-    payload = json.dumps({
-        "title": args.title,
-        "content": args.content,
-        "level": args.level,
-    }).encode("utf-8")
-
-    try:
-        server_url = _chatops_server_url()
-        req = urllib.request.Request(
-            f"{server_url}/api/chatops/notify",
-            data=payload,
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-        data = result.get("data", result)
-        _print_json(data)
-        return 0 if data.get("ok") else 1
-    except urllib.error.URLError as exc:
-        _print_json({"ok": False, "error": f"无法连接 Server: {exc.reason}", "hint": "请先启动 micro-drop serve"})
-        return 1
-    except Exception as exc:
-        _print_json({"ok": False, "error": str(exc)})
-        return 1
-
-
-def _chatops_enabled_check() -> bool:
-    """检查 ChatOps 是否已启用。"""
-    from server.app.chatops.dispatcher import is_enabled
-    return is_enabled()
-
-
-def _chatops_server_url() -> str:
-    """获取 Server 地址。"""
-    import os as _os
-    return _os.getenv("MINI_DROP_SERVER_URL", "http://localhost:8191").rstrip("/")
 
 
 def _completion_words() -> list[str]:
@@ -1205,9 +1109,6 @@ _COMMANDS = {
     "keywords": _cmd_keywords,
     "suggest": _cmd_suggest,
     "completion": _cmd_completion,
-    "chatops-config": _cmd_chatops_config,
-    "chatops-test": _cmd_chatops_test,
-    "chatops-notify": _cmd_chatops_notify,
     "collect": _cmd_collect,
     "status": _cmd_status,
     "perf-top": _cmd_perf_top,

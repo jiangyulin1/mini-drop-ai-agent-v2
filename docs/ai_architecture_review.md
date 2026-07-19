@@ -109,7 +109,7 @@ GET  /api/v1/probes
 
 ## 交付目录安全提醒
 
-工作区根目录的 `final/.env` 不是本 Git 仓库的一部分，但包含非空的 AI Provider 凭据、对象存储 Secret 和 ChatOps 配置。没有读取或记录具体值，也没有自动改动该部署文件。若 `final/` 曾被打包、邮件发送或上传，应立即轮换相关凭据，并将交付物改为只包含 `.env.example`；真实 Secret 应由部署环境或 Secret Manager 注入。
+工作区根目录的 `final/.env` 不是本 Git 仓库的一部分，但包含非空的 AI Provider 凭据和对象存储 Secret。没有读取或记录具体值，也没有自动改动该部署文件。若 `final/` 曾被打包、邮件发送或上传，应立即轮换相关凭据，并将交付物改为只包含 `.env.example`；真实 Secret 应由部署环境或 Secret Manager 注入。
 
 ## 验证
 

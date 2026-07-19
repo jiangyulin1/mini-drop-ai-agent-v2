@@ -28,7 +28,6 @@ from typing import Optional
 
 from server.app.common_utils import status_value
 from server.app.database import init_db, new_session
-from server.app.chatops import init_chatops
 from server.app.event_bus import BUS, notify_diagnosis_complete
 from server.app.prometheus_metrics import record_diagnosis, record_http_request, REGISTRY
 from server.app.grpc_server import serve_in_background
@@ -63,7 +62,6 @@ async def _lifespan(_app: FastAPI):
         _ensure_minio_bucket_with_retry(os.getenv("MINIO_BUCKET", "mini-drop"))
     _grpc = serve_in_background(repo)
     _offline_task = asyncio.create_task(_offline_sweeper())
-    init_chatops()
     try:
         yield
     finally:
@@ -867,56 +865,6 @@ def nlp_summarize_task(body: dict) -> APIResponse:
         "summary": summary,
         "followup_questions": questions,
     })
-
-
-# ── ChatOps 测试（通过 Server 持有的 WS 连接发送）─────────────
-
-
-@app.post("/api/chatops/test")
-def chatops_test_endpoint(body: Optional[dict] = None) -> APIResponse:
-    """通过 Server 持有的 ChatOps 连接发送测试消息。"""
-    from server.app.chatops.dispatcher import is_enabled as _co_enabled, _get_provider_name, _get_webhook_url
-    from server.app.chatops.providers import PROVIDERS
-    from server.app.chatops.base import ChatopsMessage
-    from datetime import datetime, timezone
-
-    if not _co_enabled():
-        return APIResponse(code=400, message="ChatOps 未启用")
-
-    provider = PROVIDERS[_get_provider_name()]
-    webhook_url = _get_webhook_url()
-    msg = ChatopsMessage(
-        title="Mini-Drop ChatOps 连接测试",
-        content="这是一条来自 Mini-Drop 性能诊断平台的测试消息。\n\n如果你收到这条消息，说明 ChatOps 配置正确 ✅",
-        level="info",
-        extra_fields=[
-            {"label": "平台", "value": _get_provider_name()},
-            {"label": "时间", "value": datetime.now(timezone.utc).isoformat()},
-        ],
-    )
-    ok = provider.send(msg, webhook_url)
-    return APIResponse(data={"ok": ok, "provider": _get_provider_name()})
-
-
-@app.post("/api/chatops/notify")
-def chatops_notify_endpoint(body: dict) -> APIResponse:
-    """通过 Server 持有的 ChatOps 连接发送自定义通知。"""
-    from server.app.chatops.dispatcher import is_enabled as _co_enabled, _get_provider_name, _get_webhook_url
-    from server.app.chatops.providers import PROVIDERS
-    from server.app.chatops.base import ChatopsMessage
-
-    if not _co_enabled():
-        return APIResponse(code=400, message="ChatOps 未启用")
-
-    provider = PROVIDERS[_get_provider_name()]
-    webhook_url = _get_webhook_url()
-    msg = ChatopsMessage(
-        title=body.get("title", "通知"),
-        content=body.get("content", ""),
-        level=body.get("level", "info"),
-    )
-    ok = provider.send(msg, webhook_url)
-    return APIResponse(data={"ok": ok, "provider": _get_provider_name()})
 
 
 # ── 启动入口 ──────────────────────────────────────────────────

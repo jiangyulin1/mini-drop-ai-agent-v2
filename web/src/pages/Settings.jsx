@@ -16,13 +16,11 @@ import {
 import {
   SettingOutlined,
   RobotOutlined,
-  MessageOutlined,
   SafetyOutlined,
   CloudServerOutlined,
   ReloadOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  SendOutlined,
   ExperimentOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
@@ -42,7 +40,6 @@ export default function Settings() {
   const [aiConfig, setAiConfig] = useState(null);
   const [apiKey, setApiKey] = useState(getStoredApiKey() || "");
   const [savingKey, setSavingKey] = useState(false);
-  const [testingChatops, setTestingChatops] = useState(false);
   const [testingAI, setTestingAI] = useState(false);
 
   const load = useCallback(async () => {
@@ -84,22 +81,6 @@ export default function Settings() {
       message.error(err.message);
     } finally {
       setSavingKey(false);
-    }
-  }
-
-  async function testChatops() {
-    setTestingChatops(true);
-    try {
-      const resp = await axios.post("/api/chatops/test");
-      if (resp.data?.data?.ok) {
-        message.success("ChatOps 测试消息已发送");
-      } else {
-        message.warning(resp.data?.message || "ChatOps 可能未启用");
-      }
-    } catch (err) {
-      message.error(err.response?.data?.detail || err.message || "ChatOps 测试失败");
-    } finally {
-      setTestingChatops(false);
     }
   }
 
@@ -261,42 +242,6 @@ export default function Settings() {
             showIcon
           />
         )}
-      </Card>
-
-      {/* ChatOps */}
-      <Card
-        title={
-          <Space>
-            <MessageOutlined style={{ color: COLORS.success }} />
-            ChatOps 通知
-          </Space>
-        }
-        size="small"
-        extra={
-          <Button
-            size="small"
-            icon={<SendOutlined />}
-            loading={testingChatops}
-            onClick={testChatops}
-          >
-            发送测试消息
-          </Button>
-        }
-      >
-        <Alert
-          type="info"
-          message="ChatOps 通知配置"
-          description={
-            <span>
-              通过环境变量 MINI_DROP_CHATOPS_ENABLED / MINI_DROP_CHATOPS_PROVIDER /
-              MINI_DROP_CHATOPS_WEBHOOK_URL 配置 IM 通知。
-              支持：<Tag>wecom</Tag> <Tag>feishu</Tag> <Tag>dingtalk</Tag> <Tag>slack</Tag> <Tag>qqbot</Tag>
-              <br />
-              服务启动后，任务状态变更、Agent 上下线、诊断完成将自动推送到配置的 IM 渠道。
-            </span>
-          }
-          showIcon
-        />
       </Card>
 
       {/* AI 测试 */}

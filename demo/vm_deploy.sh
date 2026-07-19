@@ -31,7 +31,7 @@ echo "[2/5] Setting up Python environment…"
 python3 -m venv .venv 2>/dev/null || python3 -m virtualenv .venv 2>/dev/null || true
 source .venv/bin/activate 2>/dev/null || true
 python3 -m pip install --upgrade pip -q
-pip install -e ".[dev,chatops]" -q 2>&1 | tail -3
+pip install -e ".[dev]" -q 2>&1 | tail -3
 
 # ── 3. 设置 perf_event_paranoid ─────────────────────────
 echo ""
