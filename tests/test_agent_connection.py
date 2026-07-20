@@ -1,6 +1,6 @@
 import grpc
 
-from agent.mini_drop_agent.connection import GrpcConnection
+from agent.mini_drop_agent.connection import GrpcConnection, _build_channel
 
 
 class FakeChannel:
@@ -92,3 +92,30 @@ def test_call_with_retry_reconnects_on_unavailable(monkeypatch):
     assert attempts["count"] == 2
     assert channels[0].closed is True
     assert len(channels) == 2
+
+
+def test_secure_channel_uses_custom_ca_and_server_name(monkeypatch, tmp_path):
+    ca_file = tmp_path / "ca.crt"
+    ca_file.write_bytes(b"test-ca")
+    captured = {}
+
+    monkeypatch.setenv("AGENT_GRPC_SECURE", "1")
+    monkeypatch.setenv("AGENT_GRPC_CA_CERT", str(ca_file))
+    monkeypatch.setenv("AGENT_GRPC_TLS_SERVER_NAME", "control.internal")
+    monkeypatch.setattr(
+        grpc,
+        "ssl_channel_credentials",
+        lambda root_certificates=None: ("credentials", root_certificates),
+    )
+
+    def fake_secure_channel(address, credentials, options=None):
+        captured.update(address=address, credentials=credentials, options=options)
+        return FakeChannel()
+
+    monkeypatch.setattr(grpc, "secure_channel", fake_secure_channel)
+
+    _build_channel("10.0.0.10:50051")
+
+    assert captured["address"] == "10.0.0.10:50051"
+    assert captured["credentials"] == ("credentials", b"test-ca")
+    assert ("grpc.ssl_target_name_override", "control.internal") in captured["options"]

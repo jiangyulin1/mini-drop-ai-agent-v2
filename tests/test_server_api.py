@@ -397,6 +397,48 @@ class TestTaskArtifacts:
         assert content.status_code == 200
         assert content.json()["data"]["text"] == "<svg></svg>"
 
+    def test_artifact_download_streams_minio_through_server(self, client: TestClient, monkeypatch):
+        resp = client.post("/api/tasks", json={
+            "name": "art-download", "agent_id": "a1",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        })
+        task_id = resp.json()["data"]["task_id"]
+        repo.add_artifacts(task_id, [{
+            "artifact_type": "raw",
+            "filename": "perf data.bin",
+            "bucket": "mini-drop",
+            "object_key": f"tasks/{task_id}/perf.data",
+            "content_type": "application/octet-stream",
+        }])
+        monkeypatch.setattr(store, "stream_object", lambda bucket, key: iter([b"part-1", b"part-2"]))
+
+        download = client.get(f"/api/tasks/{task_id}/artifacts/raw/download")
+
+        assert download.status_code == 200
+        assert download.content == b"part-1part-2"
+        assert "perf%20data.bin" in download.headers["content-disposition"]
+
+    def test_artifact_download_reads_local_file(self, client: TestClient, tmp_path, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_ARTIFACT_ROOT", str(tmp_path))
+        artifact_path = tmp_path / "report.txt"
+        artifact_path.write_bytes(b"local-report")
+        resp = client.post("/api/tasks", json={
+            "name": "local-download", "agent_id": "a1",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        })
+        task_id = resp.json()["data"]["task_id"]
+        repo.add_artifacts(task_id, [{
+            "artifact_type": "raw",
+            "filename": "report.txt",
+            "local_path": str(artifact_path),
+            "content_type": "text/plain",
+        }])
+
+        download = client.get(f"/api/tasks/{task_id}/artifacts/raw/download")
+
+        assert download.status_code == 200
+        assert download.content == b"local-report"
+
 
 class TestStoragePresign:
     """对象存储预签名 URL 端点。"""

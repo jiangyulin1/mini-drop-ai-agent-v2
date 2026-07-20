@@ -4,7 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.database import init_db, reset_engine
+from server.app.diagnosis import orchestrator as orchestrator_module
 from server.app.main import app, repo
+from server.app.main import diagnosis_orchestrator
 from server.app.models import Base
 from server.app.state_machine import Actor, TaskStatus
 
@@ -51,6 +53,49 @@ def _payload(query: str = "服务 service-a CPU 飙高，请定位原因") -> di
         },
         "budget_profile": "production_safe",
     }
+
+
+def test_remote_artifact_falls_back_to_object_storage_when_agent_path_is_missing(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("MINI_DROP_ARTIFACT_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        orchestrator_module.storage,
+        "read_object_bytes",
+        lambda bucket, key: b'{"avg_cpu_user_pct": 88.0}',
+    )
+
+    value = diagnosis_orchestrator._read_artifact_json({
+        "artifact_type": "sys_metrics",
+        "bucket": "mini-drop",
+        "object_key": "tasks/task-remote/sys_metrics.json",
+        "local_path": str(tmp_path / "worker-only" / "sys_metrics.json"),
+    })
+
+    assert value == {"avg_cpu_user_pct": 88.0}
+
+
+def test_existing_structured_evidence_uses_legal_transition_and_completes(client: TestClient):
+    task_id = client.post("/api/tasks", json={
+        "name": "reusable-sys-metrics",
+        "agent_id": "a1",
+        "target_pid": 1234,
+        "collector_type": "sys_metrics",
+        "duration_sec": 5,
+    }).json()["data"]["task_id"]
+    summary = _normal_summary()
+    summary["avg_cpu_user_pct"] = 92.0
+    _finish_sys_metrics_task(task_id, summary)
+
+    response = client.post("/api/v1/diagnoses", json=_payload())
+
+    assert response.status_code == 200
+    detail = response.json()["data"]
+    assert detail["status"] == "COMPLETED"
+    transitions = [(event["from_status"], event["to_status"]) for event in detail["events"]]
+    assert ("ANALYZING_EXISTING_DATA", "ANALYZING") in transitions
+    assert ("ANALYZING", "CONCLUDING") in transitions
 
 
 def _finish_sys_metrics_task(task_id: str, summary: dict):

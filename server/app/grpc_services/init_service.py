@@ -6,6 +6,10 @@ from typing import Any
 from server.app.generated import init_pb2, init_pb2_grpc
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(int(default))).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class InitAgentService(init_pb2_grpc.InitAgentServicer):
     """Agent 启动时调用的初始化服务。"""
 
@@ -25,15 +29,17 @@ class InitAgentService(init_pb2_grpc.InitAgentServicer):
         return init_pb2.RegisterAgentResponse(heartbeat_interval_sec=5)
 
     def FetchConfig(self, request: init_pb2.FetchConfigRequest, context) -> init_pb2.FetchConfigResponse:
-        # 当前阶段 MinIO 凭证通过环境变量注入，暂不从 gRPC 下发。
-        # 返回空 CosConfig 表示 Agent 应使用环境变量中的凭证。
-        # NOTE: 生产环境必须启用 gRPC TLS (MINI_DROP_GRPC_SECURE=1)，否则凭证明文传输。
+        # 默认只下发 Worker 可访问的 MinIO 地址和 bucket，凭据由 Worker 环境注入。
+        # 仅当管理员显式允许且 gRPC 已启用 TLS 时才下发凭据，避免明文泄露。
+        distribute_credentials = (
+            _env_bool("MINI_DROP_GRPC_DISTRIBUTE_MINIO_CREDENTIALS")
+            and _env_bool("MINI_DROP_GRPC_SECURE")
+        )
         return init_pb2.FetchConfigResponse(
             cos_config=init_pb2.common__pb2.CosConfig(
-                # 对 Agent 下发 MinIO 外部地址（而非 Docker 内部服务名）
                 endpoint=os.getenv("MINIO_PUBLIC_ENDPOINT", os.getenv("MINIO_ENDPOINT", "minio:9000")),
-                access_key=os.getenv("MINIO_ACCESS_KEY", ""),
-                secret_key=os.getenv("MINIO_SECRET_KEY", ""),
+                access_key=os.getenv("MINIO_ACCESS_KEY", "") if distribute_credentials else "",
+                secret_key=os.getenv("MINIO_SECRET_KEY", "") if distribute_credentials else "",
                 bucket=os.getenv("MINIO_BUCKET", "mini-drop"),
                 region=os.getenv("MINIO_REGION", ""),
             )

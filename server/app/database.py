@@ -21,7 +21,9 @@ from server.app.models import Base
 
 _engine: Engine | None = None
 _sessionmaker: sessionmaker | None = None
-_lock = threading.Lock()
+# _get_sessionmaker() may initialize the engine while holding this lock, so it
+# must be re-entrant in a fresh process where neither singleton exists yet.
+_lock = threading.RLock()
 
 
 def _build_url() -> str:

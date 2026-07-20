@@ -51,6 +51,8 @@ perf.data.*
 # Secrets
 *.pem
 *.key
+deploy/certs/*
+!deploy/certs/.gitkeep
 
 # NapCat QQ 机器人运行时文件（通过 setup.ps1 或 NapCatInstaller 安装）
 deploy/napcat/*.exe

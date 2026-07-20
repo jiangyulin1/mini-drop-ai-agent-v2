@@ -23,12 +23,14 @@ import {
 import {
   ArrowLeftOutlined,
   BarChartOutlined,
+  DownloadOutlined,
   ExperimentOutlined,
   FileTextOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useParams, useNavigate } from "react-router-dom";
 import {
+  downloadTaskArtifact,
   getDiagnosis,
   getTask,
   getTaskArtifactContent,
@@ -64,6 +66,7 @@ export default function TaskResult() {
   const [analysis, setAnalysis] = useState({ top: [], svg: "", hasFlameJson: false });
   const [analysisLoading, setAnalysisLoading] = useState(true);
   const [selectedContinuousIndex, setSelectedContinuousIndex] = useState(null);
+  const [downloadingArtifact, setDownloadingArtifact] = useState("");
 
   // ── 数据加载 ──────────────────────────────────────────
 
@@ -231,6 +234,29 @@ export default function TaskResult() {
     }
   }, [continuousWindows, selectedContinuousIndex]);
 
+  async function downloadArtifact(record) {
+    const key = `${record.artifact_type}:${record.metadata?.window_index ?? ""}`;
+    setDownloadingArtifact(key);
+    try {
+      const params = record.metadata?.window_index === undefined
+        ? {}
+        : { index: record.metadata.window_index };
+      const { blob, filename } = await downloadTaskArtifact(taskId, record.artifact_type, params);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      message.error(`下载失败：${err.message}`);
+    } finally {
+      setDownloadingArtifact("");
+    }
+  }
+
   const artifactColumns = [
     {
       title: "类型",
@@ -266,6 +292,24 @@ export default function TaskResult() {
       dataIndex: "size_bytes",
       width: 100,
       render: (v) => (v ? `${(v / 1024).toFixed(1)} KB` : "-"),
+    },
+    {
+      title: "操作",
+      width: 100,
+      render: (_, record) => {
+        const key = `${record.artifact_type}:${record.metadata?.window_index ?? ""}`;
+        return (
+          <Button
+            type="link"
+            size="small"
+            icon={<DownloadOutlined />}
+            loading={downloadingArtifact === key}
+            onClick={() => downloadArtifact(record)}
+          >
+            下载
+          </Button>
+        );
+      },
     },
   ];
 

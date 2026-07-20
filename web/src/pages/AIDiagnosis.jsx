@@ -23,6 +23,8 @@ import {
 import {
   CheckOutlined,
   CloseOutlined,
+  MinusCircleOutlined,
+  PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
@@ -68,6 +70,7 @@ export default function AIDiagnosis() {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const watchedInstances = Form.useWatch("instances", form) || [];
 
   async function refreshSessions() {
     try {
@@ -83,7 +86,18 @@ export default function AIDiagnosis() {
         setAgents(agentItems);
         setSessions(sessionItems);
         const first = agentItems.find((item) => item.status === "ONLINE") || agentItems[0];
-        if (first) form.setFieldsValue({ agent_id: first.id, host_id: first.hostname || first.id });
+        if (first) {
+          const instances = form.getFieldValue("instances") || [{}];
+          if (!instances[0]?.agent_id) {
+            form.setFieldsValue({
+              instances: [{
+                ...instances[0],
+                agent_id: first.id,
+                host_id: first.hostname || first.id,
+              }, ...instances.slice(1)],
+            });
+          }
+        }
       })
       .catch((err) => setError(err.message));
   }, [form]);
@@ -106,21 +120,21 @@ export default function AIDiagnosis() {
     setLoading(true);
     setError("");
     try {
-      const instanceId = values.instance_id || `${values.service_id}-1`;
+      const instances = values.instances.map((item, index) => ({
+        service_id: item.service_id,
+        instance_id: item.instance_id || `${item.service_id}-${index + 1}`,
+        host_id: item.host_id,
+        agent_id: item.agent_id,
+        pid: item.pid,
+        environment: item.environment || values.environment,
+      }));
       const detail = await createDiagnosisSession({
         query: values.query,
         context: {
-          service_id: values.service_id,
+          service_id: values.target_service,
           environment: values.environment,
-          instances: [{
-            service_id: values.service_id,
-            instance_id: instanceId,
-            host_id: values.host_id,
-            agent_id: values.agent_id,
-            pid: values.pid,
-            environment: values.environment,
-          }],
-          dependencies: [],
+          instances,
+          dependencies: values.dependencies || [],
         },
         budget_profile: values.budget_profile,
       });
@@ -170,6 +184,16 @@ export default function AIDiagnosis() {
     label: `${agent.hostname || agent.id} · ${agent.status}`,
     disabled: agent.status !== "ONLINE",
   }));
+  const serviceOptions = [...new Set(
+    watchedInstances.map((item) => item?.service_id?.trim()).filter(Boolean),
+  )].map((value) => ({ value, label: value }));
+
+  function selectAgent(instanceIndex, agentId) {
+    const agent = agents.find((item) => item.id === agentId);
+    if (agent) {
+      form.setFieldValue(["instances", instanceIndex, "host_id"], agent.hostname || agent.id);
+    }
+  }
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -192,7 +216,17 @@ export default function AIDiagnosis() {
             <Form
               form={form}
               layout="vertical"
-              initialValues={{ environment: "production", budget_profile: "production_safe" }}
+              initialValues={{
+                environment: "production",
+                budget_profile: "production_safe",
+                target_service: "service-a",
+                instances: [{
+                  service_id: "service-a",
+                  instance_id: "service-a-1",
+                  environment: "production",
+                }],
+                dependencies: [],
+              }}
               onFinish={submit}
             >
               <Form.Item name="query" label="问题描述" rules={[{ required: true, min: 3 }]}>
@@ -200,36 +234,16 @@ export default function AIDiagnosis() {
               </Form.Item>
               <Row gutter={12}>
                 <Col xs={24} md={12}>
-                  <Form.Item name="service_id" label="服务 ID" rules={[{ required: true }]}>
-                    <Input placeholder="service-a" />
+                  <Form.Item name="target_service" label="诊断入口服务" rules={[{ required: true }]}>
+                    <Select showSearch options={serviceOptions} placeholder="先在下方添加服务实例" />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
-                  <Form.Item name="instance_id" label="实例 ID（可选）">
-                    <Input placeholder="默认使用 service-id-1" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Form.Item name="agent_id" label="目标 Agent" rules={[{ required: true }]}>
-                    <Select options={agentOptions} placeholder="选择在线 Agent" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Form.Item name="pid" label="目标 PID" rules={[{ required: true }]}>
-                    <InputNumber min={1} max={4194304} style={{ width: "100%" }} />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Form.Item name="host_id" label="宿主机 ID" rules={[{ required: true }]}>
-                    <Input />
-                  </Form.Item>
-                </Col>
-                <Col xs={12} md={6}>
-                  <Form.Item name="environment" label="环境">
+                  <Form.Item name="environment" label="默认环境">
                     <Select options={["production", "staging", "development"].map((value) => ({ value }))} />
                   </Form.Item>
                 </Col>
-                <Col xs={12} md={6}>
+                <Col xs={24} md={12}>
                   <Form.Item name="budget_profile" label="预算策略">
                     <Select options={[
                       { value: "production_safe", label: "生产安全" },
@@ -239,6 +253,111 @@ export default function AIDiagnosis() {
                   </Form.Item>
                 </Col>
               </Row>
+
+              <Typography.Title level={5}>服务实例 / Worker</Typography.Title>
+              <Form.List name="instances">
+                {(fields, { add, remove }) => (
+                  <Space direction="vertical" style={{ width: "100%" }}>
+                    {fields.map((field, index) => (
+                      <Card
+                        key={field.key}
+                        size="small"
+                        title={`实例 ${index + 1}`}
+                        extra={fields.length > 1 ? (
+                          <Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)}>
+                            删除
+                          </Button>
+                        ) : null}
+                      >
+                        <Row gutter={12}>
+                          <Col xs={24} md={8}>
+                            <Form.Item name={[field.name, "service_id"]} label="服务 ID" rules={[{ required: true }]}>
+                              <Input placeholder="service-a" />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={24} md={8}>
+                            <Form.Item name={[field.name, "instance_id"]} label="实例 ID" rules={[{ required: true }]}>
+                              <Input placeholder="service-a-1" />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={24} md={8}>
+                            <Form.Item name={[field.name, "agent_id"]} label="目标 Agent" rules={[{ required: true }]}>
+                              <Select
+                                options={agentOptions}
+                                placeholder="选择在线 Agent"
+                                onChange={(value) => selectAgent(field.name, value)}
+                              />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={24} md={8}>
+                            <Form.Item name={[field.name, "host_id"]} label="宿主机 ID" rules={[{ required: true }]}>
+                              <Input placeholder="worker-1" />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={24} md={8}>
+                            <Form.Item name={[field.name, "pid"]} label="目标 PID" rules={[{ required: true }]}>
+                              <InputNumber min={1} max={4194304} style={{ width: "100%" }} />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={24} md={8}>
+                            <Form.Item name={[field.name, "environment"]} label="实例环境">
+                              <Select options={["production", "staging", "development"].map((value) => ({ value }))} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      </Card>
+                    ))}
+                    <Button
+                      block
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={() => add({ environment: form.getFieldValue("environment") })}
+                    >
+                      添加 Worker 实例
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
+
+              <Typography.Title level={5} style={{ marginTop: 20 }}>服务依赖关系</Typography.Title>
+              <Form.List name="dependencies">
+                {(fields, { add, remove }) => (
+                  <Space direction="vertical" style={{ width: "100%", marginBottom: 20 }}>
+                    {fields.map((field, index) => (
+                      <Row key={field.key} gutter={8} align="middle">
+                        <Col xs={24} md={6}>
+                          <Form.Item name={[field.name, "source_service"]} label={index === 0 ? "上游服务" : ""} rules={[{ required: true }]}>
+                            <Select options={serviceOptions} placeholder="source" />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={6}>
+                          <Form.Item name={[field.name, "target_service"]} label={index === 0 ? "下游服务" : ""} rules={[{ required: true }]}>
+                            <Select options={serviceOptions} placeholder="target" />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={18} md={8}>
+                          <Form.Item name={[field.name, "relation"]} label={index === 0 ? "关系" : ""} rules={[{ required: true }]}>
+                            <Select options={[
+                              "CALLS", "READS_FROM", "WRITES_TO", "PUBLISHES_TO", "CONSUMES_FROM", "SHARES_DEPENDENCY",
+                            ].map((value) => ({ value }))} />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={6} md={4}>
+                          <Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)}>删除</Button>
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      disabled={serviceOptions.length < 2}
+                      onClick={() => add({ relation: "CALLS", confidence: "high", source: "request_context" })}
+                    >
+                      添加依赖边
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
               <Button type="primary" htmlType="submit" loading={loading} icon={<RobotOutlined />}>
                 创建诊断会话
               </Button>

@@ -43,7 +43,15 @@ def _build_channel(address: str) -> grpc.Channel:
                 creds = grpc.ssl_channel_credentials(root_certificates=fh.read())
         else:
             creds = grpc.ssl_channel_credentials()
-        return grpc.secure_channel(address, creds)
+        server_name = os.getenv("AGENT_GRPC_TLS_SERVER_NAME", "").strip()
+        options = []
+        if server_name:
+            # 仍会验证 CA 签名；该选项只用于证书 SAN 与连接地址不同的实验网络。
+            options.extend([
+                ("grpc.ssl_target_name_override", server_name),
+                ("grpc.default_authority", server_name),
+            ])
+        return grpc.secure_channel(address, creds, options=options)
     return grpc.insecure_channel(address)
 
 

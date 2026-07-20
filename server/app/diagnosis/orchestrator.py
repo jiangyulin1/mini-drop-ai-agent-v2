@@ -114,6 +114,11 @@ class DiagnosisOrchestrator:
         if existing_ids:
             self.store.update_session(diagnosis_id, child_task_ids=existing_ids)
             existing_tasks = [self.repo.tasks[task_id] for task_id in existing_ids if task_id in self.repo.tasks]
+            self._transition(
+                diagnosis_id,
+                DiagnosisStatus.ANALYZING,
+                "evidence_analysis_started",
+            )
             if self._analyze_tasks(diagnosis_id, existing_tasks):
                 self._transition(diagnosis_id, DiagnosisStatus.CONCLUDING, "conclusion_generated")
                 self._transition(diagnosis_id, DiagnosisStatus.COMPLETED, "diagnosis_completed")
@@ -652,16 +657,34 @@ class DiagnosisOrchestrator:
             if obs["target"].get("service_id") in downstream_services
         ]
         all_refs = _unique_refs(obs for obs in observations)
-        compared = [
-            {
-                "instance_id": obs["target"].get("instance_id"),
-                "service_id": obs["target"].get("service_id"),
-                "host_id": obs["target"].get("host_id"),
-                "pressure": obs["pressure"],
-                "evidence_refs": obs["evidence_refs"],
-            }
-            for obs in observations
-        ]
+        compared_by_instance: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for obs in observations:
+            target = obs["target"]
+            key = (
+                target.get("instance_id"),
+                target.get("agent_id"),
+                target.get("pid"),
+            )
+            item = compared_by_instance.setdefault(key, {
+                "instance_id": target.get("instance_id"),
+                "service_id": target.get("service_id"),
+                "host_id": target.get("host_id"),
+                "agent_id": target.get("agent_id"),
+                "pid": target.get("pid"),
+                "pressure": {name: False for name in obs["pressure"]},
+                "evidence_refs": [],
+                "collector_types": [],
+                "observation_count": 0,
+            })
+            for name, flagged in obs["pressure"].items():
+                item["pressure"][name] = item["pressure"].get(name, False) or bool(flagged)
+            for ref in obs["evidence_refs"]:
+                if ref not in item["evidence_refs"]:
+                    item["evidence_refs"].append(ref)
+            if obs["collector_type"] not in item["collector_types"]:
+                item["collector_types"].append(obs["collector_type"])
+            item["observation_count"] += 1
+        compared = list(compared_by_instance.values())
 
         classification = "insufficient_evidence"
         confidence = 0.3
@@ -970,7 +993,9 @@ class DiagnosisOrchestrator:
             if local_path:
                 root = Path(os.getenv("MINI_DROP_ARTIFACT_ROOT", "/tmp/mini-drop")).resolve()
                 path = Path(local_path).expanduser().resolve()
-                if path == root or root in path.parents:
+                # Agent 的 local_path 属于远端 Worker；Control 上不存在时必须继续
+                # 回退 object_key，而不是因 stat() 抛 FileNotFoundError 提前退出。
+                if (path == root or root in path.parents) and path.is_file():
                     if path.stat().st_size > 2 * 1024 * 1024:
                         return None
                     return json.loads(path.read_text(encoding="utf-8", errors="strict"))

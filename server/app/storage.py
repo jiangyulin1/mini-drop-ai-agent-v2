@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import timedelta
+from collections.abc import Iterator
 from typing import Any
 
 from server.app.common_utils import env_bool
@@ -85,6 +86,27 @@ def read_object_bytes(bucket: str, object_key: str) -> bytes:
     response = _client().get_object(bucket, object_key)
     try:
         return response.read()
+    finally:
+        response.close()
+        response.release_conn()
+
+
+def stream_object(bucket: str, object_key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+    """流式读取对象，并在客户端中断或读取完成后释放 MinIO 连接。"""
+    if not bucket:
+        raise ValueError("bucket must not be empty")
+    if not object_key:
+        raise ValueError("object_key must not be empty")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    response = _client().get_object(bucket, object_key)
+    try:
+        while True:
+            chunk = response.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
     finally:
         response.close()
         response.release_conn()

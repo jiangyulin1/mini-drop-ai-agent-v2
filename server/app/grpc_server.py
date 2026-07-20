@@ -35,7 +35,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(int(default))).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _add_port(server: grpc.Server, address: str) -> None:
+def _add_port(server: grpc.Server, address: str) -> int:
     """Add a gRPC port, optionally secured with TLS."""
     if _env_bool("MINI_DROP_GRPC_SECURE", default=False):
         cert_file = os.getenv("MINI_DROP_GRPC_CERT_FILE", "").strip()
@@ -49,9 +49,12 @@ def _add_port(server: grpc.Server, address: str) -> None:
         with open(cert_file, "rb") as fh:
             certificate_chain = fh.read()
         server_credentials = grpc.ssl_server_credentials([(private_key, certificate_chain)])
-        server.add_secure_port(address, server_credentials)
+        bound_port = server.add_secure_port(address, server_credentials)
     else:
-        server.add_insecure_port(address)
+        bound_port = server.add_insecure_port(address)
+    if bound_port == 0:
+        raise RuntimeError(f"failed to bind gRPC address: {address}")
+    return bound_port
 
 
 def _build_server() -> grpc.Server:

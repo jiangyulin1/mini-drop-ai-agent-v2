@@ -16,10 +16,11 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path as _Path
+from urllib.parse import quote as _url_quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 import asyncio
 import json as _json
@@ -524,6 +525,40 @@ def get_task_artifact_content(task_id: str, artifact_type: str, index: Optional[
     raise HTTPException(status_code=404, detail="产物不存在")
 
 
+@app.get("/api/tasks/{task_id}/artifacts/{artifact_type}/download")
+def download_task_artifact(task_id: str, artifact_type: str, index: Optional[int] = None):
+    """经 Server 流式下载产物，使浏览器无需直接访问 MinIO 9000 端口。"""
+    if task_id not in repo.tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    for artifact in repo.artifacts.get(task_id, []):
+        if artifact.get("artifact_type") != artifact_type:
+            continue
+        if index is not None and artifact.get("metadata", {}).get("window_index") != index:
+            continue
+
+        filename = _safe_download_filename(
+            artifact.get("filename") or artifact.get("object_key") or f"{artifact_type}.bin"
+        )
+        media_type = artifact.get("content_type") or "application/octet-stream"
+        path = _resolve_artifact_path_or_none(artifact.get("local_path"))
+        if path is not None:
+            return FileResponse(path, media_type=media_type, filename=filename)
+
+        bucket = artifact.get("bucket") or os.getenv("MINIO_BUCKET", "mini-drop")
+        key = _validate_presign_request(bucket, artifact.get("object_key", ""))
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{_url_quote(filename)}",
+            "X-Content-Type-Options": "nosniff",
+        }
+        return StreamingResponse(
+            store.stream_object(bucket, key),
+            media_type=media_type,
+            headers=headers,
+        )
+    raise HTTPException(status_code=404, detail="产物不存在")
+
+
 @app.get("/api/storage/presign")
 def presign_url(bucket: str = "mini-drop", key: str = "", expires: int = 3600) -> APIResponse:
     """生成 MinIO 预签名下载 URL。"""
@@ -803,6 +838,12 @@ def _validate_presign_request(bucket: str, key: str) -> str:
     return normalized
 
 
+def _safe_download_filename(value: str) -> str:
+    filename = _Path(value.replace("\\", "/")).name
+    filename = "".join(ch for ch in filename if ch >= " " and ch not in {'"', ';'})
+    return filename[:255] or "artifact.bin"
+
+
 # ── NLP 自然语言采集 ────────────────────────────────────────────
 
 
@@ -872,4 +913,8 @@ def nlp_summarize_task(body: dict) -> APIResponse:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8191)
+    uvicorn.run(
+        app,
+        host=os.getenv("SERVER_HOST", "0.0.0.0"),
+        port=int(os.getenv("SERVER_PORT", "8191")),
+    )

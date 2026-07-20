@@ -396,6 +396,7 @@ GET    /api/audit-logs                     # 审计日志
 POST   /api/nlp/parse                      # 自然语言解析
 POST   /api/nlp/summarize                  # 任务结果 AI 总结
 GET    /api/storage/presign?key=...        # MinIO 预签名 URL
+GET    /api/tasks/{id}/artifacts/{type}/download  # 经 Server 流式下载产物
 GET    /api/metrics                        # Prometheus 指标
 GET    /api/events/stream                  # SSE 实时事件流
 GET    /api/healthz                        # 健康检查（含 DB + 存储检测）
@@ -416,20 +417,29 @@ docker compose up -d
 ### 分体部署（推荐）
 
 ```
-Windows Docker Desktop (Server+Web+PG+MinIO) ← gRPC → Linux VM (Agent 裸机)
+Windows Browser ── HTTPS 443 ──> Control VM
+                                   ├── Server / PostgreSQL / MinIO / Web
+Linux Worker 1 ── gRPC TLS 50051 ──┤
+Linux Worker 2 ── gRPC TLS 50051 ──┤
+Linux Worker 1/2 ── MinIO 9000 ────┘
 ```
 
 ```bash
-# Windows: 只启动服务端（不含 Agent）
-docker compose up -d
+# Control VM：不会启动本机 Agent，Token 和 TLS 强制开启
+cp deploy/env/control.env.example deploy/env/control.env
+bash deploy/scripts/generate-dev-certs.sh 10.0.0.10
+docker compose --env-file deploy/env/control.env -f docker-compose.control.yml up -d --build
 
-# VM: 裸机启动 Agent 指向 Windows
-export AGENT_GRPC_ADDR=172.17.144.1:50051
-export AGENT_ID=agent_vm_demo
-export AGENT_UPLOAD_ARTIFACTS=1
-export MINIO_ENDPOINT=172.17.144.1:9000
-sudo python -m agent.mini_drop_agent.main  # root：bpftrace 需要
+# 每台 Worker：修改 AGENT_ID、AGENT_IP_ADDR 和 Control 地址，并复制 ca.crt
+cp deploy/env/worker.env.example deploy/env/worker.env
+docker compose --env-file deploy/env/worker.env -f docker-compose.worker.yml up -d --build
+
+# 或使用裸机 systemd Agent（安装后不会自动启动，需先编辑 worker.env）
+sudo bash deploy/scripts/install-worker.sh "$PWD"
 ```
+
+完整步骤、证书分发、端口矩阵和验收命令见
+[三机 VM 部署与联调指南](docs/three-node-vm-deployment.md)。SSH 自动化不包含在当前阶段。
 
 ### 离线 / 本地 Docker（SQLite，无需拉取外部镜像）
 
@@ -472,14 +482,12 @@ sudo sysctl -w kernel.perf_event_paranoid=1
 
 ### MinIO 公网端点
 
-Docker 内 MinIO 使用 `minio:9000`。浏览器预签名 URL 需通过宿主机端口访问：
+Docker 内 MinIO 使用 `minio:9000`。三机模式下 `MINIO_PUBLIC_ENDPOINT` 必须填写 Worker
+可访问的 Control 地址。浏览器下载已经改为经 Server 流式转发，因此 Windows 无需访问 9000：
 
 ```bash
-# 本地
-MINIO_PUBLIC_ENDPOINT=localhost:9000
-
-# 分体部署（VM Agent 需要通过外部地址上传产物）
-MINIO_PUBLIC_ENDPOINT=172.17.144.1:9000
+# 分体部署（仅 Worker 访问）
+MINIO_PUBLIC_ENDPOINT=http://10.0.0.10:9000
 ```
 
 ---
@@ -489,9 +497,9 @@ MINIO_PUBLIC_ENDPOINT=172.17.144.1:9000
 | 层次 | 措施 |
 |------|------|
 | **HTTP API** | Bearer / X-API-Key / query token 三通道认证 |
-| **gRPC** | Token 认证拦截器 + 可选 TLS |
+| **gRPC** | Token 认证拦截器 + TLS；三机 Compose 默认强制启用 |
 | **产物读取** | 沙箱限制在 `MINI_DROP_ARTIFACT_ROOT` 内 |
-| **预签名 URL** | 有效期可配，限制 `tasks/` 前缀 |
+| **产物下载** | Server 校验任务归属后流式转发；浏览器无需直连 MinIO |
 | **Agent 保护** | 拒绝自剖析（target_pid == self PID 时拒绝）；参数 clamp 防资源耗尽 |
 | **AI 诊断控制层** | Pydantic 拒绝未知字段、服务范围白名单、固定探针注册表、R2 人工审批、主机/实例/并发/时长预算、多机证据对比、命令仅建议不执行 |
 | **密钥管理** | `.env` 已 gitignore，`.env.example` 仅模板占位符 |

@@ -1,0 +1,24 @@
+[Unit]
+Description=Mini-Drop Linux Worker Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=@MINI_DROP_ROOT@
+EnvironmentFile=/etc/mini-drop/worker.env
+ExecStart=@MINI_DROP_ROOT@/.venv/bin/python -m agent.mini_drop_agent.main
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+LimitMEMLOCK=infinity
+LimitNOFILE=65536
+PrivateTmp=false
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/tmp/mini-drop
+
+[Install]
+WantedBy=multi-user.target

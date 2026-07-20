@@ -173,6 +173,27 @@ class TestInitAgent:
         assert resp.cos_config.endpoint == "minio.test:9000"
         assert resp.cos_config.bucket == "mini-drop-test"
 
+    def test_fetch_config_withholds_credentials_by_default(self, grpc_fix: GrpcFixture, monkeypatch):
+        monkeypatch.setenv("MINIO_ACCESS_KEY", "worker-access")
+        monkeypatch.setenv("MINIO_SECRET_KEY", "worker-secret")
+        monkeypatch.delenv("MINI_DROP_GRPC_DISTRIBUTE_MINIO_CREDENTIALS", raising=False)
+
+        resp = grpc_fix.init_stub.FetchConfig(init_pb2.FetchConfigRequest(agent_id=self.AGENT_ID))
+
+        assert resp.cos_config.access_key == ""
+        assert resp.cos_config.secret_key == ""
+
+    def test_fetch_config_distributes_credentials_only_over_tls(self, grpc_fix: GrpcFixture, monkeypatch):
+        monkeypatch.setenv("MINIO_ACCESS_KEY", "worker-access")
+        monkeypatch.setenv("MINIO_SECRET_KEY", "worker-secret")
+        monkeypatch.setenv("MINI_DROP_GRPC_DISTRIBUTE_MINIO_CREDENTIALS", "1")
+        monkeypatch.setenv("MINI_DROP_GRPC_SECURE", "1")
+
+        resp = grpc_fix.init_stub.FetchConfig(init_pb2.FetchConfigRequest(agent_id=self.AGENT_ID))
+
+        assert resp.cos_config.access_key == "worker-access"
+        assert resp.cos_config.secret_key == "worker-secret"
+
 
 class TestHealthCheck:
     """HealthCheck 服务：心跳保活 + 任务下发。"""

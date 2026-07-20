@@ -54,6 +54,15 @@ class TestReadObjectBytes:
         response.close.assert_called_once()
         response.release_conn.assert_called_once()
 
+    def test_streams_and_closes_object(self):
+        response = mock.MagicMock()
+        response.read.side_effect = [b"hello", b" world", b""]
+        with mock.patch.object(store, "_client") as mock_client:
+            mock_client.return_value.get_object.return_value = response
+            assert b"".join(store.stream_object("b", "k", chunk_size=5)) == b"hello world"
+        response.close.assert_called_once()
+        response.release_conn.assert_called_once()
+
 
 class TestPresignedUrl:
     def test_returns_url_string(self):

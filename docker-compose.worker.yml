@@ -1,0 +1,43 @@
+# 三机部署：每台 Linux Worker 各启动一份。
+# cp deploy/env/worker.env.example deploy/env/worker.env 后填写本机和 Control 地址。
+# docker compose --env-file deploy/env/worker.env -f docker-compose.worker.yml up -d --build
+
+name: mini-drop-worker
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: deploy/dockerfiles/agent.Dockerfile
+    hostname: ${AGENT_ID:?set AGENT_ID}
+    environment:
+      AGENT_ID: ${AGENT_ID}
+      AGENT_IP_ADDR: ${AGENT_IP_ADDR:?set AGENT_IP_ADDR}
+      AGENT_GRPC_ADDR: ${AGENT_GRPC_ADDR:?set AGENT_GRPC_ADDR}
+      AGENT_HEARTBEAT_INTERVAL_SEC: ${AGENT_HEARTBEAT_INTERVAL_SEC:-5}
+      AGENT_GRPC_SECURE: "1"
+      AGENT_GRPC_CA_CERT: /certs/ca.crt
+      AGENT_GRPC_TLS_SERVER_NAME: ${AGENT_GRPC_TLS_SERVER_NAME:-}
+      MINI_DROP_GRPC_TOKEN: ${MINI_DROP_GRPC_TOKEN:?set MINI_DROP_GRPC_TOKEN}
+      AGENT_UPLOAD_ARTIFACTS: "1"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:?set MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
+      MINIO_SECURE: ${MINIO_SECURE:-0}
+    volumes:
+      - ./deploy/certs:/certs:ro
+      - /sys/kernel/debug:/sys/kernel/debug
+      - /lib/modules:/lib/modules:ro
+    privileged: true
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - PERFMON
+      - SYS_ADMIN
+      - BPF
+      - SYS_RESOURCE
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
+    restart: unless-stopped

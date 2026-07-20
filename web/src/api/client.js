@@ -144,6 +144,26 @@ export function getTaskArtifactContent(taskId, artifactType, params = {}) {
   return api.get(`/tasks/${taskId}/artifacts/${artifactType}/content`, { params });
 }
 
+export async function downloadTaskArtifact(taskId, artifactType, params = {}) {
+  const token = getStoredApiKey();
+  const response = await axios.get(
+    `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactType)}/download`,
+    {
+      params,
+      responseType: "blob",
+      withCredentials: true,
+      headers: token ? { "X-API-Key": token } : {},
+    },
+  );
+  const disposition = response.headers["content-disposition"] || "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  let filename = `${artifactType}.bin`;
+  if (encoded) {
+    try { filename = decodeURIComponent(encoded); } catch { filename = encoded; }
+  }
+  return { blob: response.data, filename };
+}
+
 export function triggerDiagnose(taskId) {
   return api.post(`/tasks/${taskId}/diagnose`);
 }
