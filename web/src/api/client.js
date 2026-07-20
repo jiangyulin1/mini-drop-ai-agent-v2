@@ -224,6 +224,10 @@ export function getAIConfig() {
   return api.get("/ai-config");
 }
 
+export function runAIValidation() {
+  return api.post("/ai-validation/runs", {}, { timeout: 180000 });
+}
+
 export function getCurrentUser() {
   return api.get("/me");
 }

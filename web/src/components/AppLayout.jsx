@@ -24,6 +24,7 @@ const { Sider, Header, Content } = Layout;
 const MENU_ITEMS = [
   { key: "/", icon: <DashboardOutlined />, label: "任务面板" },
   { key: "/ai-diagnosis", icon: <RobotOutlined />, label: "AI 集群诊断" },
+  { key: "/ai-validation", icon: <ExperimentOutlined />, label: "AI 服务验证" },
   { key: "/diagnoses", icon: <ExperimentOutlined />, label: "诊断历史" },
   { key: "/audit", icon: <AuditOutlined />, label: "审计日志" },
   { key: "/settings", icon: <SettingOutlined />, label: "系统设置" },

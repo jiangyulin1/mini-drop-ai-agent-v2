@@ -9,7 +9,7 @@ import json
 import re
 import time
 
-from server.app.ai_provider import chat_completions, is_feature_enabled
+from server.app.ai_provider import chat_completions, get_ai_settings, is_feature_enabled
 from server.app.rca.models import CauseEntry, DiagnosisReport, EvidenceInput, ValidatedReport
 from server.app.rca.prompt import build_system_prompt, build_user_message
 
@@ -21,7 +21,7 @@ def diagnose(
     task_id: str,
     evidence: EvidenceInput,
     candidates_json: str,
-    model_name: str = "deepseek-chat",
+    model_name: str | None = None,
 ) -> ValidatedReport:
     """执行智能归因：LLM 推理 + 校验 + 自修复。
 
@@ -34,6 +34,7 @@ def diagnose(
     Returns:
         ValidatedReport，包含校验通过的 DiagnosisReport。
     """
+    model_name = model_name or get_ai_settings().model
     evidence_json = _serialize_evidence(evidence)
     system_prompt = build_system_prompt(model_name)
     user_message = build_user_message(evidence_json, candidates_json)
@@ -119,6 +120,7 @@ def _call_deepseek(messages: list[dict], model: str) -> str:
         {
             "model": model,
             "messages": messages,
+            "thinking": {"type": "disabled"},
             "temperature": 0.1,  # 低温：归因需要确定性而非创意
             "max_tokens": 2048,
             "response_format": {"type": "json_object"},

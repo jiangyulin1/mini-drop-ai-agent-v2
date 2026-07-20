@@ -50,9 +50,14 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
         response = chat_completions({
             "model": settings.model,
             "messages": messages,
+            "thinking": {"type": "disabled"},
             "temperature": 0,
             "max_tokens": 700,
             "tools": [{"type": "function", "function": function}],
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": "emit_diagnosis_intent"},
+            },
         }, timeout=20)
         if response.status_code != 200:
             return fallback

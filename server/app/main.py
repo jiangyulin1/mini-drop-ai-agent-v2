@@ -28,6 +28,8 @@ import queue as _queue
 from typing import Optional
 
 from server.app.common_utils import status_value
+from server.app.ai_provider import get_ai_settings
+from server.app.ai_validation import AIValidationBusy, run_ai_validation_suite
 from server.app.database import init_db, new_session
 from server.app.event_bus import BUS, notify_diagnosis_complete
 from server.app.prometheus_metrics import record_diagnosis, record_http_request, REGISTRY
@@ -316,6 +318,34 @@ def healthz() -> APIResponse:
         "healthy": all_ok,
         "checks": checks,
     })
+
+
+@app.get("/api/ai-config")
+def ai_config() -> APIResponse:
+    """Return safe AI configuration metadata without exposing the API key."""
+    settings = get_ai_settings()
+    return APIResponse(data={
+        "enabled": settings.enabled,
+        "provider": settings.provider,
+        "base_url": settings.base_url,
+        "model": settings.model,
+        "has_api_key": bool(settings.api_key),
+        "features": {
+            "nlp": settings.nlp_enabled,
+            "rca": settings.rca_enabled,
+            "summarize": settings.summarize_enabled,
+        },
+    })
+
+
+@app.post("/api/ai-validation/runs")
+def run_ai_validation() -> APIResponse:
+    """Run the complete provider + Drop AI validation suite on demand."""
+    try:
+        result = run_ai_validation_suite()
+    except AIValidationBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=result)
 
 
 @app.get("/api/me")

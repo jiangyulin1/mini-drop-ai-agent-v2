@@ -65,15 +65,17 @@ def parse_intent(user_input: str) -> StructuredIntent:
         payload = {
             "model": get_ai_settings().model,
             "messages": messages,
+            "thinking": {"type": "disabled"},
             "temperature": 0.1,
             "max_tokens": 512,
             "tools": [{
                 "type": "function",
                 "function": CREATE_PROFILING_TASK_SCHEMA,
             }],
-            # 不传 tool_choice：deepseek-v4-flash 等推理模型
-            # 不支持强制 tool_choice，让模型自主决定。
-            # 当只有一个 tool 且 system prompt 指示调用时，模型通常会调用。
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": "create_profiling_task"},
+            },
         }
         resp = chat_completions(payload, timeout=20)
 

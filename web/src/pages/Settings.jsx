@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Button,
@@ -23,7 +24,6 @@ import {
   CloseCircleOutlined,
   ExperimentOutlined,
 } from "@ant-design/icons";
-import axios from "axios";
 import {
   healthz,
   getAIConfig,
@@ -40,7 +40,7 @@ export default function Settings() {
   const [aiConfig, setAiConfig] = useState(null);
   const [apiKey, setApiKey] = useState(getStoredApiKey() || "");
   const [savingKey, setSavingKey] = useState(false);
-  const [testingAI, setTestingAI] = useState(false);
+  const navigate = useNavigate();
 
   const load = useCallback(async () => {
     setError("");
@@ -84,20 +84,8 @@ export default function Settings() {
     }
   }
 
-  async function testAI() {
-    setTestingAI(true);
-    try {
-      const resp = await axios.post("/api/nlp/parse", { query: "hello" });
-      if (resp.data?.code === 0) {
-        message.success(`AI Provider 响应正常（策略: ${resp.data.data?.reasoning?.slice(0, 30) || "关键词匹配"}…）`);
-      } else {
-        message.warning(resp.data?.message || "AI 响应异常");
-      }
-    } catch (err) {
-      message.error(err.response?.data?.detail || err.message || "AI 测试失败");
-    } finally {
-      setTestingAI(false);
-    }
+  function testAI() {
+    navigate("/ai-validation");
   }
 
   if (loading) {
@@ -257,10 +245,9 @@ export default function Settings() {
           <Button
             size="small"
             icon={<ExperimentOutlined />}
-            loading={testingAI}
             onClick={testAI}
           >
-            测试 AI 响应
+            打开完整验证
           </Button>
         }
       >

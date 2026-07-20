@@ -14,6 +14,7 @@ SUMMARIZE_SYSTEM_PROMPT = """你是 Mini-Drop 性能诊断报告撰写助手。
 基于以下结构化数据写一段 150 字以内的中文总结。
 格式：(1) 主要发现 (2) 最可能原因 (3) 建议下一步。
 不要编造数据中没有的事实。"""
+MAX_SUMMARY_CHARS = 150
 
 
 def summarize(
@@ -51,11 +52,20 @@ def summarize(
             timeout=20,
         )
         if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"].strip()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            return _truncate_summary(content)
     except Exception as exc:
         log_event("warning", "ai_summarizer_failed", error=str(exc)[:200])
 
     return _template_summary(top_functions, suggestions or [])
+
+
+def _truncate_summary(text: str, limit: int = MAX_SUMMARY_CHARS) -> str:
+    """Enforce the product contract even when a model ignores prompt length."""
+    normalized = text.strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(1, limit - 1)].rstrip("，,；;。 ") + "…"
 
 
 def suggest_followup(

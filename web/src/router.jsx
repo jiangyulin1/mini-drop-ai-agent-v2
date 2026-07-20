@@ -8,6 +8,7 @@ const AuditLogs = lazy(() => import("./pages/AuditLogs"));
 const TaskResult = lazy(() => import("./pages/TaskResult"));
 const DiagnosisHistory = lazy(() => import("./pages/DiagnosisHistory"));
 const AIDiagnosis = lazy(() => import("./pages/AIDiagnosis"));
+const AIValidation = lazy(() => import("./pages/AIValidation"));
 const AgentDetail = lazy(() => import("./pages/AgentDetail"));
 const Settings = lazy(() => import("./pages/Settings"));
 
@@ -34,6 +35,10 @@ export default function Router() {
           <Route
             path="/ai-diagnosis"
             element={<Lazy><AIDiagnosis /></Lazy>}
+          />
+          <Route
+            path="/ai-validation"
+            element={<Lazy><AIValidation /></Lazy>}
           />
           <Route
             path="/diagnoses"

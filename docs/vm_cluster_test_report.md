@@ -88,6 +88,16 @@ Windows `192.168.10.1` 对 Control 的实测结果：
   101Hz 原样解析为受约束结构化参数；
 - Provider 异常时仍保留确定性降级链路，不影响基础采集和规则诊断。
 
+新增 Windows Web 可视化入口 `/ai-validation`。Control 实际运行
+`ai_validation_f9b55950185e`，8/8 项通过，总耗时 7891ms：
+
+- 配置与功能开关、账户可用性、模型发现、基础对话；
+- Drop NLP Tool Call、集群诊断意图及禁止高风险探针/自动修复约束；
+- 150 字硬限制的任务总结；
+- RCA JSON Schema、证据引用和置信度校验（0 次修复重试）。
+
+响应确认未包含 API Key、余额金额或模型原始思维链。
+
 ### 4.3 失败与恢复
 
 - 不存在 PID：`task_20260720_134647_16abc1` 正确进入 `FAILED`，原因明确为目标 PID 不存在；
@@ -103,6 +113,8 @@ Windows `192.168.10.1` 对 Control 的实测结果：
 4. 多采集器观测导致同一实例在 `compared_targets` 中重复展示。
 5. systemd 的 `ProtectHome=true` 会阻止 Agent 读取 Home 目录中的代码和 CA。
 6. Server 启动入口忽略 `SERVER_HOST`，导致 8191 无法限制为回环地址。
+7. NLP Tool Call 默认 `auto` 偶发降级；改为非思考模式并强制指定受控函数。
+8. AI 总结仅靠提示约束字数，模型可能返回 266 字；新增 150 字程序侧硬限制。
 
 上述问题均已添加或通过相应回归测试、实际集群复测验证。
 

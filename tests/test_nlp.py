@@ -15,7 +15,7 @@ from server.app.nlp.intent_parser import (
     parse_intent,
 )
 from server.app.nlp.process_resolver import resolve_pid
-from server.app.nlp.summarizer import summarize, suggest_followup
+from server.app.nlp.summarizer import _truncate_summary, summarize, suggest_followup
 
 
 class TestIntentParsing:
@@ -109,6 +109,24 @@ class TestIntentParsing:
                 assert result.duration_sec == 30
                 assert result.process_name == "mysqld"
 
+    def test_api_call_forces_non_thinking_tool_choice(self):
+        mock_resp = mock.MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"tool_calls": [{"function": {
+                "name": "create_profiling_task",
+                "arguments": json.dumps({
+                    "process_name": "mysqld", "collector_type": "ebpf_io",
+                    "duration_sec": 17, "sample_rate": 101, "reasoning": "explicit",
+                }),
+            }}]}}],
+        }
+        with mock.patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake-key"}):
+            with mock.patch("server.app.nlp.intent_parser.chat_completions", return_value=mock_resp) as call:
+                parse_intent("mysqld IO 17 秒 101Hz")
+        payload = call.call_args.args[0]
+        assert payload["thinking"] == {"type": "disabled"}
+        assert payload["tool_choice"]["function"]["name"] == "create_profiling_task"
+
 
 class TestProcessResolver:
     """进程解析。"""
@@ -174,6 +192,11 @@ class TestSummarizer:
             with mock.patch("server.app.nlp.summarizer.chat_completions", return_value=mock_resp):
                 result = sm.summarize(top)
                 assert "主要发现" in result
+
+    def test_summary_has_hard_character_limit(self):
+        result = _truncate_summary("测" * 300)
+        assert len(result) == 150
+        assert result.endswith("…")
 
 
 class TestFollowup:

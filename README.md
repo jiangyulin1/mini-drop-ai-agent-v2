@@ -524,8 +524,8 @@ MINI_DROP_GRPC_AUTH_ENABLED=1
 export MINI_DROP_AI_ENABLED=full
 export MINI_DROP_AI_PROVIDER=deepseek
 export MINI_DROP_AI_BASE_URL=https://api.deepseek.com
-export MINI_DROP_AI_API_KEY=sk-xxx
-export MINI_DROP_AI_MODEL=deepseek-chat
+export MINI_DROP_AI_API_KEY=<your-key-here>
+export MINI_DROP_AI_MODEL=deepseek-v4-flash
 ```
 
 **开关层级：**
@@ -538,6 +538,11 @@ MINI_DROP_AI_ENABLED=full      → nlp=on,  rca=on,  summarize=on
 ```
 
 不配 API Key 时核心采集/火焰图功能不受影响，AI 功能自动降级为规则引擎。
+
+启动 Web 后访问 `/ai-validation`，可由用户主动运行完整的 Drop AI 验证套件。套件覆盖
+Provider 账户/模型/对话、自然语言任务解析、集群诊断意图与安全约束、AI 总结、RCA
+证据引用校验。页面不会返回 API Key、余额金额或原始思维链；并发运行会被拒绝，避免
+重复消耗 Token。
 
 ---
 

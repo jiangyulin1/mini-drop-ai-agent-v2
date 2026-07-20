@@ -8,6 +8,8 @@
 测试在 setUp 中直接清理 repo 状态。
 """
 
+from unittest import mock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -61,6 +63,30 @@ class TestHealthz:
         resp = client.get("/api/me")
         assert resp.status_code == 200
         assert resp.json()["data"]["user_id"] == "demo_user"
+
+    def test_ai_config_never_returns_key(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_AI_API_KEY", "secret-must-not-leak")
+        monkeypatch.setenv("MINI_DROP_AI_MODEL", "deepseek-v4-flash")
+        resp = client.get("/api/ai-config")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["has_api_key"] is True
+        assert data["model"] == "deepseek-v4-flash"
+        assert "secret-must-not-leak" not in resp.text
+
+    def test_ai_validation_endpoint(self, client: TestClient):
+        result = {
+            "run_id": "ai_validation_test",
+            "status": "PASSED",
+            "passed_count": 8,
+            "failed_count": 0,
+            "total_count": 8,
+            "checks": [],
+        }
+        with mock.patch("server.app.main.run_ai_validation_suite", return_value=result):
+            resp = client.post("/api/ai-validation/runs")
+        assert resp.status_code == 200
+        assert resp.json()["data"]["status"] == "PASSED"
 
 
 class TestStartupMinio:
