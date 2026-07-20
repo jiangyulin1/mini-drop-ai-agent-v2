@@ -514,6 +514,9 @@ MINI_DROP_API_AUTH_ENABLED=1
 MINI_DROP_GRPC_AUTH_ENABLED=1
 ```
 
+Web 顶栏填写的是 `MINI_DROP_API_KEY`（Control REST 访问凭据），不是 AI Provider Key。
+认证失败时 Agent/任务状态显示为“未知”并给出明确提示，不会把接口失败误显示成 0 个 Agent。
+
 ---
 
 ## AI Provider
@@ -539,10 +542,10 @@ MINI_DROP_AI_ENABLED=full      → nlp=on,  rca=on,  summarize=on
 
 不配 API Key 时核心采集/火焰图功能不受影响，AI 功能自动降级为规则引擎。
 
-启动 Web 后访问 `/ai-validation`，可由用户主动运行完整的 Drop AI 验证套件。套件覆盖
+启动 Web 后，可通过“AI 集群诊断”标题区的“AI 服务检测”按钮主动运行完整套件。验证覆盖
 Provider 账户/模型/对话、自然语言任务解析、集群诊断意图与安全约束、AI 总结、RCA
-证据引用校验。页面不会返回 API Key、余额金额或原始思维链；并发运行会被拒绝，避免
-重复消耗 Token。
+证据引用校验。弹窗不会返回 API Key、余额金额或原始思维链；并发运行会被拒绝，避免
+重复消耗 Token，也不额外占用一级导航页面。
 
 ---
 

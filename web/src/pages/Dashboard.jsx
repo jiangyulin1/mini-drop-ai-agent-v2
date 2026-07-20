@@ -102,6 +102,7 @@ export default function Dashboard() {
   const [service, setService] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [agents, setAgents] = useState([]);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
 
   // ── 搜索 / 排序 ──────────────────────────────────────
 
@@ -125,8 +126,17 @@ export default function Dashboard() {
         listAgents(),
       ]);
       if (healthRes.status === "fulfilled") setService(healthRes.value);
-      setTasks(taskRes.status === "fulfilled" ? taskRes.value || [] : []);
-      setAgents(agentRes.status === "fulfilled" ? agentRes.value || [] : []);
+      if (taskRes.status === "fulfilled") setTasks(taskRes.value || []);
+      if (agentRes.status === "fulfilled") {
+        setAgents(agentRes.value || []);
+        setAgentsLoaded(true);
+      } else {
+        setAgentsLoaded(false);
+      }
+      const failures = [taskRes, agentRes]
+        .filter((item) => item.status === "rejected")
+        .map((item) => item.reason?.message || "数据加载失败");
+      if (failures.length) setError([...new Set(failures)].join("；"));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -460,13 +470,13 @@ export default function Dashboard() {
                   </Typography.Text>
                 </Space>
               }
-              value={stats.onlineCount}
+              value={agentsLoaded ? stats.onlineCount : "—"}
               suffix={
                 <Typography.Text style={{ fontSize: FONT_SIZES.sm, color: COLORS.textSecondary }}>
-                  / {stats.onlineCount + stats.offlineCount}
+                  {agentsLoaded ? `/ ${stats.onlineCount + stats.offlineCount}` : "认证后显示"}
                 </Typography.Text>
               }
-              valueStyle={{ fontSize: 28, color: stats.onlineCount > 0 ? COLORS.success : COLORS.offline }}
+              valueStyle={{ fontSize: 28, color: agentsLoaded && stats.onlineCount > 0 ? COLORS.success : COLORS.offline }}
             />
           </Card>
         </Col>
@@ -554,8 +564,14 @@ export default function Dashboard() {
               <Typography.Text style={{ fontSize: FONT_SIZES.sm, color: COLORS.textSecondary }}>
                 Agent 状态：
               </Typography.Text>
-              <Badge status="success" text={`${stats.onlineCount} 在线`} />
-              <Badge status="default" text={`${stats.offlineCount} 离线`} />
+              {agentsLoaded ? (
+                <>
+                  <Badge status="success" text={`${stats.onlineCount} 在线`} />
+                  <Badge status="default" text={`${stats.offlineCount} 离线`} />
+                </>
+              ) : (
+                <Tag color="red">认证失败，状态未知</Tag>
+              )}
               {recentDone.length > 0 && (
                 <Tag icon={<ExperimentOutlined />} color="purple">
                   最近完成: {recentDone.map((t) => t.name || t.id?.slice(0, 6)).join(", ")}
@@ -634,7 +650,7 @@ export default function Dashboard() {
           <Space>
             <CloudServerOutlined style={{ color: COLORS.success }} />
             Agent 列表
-            <Tag>{agents.length}</Tag>
+            <Tag>{agentsLoaded ? agents.length : "未知"}</Tag>
           </Space>
         }
         size="small"
@@ -646,7 +662,7 @@ export default function Dashboard() {
           pagination={false}
           size="middle"
           scroll={{ x: 800 }}
-          locale={{ emptyText: "暂无 Agent 注册，请在目标主机上启动 Agent" }}
+          locale={{ emptyText: agentsLoaded ? "暂无 Agent 注册，请在目标主机上启动 Agent" : "认证后加载 Agent 数据" }}
         />
       </Card>
     </Space>

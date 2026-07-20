@@ -10,6 +10,7 @@ import {
   Input,
   InputNumber,
   List,
+  Modal,
   Row,
   Select,
   Space,
@@ -23,6 +24,7 @@ import {
 import {
   CheckOutlined,
   CloseOutlined,
+  ExperimentOutlined,
   MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -35,6 +37,7 @@ import {
   getDiagnosisSession,
   listAgents,
   listDiagnosisSessions,
+  runAIValidation,
 } from "../api/client";
 
 const TERMINAL = new Set([
@@ -69,6 +72,7 @@ export default function AIDiagnosis() {
   const [sessions, setSessions] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [validationRunning, setValidationRunning] = useState(false);
   const [error, setError] = useState("");
   const watchedInstances = Form.useWatch("instances", form) || [];
 
@@ -179,6 +183,62 @@ export default function AIDiagnosis() {
     }
   }
 
+  async function executeAIValidation() {
+    setValidationRunning(true);
+    try {
+      const result = await runAIValidation();
+      const columns = [
+        { title: "层级", dataIndex: "layer", width: 130 },
+        { title: "验证项", dataIndex: "name", width: 210 },
+        {
+          title: "结果",
+          dataIndex: "status",
+          width: 90,
+          render: (value) => <Tag color={value === "PASS" ? "green" : "red"}>{value === "PASS" ? "通过" : "失败"}</Tag>,
+        },
+        { title: "耗时", dataIndex: "duration_ms", width: 100, render: (value) => `${value} ms` },
+        { title: "说明", dataIndex: "detail" },
+      ];
+      const open = result.status === "PASSED" ? Modal.success : Modal.warning;
+      open({
+        title: `Drop AI 服务检测：${result.passed_count}/${result.total_count} 通过`,
+        width: 1000,
+        content: (
+          <Space direction="vertical" style={{ width: "100%" }}>
+            <Alert
+              type={result.status === "PASSED" ? "success" : "warning"}
+              showIcon
+              message={`${result.provider} / ${result.model} · 总耗时 ${result.duration_ms} ms`}
+              description="结果不包含 AI Key、余额金额或原始思维链。"
+            />
+            <Table
+              rowKey="check_id"
+              columns={columns}
+              dataSource={result.checks || []}
+              pagination={false}
+              size="small"
+              scroll={{ x: 850 }}
+            />
+          </Space>
+        ),
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setValidationRunning(false);
+    }
+  }
+
+  function requestAIValidation() {
+    Modal.confirm({
+      title: "运行 Drop AI 服务检测？",
+      content: "将真实调用 Provider、NLP、集群意图、总结和 RCA，产生少量 Token 费用。",
+      okText: "开始检测",
+      cancelText: "取消",
+      onOk: executeAIValidation,
+    });
+  }
+
   const agentOptions = agents.map((agent) => ({
     value: agent.id,
     label: `${agent.hostname || agent.id} · ${agent.status}`,
@@ -201,6 +261,14 @@ export default function AIDiagnosis() {
         <RobotOutlined style={{ fontSize: 22, color: "#722ed1" }} />
         <Typography.Title level={4} style={{ margin: 0 }}>AI 集群诊断</Typography.Title>
         <Tag color="purple">证据驱动</Tag>
+        <Button
+          size="small"
+          icon={<ExperimentOutlined />}
+          loading={validationRunning}
+          onClick={requestAIValidation}
+        >
+          AI 服务检测
+        </Button>
       </Space>
 
       <Alert

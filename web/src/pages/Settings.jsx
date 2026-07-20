@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Button,
@@ -22,7 +21,6 @@ import {
   ReloadOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  ExperimentOutlined,
 } from "@ant-design/icons";
 import {
   healthz,
@@ -40,7 +38,6 @@ export default function Settings() {
   const [aiConfig, setAiConfig] = useState(null);
   const [apiKey, setApiKey] = useState(getStoredApiKey() || "");
   const [savingKey, setSavingKey] = useState(false);
-  const navigate = useNavigate();
 
   const load = useCallback(async () => {
     setError("");
@@ -82,10 +79,6 @@ export default function Settings() {
     } finally {
       setSavingKey(false);
     }
-  }
-
-  function testAI() {
-    navigate("/ai-validation");
   }
 
   if (loading) {
@@ -230,37 +223,6 @@ export default function Settings() {
             showIcon
           />
         )}
-      </Card>
-
-      {/* AI 测试 */}
-      <Card
-        title={
-          <Space>
-            <RobotOutlined style={{ color: COLORS.warning }} />
-            AI 连通性测试
-          </Space>
-        }
-        size="small"
-        extra={
-          <Button
-            size="small"
-            icon={<ExperimentOutlined />}
-            onClick={testAI}
-          >
-            打开完整验证
-          </Button>
-        }
-      >
-        <Alert
-          type={aiConfig?.has_api_key ? "success" : "warning"}
-          message={aiConfig?.has_api_key ? `AI Provider: ${aiConfig.provider} / ${aiConfig.model}` : "AI Provider 未配置"}
-          description={
-            aiConfig?.has_api_key
-              ? `策略模式: ${aiConfig.enabled} · NLP: ${aiConfig.features?.nlp ? "开" : "关"} · RCA: ${aiConfig.features?.rca ? "开" : "关"} · 摘要: ${aiConfig.features?.summarize ? "开" : "关"}`
-              : "请设置 MINI_DROP_AI_API_KEY 等环境变量启用 AI 功能"
-          }
-          showIcon
-        />
       </Card>
 
       {/* API 认证 */}

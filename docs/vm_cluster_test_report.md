@@ -88,7 +88,8 @@ Windows `192.168.10.1` 对 Control 的实测结果：
   101Hz 原样解析为受约束结构化参数；
 - Provider 异常时仍保留确定性降级链路，不影响基础采集和规则诊断。
 
-新增 Windows Web 可视化入口 `/ai-validation`。Control 实际运行
+在 Windows Web 的“AI 集群诊断”标题区新增“AI 服务检测”按钮，通过弹窗展示分项结果。
+Control 实际运行
 `ai_validation_f9b55950185e`，8/8 项通过，总耗时 7891ms：
 
 - 配置与功能开关、账户可用性、模型发现、基础对话；
@@ -115,6 +116,8 @@ Windows `192.168.10.1` 对 Control 的实测结果：
 6. Server 启动入口忽略 `SERVER_HOST`，导致 8191 无法限制为回环地址。
 7. NLP Tool Call 默认 `auto` 偶发降级；改为非思考模式并强制指定受控函数。
 8. AI 总结仅靠提示约束字数，模型可能返回 266 字；新增 150 字程序侧硬限制。
+9. Windows 浏览器未保存 `MINI_DROP_API_KEY` 时 `/api/agents` 返回 401，但旧页面把失败结果
+   清空成 0 个 Agent；现改为“状态未知”并明确提示在顶栏保存 Control API Key。
 
 上述问题均已添加或通过相应回归测试、实际集群复测验证。
 

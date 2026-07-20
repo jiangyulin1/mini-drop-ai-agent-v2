@@ -37,7 +37,9 @@ api.interceptors.response.use(
     throw new Error(body.message || "未知错误");
   },
   (err) => {
-    const detail = err.response?.data?.detail || err.message;
+    const detail = err.response?.status === 401
+      ? "访问认证失败：请在右上角填写 Mini-Drop API Key 并点击保存"
+      : err.response?.data?.detail || err.message;
     throw new Error(detail);
   },
 );
