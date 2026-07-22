@@ -306,6 +306,10 @@ def test_existing_structured_evidence_uses_legal_transition_and_completes(client
     assert response.status_code == 200
     detail = response.json()["data"]
     assert detail["status"] == "COMPLETED"
+    assert len(detail["coverage"]) == 1
+    assert detail["coverage"][0]["target"] == "service-a-1"
+    assert detail["coverage"][0]["status"] == "COMPLETED"
+    assert detail["coverage"][0]["task_id"] == task_id
     transitions = [(event["from_status"], event["to_status"]) for event in detail["events"]]
     assert ("ANALYZING_EXISTING_DATA", "ANALYZING") in transitions
     assert ("ANALYZING", "CONCLUDING") in transitions

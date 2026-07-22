@@ -175,6 +175,30 @@ class DiagnosisOrchestrator:
             require_fresh=intent.diagnosis_mode == DiagnosisMode.LIVE,
         )
         if existing_ids:
+            for task_id in existing_ids:
+                task = self.repo.tasks.get(task_id)
+                if task is None:
+                    continue
+                target = next((
+                    item for item in target_scope.get("instances", [])
+                    if item.get("agent_id") == task.agent_id
+                    and int(item.get("pid", 0) or 0) == int(task.target_pid)
+                ), None)
+                if target is None:
+                    continue
+                reuse_key = f"{diagnosis_id}:reuse:{task_id}"
+                self.store.add_probe({
+                    "step_id": f"step_{hashlib.sha256(reuse_key.encode()).hexdigest()[:14]}",
+                    "diagnosis_id": diagnosis_id,
+                    "probe_id": "host_process_metrics",
+                    "target": target,
+                    "parameters": {"reused_task_id": task_id},
+                    "reason": "复用时间窗、目标和质量均满足策略的已有结构化证据。",
+                    "risk_level": "R1",
+                    "requires_approval": False,
+                    "status": "COMPLETED",
+                    "task_id": task_id,
+                })
             self._complete_node(
                 diagnosis_id, "plan_evidence",
                 input_refs=["target_scope", "hypothesis_graph"],

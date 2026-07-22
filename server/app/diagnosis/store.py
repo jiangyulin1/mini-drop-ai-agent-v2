@@ -412,6 +412,7 @@ class DiagnosisStore:
                 reason=probe["reason"],
                 risk_level=probe["risk_level"],
                 status=probe["status"],
+                task_id=probe.get("task_id"),
                 requires_approval=1 if probe.get("requires_approval") else 0,
                 created_at=now,
                 updated_at=now,
