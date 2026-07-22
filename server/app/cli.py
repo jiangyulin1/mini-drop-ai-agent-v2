@@ -11,6 +11,7 @@ import server.app._env  # noqa: F401 — 自动加载 .env
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -89,12 +90,19 @@ def main(argv: list[str] | None = None) -> int:
     p_collect.add_argument("--agent", required=True, help="target agent ID")
     p_collect.add_argument("--pid", type=int, required=True, help="target process PID")
     p_collect.add_argument("--collector", default="perf_cpu",
-                           choices=["perf_cpu", "ebpf_io", "pyspy", "continuous_perf", "java_async", "go_pprof", "memory_smaps"])
+                           choices=["perf_cpu", "ebpf_io", "pyspy", "continuous_perf", "java_async", "go_pprof", "memory_smaps", "sys_metrics"])
     p_collect.add_argument("--duration", type=int, default=15)
     p_collect.add_argument("--sample-rate", type=int, default=99)
     p_collect.add_argument("--name", default="", help="task display name")
     p_collect.add_argument("--watch", action="store_true", default=True, help="poll until terminal (default)")
     p_collect.add_argument("--no-watch", action="store_false", dest="watch")
+    p_collect.add_argument("--api-key-env", default="MINI_DROP_API_KEY",
+                           help="environment variable containing the API key")
+
+    p_inspect = sub.add_parser("diagnosis-inspect", help="inspect one diagnosis session via Server API")
+    p_inspect.add_argument("--url", default="http://localhost:8191")
+    p_inspect.add_argument("--diagnosis-id", required=True)
+    p_inspect.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_status = sub.add_parser("status", help="query Server/Agent status")
     p_status.add_argument("--url", default="http://localhost:8191")
@@ -453,7 +461,7 @@ def _cmd_collect(args) -> int:
     req = urllib.request.Request(
         f"{url}/api/tasks",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_api_headers(args.api_key_env)},
         method="POST",
     )
     try:
@@ -475,7 +483,33 @@ def _cmd_collect(args) -> int:
         return 0
 
     # 复用 watch 逻辑
-    return _watch_until_terminal(url, task_id)
+    return _watch_until_terminal(url, task_id, api_key_env=args.api_key_env)
+
+
+def _cmd_diagnosis_inspect(args) -> int:
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(
+        f"{args.url.rstrip('/')}/api/v1/diagnoses/{args.diagnosis_id}",
+        headers=_api_headers(args.api_key_env), method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read())
+        _print_json(payload.get("data", payload))
+        return 0
+    except urllib.error.HTTPError as exc:
+        _print_json({"error": f"HTTP {exc.code}", "detail": exc.read().decode("utf-8", errors="replace")})
+        return 1
+    except urllib.error.URLError as exc:
+        _print_json({"error": f"cannot reach {args.url}: {exc.reason}"})
+        return 1
+
+
+def _api_headers(environment_name: str = "MINI_DROP_API_KEY") -> dict[str, str]:
+    key = os.getenv(environment_name, "")
+    return {"Authorization": f"Bearer {key}"} if key else {}
 
 
 def _cmd_status(args) -> int:
@@ -1074,14 +1108,23 @@ def _cmd_install_check(args) -> int:
     return 0 if all_ok else 1
 
 
-def _watch_until_terminal(url: str, task_id: str, interval: float = 2.0, timeout: float = 120.0) -> int:
+def _watch_until_terminal(
+    url: str,
+    task_id: str,
+    interval: float = 2.0,
+    timeout: float = 120.0,
+    api_key_env: str = "MINI_DROP_API_KEY",
+) -> int:
     """轮询任务状态直到终止。"""
     import urllib.request
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(interval)
         try:
-            with urllib.request.urlopen(f"{url}/api/tasks/{task_id}", timeout=5) as resp:
+            request = urllib.request.Request(
+                f"{url}/api/tasks/{task_id}", headers=_api_headers(api_key_env), method="GET",
+            )
+            with urllib.request.urlopen(request, timeout=5) as resp:
                 data = json.loads(resp.read())
             task = data.get("data", {})
             status = task.get("status", "UNKNOWN")
@@ -1110,6 +1153,7 @@ _COMMANDS = {
     "suggest": _cmd_suggest,
     "completion": _cmd_completion,
     "collect": _cmd_collect,
+    "diagnosis-inspect": _cmd_diagnosis_inspect,
     "status": _cmd_status,
     "perf-top": _cmd_perf_top,
     "version": _cmd_version,

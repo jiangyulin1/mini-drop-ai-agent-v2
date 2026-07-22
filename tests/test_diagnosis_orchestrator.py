@@ -8,8 +8,9 @@ from fastapi.testclient import TestClient
 
 from server.app.database import init_db, reset_engine
 from server.app.diagnosis import orchestrator as orchestrator_module
-from server.app.diagnosis.domain_analyzers import analyze_observations
-from server.app.diagnosis.report_verifier import verify_report
+from server.app.diagnosis.actions import collect_action
+from server.app.diagnosis.domain_analyzers import analyze_observations, assess_cluster, cluster_finding
+from server.app.diagnosis.report_verifier import evidence_integrity_hash, verify_report
 from server.app.diagnosis.schemas import ApprovalRequest
 from server.app.main import app, repo
 from server.app.main import diagnosis_orchestrator
@@ -114,6 +115,50 @@ def test_verifier_rejects_downstream_claim_without_evidence():
     }, [], {"instances": []})
     assert result["status"] == "failed"
     assert any("缺少 Evidence" in issue for issue in result["issues"])
+
+
+def test_root_location_and_domain_cause_are_independent():
+    scope = {"target_service": "a", "downstream_service_ids": ["b"], "same_host_instance_ids": []}
+    observations = [
+        {"target": {"service_id": "a", "instance_id": "a1"}, "facts": {},
+         "pressure": {}, "evidence_refs": ["ev-a"]},
+        {"target": {"service_id": "b", "instance_id": "b1"},
+         "facts": {"packet_loss_pct": 3}, "pressure": {"network": True}, "evidence_refs": ["ev-b"]},
+    ]
+    result = assess_cluster(scope, observations)
+    assert result["root_location"]["type"] == "downstream"
+    assert result["domain_cause"]["type"] == "network"
+    assert "linux.cpu.process_pressure" not in cluster_finding(result)["knowledge_ids"]
+
+
+def test_verifier_detects_rendered_command_tampering():
+    action = collect_action(
+        action_id="a", title="collect", collector_type="sys_metrics",
+        target={"agent_id": "a1", "pid": 1234}, duration_sec=15, sample_rate=11,
+        comment="test", risk_level="R1", evidence_refs=[], confidence_level="中",
+    )
+    action["rendered_command"] += " --duration 99"
+    result = verify_report({"actions": [action]}, [], {"instances": [{"agent_id": "a1", "pid": 1234}]})
+    assert result["status"] == "failed"
+    assert any("preview" in issue for issue in result["issues"])
+
+
+def test_verifier_recomputes_full_evidence_hash():
+    evidence = {
+        "evidence_id": "ev1", "source_type": "derived_artifact", "source_system": "agent",
+        "evidence_role": "incident", "target": {"agent_id": "a1", "pid": 1234},
+        "event_time_range": {}, "ingestion_time": datetime.now(timezone.utc),
+        "query_or_probe": "sys_metrics", "raw_artifact_ref": None, "derived_artifact_ref": "x",
+        "derivation_version": "v2", "observed_value": {"cpu": 1}, "baseline_value": {},
+        "anomaly_score": {}, "data_quality": {"domains": ["host"]}, "claim_links": [],
+    }
+    evidence["integrity_hash"] = evidence_integrity_hash(evidence)
+    evidence["observed_value"]["cpu"] = 2
+    result = verify_report(
+        {"root_location": {"type": "self", "target_ref": "i1", "evidence_refs": ["ev1"]}, "actions": []},
+        [evidence], {"instances": [{"agent_id": "a1", "pid": 1234}]},
+    )
+    assert any("Hash" in issue for issue in result["issues"])
 
 
 def test_five_instances_are_covered_in_bounded_batches(client: TestClient):

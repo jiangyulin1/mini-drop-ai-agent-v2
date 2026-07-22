@@ -214,6 +214,7 @@ class DiagnosisAction(StrictModel):
     collector_type: Optional[str] = Field(default=None, max_length=64)
     target: ActionTarget
     parameters: dict[str, Any] = Field(default_factory=dict)
+    renderer_version: Literal["cli-renderer-v2"] = "cli-renderer-v2"
     rendered_command: str = Field(min_length=1, max_length=2048)
     comment: str = Field(min_length=1, max_length=1000)
     risk_level: Literal["R0", "R1", "R2", "R3"]
@@ -252,6 +253,18 @@ class DomainFinding(StrictModel):
     missing_evidence: list[str] = Field(default_factory=list)
     facts: dict[str, Any] = Field(default_factory=dict)
     knowledge_ids: list[str] = Field(default_factory=list)
+
+
+class RootLocation(StrictModel):
+    type: Literal["self", "same_host", "downstream", "shared_resource", "unknown"]
+    target_ref: Optional[str] = None
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class DomainCause(StrictModel):
+    type: Literal["cpu", "io", "memory", "network", "database", "runtime", "unknown"]
+    subtype: str = "unknown"
+    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class ReportVerification(StrictModel):

@@ -24,7 +24,7 @@ from server.app.diagnosis.domain_analyzers import (
 )
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe
-from server.app.diagnosis.report_verifier import verify_report
+from server.app.diagnosis.report_verifier import evidence_integrity_hash, verify_report
 from server.app.diagnosis.schemas import (
     ApprovalRequest,
     CreateDiagnosisRequest,
@@ -873,6 +873,8 @@ class DiagnosisOrchestrator:
             "evidence_scope": "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident",
             "confidence_level": cluster_assessment["confidence_level"] or (deduped[0]["confidence_level"] if deduped else "不可判断"),
             "cluster_assessment": cluster_assessment,
+            "root_location": cluster_assessment["root_location"],
+            "domain_cause": cluster_assessment["domain_cause"],
             "findings": findings,
             "root_cause_candidates": deduped,
             "ruled_out": cluster_assessment["ruled_out"],
@@ -1050,6 +1052,8 @@ class DiagnosisOrchestrator:
                 "compared_targets": [],
                 "ruled_out": [],
             },
+            "root_location": {"type": "unknown", "target_ref": None, "evidence_refs": []},
+            "domain_cause": {"type": "unknown", "subtype": "unknown", "evidence_refs": []},
             "root_cause_candidates": [],
             "ruled_out": [],
             "actions": actions,
@@ -1137,6 +1141,8 @@ class DiagnosisOrchestrator:
             "evidence_scope": "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident",
             "confidence_level": "不可判断",
             "cluster_assessment": assessment,
+            "root_location": assessment["root_location"],
+            "domain_cause": assessment["domain_cause"],
             "findings": [finding],
             "root_cause_candidates": [],
             "ruled_out": [],
@@ -1185,12 +1191,11 @@ class DiagnosisOrchestrator:
             "agent_id": task.agent_id,
             "target_pid": task.target_pid,
         }
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
         identity = hashlib.sha256(f"{diagnosis_id}:{task.id}:task".encode()).hexdigest()
         evidence_id = f"ev_{identity[:20]}"
         session = self.store.get_session(diagnosis_id) or {}
         evidence_role = "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident"
-        self.store.add_evidence({
+        evidence_record = {
             "evidence_id": evidence_id,
             "diagnosis_id": diagnosis_id,
             "source_type": "task_event",
@@ -1202,13 +1207,19 @@ class DiagnosisOrchestrator:
                 "end": _iso(task.finished_at or utcnow()),
                 "clock_skew_estimate_ms": None,
             },
+            "ingestion_time": utcnow(),
             "query_or_probe": task.collector_type,
             "derived_artifact_ref": f"task:{task.id}",
             "derivation_version": PLANNER_VERSION,
             "observed_value": payload,
-            "data_quality": {"completeness": "high" if status_value(task.status) == "DONE" else "low"},
-            "integrity_hash": f"sha256:{digest}",
-        })
+            "baseline_value": {},
+            "anomaly_score": {},
+            "claim_links": [],
+            "data_quality": {"completeness": "high" if status_value(task.status) == "DONE" else "low",
+                             "domains": ["task"]},
+        }
+        evidence_record["integrity_hash"] = evidence_integrity_hash(evidence_record)
+        self.store.add_evidence(evidence_record)
         return evidence_id
 
     def _add_artifact_evidence(
@@ -1227,7 +1238,13 @@ class DiagnosisOrchestrator:
         evidence_id = f"ev_{identity[:20]}"
         session = self.store.get_session(diagnosis_id) or {}
         evidence_role = "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident"
-        self.store.add_evidence({
+        domains = {
+            "sys_metrics": ["host", "process", "container"], "top_json": ["process"],
+            "ebpf_metrics": ["host", "process"], "memory_json": ["process"],
+            "network_metrics": ["host", "dependency"], "database_metrics": ["dependency"],
+            "runtime_metrics": ["process", "runtime"],
+        }.get(artifact_type, [])
+        evidence_record = {
             "evidence_id": evidence_id,
             "diagnosis_id": diagnosis_id,
             "source_type": "derived_artifact",
@@ -1240,14 +1257,19 @@ class DiagnosisOrchestrator:
                 "sampling_period_seconds": task.duration_sec,
                 "clock_skew_estimate_ms": None,
             },
+            "ingestion_time": utcnow(),
             "query_or_probe": task.collector_type,
             "raw_artifact_ref": f"task:{task.id}:artifact:{artifact_type}",
             "derived_artifact_ref": artifact.get("object_key") or artifact.get("local_path"),
             "derivation_version": PLANNER_VERSION,
             "observed_value": _summarize_value(value),
-            "data_quality": _artifact_quality(value, len(serialized), task.duration_sec),
-            "integrity_hash": f"sha256:{digest}",
-        })
+            "baseline_value": {},
+            "anomaly_score": {},
+            "claim_links": [],
+            "data_quality": {**_artifact_quality(value, len(serialized), task.duration_sec), "domains": domains},
+        }
+        evidence_record["integrity_hash"] = evidence_integrity_hash(evidence_record)
+        self.store.add_evidence(evidence_record)
         session = self.store.get_session(diagnosis_id)
         if session is not None:
             usage = dict(session.get("budget_used", {}))

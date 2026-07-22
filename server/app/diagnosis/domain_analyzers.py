@@ -119,6 +119,23 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
                 "evidence_refs": all_refs,
             })
 
+    location_type = {
+        "host_resource_contention": "shared_resource",
+        "same_host_noisy_neighbor": "same_host",
+        "downstream_dependency": "downstream",
+        "self_code_or_process_pressure": "self",
+    }.get(classification, "unknown")
+    selected = {
+        "same_host": same_host_obs,
+        "downstream": downstream_obs,
+        "self": target_obs,
+        "shared_resource": target_obs + same_host_obs,
+    }.get(location_type, [])
+    selected_refs = _unique_refs(selected)
+    target_ref = None
+    if selected:
+        target_ref = selected[0].get("target", {}).get("instance_id") or selected[0].get("target", {}).get("host_id")
+    domain_type, subtype = _domain_cause(selected)
     legacy_confidence = {"不可判断": 0.0, "低": 0.3, "中": 0.65, "高": 0.82}[confidence_level]
     return {
         "classification": classification,
@@ -129,6 +146,8 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         "evidence_refs": all_refs,
         "compared_targets": list(compared_by_instance.values()),
         "ruled_out": ruled_out,
+        "root_location": {"type": location_type, "target_ref": target_ref, "evidence_refs": selected_refs},
+        "domain_cause": {"type": domain_type, "subtype": subtype, "evidence_refs": selected_refs},
     }
 
 
@@ -139,6 +158,19 @@ def cluster_finding(assessment: dict[str, Any]) -> dict[str, Any]:
         "downstream_dependency": ["distributed.downstream_pressure"],
         "self_code_or_process_pressure": ["linux.cpu.process_pressure"],
     }
+    domain_knowledge = {
+        "cpu": ["linux.cpu.process_pressure"],
+        "io": ["linux.iowait.shared_block_device"],
+        "memory": ["linux.memory.process_growth"],
+        "network": ["linux.network.retransmit"],
+        "database": ["mysql.lock_wait"],
+        "runtime": ["jvm.gc.pressure"],
+    }
+    domain = assessment.get("domain_cause", {})
+    location_knowledge = knowledge_map.get(assessment["classification"], [])
+    cause_knowledge = domain_knowledge.get(domain.get("type"), [])
+    if domain.get("type") == "cpu" and domain.get("subtype") != "process_cpu_hotspot":
+        cause_knowledge = []
     finding = DomainFinding(
         finding_id=f"finding.cluster.{assessment['classification']}",
         analyzer_id="cluster_assessor.v2",
@@ -152,7 +184,7 @@ def cluster_finding(assessment: dict[str, Any]) -> dict[str, Any]:
             "目标、同宿主或下游的区分性指标",
         ],
         facts={"confidence_factors": assessment.get("confidence_factors", {})},
-        knowledge_ids=knowledge_map.get(assessment["classification"], []),
+        knowledge_ids=list(dict.fromkeys(location_knowledge + cause_knowledge)),
     )
     return finding.model_dump(mode="json")
 
@@ -215,7 +247,7 @@ def _analyze_io(obs: dict[str, Any]) -> list[DomainFinding]:
     block_latency_high = bool(obs.get("pressure", {}).get("block_latency_high"))
     if iowait < 10 and not block_latency_high:
         return []
-    return [_finding(obs, "io_wait_analyzer.v1", "io", "io_wait_high",
+    return [_finding(obs, "io_wait_analyzer.v2", "io", "io_wait_high",
         "I/O 等待或块设备延迟偏高，需要区分单进程 I/O、同宿主竞争和设备异常。",
         facts={"cpu_iowait_pct": iowait}, knowledge_ids=["linux.iowait.shared_block_device"],
         missing=[] if block_latency_high else ["块设备延迟直方图"])]
@@ -229,7 +261,7 @@ def _analyze_memory(obs: dict[str, Any]) -> list[DomainFinding]:
     if trend not in {"increasing", "growing"} and rss_max < 2048:
         return []
     finding_type = "rss_growth" if trend in {"increasing", "growing"} else "high_rss"
-    return [_finding(obs, "memory_pressure_analyzer.v1", "memory", finding_type,
+    return [_finding(obs, "memory_pressure_analyzer.v2", "memory", finding_type,
         "进程 RSS 呈增长趋势或已达到较高水位，应结合限制、回收行为和对象分配继续确认。",
         facts={"vmrss_mb": rss, "vmrss_mb_max": rss_max, "trend": trend or "unknown"},
         knowledge_ids=["linux.memory.process_growth"],
@@ -289,6 +321,24 @@ def _unique_refs(observations: list[dict[str, Any]]) -> list[str]:
             if ref not in result:
                 result.append(ref)
     return result
+
+
+def _domain_cause(observations: list[dict[str, Any]]) -> tuple[str, str]:
+    facts = [_facts(obs) for obs in observations]
+    if any(_num(item.get("mysql_lock_wait_count")) > 0 or _num(item.get("mysql_lock_wait_seconds")) > 0 for item in facts):
+        return "database", "mysql_lock_wait"
+    if any(_num(item.get("jvm_gc_pause_p95_ms")) >= 200 or _num(item.get("jvm_gc_time_pct")) >= 10 for item in facts):
+        return "runtime", "jvm_gc_pressure"
+    if any(_num(item.get("packet_loss_pct")) >= 1 or _num(item.get("tcp_retransmit_pct")) >= 1 for item in facts):
+        return "network", "packet_loss_or_retransmit"
+    if any(obs.get("pressure", {}).get("block_latency_high") or obs.get("pressure", {}).get("io_wait") for obs in observations):
+        return "io", "host_or_shared_io_pressure"
+    if any(obs.get("pressure", {}).get("memory") for obs in observations):
+        return "memory", "process_or_container_memory_pressure"
+    if any(obs.get("pressure", {}).get("cpu") for obs in observations):
+        process_hot = any(_has_self_hotspot(obs) for obs in observations)
+        return "cpu", "process_cpu_hotspot" if process_hot else "host_cpu_saturation"
+    return "unknown", "unknown"
 
 
 def _num(value: Any) -> float:

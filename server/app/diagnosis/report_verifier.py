@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import shlex
 from typing import Any
 
 from pydantic import ValidationError
 
 from server.app.diagnosis.knowledge import knowledge_ids
+from server.app.diagnosis.actions import render_action_argv
+from server.app.diagnosis.domain_analyzers import ANALYZER_CONTRACTS
 from server.app.diagnosis.probe_registry import list_probes
-from server.app.diagnosis.schemas import DiagnosisAction, ReportVerification
+from server.app.diagnosis.schemas import (
+    DiagnosisAction, DomainCause, DomainFinding, ReportVerification, RootLocation,
+)
 
 
 LEGACY_ACTION_FIELDS = {"command_id", "command", "confidence"}
@@ -38,6 +45,25 @@ def verify_report(
     if unknown_knowledge:
         issues.append(f"未知 knowledge_refs: {unknown_knowledge}")
 
+    for model, key in ((RootLocation, "root_location"), (DomainCause, "domain_cause")):
+        if key in conclusion:
+            try:
+                model.model_validate(conclusion[key])
+            except ValidationError as exc:
+                issues.append(f"{key} Schema 校验失败: {exc.errors()[0]['msg']}")
+
+    registered_analyzers = set(ANALYZER_CONTRACTS) | {"cluster_assessor.v2"}
+    for raw_finding in conclusion.get("findings", []):
+        try:
+            finding = DomainFinding.model_validate(raw_finding)
+        except ValidationError as exc:
+            issues.append(f"Finding Schema 校验失败: {exc.errors()[0]['msg']}")
+            continue
+        if finding.analyzer_id not in registered_analyzers:
+            issues.append(f"未注册 Analyzer: {finding.analyzer_id}")
+        if finding.severity != "info" and not finding.evidence_refs:
+            issues.append(f"Finding 缺少 Evidence: {finding.finding_id}")
+
     allowed_targets = {
         (item.get("agent_id"), item.get("pid"))
         for item in target_scope.get("instances", [])
@@ -47,6 +73,8 @@ def verify_report(
         target = item.get("target", {})
         if (target.get("agent_id"), target.get("pid")) not in allowed_targets:
             issues.append(f"Evidence 目标不在诊断范围: {ref}")
+        if item.get("integrity_hash") and item["integrity_hash"] != evidence_integrity_hash(item):
+            issues.append(f"Evidence Hash 校验失败: {ref}")
 
     for claim_name, refs in _substantive_claims(conclusion):
         if not refs:
@@ -69,11 +97,19 @@ def verify_report(
             continue
         if "\n" in action.rendered_command or "\r" in action.rendered_command:
             issues.append(f"Action 包含非法换行: {action.action_id}")
+        try:
+            expected_argv = render_action_argv(action)
+            if shlex.split(action.rendered_command) != expected_argv:
+                issues.append(f"Action preview 与结构化字段不一致: {action.action_id}")
+        except (ValueError, KeyError) as exc:
+            issues.append(f"Action 无法重渲染: {action.action_id}: {exc}")
         if action.action_type == "collect":
             if action.collector_type not in registered_collectors:
                 issues.append(f"Action 使用未注册采集器: {action.collector_type}")
             if (action.target.agent_id, action.target.pid) not in allowed_targets:
                 issues.append(f"Action 目标不在诊断范围: {action.action_id}")
+            if not action.parameters.get("api_key_env"):
+                issues.append(f"Action 未配置 CLI 认证来源: {action.action_id}")
         if action.auto_execute is not False:
             issues.append(f"Action 禁止自动执行: {action.action_id}")
 
@@ -148,6 +184,32 @@ def _parse_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+EVIDENCE_HASH_FIELDS = (
+    "source_type", "source_system", "evidence_role", "target", "event_time_range",
+    "ingestion_time", "query_or_probe", "raw_artifact_ref", "derived_artifact_ref",
+    "derivation_version", "observed_value", "baseline_value", "anomaly_score",
+    "data_quality", "claim_links",
+)
+
+
+def evidence_integrity_hash(value: dict[str, Any]) -> str:
+    canonical = {name: _canonicalize(value.get(name)) for name in EVIDENCE_HASH_FIELDS}
+    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def _canonicalize(value: Any) -> Any:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat()
+    if isinstance(value, dict):
+        return {str(key): _canonicalize(item) for key, item in sorted(value.items())}
+    if isinstance(value, list):
+        return [_canonicalize(item) for item in value]
+    return value
 
 
 def _all_evidence_refs(value: Any) -> set[str]:

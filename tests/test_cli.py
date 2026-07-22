@@ -134,3 +134,25 @@ def test_batch_diagnose_uses_rule_engine(tmp_path, monkeypatch, capsys):
     assert out["total"] == 1
     assert out["items"][0]["ok"] is True
     assert out["items"][0]["top_cause"] == "cpu_hotspot_recursive"
+
+
+def test_collect_accepts_sys_metrics_and_api_key_env(monkeypatch):
+    captured = {}
+
+    def command(args):
+        captured.update(vars(args))
+        return 0
+
+    monkeypatch.setitem(cli._COMMANDS, "collect", command)
+    code = cli.main([
+        "collect", "--agent", "a1", "--pid", "12", "--collector", "sys_metrics",
+        "--api-key-env", "CUSTOM_API_KEY", "--no-watch",
+    ])
+    assert code == 0
+    assert captured["collector"] == "sys_metrics"
+    assert captured["api_key_env"] == "CUSTOM_API_KEY"
+
+
+def test_api_headers_use_bearer_without_exposing_key(monkeypatch):
+    monkeypatch.setenv("MY_API_KEY", "secret")
+    assert cli._api_headers("MY_API_KEY") == {"Authorization": "Bearer secret"}
