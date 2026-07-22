@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from server.app.database import init_db, reset_engine
 from server.app.diagnosis import orchestrator as orchestrator_module
+from server.app.diagnosis.orchestrator import _pressure_flags
 from server.app.diagnosis.actions import collect_action
 from server.app.diagnosis.domain_analyzers import analyze_observations, assess_cluster, cluster_finding
 from server.app.diagnosis.report_verifier import evidence_integrity_hash, verify_report
@@ -113,6 +114,15 @@ def test_pure_ebpf_latency_produces_io_finding():
     assert "io_wait_high" in {item["finding_type"] for item in findings}
 
 
+def test_process_cpu_delta_detects_hot_process_on_non_saturated_host():
+    pressure = _pressure_flags({
+        "avg_cpu_user_pct": 25,
+        "avg_cpu_sys_pct": 5,
+        "process_cpu_core_usage": 1.2,
+    }, {})
+    assert pressure["cpu"] is True
+
+
 def test_verifier_rejects_downstream_claim_without_evidence():
     result = verify_report({
         "cluster_assessment": {
@@ -171,7 +181,7 @@ def test_verifier_recomputes_full_evidence_hash():
 
 def test_five_instances_are_covered_in_bounded_batches(client: TestClient):
     payload = _payload("service-a 延迟升高，覆盖全部实例")
-    payload["budget"] = {"max_parallel_probes": 2}
+    payload["budget"] = {"max_parallel_probes": 2, "max_medium_risk_probes": 0}
     for index in range(2, 6):
         agent_id = f"a{index}"
         host_id = f"host-{index}"
@@ -316,6 +326,7 @@ def test_diagnosis_waits_for_all_active_target_tasks(client: TestClient):
         capabilities=["sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps"],
     )
     payload = _payload()
+    payload["budget"] = {"max_medium_risk_probes": 0}
     payload["context"]["instances"].append({
         "service_id": "service-b",
         "instance_id": "service-b-1",
@@ -347,7 +358,7 @@ def test_diagnosis_waits_for_all_active_target_tasks(client: TestClient):
 
     _finish_sys_metrics_task(task_ids[1], _normal_summary())
     completed = client.get(f"/api/v1/diagnoses/{diagnosis_id}").json()["data"]
-    assert completed["status"] == "COMPLETED"
+    assert completed["status"] == "INSUFFICIENT_EVIDENCE"
     assert len(completed["evidence"]) == 4
 
 

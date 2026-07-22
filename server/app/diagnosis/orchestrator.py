@@ -929,7 +929,9 @@ class DiagnosisOrchestrator:
         )
         self._append_conclusion(diagnosis_id, conclusion)
         self._update_hypotheses(diagnosis_id, deduped)
-        return True
+        return cluster_assessment["classification"] not in {
+            "insufficient_evidence", "scope_unresolved",
+        }
 
     def _build_task_observation(
         self,
@@ -1727,12 +1729,13 @@ def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str
     rss_mb = _num(summary.get("vmrss_mb"))
     fd_count = _num(summary.get("fd_count"))
     threads = _num(summary.get("thread_count"))
+    process_cpu_cores = _num(summary.get("process_cpu_core_usage"))
     memory_trend = str(summary.get("vmrss_trend") or summary.get("memory_trend") or "").lower()
     fd_trend = str(summary.get("fd_trend") or "").lower()
     top_items = values.get("top_json") if isinstance(values.get("top_json"), list) else []
     top_percent = _num((top_items[0] or {}).get("percent")) if top_items else 0.0
     return {
-        "cpu": cpu_user + cpu_sys >= 75 or top_percent >= 45,
+        "cpu": process_cpu_cores >= 0.75 or cpu_user + cpu_sys >= 75 or top_percent >= 45,
         "io_wait": cpu_iowait >= 20 or _has_ebpf_latency(values.get("ebpf_metrics")),
         "host_iowait_high": cpu_iowait >= 10,
         "block_latency_high": _has_ebpf_latency(values.get("ebpf_metrics")),
