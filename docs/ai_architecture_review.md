@@ -1,5 +1,7 @@
 # Mini-Drop AI 架构审核与实施说明
 
+> 2026-07-22 更新：诊断控制层已进一步升级为显式 12 节点流水线，加入结构化 Action、确定性 Domain Finding、静态 Knowledge 引用、报告 Verifier 和 7 个 golden scenarios。详见 `docs/diagnosis_pipeline_v2.md`。
+
 ## 审核结论
 
 现有工程已经具备 Drop 轻量复刻所需的任务调度、Agent 采集、Artifact 元数据、Analyzer、Web 和任务级 RCA，但原来的 AI 能力本质上是“对一个已完成 Task 做事后归因”，不能承载 `AI功能设计.md` 中跨 Task、跨实例、可审批、可恢复的诊断会话。
@@ -110,7 +112,7 @@ GET  /api/v1/probes
 - 真实 OIDC、多用户 RBAC、资源组和 Artifact 逐对象授权；当前仍是 API Key + 可选服务白名单。
 - 来自 CMDB/Kubernetes/Service Mesh 的历史拓扑；当前使用请求上下文生成快照。
 - Prometheus/Trace/日志/发布记录的统一基线服务和时间偏差估计。
-- TaskAttempt、Transactional Outbox、独立 Analyzer 队列和完整对象存储对账。
+- 完整 TaskAttempt、独立 Analyzer 队列、Task 创建之外的通用 Outbox 和完整对象存储对账；当前已实现诊断步骤到 Task 创建的专用 Outbox 与唯一约束。
 - 多跳 Trace 因果分析和经过演练集校准的概率输出。
 - 自动修复；当前 R3 始终只提供人工建议。
 - 压测预测目前尚未接入容量模型；当前只给安全诊断命令和证据对比，后续可基于历史拓扑、资源曲线和发布计划增加预测压力评估。
@@ -123,6 +125,6 @@ GET  /api/v1/probes
 
 ## 验证
 
-- 后端全量测试：314 passed。
-- 新增诊断控制层测试：覆盖范围确认、注册探针、R2 审批、证据引用、证据不足、未知字段拒绝、服务白名单。
+- 后端全量测试：363 passed。
+- 诊断控制层测试：30 passed，覆盖时间/范围、注册探针、R2 并发审批、Outbox 幂等、证据引用/质量/域、证据不足、新旧数据库迁移、服务白名单、新鲜度和多目标完成屏障。
 - Web：Vite production build 通过。

@@ -1,6 +1,6 @@
 # Mini-Drop 三节点实验集群部署与测试报告
 
-测试日期：2026-07-20（Asia/Shanghai）
+测试日期：2026-07-20、2026-07-22（Asia/Shanghai）
 
 ## 1. 实际部署
 
@@ -106,6 +106,33 @@ Control 实际运行
 - 重启 systemd Agent 后恢复 `ONLINE`，并再次完成采集与上传；
 - 两台测试负载已在测试结束后停止并清理。
 
+### 4.4 证据驱动流水线 v2 实测（2026-07-22）
+
+在 Control 部署 12 节点诊断流水线、确定性 Analyzer、Knowledge、结构化 Action、Verifier 和 Golden Harness；在 Worker 部署真实 `service-a → service-b` 实验服务和负载发生器。
+
+最终场景：service-a 位于 Worker 1，调用 Worker 2 的 service-b；Worker 2 同时运行 4 个 CPU 噪声进程。诊断会话 `diag_session_20260722_092502_1fd316d6` 的结果：
+
+| 检查项 | 结果 |
+|---|---|
+| 新采集任务 | `task_20260722_092502_6a5572`、`task_20260722_092502_3a3bb2` |
+| 流水线 | 12/12 节点 `COMPLETED` |
+| 目标 service-a | CPU/load/memory/fd 均为 `false`；CPU user 0.1%，load1m 0.0 |
+| 下游 service-b | CPU=`true`、load=`true`；CPU user 93.3%，load1m 9.43 |
+| 跨节点分类 | `downstream_dependency` |
+| 证据与知识 | 4 条 Evidence、2 条 Knowledge 引用 |
+| 报告校验 | Verifier passed；检查 4 条证据、2 条知识、2 个 Action |
+| 动作安全 | R0 inspect + R1 sys_metrics，均 `auto_execute=false` |
+
+测试结束后，service-a、service-b、load generator 和所有 CPU noise transient unit 均已停止；两个 `mini-drop-agent` 保持 `active`。
+
+### 4.5 核心不变量复测（2026-07-22 晚）
+
+- 全新跨节点会话 `diag_session_20260722_130907_8827a3dd` 完成两目标 R1、12/12 节点和 `sys_metrics.v2` Evidence 校验；
+- 修正 Host/Process 分域后，会话 `diag_session_20260722_131128_02666375` 输出 `downstream(service-b-1)` 与 `cpu/process_cpu_pressure`；
+- 对 `diag_session_20260722_131418_7f9b93fa` 的同一 R2 step 并发批准返回 200/409，只生成一个 Task，最终明确进入 `INSUFFICIENT_EVIDENCE`；
+- HISTORICAL 会话 `diag_session_20260722_131708_84d93ed2` 在没有历史 Evidence 时创建 0 个 Task/Probe，并进入 `INSUFFICIENT_EVIDENCE`；
+- 实验进程清理后，两个 Agent 均保持 `ONLINE`。
+
 ## 5. 测试中发现并修复的问题
 
 1. Agent 本地文件不存在于 Control 时，结构化证据读取提前失败，没有回退对象存储。
@@ -118,6 +145,14 @@ Control 实际运行
 8. AI 总结仅靠提示约束字数，模型可能返回 266 字；新增 150 字程序侧硬限制。
 9. Windows 浏览器未保存 `MINI_DROP_API_KEY` 时 `/api/agents` 返回 401，但旧页面把失败结果
    清空成 0 个 Agent；现改为“状态未知”并明确提示在顶栏保存 Control API Key。
+10. systemd 在创建 namespace 前要求 `ReadWritePaths` 已存在，导致 Worker 开机后 Agent 进入 `226/NAMESPACE` 重启循环；服务单元改为允许路径缺失并在启动前创建 `/tmp/mini-drop`。
+11. `vmrss_mb / vmrss_mb_max` 和 `fd_count / fd_max` 把“采样窗口最大值”误当“系统限制”，稳定进程会被误报；改为绝对阈值与增长趋势组合，并增加回归测试。
+12. 宽时间窗会复用十多分钟前的 Task，无法代表当前负载；改为默认 120 秒新鲜度、结构化产物校验和全目标覆盖，不完整时整组重新采集。
+13. 多目标探针完成速度不同时，首个终态任务曾触发提前结论；增加全目标完成屏障，下游/同宿主归因也必须存在目标侧观测。
+14. 旧 SQLite 不会由 `create_all()` 自动增加 v2 列，升级后 Agent 心跳查询失败；新增幂等的 additive schema migration。
+15. `WAITING_APPROVAL` 页面重复轮询会再次分析已完成 R1 并触发非法迁移；改为审批等待态幂等返回。
+16. LIVE 默认 requested window 的终点早于随后采集的 Evidence；新增受 deadline 约束的 effective collection window，并由 Verifier 使用该窗口。
+17. 多核主机上单进程占满一个核心时宿主机总 CPU 可能低于 75%；改用进程 tick 增量的核使用量区分 `process_cpu_pressure` 与 `host_cpu_saturation`。
 
 上述问题均已添加或通过相应回归测试、实际集群复测验证。
 
