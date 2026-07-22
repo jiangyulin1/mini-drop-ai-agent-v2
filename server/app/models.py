@@ -493,6 +493,7 @@ class DiagnosisEvidenceModel(Base):
     )
     source_type = Column(String(32), nullable=False)
     source_system = Column(String(64), nullable=False)
+    evidence_role = Column(String(32), nullable=False, default="incident")
     target_json = Column(JSON, default=dict)
     event_time_range_json = Column(JSON, default=dict)
     ingestion_time = Column(DateTime(timezone=True), nullable=False)
@@ -513,6 +514,7 @@ class DiagnosisEvidenceModel(Base):
             "diagnosis_id": self.diagnosis_id,
             "source_type": self.source_type,
             "source_system": self.source_system,
+            "evidence_role": self.evidence_role,
             "target": self.target_json or {},
             "event_time_range": self.event_time_range_json or {},
             "ingestion_time": self.ingestion_time,
@@ -526,4 +528,47 @@ class DiagnosisEvidenceModel(Base):
             "data_quality": self.data_quality_json or {},
             "integrity_hash": self.integrity_hash,
             "claim_links": self.claim_links_json or [],
+        }
+
+
+class DiagnosisNodeRunModel(Base):
+    """显式诊断流水线节点的可恢复运行记录。"""
+
+    __tablename__ = "diagnosis_node_runs"
+
+    id = Column(String(256), primary_key=True)
+    diagnosis_id = Column(
+        String(128), ForeignKey("diagnosis_sessions.id"), nullable=False, index=True,
+    )
+    node_name = Column(String(64), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    status = Column(String(32), nullable=False)
+    attempt = Column(Integer, nullable=False, default=0)
+    input_refs_json = Column(JSON, default=list)
+    output_refs_json = Column(JSON, default=list)
+    metrics_json = Column(JSON, default=dict)
+    error_code = Column(String(128), nullable=True)
+    error_message = Column(Text, nullable=True)
+    implementation_version = Column(String(64), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "node_run_id": self.id,
+            "diagnosis_id": self.diagnosis_id,
+            "node_name": self.node_name,
+            "sequence": self.sequence,
+            "status": self.status,
+            "attempt": self.attempt,
+            "input_refs": self.input_refs_json or [],
+            "output_refs": self.output_refs_json or [],
+            "metrics": self.metrics_json or {},
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "implementation_version": self.implementation_version,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "updated_at": self.updated_at,
         }

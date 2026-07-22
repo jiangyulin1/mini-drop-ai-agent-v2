@@ -1,0 +1,28 @@
+{
+  "scenario_id": "self_code_hotspot",
+  "query": "service-a CPU 飙高，定位自身热点",
+  "scope": {
+    "target_service": "service-a",
+    "same_host_instance_ids": [],
+    "downstream_service_ids": [],
+    "instances": [
+      {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001}
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-self-cpu", "collector_type": "perf_cpu",
+      "target": {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+      "facts": {"avg_cpu_user_pct": 92, "avg_cpu_sys_pct": 4},
+      "top_function": {"name": "compute_hotspot", "percent": 72},
+      "pressure": {"cpu": true, "io_wait": false, "memory": false, "network": false},
+      "evidence_refs": ["ev-self-cpu", "ev-self-profile"]
+    }
+  ],
+  "expected": {
+    "classification": "self_code_or_process_pressure",
+    "finding_types": ["userland_hotspot"],
+    "knowledge_refs": ["linux.cpu.process_pressure"],
+    "action_collectors": ["sys_metrics", "perf_cpu"]
+  }
+}

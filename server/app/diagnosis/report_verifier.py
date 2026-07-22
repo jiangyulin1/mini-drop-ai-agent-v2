@@ -1,0 +1,164 @@
+"""诊断报告的确定性引用、动作和安全策略校验。"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from pydantic import ValidationError
+
+from server.app.diagnosis.knowledge import knowledge_ids
+from server.app.diagnosis.probe_registry import list_probes
+from server.app.diagnosis.schemas import DiagnosisAction, ReportVerification
+
+
+LEGACY_ACTION_FIELDS = {"command_id", "command", "confidence"}
+
+
+def verify_report(
+    conclusion: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    target_scope: dict[str, Any],
+    diagnosis_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    issues: list[str] = []
+    evidence_by_id = {item["evidence_id"]: item for item in evidence}
+    valid_evidence = set(evidence_by_id)
+    valid_knowledge = knowledge_ids()
+    evidence_refs = _all_evidence_refs(conclusion)
+    unknown_evidence = sorted(evidence_refs - valid_evidence)
+    if unknown_evidence:
+        issues.append(f"未知 evidence_refs: {unknown_evidence}")
+
+    report_knowledge = set(conclusion.get("knowledge_refs", []))
+    for item in conclusion.get("knowledge_context", []):
+        if item.get("knowledge_id"):
+            report_knowledge.add(item["knowledge_id"])
+    unknown_knowledge = sorted(report_knowledge - valid_knowledge)
+    if unknown_knowledge:
+        issues.append(f"未知 knowledge_refs: {unknown_knowledge}")
+
+    allowed_targets = {
+        (item.get("agent_id"), item.get("pid"))
+        for item in target_scope.get("instances", [])
+    }
+    for ref in sorted(evidence_refs & valid_evidence):
+        item = evidence_by_id[ref]
+        target = item.get("target", {})
+        if (target.get("agent_id"), target.get("pid")) not in allowed_targets:
+            issues.append(f"Evidence 目标不在诊断范围: {ref}")
+
+    for claim_name, refs in _substantive_claims(conclusion):
+        if not refs:
+            issues.append(f"实质性结论缺少 Evidence: {claim_name}")
+
+    _verify_evidence_time(
+        issues,
+        conclusion,
+        [evidence_by_id[ref] for ref in evidence_refs if ref in evidence_by_id],
+        diagnosis_context or {},
+    )
+    registered_collectors = {item.runner_task_kind for item in list_probes()}
+    actions = conclusion.get("actions") or conclusion.get("diagnostic_commands") or []
+    for raw in actions:
+        payload = {key: value for key, value in raw.items() if key not in LEGACY_ACTION_FIELDS}
+        try:
+            action = DiagnosisAction.model_validate(payload)
+        except ValidationError as exc:
+            issues.append(f"Action Schema 校验失败 {raw.get('action_id')}: {exc.errors()[0]['msg']}")
+            continue
+        if "\n" in action.rendered_command or "\r" in action.rendered_command:
+            issues.append(f"Action 包含非法换行: {action.action_id}")
+        if action.action_type == "collect":
+            if action.collector_type not in registered_collectors:
+                issues.append(f"Action 使用未注册采集器: {action.collector_type}")
+            if (action.target.agent_id, action.target.pid) not in allowed_targets:
+                issues.append(f"Action 目标不在诊断范围: {action.action_id}")
+        if action.auto_execute is not False:
+            issues.append(f"Action 禁止自动执行: {action.action_id}")
+
+    result = ReportVerification(
+        status="failed" if issues else "passed",
+        checked_evidence_refs=len(evidence_refs),
+        checked_knowledge_refs=len(report_knowledge),
+        checked_actions=len(actions),
+        issues=issues,
+    )
+    return result.model_dump(mode="json")
+
+
+def _substantive_claims(conclusion: dict[str, Any]) -> list[tuple[str, list[str]]]:
+    claims: list[tuple[str, list[str]]] = []
+    assessment = conclusion.get("cluster_assessment", {})
+    classification = assessment.get("classification")
+    if classification not in {None, "insufficient_evidence", "scope_unresolved"}:
+        claims.append((f"cluster_assessment:{classification}", assessment.get("evidence_refs", [])))
+    for name in ("root_location", "domain_cause"):
+        value = conclusion.get(name, {})
+        if value.get("type") not in {None, "unknown"}:
+            claims.append((name, value.get("evidence_refs", [])))
+    for finding in conclusion.get("findings", []):
+        if finding.get("finding_type") != "insufficient_evidence" and finding.get("severity") != "info":
+            claims.append((f"finding:{finding.get('finding_id', 'unknown')}", finding.get("evidence_refs", [])))
+    for candidate in conclusion.get("root_cause_candidates", []):
+        claims.append((f"candidate:{candidate.get('candidate_id', 'unknown')}", candidate.get("evidence_refs", [])))
+    return claims
+
+
+def _verify_evidence_time(
+    issues: list[str],
+    conclusion: dict[str, Any],
+    referenced: list[dict[str, Any]],
+    context: dict[str, Any],
+) -> None:
+    intent = context.get("normalized_intent", {})
+    mode = intent.get("diagnosis_mode", "LIVE")
+    policy = intent.get("evidence_time_policy", {})
+    requested = context.get("requested_time_range", {})
+    start = _parse_time(requested.get("start"))
+    end = _parse_time(requested.get("end"))
+    skew = timedelta(seconds=int(policy.get("max_clock_skew_seconds", 5) or 0))
+    require_overlap = bool(policy.get("require_overlap", True))
+    for item in referenced:
+        role = item.get("evidence_role", "incident")
+        ref = item.get("evidence_id", "unknown")
+        event_range = item.get("event_time_range", {})
+        event_start = _parse_time(event_range.get("start"))
+        event_end = _parse_time(event_range.get("end"))
+        if role == "reproduction":
+            if mode != "REPRODUCTION" or conclusion.get("evidence_scope") != "reproduction":
+                issues.append(f"复现 Evidence 不能证明历史根因: {ref}")
+            continue
+        if role != "incident" or not require_overlap or not all((start, end, event_start, event_end)):
+            continue
+        if event_end < start - skew or event_start > end + skew:
+            issues.append(f"Evidence 时间窗与请求不重叠: {ref}")
+
+
+def _parse_time(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif not value:
+        return None
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _all_evidence_refs(value: Any) -> set[str]:
+    refs: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "evidence_refs" and isinstance(item, list):
+                refs.update(str(ref) for ref in item)
+            else:
+                refs.update(_all_evidence_refs(item))
+    elif isinstance(value, list):
+        for item in value:
+            refs.update(_all_evidence_refs(item))
+    return refs

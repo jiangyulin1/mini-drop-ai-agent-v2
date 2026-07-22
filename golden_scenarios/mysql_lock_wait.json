@@ -1,0 +1,22 @@
+{
+  "scenario_id": "mysql_lock_wait",
+  "query": "service-db 出现 MySQL 锁等待",
+  "scope": {
+    "target_service": "service-db", "same_host_instance_ids": [], "downstream_service_ids": [],
+    "instances": [{"service_id": "service-db", "instance_id": "service-db-1", "host_id": "host-db", "agent_id": "adb", "pid": 3306}]
+  },
+  "observations": [{
+    "task_id": "task-mysql", "collector_type": "database_metrics",
+    "target": {"service_id": "service-db", "instance_id": "service-db-1", "host_id": "host-db", "agent_id": "adb", "pid": 3306},
+    "facts": {"mysql_lock_wait_count": 18, "mysql_lock_wait_seconds": 12.4},
+    "top_function": {"name": "", "percent": 0},
+    "pressure": {"cpu": false, "io_wait": false, "memory": false},
+    "evidence_refs": ["ev-mysql-locks"]
+  }],
+  "expected": {
+    "classification": "insufficient_evidence",
+    "finding_types": ["mysql_lock_wait"],
+    "knowledge_refs": ["mysql.lock_wait"],
+    "action_collectors": ["sys_metrics", "perf_cpu", "ebpf_io"]
+  }
+}

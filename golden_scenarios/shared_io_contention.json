@@ -1,0 +1,33 @@
+{
+  "scenario_id": "shared_io_contention",
+  "query": "service-a 和同宿主实例同时 iowait 高",
+  "scope": {
+    "target_service": "service-a", "same_host_instance_ids": ["service-c-1"], "downstream_service_ids": [],
+    "instances": [
+      {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+      {"service_id": "service-c", "instance_id": "service-c-1", "host_id": "host-1", "agent_id": "a1", "pid": 1003}
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-a-io", "collector_type": "sys_metrics",
+      "target": {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+      "facts": {"avg_cpu_iowait_pct": 28}, "top_function": {"name": "", "percent": 0},
+      "pressure": {"cpu": false, "io_wait": true, "io_latency": false, "memory": false},
+      "evidence_refs": ["ev-a-iowait", "ev-a-sys"]
+    },
+    {
+      "task_id": "task-c-io", "collector_type": "sys_metrics",
+      "target": {"service_id": "service-c", "instance_id": "service-c-1", "host_id": "host-1", "agent_id": "a1", "pid": 1003},
+      "facts": {"avg_cpu_iowait_pct": 35}, "top_function": {"name": "", "percent": 0},
+      "pressure": {"cpu": false, "io_wait": true, "io_latency": false, "memory": false},
+      "evidence_refs": ["ev-c-iowait", "ev-c-sys"]
+    }
+  ],
+  "expected": {
+    "classification": "host_resource_contention",
+    "finding_types": ["io_wait_high", "host_resource_contention"],
+    "knowledge_refs": ["linux.iowait.shared_block_device"],
+    "action_collectors": ["sys_metrics", "ebpf_io"]
+  }
+}

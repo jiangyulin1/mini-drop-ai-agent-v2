@@ -1,0 +1,35 @@
+{
+  "scenario_id": "same_host_cpu_noise",
+  "query": "service-a 变慢，检查同宿主 CPU 噪声邻居",
+  "scope": {
+    "target_service": "service-a",
+    "same_host_instance_ids": ["noise-1"],
+    "downstream_service_ids": [],
+    "instances": [
+      {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+      {"service_id": "noise", "instance_id": "noise-1", "host_id": "host-1", "agent_id": "a1", "pid": 1002}
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-target", "collector_type": "sys_metrics",
+      "target": {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+      "facts": {"avg_cpu_user_pct": 15}, "top_function": {"name": "", "percent": 0},
+      "pressure": {"cpu": false, "io_wait": false, "memory": false, "network": false},
+      "evidence_refs": ["ev-target-normal"]
+    },
+    {
+      "task_id": "task-noise", "collector_type": "sys_metrics",
+      "target": {"service_id": "noise", "instance_id": "noise-1", "host_id": "host-1", "agent_id": "a1", "pid": 1002},
+      "facts": {"avg_cpu_user_pct": 95}, "top_function": {"name": "", "percent": 0},
+      "pressure": {"cpu": true, "io_wait": false, "memory": false, "network": false},
+      "evidence_refs": ["ev-noise-cpu"]
+    }
+  ],
+  "expected": {
+    "classification": "same_host_noisy_neighbor",
+    "finding_types": ["userland_hotspot", "same_host_noisy_neighbor"],
+    "knowledge_refs": ["distributed.same_host_noisy_neighbor"],
+    "action_collectors": ["sys_metrics", "ebpf_io"]
+  }
+}

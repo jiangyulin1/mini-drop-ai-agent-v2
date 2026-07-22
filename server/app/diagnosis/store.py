@@ -9,10 +9,12 @@ from server.app.database import new_session
 from server.app.models import (
     DiagnosisEventModel,
     DiagnosisEvidenceModel,
+    DiagnosisNodeRunModel,
     DiagnosisSessionModel,
     ProbeExecutionModel,
     TopologySnapshotModel,
 )
+from server.app.diagnosis.pipeline import PIPELINE_NODES, PIPELINE_VERSION, node_run_id
 
 
 def utcnow() -> datetime:
@@ -75,10 +77,111 @@ class DiagnosisStore:
                 payload_json={},
                 created_at=now,
             ))
+            for sequence, node_name in enumerate(PIPELINE_NODES, start=1):
+                session.add(DiagnosisNodeRunModel(
+                    id=node_run_id(model.id, node_name),
+                    diagnosis_id=model.id,
+                    node_name=node_name,
+                    sequence=sequence,
+                    status="PENDING",
+                    attempt=0,
+                    input_refs_json=[],
+                    output_refs_json=[],
+                    metrics_json={},
+                    implementation_version=PIPELINE_VERSION,
+                    updated_at=now,
+                ))
             session.commit()
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+    def initialize_pipeline(self, diagnosis_id: str) -> None:
+        now = utcnow()
+        session = new_session()
+        try:
+            for sequence, node_name in enumerate(PIPELINE_NODES, start=1):
+                key = node_run_id(diagnosis_id, node_name)
+                if session.get(DiagnosisNodeRunModel, key) is None:
+                    session.add(DiagnosisNodeRunModel(
+                        id=key,
+                        diagnosis_id=diagnosis_id,
+                        node_name=node_name,
+                        sequence=sequence,
+                        status="PENDING",
+                        attempt=0,
+                        input_refs_json=[],
+                        output_refs_json=[],
+                        metrics_json={},
+                        implementation_version=PIPELINE_VERSION,
+                        updated_at=now,
+                    ))
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def update_pipeline_node(
+        self,
+        diagnosis_id: str,
+        node_name: str,
+        status: str,
+        *,
+        input_refs: list[str] | None = None,
+        output_refs: list[str] | None = None,
+        metrics: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any]:
+        allowed_statuses = {"PENDING", "RUNNING", "WAITING", "COMPLETED", "SKIPPED", "FAILED"}
+        if status not in allowed_statuses:
+            raise ValueError(f"非法节点状态: {status}")
+        session = new_session()
+        try:
+            model = session.get(DiagnosisNodeRunModel, node_run_id(diagnosis_id, node_name))
+            if model is None:
+                raise ValueError(f"诊断节点不存在: {diagnosis_id}/{node_name}")
+            now = utcnow()
+            if status == "RUNNING" and model.status != "RUNNING":
+                model.attempt += 1
+                model.started_at = now
+                model.finished_at = None
+                model.error_code = None
+                model.error_message = None
+            if status in {"COMPLETED", "SKIPPED", "FAILED"}:
+                model.finished_at = now
+            model.status = status
+            if input_refs is not None:
+                model.input_refs_json = list(dict.fromkeys(input_refs))
+            if output_refs is not None:
+                model.output_refs_json = list(dict.fromkeys(output_refs))
+            if metrics is not None:
+                model.metrics_json = metrics
+            model.error_code = error_code
+            model.error_message = (error_message or "")[:2000] or None
+            model.updated_at = now
+            session.commit()
+            return model.to_dict()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def list_pipeline_nodes(self, diagnosis_id: str) -> list[dict[str, Any]]:
+        session = new_session()
+        try:
+            rows = (
+                session.query(DiagnosisNodeRunModel)
+                .filter(DiagnosisNodeRunModel.diagnosis_id == diagnosis_id)
+                .order_by(DiagnosisNodeRunModel.sequence.asc())
+                .all()
+            )
+            return [row.to_dict() for row in rows]
         finally:
             session.close()
 
@@ -323,6 +426,7 @@ class DiagnosisStore:
                 diagnosis_id=evidence["diagnosis_id"],
                 source_type=evidence["source_type"],
                 source_system=evidence["source_system"],
+                evidence_role=evidence.get("evidence_role", "incident"),
                 target_json=evidence.get("target", {}),
                 event_time_range_json=evidence.get("event_time_range", {}),
                 ingestion_time=evidence.get("ingestion_time", utcnow()),
@@ -387,6 +491,18 @@ class DiagnosisStore:
         item["topology_snapshot"] = self.get_topology(item.get("topology_snapshot_id"))
         item["probes"] = self.list_probes(diagnosis_id)
         item["evidence"] = self.list_evidence(diagnosis_id)
+        pipeline_nodes = self.list_pipeline_nodes(diagnosis_id)
+        if not pipeline_nodes:
+            # create_all 只会创建新表；为升级前的历史会话补一组明确标记的节点，
+            # 避免前端把“没有历史节点数据”误判为仍在执行。
+            self.initialize_pipeline(diagnosis_id)
+            for node_name in PIPELINE_NODES:
+                self.update_pipeline_node(
+                    diagnosis_id, node_name, "SKIPPED",
+                    metrics={"reason": "legacy_session_without_node_history"},
+                )
+            pipeline_nodes = self.list_pipeline_nodes(diagnosis_id)
+        item["pipeline_nodes"] = pipeline_nodes
         conclusions = item.get("conclusion_versions", [])
         item["latest_conclusion"] = conclusions[-1] if conclusions else None
         return item

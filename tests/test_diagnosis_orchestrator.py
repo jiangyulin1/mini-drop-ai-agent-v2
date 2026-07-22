@@ -1,10 +1,14 @@
 """AI 集群诊断会话、探针审批、预算和证据链测试。"""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
 from server.app.database import init_db, reset_engine
 from server.app.diagnosis import orchestrator as orchestrator_module
+from server.app.diagnosis.domain_analyzers import analyze_observations
+from server.app.diagnosis.report_verifier import verify_report
 from server.app.main import app, repo
 from server.app.main import diagnosis_orchestrator
 from server.app.models import Base
@@ -55,6 +59,61 @@ def _payload(query: str = "服务 service-a CPU 飙高，请定位原因") -> di
     }
 
 
+def test_historical_request_never_creates_current_task(client: TestClient):
+    payload = _payload("请分析 2020 年的 service-a 故障")
+    payload["context"]["time_range"] = {
+        "start": "2020-01-01T00:00:00Z",
+        "end": "2020-01-01T00:30:00Z",
+        "source": "user_expression",
+    }
+    data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    assert data["normalized_intent"]["diagnosis_mode"] == "HISTORICAL"
+    assert data["status"] == "INSUFFICIENT_EVIDENCE"
+    assert data["child_task_ids"] == []
+    assert data["probes"] == []
+
+
+def test_missing_target_anchor_does_not_expand_to_other_service(client: TestClient):
+    payload = _payload()
+    payload["context"]["instances"][0]["service_id"] = "service-b"
+    payload["context"]["instances"][0]["instance_id"] = "service-b-1"
+    data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    assert data["status"] == "NEEDS_SCOPE_CONFIRMATION"
+    assert data["target_scope"]["scope_completeness"] == "unresolved"
+    assert data["child_task_ids"] == []
+
+
+def test_zero_probe_budget_ends_explicitly(client: TestClient):
+    payload = _payload()
+    payload["budget"] = {"max_total_probe_cpu_seconds": 0}
+    data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    assert data["status"] == "BUDGET_EXHAUSTED"
+    assert data["child_task_ids"] == []
+
+
+def test_pure_ebpf_latency_produces_io_finding():
+    findings = analyze_observations([{
+        "task_id": "t1",
+        "target": {"instance_id": "i1"},
+        "facts": {},
+        "pressure": {"block_latency_high": True},
+        "evidence_refs": ["ev1"],
+    }])
+    assert "io_wait_high" in {item["finding_type"] for item in findings}
+
+
+def test_verifier_rejects_downstream_claim_without_evidence():
+    result = verify_report({
+        "cluster_assessment": {
+            "classification": "downstream_dependency",
+            "evidence_refs": [],
+        },
+        "actions": [],
+    }, [], {"instances": []})
+    assert result["status"] == "failed"
+    assert any("缺少 Evidence" in issue for issue in result["issues"])
+
+
 def test_remote_artifact_falls_back_to_object_storage_when_agent_path_is_missing(
     tmp_path,
     monkeypatch,
@@ -98,6 +157,79 @@ def test_existing_structured_evidence_uses_legal_transition_and_completes(client
     assert ("ANALYZING", "CONCLUDING") in transitions
 
 
+def test_reusable_evidence_must_be_fresh_and_cover_every_target(client: TestClient):
+    task_id = client.post("/api/tasks", json={
+        "name": "reusable-sys-metrics",
+        "agent_id": "a1",
+        "target_pid": 1234,
+        "collector_type": "sys_metrics",
+        "duration_sec": 5,
+    }).json()["data"]["task_id"]
+    _finish_sys_metrics_task(task_id, _normal_summary())
+    now = datetime.now(timezone.utc)
+
+    complete_scope = {
+        "instances": [{"agent_id": "a1", "pid": 1234}],
+    }
+    assert diagnosis_orchestrator._find_reusable_tasks(
+        complete_scope, now - timedelta(minutes=30), now,
+    ) == [task_id]
+    assert diagnosis_orchestrator._find_reusable_tasks(
+        complete_scope, now - timedelta(minutes=30), now + timedelta(minutes=5),
+    ) == []
+
+    partial_scope = {
+        "instances": [
+            {"agent_id": "a1", "pid": 1234},
+            {"agent_id": "a2", "pid": 5678},
+        ],
+    }
+    assert diagnosis_orchestrator._find_reusable_tasks(
+        partial_scope, now - timedelta(minutes=30), now,
+    ) == []
+
+
+def test_diagnosis_waits_for_all_active_target_tasks(client: TestClient):
+    repo.register_agent(
+        "a2", "host-2", "10.0.0.2",
+        capabilities=["sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps"],
+    )
+    payload = _payload()
+    payload["context"]["instances"].append({
+        "service_id": "service-b",
+        "instance_id": "service-b-1",
+        "host_id": "host-2",
+        "agent_id": "a2",
+        "pid": 5678,
+        "environment": "production",
+    })
+    payload["context"]["dependencies"] = [{
+        "source_service": "service-a",
+        "target_service": "service-b",
+        "relation": "CALLS",
+    }]
+    created = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    diagnosis_id = created["diagnosis_id"]
+    task_ids = [
+        item["task_id"]
+        for item in created["probes"]
+        if item["probe_id"] == "host_process_metrics"
+    ]
+    assert len(task_ids) == 2
+
+    _finish_sys_metrics_task(task_ids[0], _normal_summary())
+    collecting = client.get(f"/api/v1/diagnoses/{diagnosis_id}").json()["data"]
+    assert collecting["status"] == "COLLECTING"
+    run_node = next(item for item in collecting["pipeline_nodes"] if item["node_name"] == "run_probes")
+    assert run_node["status"] == "RUNNING"
+    assert run_node["metrics"]["terminal_task_count"] == 1
+
+    _finish_sys_metrics_task(task_ids[1], _normal_summary())
+    completed = client.get(f"/api/v1/diagnoses/{diagnosis_id}").json()["data"]
+    assert completed["status"] == "COMPLETED"
+    assert len(completed["evidence"]) == 4
+
+
 def _finish_sys_metrics_task(task_id: str, summary: dict):
     repo.transition_task(task_id, TaskStatus.RUNNING, "agent accepted", Actor.SERVER)
     repo.transition_task(task_id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
@@ -132,6 +264,19 @@ def _normal_summary() -> dict:
         "net_rx_kbps": 10,
         "net_tx_kbps": 10,
     }
+
+
+def test_stable_rss_and_fd_near_observed_max_are_not_pressure():
+    summary = _normal_summary()
+    summary.update({
+        "vmrss_mb": 200,
+        "vmrss_mb_max": 201,
+        "fd_count": 20,
+        "fd_max": 20,
+    })
+    flags = orchestrator_module._pressure_flags(summary, {})
+    assert flags["memory"] is False
+    assert flags["fd"] is False
 
 
 def _sys_metric_probe_by_instance(data: dict) -> dict:
@@ -237,6 +382,15 @@ class TestDiagnosisSessionAPI:
         assert set(candidate["evidence_refs"]).issubset(evidence_ids)
         assert all(item["integrity_hash"].startswith("sha256:") for item in detail["evidence"])
         assert all(item["status"] != "WAITING_APPROVAL" for item in detail["probes"])
+        assert len(detail["pipeline_nodes"]) == 12
+        assert detail["latest_conclusion"]["verification"]["status"] == "passed"
+        assert detail["latest_conclusion"]["findings"]
+        assert detail["latest_conclusion"]["knowledge_refs"]
+        actions = detail["latest_conclusion"]["actions"]
+        assert actions
+        assert all(action["action_type"] in {"inspect", "collect", "manual_remediation"} for action in actions)
+        assert all(action["rendered_command"] == action["command"] for action in actions)
+        assert all(action["auto_execute"] is False for action in actions)
 
     def test_rejected_deep_probe_can_end_as_insufficient_evidence(self, client: TestClient):
         data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
@@ -337,6 +491,7 @@ class TestDiagnosisSessionAPI:
         commands = detail["latest_conclusion"]["diagnostic_commands"]
         assert any(cmd["risk_level"] == "R2" and cmd["requires_approval"] for cmd in commands)
         assert all(cmd["execution_policy"] == "human_review_required" for cmd in commands)
+        assert all(cmd["approval_policy"] == "single_execution" for cmd in commands if cmd["risk_level"] == "R2")
 
     def test_shared_io_wait_prefers_host_contention_over_generic_neighbor(self, client: TestClient):
         repo.register_agent(

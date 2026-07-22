@@ -7,7 +7,12 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from server.app.ai_provider import chat_completions, get_ai_settings, is_feature_enabled
-from server.app.diagnosis.schemas import CreateDiagnosisRequest, NormalizedIntent, TimeRange
+from server.app.diagnosis.schemas import (
+    CreateDiagnosisRequest,
+    DiagnosisMode,
+    NormalizedIntent,
+    TimeRange,
+)
 
 
 SYSTEM_PROMPT = """你是性能诊断意图解析器，只提取结构化字段，不判断根因，不生成命令。
@@ -75,6 +80,11 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
             intent.environment = request.context.environment
         if request.context.time_range:
             intent.time_range = request.context.time_range
+        # 模式和时间策略属于可信请求策略，不能由模型放宽。
+        intent.diagnosis_mode = _resolve_mode(request, intent.time_range)
+        intent.evidence_time_policy = request.evidence_time_policy
+        if intent.diagnosis_mode == DiagnosisMode.REPRODUCTION:
+            intent.evidence_time_policy.allow_reproduction_evidence = True
         return intent
     except Exception:
         return fallback
@@ -112,11 +122,17 @@ def _fallback_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
             source="default_window",
         )
 
+    mode = _resolve_mode(request, time_range)
+    policy = request.evidence_time_policy.model_copy(deep=True)
+    if mode == DiagnosisMode.REPRODUCTION:
+        policy.allow_reproduction_evidence = True
     return NormalizedIntent(
         symptom=symptom,
         target_service=target,
         environment=request.context.environment,
         time_range=time_range,
+        diagnosis_mode=mode,
+        evidence_time_policy=policy,
         scope={"self": True, "same_host": True, "downstream_hops": 1},
         constraints={
             "no_high_risk_probe": True,
@@ -125,6 +141,17 @@ def _fallback_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
         },
         ambiguities=ambiguities,
     )
+
+
+def _resolve_mode(request: CreateDiagnosisRequest, time_range: TimeRange) -> DiagnosisMode:
+    if request.diagnosis_mode != DiagnosisMode.AUTO:
+        return request.diagnosis_mode
+    now = datetime.now(timezone.utc)
+    skew = timedelta(seconds=request.evidence_time_policy.max_clock_skew_seconds)
+    # 明确结束于当前容差窗口之前的事件只能读取历史证据。
+    if time_range.end < now - skew:
+        return DiagnosisMode.HISTORICAL
+    return DiagnosisMode.LIVE
 
 
 def _extract_service(text: str) -> str | None:

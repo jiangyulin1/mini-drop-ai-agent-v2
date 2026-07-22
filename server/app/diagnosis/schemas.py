@@ -35,6 +35,20 @@ class DiagnosisStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class DiagnosisMode(str, Enum):
+    AUTO = "AUTO"
+    LIVE = "LIVE"
+    HISTORICAL = "HISTORICAL"
+    REPRODUCTION = "REPRODUCTION"
+
+
+class EvidenceRole(str, Enum):
+    INCIDENT = "incident"
+    BASELINE = "baseline"
+    REPRODUCTION = "reproduction"
+    TOPOLOGY = "topology"
+
+
 TERMINAL_DIAGNOSIS_STATUSES = {
     DiagnosisStatus.COMPLETED.value,
     DiagnosisStatus.INSUFFICIENT_EVIDENCE.value,
@@ -67,6 +81,9 @@ class ServiceInstance(StrictModel):
     agent_id: str = Field(min_length=1, max_length=128)
     pid: int = Field(gt=0, le=4194304)
     container_id: Optional[str] = Field(default=None, max_length=128)
+    cgroup_id: Optional[str] = Field(default=None, max_length=256)
+    process_start_time: Optional[int] = Field(default=None, ge=0)
+    boot_id: Optional[str] = Field(default=None, max_length=128)
     environment: str = Field(default="unknown", min_length=1, max_length=64)
 
 
@@ -91,6 +108,12 @@ class DiagnosisContext(StrictModel):
     dependencies: list[DependencyEdge] = Field(default_factory=list, max_length=200)
 
 
+class EvidenceTimePolicy(StrictModel):
+    max_clock_skew_seconds: int = Field(default=5, ge=0, le=300)
+    require_overlap: bool = True
+    allow_reproduction_evidence: bool = False
+
+
 class DiagnosisBudget(StrictModel):
     max_hosts: int = Field(default=5, ge=1, le=20)
     max_service_instances: int = Field(default=10, ge=1, le=100)
@@ -108,6 +131,8 @@ class CreateDiagnosisRequest(StrictModel):
     context: DiagnosisContext = Field(default_factory=DiagnosisContext)
     budget_profile: Literal["production_safe", "staging", "development"] = "production_safe"
     budget: Optional[DiagnosisBudget] = None
+    diagnosis_mode: DiagnosisMode = DiagnosisMode.AUTO
+    evidence_time_policy: EvidenceTimePolicy = Field(default_factory=EvidenceTimePolicy)
 
 
 class ApprovalRequest(StrictModel):
@@ -138,6 +163,8 @@ class NormalizedIntent(StrictModel):
     target_service: Optional[str] = None
     environment: str = "unknown"
     time_range: TimeRange
+    diagnosis_mode: DiagnosisMode = DiagnosisMode.LIVE
+    evidence_time_policy: EvidenceTimePolicy = Field(default_factory=EvidenceTimePolicy)
     scope: DiagnosisScope = Field(default_factory=DiagnosisScope)
     constraints: DiagnosisConstraints = Field(default_factory=DiagnosisConstraints)
     ambiguities: list[str] = Field(default_factory=list)
@@ -167,3 +194,69 @@ class ProbePlan(StrictModel):
     reason: str
     risk_level: Literal["R0", "R1", "R2", "R3"]
     requires_approval: bool
+
+
+class ActionTarget(StrictModel):
+    service_id: Optional[str] = Field(default=None, max_length=128)
+    instance_id: Optional[str] = Field(default=None, max_length=128)
+    host_id: Optional[str] = Field(default=None, max_length=128)
+    agent_id: Optional[str] = Field(default=None, max_length=128)
+    pid: Optional[int] = Field(default=None, gt=0, le=4194304)
+    diagnosis_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class DiagnosisAction(StrictModel):
+    """由服务端渲染、永不由模型自由执行的结构化动作。"""
+
+    action_id: str = Field(min_length=1, max_length=128)
+    action_type: Literal["inspect", "collect", "manual_remediation"]
+    title: str = Field(min_length=1, max_length=256)
+    collector_type: Optional[str] = Field(default=None, max_length=64)
+    target: ActionTarget
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    rendered_command: str = Field(min_length=1, max_length=2048)
+    comment: str = Field(min_length=1, max_length=1000)
+    risk_level: Literal["R0", "R1", "R2", "R3"]
+    approval_policy: Literal[
+        "read_only", "auto_low_risk", "single_execution", "manual_only",
+    ]
+    requires_approval: bool = False
+    auto_execute: Literal[False] = False
+    execution_policy: Literal["human_review_required"] = "human_review_required"
+    evidence_refs: list[str] = Field(default_factory=list)
+    confidence_level: Literal["高", "中", "低", "不可判断"] = "不可判断"
+
+    @model_validator(mode="after")
+    def validate_policy(self):
+        if self.action_type == "collect":
+            if not self.collector_type or not self.target.agent_id or not self.target.pid:
+                raise ValueError("collect action 必须包含 collector_type、agent_id 和 pid")
+        if self.risk_level == "R2":
+            if not self.requires_approval or self.approval_policy != "single_execution":
+                raise ValueError("R2 action 必须使用 single_execution 单次审批")
+        if self.risk_level == "R3" and self.approval_policy != "manual_only":
+            raise ValueError("R3 action 只能是 manual_only")
+        return self
+
+
+class DomainFinding(StrictModel):
+    finding_id: str = Field(min_length=1, max_length=160)
+    analyzer_id: str = Field(min_length=1, max_length=128)
+    category: Literal["cpu", "io", "memory", "network", "database", "runtime", "cluster"]
+    finding_type: str = Field(min_length=1, max_length=128)
+    severity: Literal["info", "warning", "critical"]
+    confidence_level: Literal["高", "中", "低", "不可判断"]
+    summary: str = Field(min_length=1, max_length=1000)
+    evidence_refs: list[str] = Field(default_factory=list)
+    contradicting_evidence_refs: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    facts: dict[str, Any] = Field(default_factory=dict)
+    knowledge_ids: list[str] = Field(default_factory=list)
+
+
+class ReportVerification(StrictModel):
+    status: Literal["passed", "failed"]
+    checked_evidence_refs: int = 0
+    checked_knowledge_refs: int = 0
+    checked_actions: int = 0
+    issues: list[str] = Field(default_factory=list)

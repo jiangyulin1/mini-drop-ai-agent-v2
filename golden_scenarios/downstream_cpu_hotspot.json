@@ -1,0 +1,31 @@
+{
+  "scenario_id": "downstream_cpu_hotspot",
+  "query": "service-a 延迟升高，检查下游 service-b",
+  "scope": {
+    "target_service": "service-a", "same_host_instance_ids": [], "downstream_service_ids": ["service-b"],
+    "instances": [
+      {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+      {"service_id": "service-b", "instance_id": "service-b-1", "host_id": "host-2", "agent_id": "a2", "pid": 2001}
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-a", "collector_type": "sys_metrics",
+      "target": {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+      "facts": {"avg_cpu_user_pct": 18}, "top_function": {"name": "", "percent": 0},
+      "pressure": {"cpu": false, "io_wait": false, "memory": false}, "evidence_refs": ["ev-a-normal"]
+    },
+    {
+      "task_id": "task-b", "collector_type": "sys_metrics",
+      "target": {"service_id": "service-b", "instance_id": "service-b-1", "host_id": "host-2", "agent_id": "a2", "pid": 2001},
+      "facts": {"avg_cpu_user_pct": 93}, "top_function": {"name": "", "percent": 0},
+      "pressure": {"cpu": true, "io_wait": false, "memory": false}, "evidence_refs": ["ev-b-cpu"]
+    }
+  ],
+  "expected": {
+    "classification": "downstream_dependency",
+    "finding_types": ["userland_hotspot", "downstream_dependency"],
+    "knowledge_refs": ["distributed.downstream_pressure"],
+    "action_collectors": ["sys_metrics"]
+  }
+}

@@ -1,0 +1,92 @@
+[
+  {
+    "knowledge_id": "linux.cpu.process_pressure",
+    "title": "Linux 进程用户态 CPU 热点",
+    "summary": "用户态 CPU 高只能说明计算压力；需要 Profile 热点、同宿主对比和负载变化来区分代码回归与流量增长。",
+    "keywords": ["cpu", "userland", "hotspot", "用户态", "热点", "self_code_or_process_pressure"],
+    "applies_to": ["cpu", "self_code_or_process_pressure"],
+    "required_evidence": ["CPU user/system 比例", "Profile TopN", "同宿主资源对比"],
+    "caveats": ["单次 CPU 高不能证明代码回归", "缺少符号时应返回证据不足"],
+    "document": "linux_cpu.md"
+  },
+  {
+    "knowledge_id": "linux.cpu.kernel_overhead",
+    "title": "Linux 系统态 CPU 偏高",
+    "summary": "系统态 CPU 偏高可能来自系统调用、网络协议栈、调度或内核路径，需要内核栈和关联指标区分。",
+    "keywords": ["cpu", "system", "kernel", "系统态", "内核"],
+    "applies_to": ["cpu", "kernel_overhead"],
+    "required_evidence": ["CPU system 比例", "内核栈或系统调用分布"],
+    "caveats": ["不能仅凭 system% 判断具体内核模块"],
+    "document": "linux_cpu.md"
+  },
+  {
+    "knowledge_id": "linux.iowait.shared_block_device",
+    "title": "共享块设备与 I/O wait 争抢",
+    "summary": "目标和同宿主实例同时出现 iowait，更支持共享设备或宿主机争抢；仍需设备延迟与队列证据排除共同流量上涨。",
+    "keywords": ["io", "iowait", "block", "磁盘", "共享", "host_resource_contention"],
+    "applies_to": ["io", "host_resource_contention"],
+    "required_evidence": ["目标与邻居 iowait", "块设备延迟直方图", "设备队列深度"],
+    "caveats": ["相关性不等于噪声邻居导致", "虚拟磁盘可能共享宿主物理设备"],
+    "document": "linux_iowait.md"
+  },
+  {
+    "knowledge_id": "linux.memory.process_growth",
+    "title": "进程内存增长与压力",
+    "summary": "RSS 增长需要结合采样时长、内存限制、堆或分配热点判断，不能只以高水位认定内存泄漏。",
+    "keywords": ["memory", "rss", "leak", "内存", "增长", "泄漏"],
+    "applies_to": ["memory", "rss_growth", "high_rss"],
+    "required_evidence": ["RSS 时间序列", "内存限制", "分配热点或 GC 指标"],
+    "caveats": ["缓存增长和泄漏表现可能相似"],
+    "document": "linux_memory.md"
+  },
+  {
+    "knowledge_id": "linux.network.retransmit",
+    "title": "TCP 重传、丢包与网络延迟",
+    "summary": "重传或丢包需要同时检查连接两端、路径和时间窗；高吞吐本身不能证明网络故障。",
+    "keywords": ["network", "tcp", "retransmit", "packet_loss", "网络", "重传", "丢包"],
+    "applies_to": ["network", "packet_loss_or_latency"],
+    "required_evidence": ["重传率", "连接级 RTT", "链路两端指标"],
+    "caveats": ["应用超时和网络丢包可能互相影响"],
+    "document": "tcp_retransmit.md"
+  },
+  {
+    "knowledge_id": "mysql.lock_wait",
+    "title": "MySQL 锁等待诊断",
+    "summary": "锁等待根因通常是阻塞事务、过长事务或访问顺序冲突，需要建立 blocking→blocked 关系。",
+    "keywords": ["mysql", "database", "lock", "数据库", "锁等待", "阻塞"],
+    "applies_to": ["database", "mysql_lock_wait"],
+    "required_evidence": ["锁等待数与时长", "阻塞会话", "事务持续时间"],
+    "caveats": ["慢查询不一定由锁等待造成"],
+    "document": "mysql_lock_wait.md"
+  },
+  {
+    "knowledge_id": "jvm.gc.pressure",
+    "title": "JVM GC 暂停与分配压力",
+    "summary": "GC 压力需要结合暂停分位数、GC 时间占比、堆分代占用和分配速率判断。",
+    "keywords": ["jvm", "gc", "pause", "runtime", "垃圾回收", "暂停"],
+    "applies_to": ["runtime", "jvm_gc_pressure"],
+    "required_evidence": ["GC pause P95", "GC 时间占比", "堆分代占用"],
+    "caveats": ["CPU 高可能是 GC 的原因，也可能是结果"],
+    "document": "jvm_gc.md"
+  },
+  {
+    "knowledge_id": "distributed.same_host_noisy_neighbor",
+    "title": "同宿主噪声邻居",
+    "summary": "需要目标、邻居和宿主机三方证据；仅发现邻居繁忙不足以证明因果关系。",
+    "keywords": ["noisy_neighbor", "same_host", "噪声邻居", "同宿主"],
+    "applies_to": ["same_host_noisy_neighbor"],
+    "required_evidence": ["目标压力", "邻居压力", "共享资源饱和度"],
+    "caveats": ["共同流量上涨可能同时推高多个实例"],
+    "document": "distributed_attribution.md"
+  },
+  {
+    "knowledge_id": "distributed.downstream_pressure",
+    "title": "下游依赖压力与症状传播",
+    "summary": "上游延迟可能只是症状，需结合历史拓扑和同一时间窗的下游资源、Trace 分段判断根因节点。",
+    "keywords": ["downstream", "dependency", "下游", "依赖", "传播"],
+    "applies_to": ["downstream_dependency"],
+    "required_evidence": ["历史拓扑", "上下游时间窗", "Trace 或下游指标"],
+    "caveats": ["当前拓扑不能直接解释历史故障"],
+    "document": "distributed_attribution.md"
+  }
+]

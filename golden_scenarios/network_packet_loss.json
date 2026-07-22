@@ -1,0 +1,22 @@
+{
+  "scenario_id": "network_packet_loss",
+  "query": "service-a 网络重传和 P95 延迟异常",
+  "scope": {
+    "target_service": "service-a", "same_host_instance_ids": [], "downstream_service_ids": [],
+    "instances": [{"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001}]
+  },
+  "observations": [{
+    "task_id": "task-network", "collector_type": "network_metrics",
+    "target": {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+    "facts": {"tcp_retransmit_pct": 4.2, "network_latency_p95_ms": 380},
+    "top_function": {"name": "", "percent": 0},
+    "pressure": {"cpu": false, "io_wait": false, "memory": false, "network": true},
+    "evidence_refs": ["ev-network-retransmit"]
+  }],
+  "expected": {
+    "classification": "self_code_or_process_pressure",
+    "finding_types": ["packet_loss_or_latency"],
+    "knowledge_refs": ["linux.network.retransmit"],
+    "action_collectors": ["sys_metrics", "perf_cpu"]
+  }
+}

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import socket
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,11 +15,20 @@ from server.app import storage
 from server.app.ai_provider import get_ai_settings, is_feature_enabled
 from server.app.common_utils import status_value
 from server.app.diagnosis.intent import parse_diagnosis_intent
+from server.app.diagnosis.actions import collect_action, inspect_command_action, inspect_session_action
+from server.app.diagnosis.domain_analyzers import (
+    analyze_observations,
+    assess_cluster,
+    cluster_finding,
+)
+from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe
+from server.app.diagnosis.report_verifier import verify_report
 from server.app.diagnosis.schemas import (
     ApprovalRequest,
     CreateDiagnosisRequest,
     DiagnosisBudget,
+    DiagnosisMode,
     DiagnosisStatus,
     ProbePlan,
     TERMINAL_DIAGNOSIS_STATUSES,
@@ -35,12 +44,15 @@ from server.app.schemas import CreateTaskRequest, MAX_SAMPLE_RATE, MAX_TASK_DURA
 PLANNER_VERSION = "diagnosis-orchestrator-v1"
 ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "UPLOADING", "ANALYZING"}
 TERMINAL_TASK_STATUSES = {"DONE", "FAILED"}
-STRUCTURED_ARTIFACT_TYPES = {"top_json", "ebpf_metrics", "sys_metrics", "memory_json"}
+STRUCTURED_ARTIFACT_TYPES = {
+    "top_json", "ebpf_metrics", "sys_metrics", "memory_json",
+    "network_metrics", "database_metrics", "runtime_metrics",
+}
 ALLOWED_DIAGNOSIS_TRANSITIONS = {
     "CREATED": {"UNDERSTANDING", "USER_CANCELED", "FAILED"},
     "UNDERSTANDING": {"PLANNING", "NEEDS_SCOPE_CONFIRMATION", "TOPOLOGY_UNAVAILABLE", "FAILED"},
     "PLANNING": {"ANALYZING_EXISTING_DATA", "BUDGET_EXHAUSTED", "FAILED"},
-    "ANALYZING_EXISTING_DATA": {"ANALYZING", "COLLECTING", "WAITING_APPROVAL", "INSUFFICIENT_EVIDENCE", "FAILED"},
+    "ANALYZING_EXISTING_DATA": {"ANALYZING", "COLLECTING", "WAITING_APPROVAL", "INSUFFICIENT_EVIDENCE", "BUDGET_EXHAUSTED", "FAILED"},
     "COLLECTING": {"ANALYZING", "WAITING_APPROVAL", "NEED_MORE_EVIDENCE", "BUDGET_EXHAUSTED", "FAILED"},
     "ANALYZING": {"CONCLUDING", "WAITING_APPROVAL", "COLLECTING", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "FAILED"},
     "WAITING_APPROVAL": {"COLLECTING", "NEED_MORE_EVIDENCE", "BUDGET_EXHAUSTED", "USER_CANCELED", "FAILED"},
@@ -54,6 +66,23 @@ class DiagnosisOrchestrator:
         self.repo = task_repository
         self.store = store or DiagnosisStore()
         self.owner = f"{socket.gethostname()}:{os.getpid()}"
+
+    def _complete_node(
+        self,
+        diagnosis_id: str,
+        node_name: str,
+        *,
+        input_refs: list[str] | None = None,
+        output_refs: list[str] | None = None,
+        metrics: dict[str, Any] | None = None,
+    ) -> None:
+        self.store.update_pipeline_node(
+            diagnosis_id, node_name, "RUNNING", input_refs=input_refs,
+        )
+        self.store.update_pipeline_node(
+            diagnosis_id, node_name, "COMPLETED",
+            input_refs=input_refs, output_refs=output_refs, metrics=metrics,
+        )
 
     def create(self, request: CreateDiagnosisRequest, creator_id: str = "demo_user") -> dict[str, Any]:
         intent = parse_diagnosis_intent(request)
@@ -74,7 +103,7 @@ class DiagnosisOrchestrator:
             "normalized_intent": intent.model_dump(mode="json"),
             "target_scope": target_scope,
             "requested_time_range": intent.time_range.model_dump(mode="json"),
-            "effective_time_range": intent.time_range.model_dump(mode="json"),
+            "effective_time_range": self._effective_time_range(intent, budget),
             "topology_snapshot_id": snapshot["snapshot_id"],
             "status": DiagnosisStatus.CREATED.value,
             "policy_profile": request.budget_profile,
@@ -91,6 +120,23 @@ class DiagnosisOrchestrator:
             "model_version": get_ai_settings().model,
             "planner_version": PLANNER_VERSION,
         })
+        self._complete_node(
+            diagnosis_id, "understand_intent",
+            output_refs=["normalized_intent"],
+            metrics={"ambiguity_count": len(intent.ambiguities)},
+        )
+        self._complete_node(
+            diagnosis_id, "resolve_scope",
+            input_refs=["normalized_intent", snapshot["snapshot_id"]],
+            output_refs=["target_scope", snapshot["snapshot_id"]],
+            metrics={"instance_count": len(target_scope["instances"])},
+        )
+        self._complete_node(
+            diagnosis_id, "build_hypotheses",
+            input_refs=["target_scope"],
+            output_refs=[item["hypothesis_id"] for item in hypotheses],
+            metrics={"hypothesis_count": len(hypotheses)},
+        )
         self._transition(diagnosis_id, DiagnosisStatus.UNDERSTANDING, "intent_parsed")
 
         if intent.ambiguities or not target_scope["instances"]:
@@ -101,6 +147,9 @@ class DiagnosisOrchestrator:
                 {"ambiguities": intent.ambiguities},
             )
             self._append_scope_help_conclusion(diagnosis_id, request.query, intent.ambiguities)
+            for node_name in ("plan_evidence", "risk_gate", "run_probes", "normalize_evidence",
+                              "analyze_evidence", "assess_cluster", "retrieve_knowledge"):
+                self.store.update_pipeline_node(diagnosis_id, node_name, "SKIPPED")
             return self.store.get_detail(diagnosis_id) or {}
 
         self._transition(diagnosis_id, DiagnosisStatus.PLANNING, "plan_created")
@@ -110,8 +159,26 @@ class DiagnosisOrchestrator:
             "existing_data_analysis_started",
         )
 
-        existing_ids = self._find_reusable_tasks(target_scope, intent.time_range.start, intent.time_range.end)
+        existing_ids = self._find_reusable_tasks(
+            target_scope,
+            intent.time_range.start,
+            intent.time_range.end,
+            require_fresh=intent.diagnosis_mode == DiagnosisMode.LIVE,
+        )
         if existing_ids:
+            self._complete_node(
+                diagnosis_id, "plan_evidence",
+                input_refs=["target_scope", "hypothesis_graph"],
+                output_refs=[f"task:{task_id}" for task_id in existing_ids],
+                metrics={"reusable_task_count": len(existing_ids), "planned_probe_count": 0},
+            )
+            self._complete_node(
+                diagnosis_id, "risk_gate",
+                input_refs=[f"task:{task_id}" for task_id in existing_ids],
+                output_refs=["reuse_existing_evidence"],
+                metrics={"new_probe_count": 0},
+            )
+            self.store.update_pipeline_node(diagnosis_id, "run_probes", "SKIPPED")
             self.store.update_session(diagnosis_id, child_task_ids=existing_ids)
             existing_tasks = [self.repo.tasks[task_id] for task_id in existing_ids if task_id in self.repo.tasks]
             self._transition(
@@ -124,7 +191,47 @@ class DiagnosisOrchestrator:
                 self._transition(diagnosis_id, DiagnosisStatus.COMPLETED, "diagnosis_completed")
                 return self.store.get_detail(diagnosis_id) or {}
 
+        if intent.diagnosis_mode == DiagnosisMode.HISTORICAL:
+            # 历史诊断绝不通过当前采集来填补历史证据缺口。
+            self._ensure_insufficient_conclusion(diagnosis_id, [])
+            self._transition(
+                diagnosis_id,
+                DiagnosisStatus.INSUFFICIENT_EVIDENCE,
+                "historical_evidence_unavailable",
+            )
+            return self.store.get_detail(diagnosis_id) or {}
+
         self._plan_and_schedule(diagnosis_id, intent.symptom, target_scope, budget)
+        probes = self.store.list_probes(diagnosis_id)
+        self._complete_node(
+            diagnosis_id, "plan_evidence",
+            input_refs=["target_scope", "hypothesis_graph"],
+            output_refs=[item["step_id"] for item in probes],
+            metrics={"reusable_task_count": 0, "planned_probe_count": len(probes)},
+        )
+        self._complete_node(
+            diagnosis_id, "risk_gate",
+            input_refs=[item["step_id"] for item in probes],
+            output_refs=[item["step_id"] for item in probes if item["status"] != "REJECTED_POLICY"],
+            metrics={
+                "planned_probe_count": len(probes),
+                "approval_required_count": sum(1 for item in probes if item["requires_approval"]),
+            },
+        )
+        self.store.update_pipeline_node(
+            diagnosis_id, "run_probes", "RUNNING",
+            input_refs=[item["step_id"] for item in probes],
+            output_refs=[f"task:{item['task_id']}" for item in probes if item.get("task_id")],
+        )
+        if not probes:
+            self._ensure_insufficient_conclusion(diagnosis_id, [])
+            terminal = (
+                DiagnosisStatus.BUDGET_EXHAUSTED
+                if budget.max_total_probe_cpu_seconds == 0
+                else DiagnosisStatus.INSUFFICIENT_EVIDENCE
+            )
+            self._transition(diagnosis_id, terminal, "empty_plan_terminal")
+            return self.store.get_detail(diagnosis_id) or {}
         self._advance_locked(diagnosis_id)
         return self.store.get_detail(diagnosis_id) or {}
 
@@ -241,6 +348,13 @@ class DiagnosisOrchestrator:
             {"step_id": request.step_id, "approver_id": request.approver_id, "scope": request.scope},
         )
         self._schedule_probe(request.step_id)
+        approved_step = self.store.get_probe(request.step_id) or {}
+        self.store.update_pipeline_node(
+            diagnosis_id, "run_probes", "RUNNING",
+            input_refs=[request.step_id],
+            output_refs=[f"task:{approved_step['task_id']}"] if approved_step.get("task_id") else [],
+            metrics={"approved_step_id": request.step_id},
+        )
         self._transition(
             diagnosis_id,
             DiagnosisStatus.COLLECTING,
@@ -289,7 +403,31 @@ class DiagnosisOrchestrator:
             elif task_status in ACTIVE_TASK_STATUSES:
                 active_tasks.append(task)
 
+        # A faster worker may finish while another target is still collecting.
+        # Cross-node attribution must use one coherent collection round, so do
+        # not conclude from the first terminal child task.
+        if active_tasks:
+            self.store.update_pipeline_node(
+                diagnosis_id, "run_probes", "RUNNING",
+                output_refs=[f"task:{task.id}" for task in active_tasks],
+                metrics={
+                    "active_task_count": len(active_tasks),
+                    "terminal_task_count": len(terminal_tasks),
+                },
+            )
+            if session["status"] != DiagnosisStatus.COLLECTING.value:
+                self._transition(diagnosis_id, DiagnosisStatus.COLLECTING, "probe_started")
+            return
+
         if terminal_tasks:
+            self.store.update_pipeline_node(
+                diagnosis_id, "run_probes", "COMPLETED",
+                output_refs=[f"task:{task.id}" for task in terminal_tasks],
+                metrics={
+                    "terminal_task_count": len(terminal_tasks),
+                    "failed_task_count": sum(1 for task in terminal_tasks if status_value(task.status) == "FAILED"),
+                },
+            )
             self._transition(diagnosis_id, DiagnosisStatus.ANALYZING, "evidence_analysis_started")
             informative = self._analyze_tasks(diagnosis_id, terminal_tasks)
             if informative:
@@ -305,13 +443,13 @@ class DiagnosisOrchestrator:
                 self._transition(diagnosis_id, final_status, "diagnosis_completed")
                 return
 
-        if active_tasks:
-            if session["status"] != DiagnosisStatus.COLLECTING.value:
-                self._transition(diagnosis_id, DiagnosisStatus.COLLECTING, "probe_started")
-            return
-
         waiting = [probe for probe in self.store.list_probes(diagnosis_id) if probe["status"] == "WAITING_APPROVAL"]
         if waiting:
+            self.store.update_pipeline_node(
+                diagnosis_id, "run_probes", "WAITING",
+                input_refs=[probe["step_id"] for probe in waiting],
+                metrics={"approval_required_count": len(waiting)},
+            )
             self._transition(
                 diagnosis_id,
                 DiagnosisStatus.WAITING_APPROVAL,
@@ -490,6 +628,10 @@ class DiagnosisOrchestrator:
         )
 
     def _analyze_tasks(self, diagnosis_id: str, tasks: list[Any]) -> bool:
+        self.store.update_pipeline_node(
+            diagnosis_id, "normalize_evidence", "RUNNING",
+            input_refs=[f"task:{task.id}" for task in tasks],
+        )
         all_candidates: list[dict[str, Any]] = []
         task_observations: list[dict[str, Any]] = []
         missing: list[str] = []
@@ -542,8 +684,24 @@ class DiagnosisOrchestrator:
                     "sort_score": candidate.final_confidence,
                 })
 
+        evidence_items = self.store.list_evidence(diagnosis_id)
+        evidence_ids = [item["evidence_id"] for item in evidence_items]
+        self.store.update_pipeline_node(
+            diagnosis_id, "normalize_evidence", "COMPLETED",
+            input_refs=[f"task:{task.id}" for task in tasks],
+            output_refs=evidence_ids,
+            metrics={"evidence_count": len(evidence_items), "observation_count": len(task_observations)},
+        )
+
         if not all_candidates and not task_observations:
+            self.store.update_pipeline_node(
+                diagnosis_id, "analyze_evidence", "SKIPPED",
+                metrics={"reason": "no_structured_observation"},
+            )
             return False
+        self.store.update_pipeline_node(
+            diagnosis_id, "analyze_evidence", "RUNNING", input_refs=evidence_ids,
+        )
         all_candidates.sort(key=lambda item: item["sort_score"], reverse=True)
         deduped: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -563,21 +721,68 @@ class DiagnosisOrchestrator:
             if len(deduped) >= 3:
                 break
 
+        findings = analyze_observations(task_observations)
+        self.store.update_pipeline_node(
+            diagnosis_id, "analyze_evidence", "COMPLETED",
+            input_refs=evidence_ids,
+            output_refs=[item["finding_id"] for item in findings],
+            metrics={"finding_count": len(findings), "candidate_count": len(deduped)},
+        )
+
+        self.store.update_pipeline_node(
+            diagnosis_id, "assess_cluster", "RUNNING",
+            input_refs=[item["finding_id"] for item in findings] + evidence_ids,
+        )
         cluster_assessment = self._build_cluster_assessment(diagnosis_id, task_observations)
-        diagnostic_commands = self._build_reviewable_commands(
+        cluster_item = cluster_finding(cluster_assessment)
+        findings.append(cluster_item)
+        self.store.update_pipeline_node(
+            diagnosis_id, "assess_cluster", "COMPLETED",
+            output_refs=[cluster_item["finding_id"]],
+            metrics={"classification": cluster_assessment["classification"]},
+        )
+
+        self.store.update_pipeline_node(
+            diagnosis_id, "retrieve_knowledge", "RUNNING",
+            input_refs=[item["finding_id"] for item in findings],
+        )
+        session = self.store.get_session(diagnosis_id) or {}
+        knowledge_context = retrieve_knowledge(session.get("raw_query", ""), findings)
+        knowledge_refs = [item["knowledge_id"] for item in knowledge_context]
+        self.store.update_pipeline_node(
+            diagnosis_id, "retrieve_knowledge", "COMPLETED",
+            output_refs=knowledge_refs,
+            metrics={"knowledge_count": len(knowledge_refs)},
+        )
+
+        self.store.update_pipeline_node(
+            diagnosis_id, "generate_actions", "RUNNING",
+            input_refs=evidence_ids + [item["finding_id"] for item in findings],
+        )
+        diagnostic_actions = self._build_reviewable_commands(
             diagnosis_id,
             task_observations,
             cluster_assessment,
+        )
+        self.store.update_pipeline_node(
+            diagnosis_id, "generate_actions", "COMPLETED",
+            output_refs=[item["action_id"] for item in diagnostic_actions],
+            metrics={"action_count": len(diagnostic_actions)},
         )
         conclusion = {
             "version": len((self.store.get_session(diagnosis_id) or {}).get("conclusion_versions", [])) + 1,
             "generated_at": utcnow().isoformat(),
             "summary": cluster_assessment["summary"] or f"形成 {len(deduped)} 个有证据关联的根因候选；结论仍需结合反证和人工确认。",
+            "evidence_scope": "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident",
             "confidence_level": cluster_assessment["confidence_level"] or (deduped[0]["confidence_level"] if deduped else "不可判断"),
             "cluster_assessment": cluster_assessment,
+            "findings": findings,
             "root_cause_candidates": deduped,
             "ruled_out": cluster_assessment["ruled_out"],
-            "diagnostic_commands": diagnostic_commands,
+            "knowledge_refs": knowledge_refs,
+            "knowledge_context": knowledge_context,
+            "actions": diagnostic_actions,
+            "diagnostic_commands": diagnostic_actions,
             "recommendations": [{
                 "action": "由人工依据证据确认根因后再执行变更；本诊断不会自动重启、迁移或修改配置。",
                 "risk_level": "R3",
@@ -590,6 +795,27 @@ class DiagnosisOrchestrator:
                 "evidence_count": len(self.store.list_evidence(diagnosis_id)),
             },
         }
+        self.store.update_pipeline_node(
+            diagnosis_id, "verify_report", "RUNNING",
+            input_refs=evidence_ids + knowledge_refs + [item["action_id"] for item in diagnostic_actions],
+        )
+        verification = verify_report(conclusion, evidence_items, session.get("target_scope", {}), session)
+        conclusion["verification"] = verification
+        if verification["status"] != "passed":
+            self.store.update_pipeline_node(
+                diagnosis_id, "verify_report", "FAILED",
+                error_code="REPORT_VERIFICATION_FAILED",
+                error_message="; ".join(verification["issues"]),
+                metrics=verification,
+            )
+            self.store.record_event(
+                diagnosis_id, "report_verification_failed", {"issues": verification["issues"]},
+            )
+            return False
+        self.store.update_pipeline_node(
+            diagnosis_id, "verify_report", "COMPLETED",
+            output_refs=["verified_report"], metrics=verification,
+        )
         self._append_conclusion(diagnosis_id, conclusion)
         self._update_hypotheses(diagnosis_id, deduped)
         return True
@@ -612,6 +838,7 @@ class DiagnosisOrchestrator:
             "collector_type": task.collector_type,
             "target": target,
             "summary": summary,
+            "facts": _normalized_facts(values, summary),
             "top_function": {"name": top_name, "percent": top_percent},
             "pressure": pressure,
             "evidence_refs": evidence_refs,
@@ -641,107 +868,7 @@ class DiagnosisOrchestrator:
     ) -> dict[str, Any]:
         session = self.store.get_session(diagnosis_id) or {}
         scope = session.get("target_scope", {})
-        target_service = scope.get("target_service")
-        same_host_ids = set(scope.get("same_host_instance_ids", []))
-        downstream_services = set(scope.get("downstream_service_ids", []))
-        target_obs = [
-            obs for obs in observations
-            if obs["target"].get("service_id") == target_service
-        ]
-        same_host_obs = [
-            obs for obs in observations
-            if obs["target"].get("instance_id") in same_host_ids
-        ]
-        downstream_obs = [
-            obs for obs in observations
-            if obs["target"].get("service_id") in downstream_services
-        ]
-        all_refs = _unique_refs(obs for obs in observations)
-        compared_by_instance: dict[tuple[Any, ...], dict[str, Any]] = {}
-        for obs in observations:
-            target = obs["target"]
-            key = (
-                target.get("instance_id"),
-                target.get("agent_id"),
-                target.get("pid"),
-            )
-            item = compared_by_instance.setdefault(key, {
-                "instance_id": target.get("instance_id"),
-                "service_id": target.get("service_id"),
-                "host_id": target.get("host_id"),
-                "agent_id": target.get("agent_id"),
-                "pid": target.get("pid"),
-                "pressure": {name: False for name in obs["pressure"]},
-                "evidence_refs": [],
-                "collector_types": [],
-                "observation_count": 0,
-            })
-            for name, flagged in obs["pressure"].items():
-                item["pressure"][name] = item["pressure"].get(name, False) or bool(flagged)
-            for ref in obs["evidence_refs"]:
-                if ref not in item["evidence_refs"]:
-                    item["evidence_refs"].append(ref)
-            if obs["collector_type"] not in item["collector_types"]:
-                item["collector_types"].append(obs["collector_type"])
-            item["observation_count"] += 1
-        compared = list(compared_by_instance.values())
-
-        classification = "insufficient_evidence"
-        confidence = 0.3
-        summary = "已有证据不足以区分自身代码、同宿主噪声邻居或下游依赖问题。"
-        ruled_out: list[dict[str, Any]] = []
-
-        target_hot = any(_has_self_hotspot(obs) for obs in target_obs)
-        target_pressure = any(_has_pressure(obs) for obs in target_obs)
-        neighbor_pressure = any(_has_pressure(obs) for obs in same_host_obs)
-        downstream_pressure = any(_has_pressure(obs) for obs in downstream_obs)
-        shared_iowait = (
-            any(obs["pressure"].get("io_wait") for obs in target_obs)
-            and any(obs["pressure"].get("io_wait") for obs in same_host_obs)
-        )
-
-        if shared_iowait:
-            classification = "host_resource_contention"
-            confidence = 0.7
-            summary = "目标实例和同宿主实例同时表现出 I/O 等待，倾向于宿主机或共享块设备争抢。"
-        elif same_host_obs and neighbor_pressure and not target_hot:
-            classification = "same_host_noisy_neighbor"
-            confidence = 0.78 if target_obs else 0.62
-            summary = "同宿主其他实例存在明显资源压力，当前更像被噪声邻居或宿主机资源争抢拖累。"
-            ruled_out.append({
-                "hypothesis": "self_code_regression",
-                "reason": "目标实例缺少高占比代码热点，且同宿主实例压力更明显。",
-                "evidence_refs": all_refs,
-            })
-        elif downstream_obs and downstream_pressure and not target_hot:
-            classification = "downstream_dependency"
-            confidence = 0.72
-            summary = "下游依赖实例出现资源压力，根因节点可能不在最先告警的服务上。"
-            ruled_out.append({
-                "hypothesis": "same_host_noisy_neighbor",
-                "reason": "当前证据更集中在一跳下游，而不是同宿主横向干扰。",
-                "evidence_refs": all_refs,
-            })
-        elif target_hot or target_pressure:
-            classification = "self_code_or_process_pressure"
-            confidence = 0.68 if target_hot else 0.58
-            summary = "证据主要集中在目标实例自身，优先检查代码热点、线程竞争或进程资源压力。"
-            if same_host_obs:
-                ruled_out.append({
-                    "hypothesis": "same_host_noisy_neighbor",
-                    "reason": "同宿主观测未显示更强资源压力。",
-                    "evidence_refs": all_refs,
-                })
-
-        return {
-            "classification": classification,
-            "confidence": round(confidence, 2),
-            "confidence_level": _confidence_label(confidence),
-            "summary": summary,
-            "evidence_refs": all_refs,
-            "compared_targets": compared,
-            "ruled_out": ruled_out,
-        }
+        return assess_cluster(scope, observations)
 
     def _build_reviewable_commands(
         self,
@@ -749,58 +876,39 @@ class DiagnosisOrchestrator:
         observations: list[dict[str, Any]],
         assessment: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        commands = [
-            _command_suggestion(
-                "cmd_review_session",
-                "回看诊断证据链",
-                f"curl -s http://localhost:8191/api/v1/diagnoses/{diagnosis_id}",
-                "只读查询当前诊断会话，核对 cluster_assessment、evidence_refs 和探针状态。",
-                "R0",
-                assessment.get("evidence_refs", []),
-                confidence=0.95,
-            )
-        ]
+        commands = [inspect_session_action(diagnosis_id, assessment.get("evidence_refs", []))]
         target_obs = observations[0] if observations else None
         if target_obs:
-            agent_id = target_obs["target"].get("agent_id")
-            pid = target_obs["target"].get("pid")
-            commands.append(_command_suggestion(
-                "cmd_low_risk_metrics",
-                "补充低风险系统指标",
-                f"micro-drop collect --agent {agent_id} --pid {pid} --collector sys_metrics --duration 15 --sample-rate 11 --watch",
-                "低开销采集 CPU、内存、线程、FD、网络与 I/O 等待趋势，适合复核当前判断。",
-                "R1",
-                target_obs.get("evidence_refs", []),
-                confidence=0.82,
+            target = target_obs["target"]
+            commands.append(collect_action(
+                action_id="act_low_risk_metrics", title="补充低风险系统指标",
+                collector_type="sys_metrics", target=target, duration_sec=15, sample_rate=11,
+                comment="低开销采集 CPU、内存、线程、FD、网络与 I/O 等待趋势，适合复核当前判断。",
+                risk_level="R1", evidence_refs=target_obs.get("evidence_refs", []),
+                confidence_level="高",
             ))
             if assessment.get("classification") in {
                 "self_code_or_process_pressure",
                 "insufficient_evidence",
             }:
-                commands.append(_command_suggestion(
-                    "cmd_cpu_profile",
-                    "申请一次 CPU Profile",
-                    f"micro-drop collect --agent {agent_id} --pid {pid} --collector perf_cpu --duration 15 --sample-rate 49 --watch",
-                    "中风险深度采样，可能带来额外开销；必须由人确认窗口和目标后再执行。",
-                    "R2",
-                    target_obs.get("evidence_refs", []),
-                    requires_approval=True,
-                    confidence=0.72,
+                commands.append(collect_action(
+                    action_id="act_cpu_profile", title="申请一次 CPU Profile",
+                    collector_type="perf_cpu", target=target, duration_sec=15, sample_rate=49,
+                    comment="中风险深度采样，可能带来额外开销；必须由人确认窗口和目标后再执行。",
+                    risk_level="R2", evidence_refs=target_obs.get("evidence_refs", []),
+                    confidence_level="中",
                 ))
             if assessment.get("classification") in {
                 "same_host_noisy_neighbor",
                 "host_resource_contention",
                 "insufficient_evidence",
             }:
-                commands.append(_command_suggestion(
-                    "cmd_io_latency",
-                    "申请一次 I/O 延迟探针",
-                    f"micro-drop collect --agent {agent_id} --pid {pid} --collector ebpf_io --duration 15 --sample-rate 11 --watch",
-                    "中风险 eBPF 探针，用于确认块设备延迟和宿主机级 I/O 争抢；需要人工审批。",
-                    "R2",
-                    assessment.get("evidence_refs", []),
-                    requires_approval=True,
-                    confidence=0.68,
+                commands.append(collect_action(
+                    action_id="act_io_latency", title="申请一次 I/O 延迟探针",
+                    collector_type="ebpf_io", target=target, duration_sec=15, sample_rate=11,
+                    comment="中风险 eBPF 探针，用于确认块设备延迟和宿主机级 I/O 争抢；需要人工审批。",
+                    risk_level="R2", evidence_refs=assessment.get("evidence_refs", []),
+                    confidence_level="中",
                 ))
         return commands
 
@@ -811,6 +919,25 @@ class DiagnosisOrchestrator:
         ambiguities: list[str],
     ) -> None:
         """没有可靠拓扑时，只给可审核排查命令，不假装已经诊断。"""
+        actions = [
+            inspect_command_action(
+                action_id="act_list_agents", title="列出可用 Agent",
+                argv=["micro-drop", "status", "--agents"],
+                comment="确认哪些 Agent 在线，以及它们是否具备 sys_metrics/perf_cpu/ebpf_io 等诊断能力。",
+                diagnosis_id=diagnosis_id,
+            ),
+            inspect_command_action(
+                action_id="act_parse_intent", title="解析自然语言意图",
+                argv=["micro-drop", "parse", query],
+                comment="仅解析意图，不创建采集任务；适合人工核对服务名、采集器和安全参数。",
+                diagnosis_id=diagnosis_id, confidence_level="中",
+            ),
+        ]
+        self._complete_node(
+            diagnosis_id, "generate_actions",
+            output_refs=[item["action_id"] for item in actions],
+            metrics={"action_count": len(actions)},
+        )
         conclusion = {
             "version": 1,
             "generated_at": utcnow().isoformat(),
@@ -827,26 +954,8 @@ class DiagnosisOrchestrator:
             },
             "root_cause_candidates": [],
             "ruled_out": [],
-            "diagnostic_commands": [
-                _command_suggestion(
-                    "cmd_list_agents",
-                    "列出可用 Agent",
-                    "micro-drop status --agents",
-                    "确认哪些 Agent 在线，以及它们是否具备 sys_metrics/perf_cpu/ebpf_io 等诊断能力。",
-                    "R0",
-                    [],
-                    confidence=0.9,
-                ),
-                _command_suggestion(
-                    "cmd_parse_intent",
-                    "解析自然语言意图",
-                    f"micro-drop parse {json.dumps(query, ensure_ascii=False)}",
-                    "仅解析意图，不创建采集任务；适合人工核对服务名、采集器和安全参数。",
-                    "R0",
-                    [],
-                    confidence=0.75,
-                ),
-            ],
+            "actions": actions,
+            "diagnostic_commands": actions,
             "recommendations": [{
                 "action": "补充 context.instances 后重新创建诊断会话；AI 不会猜测 PID 或跨服务扩散采集。",
                 "risk_level": "R0",
@@ -855,7 +964,23 @@ class DiagnosisOrchestrator:
             "limitations": ambiguities or ["service_instance_mapping"],
             "coverage": {"task_count": 0, "evidence_count": 0},
         }
-        self._append_conclusion(diagnosis_id, conclusion)
+        session = self.store.get_session(diagnosis_id) or {}
+        verification = verify_report(conclusion, [], session.get("target_scope", {}), session)
+        conclusion["verification"] = verification
+        if verification["status"] == "passed":
+            self._complete_node(
+                diagnosis_id, "verify_report",
+                input_refs=[item["action_id"] for item in actions],
+                output_refs=["verified_scope_help_report"],
+                metrics=verification,
+            )
+            self._append_conclusion(diagnosis_id, conclusion)
+        else:
+            self.store.update_pipeline_node(
+                diagnosis_id, "verify_report", "FAILED",
+                error_code="REPORT_VERIFICATION_FAILED",
+                error_message="; ".join(verification["issues"]), metrics=verification,
+            )
 
     def _ensure_insufficient_conclusion(self, diagnosis_id: str, tasks: list[Any]) -> None:
         session = self.store.get_session(diagnosis_id) or {}
@@ -872,18 +997,74 @@ class DiagnosisOrchestrator:
         stored_evidence = self.store.list_evidence(diagnosis_id)
         if tasks and not any(item["source_type"] == "derived_artifact" for item in stored_evidence):
             missing.append("任务缺少结构化分析产物")
+        scope = session.get("target_scope", {})
+        assessment = assess_cluster(scope, [])
+        finding = cluster_finding(assessment)
+        evidence_refs = [item["evidence_id"] for item in stored_evidence]
+        actions = [inspect_session_action(diagnosis_id, evidence_refs)]
+        target = next(iter(scope.get("instances", [])), None)
+        if target and session.get("normalized_intent", {}).get("diagnosis_mode") != "HISTORICAL":
+            actions.append(collect_action(
+                action_id="act_low_risk_metrics", title="重新采集低风险系统指标",
+                collector_type="sys_metrics", target=target, duration_sec=15, sample_rate=11,
+                comment="当前结构化证据缺失，先以低风险指标确认数据链路和资源趋势。",
+                risk_level="R1", evidence_refs=evidence_refs, confidence_level="低",
+            ))
+        pipeline = {item["node_name"]: item["status"] for item in self.store.list_pipeline_nodes(diagnosis_id)}
+        self.store.update_pipeline_node(
+            diagnosis_id, "run_probes", "COMPLETED" if probes else "SKIPPED",
+            output_refs=[f"task:{task.id}" for task in tasks],
+            metrics={"probe_statuses": {item["step_id"]: item["status"] for item in probes}},
+        )
+        if pipeline.get("normalize_evidence") == "PENDING":
+            self.store.update_pipeline_node(diagnosis_id, "normalize_evidence", "SKIPPED")
+        if pipeline.get("analyze_evidence") == "PENDING":
+            self.store.update_pipeline_node(diagnosis_id, "analyze_evidence", "SKIPPED")
+        self._complete_node(
+            diagnosis_id, "assess_cluster", input_refs=evidence_refs,
+            output_refs=[finding["finding_id"]], metrics={"classification": "insufficient_evidence"},
+        )
+        self._complete_node(
+            diagnosis_id, "retrieve_knowledge", input_refs=[finding["finding_id"]],
+            output_refs=[], metrics={"knowledge_count": 0},
+        )
+        self._complete_node(
+            diagnosis_id, "generate_actions", input_refs=evidence_refs,
+            output_refs=[item["action_id"] for item in actions], metrics={"action_count": len(actions)},
+        )
         conclusion = {
             "version": 1,
             "generated_at": utcnow().isoformat(),
             "summary": "当前证据不足，不能可靠给出根因候选。",
+            "evidence_scope": "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident",
             "confidence_level": "不可判断",
+            "cluster_assessment": assessment,
+            "findings": [finding],
             "root_cause_candidates": [],
             "ruled_out": [],
+            "knowledge_refs": [],
+            "knowledge_context": [],
+            "actions": actions,
+            "diagnostic_commands": actions,
             "recommendations": [],
             "limitations": missing or ["缺少能够区分候选假设的独立证据"],
             "coverage": {"task_count": len(tasks), "evidence_count": len(stored_evidence)},
         }
-        self._append_conclusion(diagnosis_id, conclusion)
+        verification = verify_report(conclusion, stored_evidence, scope, session)
+        conclusion["verification"] = verification
+        if verification["status"] == "passed":
+            self._complete_node(
+                diagnosis_id, "verify_report",
+                input_refs=evidence_refs + [item["action_id"] for item in actions],
+                output_refs=["verified_insufficient_report"], metrics=verification,
+            )
+            self._append_conclusion(diagnosis_id, conclusion)
+        else:
+            self.store.update_pipeline_node(
+                diagnosis_id, "verify_report", "FAILED",
+                error_code="REPORT_VERIFICATION_FAILED",
+                error_message="; ".join(verification["issues"]), metrics=verification,
+            )
 
     def _append_conclusion(self, diagnosis_id: str, conclusion: dict[str, Any]) -> None:
         session = self.store.get_session(diagnosis_id)
@@ -909,11 +1090,14 @@ class DiagnosisOrchestrator:
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
         identity = hashlib.sha256(f"{diagnosis_id}:{task.id}:task".encode()).hexdigest()
         evidence_id = f"ev_{identity[:20]}"
+        session = self.store.get_session(diagnosis_id) or {}
+        evidence_role = "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident"
         self.store.add_evidence({
             "evidence_id": evidence_id,
             "diagnosis_id": diagnosis_id,
             "source_type": "task_event",
             "source_system": "mini_drop",
+            "evidence_role": evidence_role,
             "target": {"agent_id": task.agent_id, "pid": task.target_pid},
             "event_time_range": {
                 "start": _iso(task.started_at or task.created_at),
@@ -943,11 +1127,14 @@ class DiagnosisOrchestrator:
             f"{diagnosis_id}:{task.id}:{artifact_type}:{digest}".encode()
         ).hexdigest()
         evidence_id = f"ev_{identity[:20]}"
+        session = self.store.get_session(diagnosis_id) or {}
+        evidence_role = "reproduction" if session.get("normalized_intent", {}).get("diagnosis_mode") == "REPRODUCTION" else "incident"
         self.store.add_evidence({
             "evidence_id": evidence_id,
             "diagnosis_id": diagnosis_id,
             "source_type": "derived_artifact",
             "source_system": "mini_drop_analyzer",
+            "evidence_role": evidence_role,
             "target": {"agent_id": task.agent_id, "pid": task.target_pid},
             "event_time_range": {
                 "start": _iso(task.started_at or task.created_at),
@@ -960,7 +1147,7 @@ class DiagnosisOrchestrator:
             "derived_artifact_ref": artifact.get("object_key") or artifact.get("local_path"),
             "derivation_version": PLANNER_VERSION,
             "observed_value": _summarize_value(value),
-            "data_quality": {"completeness": "medium", "size_bytes": len(serialized)},
+            "data_quality": _artifact_quality(value, len(serialized), task.duration_sec),
             "integrity_hash": f"sha256:{digest}",
         })
         session = self.store.get_session(diagnosis_id)
@@ -1068,14 +1255,66 @@ class DiagnosisOrchestrator:
 
     def _build_target_scope(self, request, intent, budget: DiagnosisBudget) -> dict[str, Any]:
         all_instances = [item.model_dump(mode="json") for item in request.context.instances]
-        target_instances = [item for item in all_instances if item["service_id"] == intent.target_service]
+        excluded: list[dict[str, Any]] = []
+        identities: dict[str, tuple[Any, ...]] = {}
+        for item in all_instances:
+            identity = (
+                item.get("agent_id"), item.get("pid"), item.get("process_start_time"),
+                item.get("boot_id"), item.get("container_id"), item.get("cgroup_id"),
+            )
+            previous = identities.setdefault(item["instance_id"], identity)
+            if previous != identity:
+                raise ValueError(f"instance_id {item['instance_id']} 指向多个进程身份")
+
+        eligible: list[dict[str, Any]] = []
+        for item in all_instances:
+            reason = None
+            if intent.environment != "unknown" and item["environment"] != intent.environment:
+                reason = "environment_mismatch"
+            else:
+                agent = self.repo.agents.get(item["agent_id"])
+                if agent is None:
+                    reason = "agent_not_registered"
+                elif str(getattr(agent, "hostname", "")) != item["host_id"]:
+                    reason = "agent_host_mismatch"
+            if reason:
+                excluded.append({"instance_id": item["instance_id"], "reason": reason})
+            else:
+                eligible.append(item)
+
+        target_instances = [item for item in eligible if item["service_id"] == intent.target_service]
+        # 目标锚点未建立时禁止向同宿主或依赖扩散。
+        if not target_instances:
+            return {
+                "target_service": intent.target_service,
+                "environment": intent.environment,
+                "target_anchor": None,
+                "instances": [],
+                "eligible_targets": [],
+                "excluded_targets": excluded,
+                "scope_completeness": "unresolved",
+                "same_host_instance_ids": [],
+                "downstream_service_ids": [],
+                "max_topology_hops": budget.max_topology_hops,
+            }
+
         host_ids = {item["host_id"] for item in target_instances}
-        same_host = [item for item in all_instances if item["host_id"] in host_ids and item not in target_instances]
-        downstream_services = {
-            edge.target_service for edge in request.context.dependencies
-            if edge.source_service == intent.target_service and edge.relation == "CALLS"
-        }
-        downstream = [item for item in all_instances if item["service_id"] in downstream_services]
+        same_host = [item for item in eligible if item["host_id"] in host_ids and item not in target_instances]
+
+        adjacency: dict[str, set[str]] = {}
+        for edge in request.context.dependencies:
+            if edge.relation in {"CALLS", "READS_FROM", "WRITES_TO", "PUBLISHES_TO", "SHARES_DEPENDENCY"}:
+                adjacency.setdefault(edge.source_service, set()).add(edge.target_service)
+        downstream_services: set[str] = set()
+        frontier = {intent.target_service} if intent.target_service else set()
+        for _ in range(budget.max_topology_hops):
+            next_frontier = {target for source in frontier for target in adjacency.get(source, set())}
+            next_frontier -= downstream_services
+            downstream_services.update(next_frontier)
+            frontier = next_frontier
+            if not frontier:
+                break
+        downstream = [item for item in eligible if item["service_id"] in downstream_services]
         ordered = target_instances + same_host + downstream
         unique = []
         seen = set()
@@ -1089,10 +1328,16 @@ class DiagnosisOrchestrator:
             unique.append(item)
             if len(unique) >= budget.max_service_instances:
                 break
+        budget_excluded = [item for item in eligible if item not in unique]
+        excluded.extend({"instance_id": item["instance_id"], "reason": "budget_excluded"} for item in budget_excluded)
         return {
             "target_service": intent.target_service,
             "environment": intent.environment,
+            "target_anchor": dict(target_instances[0]),
             "instances": unique,
+            "eligible_targets": unique,
+            "excluded_targets": excluded,
+            "scope_completeness": "complete" if not excluded else "partial",
             "same_host_instance_ids": [item["instance_id"] for item in same_host],
             "downstream_service_ids": sorted(downstream_services),
             "max_topology_hops": budget.max_topology_hops,
@@ -1136,11 +1381,39 @@ class DiagnosisOrchestrator:
         graph["hypotheses"] = hypotheses
         self.store.update_session(diagnosis_id, hypothesis_graph=graph)
 
-    def _find_reusable_tasks(self, target_scope: dict[str, Any], start: datetime, end: datetime) -> list[str]:
+    def _find_reusable_tasks(
+        self,
+        target_scope: dict[str, Any],
+        start: datetime,
+        end: datetime,
+        *,
+        require_fresh: bool = True,
+    ) -> list[str]:
+        """Return one fresh sys-metrics task for every target, or nothing.
+
+        A task merely overlapping a broad diagnosis window is not necessarily
+        representative of the current incident.  Reuse is therefore an
+        all-or-nothing fast path: every target must have a recent, successful,
+        structured sys-metrics artifact.  Partial or stale coverage falls back
+        to new controlled probes instead of mixing observation times.
+        """
         targets = {(item["agent_id"], item["pid"]) for item in target_scope.get("instances", [])}
-        result = []
+        if not targets:
+            return []
+        try:
+            max_age_seconds = max(
+                0,
+                int(os.getenv("MINI_DROP_DIAGNOSIS_REUSE_MAX_AGE_SECONDS", "120")),
+            )
+        except ValueError:
+            max_age_seconds = 120
+        freshness_cutoff = end - timedelta(seconds=max_age_seconds)
+        latest_by_target: dict[tuple[str, int], tuple[datetime, str]] = {}
         for task in self.repo.tasks.values():
-            if (task.agent_id, task.target_pid) not in targets:
+            target = (task.agent_id, task.target_pid)
+            if target not in targets:
+                continue
+            if task.collector_type != "sys_metrics" or status_value(task.status) != "DONE":
                 continue
             task_start = task.started_at or task.created_at
             task_end = task.finished_at or task_start
@@ -1148,9 +1421,28 @@ class DiagnosisOrchestrator:
                 task_start = task_start.replace(tzinfo=timezone.utc)
             if task_end.tzinfo is None:
                 task_end = task_end.replace(tzinfo=timezone.utc)
-            if task_end >= start and task_start <= end and status_value(task.status) in TERMINAL_TASK_STATUSES:
-                result.append(task.id)
-        return sorted(result)
+            if task_end < start or task_start > end or (require_fresh and task_end < freshness_cutoff):
+                continue
+            artifacts = self.repo.artifacts.get(task.id, [])
+            if not any(item.get("artifact_type") == "sys_metrics" for item in artifacts):
+                continue
+            current = latest_by_target.get(target)
+            if current is None or task_end > current[0]:
+                latest_by_target[target] = (task_end, task.id)
+        if set(latest_by_target) != targets:
+            return []
+        return sorted(item[1] for item in latest_by_target.values())
+
+    @staticmethod
+    def _effective_time_range(intent, budget: DiagnosisBudget) -> dict[str, Any]:
+        if intent.diagnosis_mode != DiagnosisMode.REPRODUCTION:
+            return intent.time_range.model_dump(mode="json")
+        now = utcnow()
+        return {
+            "start": now.isoformat(),
+            "end": (now + timedelta(minutes=budget.max_duration_minutes)).isoformat(),
+            "source": "reproduction_window",
+        }
 
     def _transition(
         self,
@@ -1240,35 +1532,51 @@ def _confidence_label(value: float) -> str:
     return "不可判断"
 
 
-def _command_suggestion(
-    command_id: str,
-    title: str,
-    command: str,
-    comment: str,
-    risk_level: str,
-    evidence_refs: list[str],
-    *,
-    requires_approval: bool = False,
-    confidence: float = 0.5,
-) -> dict[str, Any]:
-    return {
-        "command_id": command_id,
-        "title": title,
-        "command": command,
-        "comment": comment,
-        "risk_level": risk_level,
-        "requires_approval": requires_approval,
-        "auto_execute": False,
-        "execution_policy": "human_review_required",
-        "evidence_refs": list(dict.fromkeys(evidence_refs)),
-        "confidence": round(confidence, 2),
-    }
-
-
 def _sys_summary(value: Any) -> dict[str, Any]:
     if isinstance(value, dict) and isinstance(value.get("summary"), dict):
         return value["summary"]
     return {}
+
+
+def _normalized_facts(values: dict[str, Any], sys_summary: dict[str, Any]) -> dict[str, Any]:
+    """把不同采集器的标量摘要合并为 Analyzer 的稳定事实输入。"""
+    facts = dict(sys_summary)
+    for artifact_type, raw in values.items():
+        if artifact_type == "top_json" or not isinstance(raw, dict):
+            continue
+        payload = raw.get("summary") if isinstance(raw.get("summary"), dict) else raw
+        for key, value in payload.items():
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                facts[key] = value
+    return facts
+
+
+def _artifact_quality(value: Any, size_bytes: int, duration_sec: int) -> dict[str, Any]:
+    sample_count = 0
+    if isinstance(value, dict):
+        sample_count = int(_num(value.get("sample_count")))
+    elif isinstance(value, list):
+        sample_count = len(value)
+    reasons: list[str] = []
+    if size_bytes <= 2:
+        reasons.append("empty_or_nearly_empty_artifact")
+    if duration_sec < 3:
+        reasons.append("sampling_window_too_short")
+    if sample_count == 0:
+        reasons.append("sample_count_unavailable")
+    if size_bytes <= 2 or duration_sec < 3:
+        completeness = "low"
+    elif sample_count >= 5:
+        completeness = "high"
+    else:
+        completeness = "medium"
+    return {
+        "completeness": completeness,
+        "size_bytes": size_bytes,
+        "sample_count": sample_count or None,
+        "sampling_window_seconds": duration_sec,
+        "quality_reasons": reasons,
+    }
 
 
 def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str, bool]:
@@ -1277,17 +1585,20 @@ def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str
     cpu_iowait = _num(summary.get("avg_cpu_iowait_pct"))
     load1m = _num(summary.get("load1m"))
     rss_mb = _num(summary.get("vmrss_mb"))
-    rss_max = _num(summary.get("vmrss_mb_max"))
     fd_count = _num(summary.get("fd_count"))
-    fd_max = _num(summary.get("fd_max"))
     threads = _num(summary.get("thread_count"))
+    memory_trend = str(summary.get("vmrss_trend") or summary.get("memory_trend") or "").lower()
+    fd_trend = str(summary.get("fd_trend") or "").lower()
     top_items = values.get("top_json") if isinstance(values.get("top_json"), list) else []
     top_percent = _num((top_items[0] or {}).get("percent")) if top_items else 0.0
     return {
         "cpu": cpu_user + cpu_sys >= 75 or top_percent >= 45,
         "io_wait": cpu_iowait >= 20 or _has_ebpf_latency(values.get("ebpf_metrics")),
-        "memory": rss_mb >= 1024 or (rss_max > 0 and rss_mb / max(rss_max, 1.0) >= 0.9),
-        "fd": fd_count >= 1000 or (fd_max > 0 and fd_count / max(fd_max, 1.0) >= 0.9),
+        "host_iowait_high": cpu_iowait >= 10,
+        "block_latency_high": _has_ebpf_latency(values.get("ebpf_metrics")),
+        "process_io_rate_high": False,
+        "memory": rss_mb >= 1024 or (memory_trend in {"increasing", "growing"} and rss_mb >= 256),
+        "fd": fd_count >= 1000 or (fd_trend == "increasing" and fd_count >= 200),
         "thread": threads >= 512,
         "load": load1m >= 4,
     }

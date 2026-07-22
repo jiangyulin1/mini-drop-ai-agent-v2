@@ -1,0 +1,22 @@
+{
+  "scenario_id": "memory_leak",
+  "query": "service-a RSS 持续增长",
+  "scope": {
+    "target_service": "service-a", "same_host_instance_ids": [], "downstream_service_ids": [],
+    "instances": [{"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001}]
+  },
+  "observations": [{
+    "task_id": "task-memory", "collector_type": "sys_metrics",
+    "target": {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
+    "facts": {"vmrss_mb": 880, "vmrss_mb_max": 920, "vmrss_trend": "increasing"},
+    "top_function": {"name": "", "percent": 0},
+    "pressure": {"cpu": false, "io_wait": false, "memory": true},
+    "evidence_refs": ["ev-memory-series"]
+  }],
+  "expected": {
+    "classification": "self_code_or_process_pressure",
+    "finding_types": ["rss_growth"],
+    "knowledge_refs": ["linux.memory.process_growth"],
+    "action_collectors": ["sys_metrics", "perf_cpu"]
+  }
+}
