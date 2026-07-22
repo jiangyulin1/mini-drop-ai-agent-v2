@@ -263,6 +263,13 @@ class InMemoryRepository:
 
             return task
 
+    def get_task_by_diagnosis_step_id(self, step_id: str) -> TaskRecord | None:
+        with self._lock:
+            return next((
+                task for task in self.tasks.values()
+                if task.request_params.get("options", {}).get("diagnosis_step_id") == step_id
+            ), None)
+
     def transition_task(
         self, task_id: str, to_status: TaskStatus,
         reason: str, actor: Actor,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -64,6 +64,7 @@ class TaskModel(Base):
     status = Column(String(16), nullable=False)
     status_reason = Column(Text, default="")
     request_params = Column(JSON, default=dict)
+    diagnosis_step_id = Column(String(128), nullable=True, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -385,6 +386,8 @@ class DiagnosisSessionModel(Base):
     planner_version = Column(String(64), nullable=False)
     lease_owner = Column(String(128), nullable=True)
     lease_until = Column(DateTime(timezone=True), nullable=True)
+    row_version = Column(Integer, nullable=False, default=0)
+    deadline_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -411,6 +414,8 @@ class DiagnosisSessionModel(Base):
             "planner_version": self.planner_version,
             "lease_owner": self.lease_owner,
             "lease_until": self.lease_until,
+            "row_version": self.row_version,
+            "deadline_at": self.deadline_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -462,6 +467,9 @@ class ProbeExecutionModel(Base):
     approved_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
+    retry_count = Column(Integer, nullable=False, default=0)
+    error_code = Column(String(128), nullable=True)
+    error_message = Column(Text, nullable=True)
 
     def to_dict(self) -> dict:
         return {
@@ -479,7 +487,25 @@ class ProbeExecutionModel(Base):
             "approved_at": self.approved_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "retry_count": self.retry_count,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
         }
+
+
+class DiagnosisOutboxModel(Base):
+    """Transactional intent to create the one Task belonging to a probe step."""
+
+    __tablename__ = "diagnosis_task_outbox"
+
+    id = Column(String(160), primary_key=True)
+    diagnosis_id = Column(String(128), ForeignKey("diagnosis_sessions.id"), nullable=False, index=True)
+    step_id = Column(String(128), ForeignKey("diagnosis_probe_executions.id"), nullable=False, unique=True)
+    status = Column(String(32), nullable=False, default="PENDING")
+    attempt = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class DiagnosisEvidenceModel(Base):
@@ -535,6 +561,7 @@ class DiagnosisNodeRunModel(Base):
     """显式诊断流水线节点的可恢复运行记录。"""
 
     __tablename__ = "diagnosis_node_runs"
+    __table_args__ = (UniqueConstraint("diagnosis_id", "node_name", name="uq_diagnosis_node_name"),)
 
     id = Column(String(256), primary_key=True)
     diagnosis_id = Column(

@@ -5,11 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import or_
+
 from server.app.database import new_session
 from server.app.models import (
     DiagnosisEventModel,
     DiagnosisEvidenceModel,
     DiagnosisNodeRunModel,
+    DiagnosisOutboxModel,
     DiagnosisSessionModel,
     ProbeExecutionModel,
     TopologySnapshotModel,
@@ -65,6 +68,8 @@ class DiagnosisStore:
                 conclusion_versions_json=data.get("conclusion_versions", []),
                 model_version=data["model_version"],
                 planner_version=data["planner_version"],
+                row_version=0,
+                deadline_at=data["deadline_at"],
                 created_at=now,
                 updated_at=now,
             )
@@ -207,6 +212,20 @@ class DiagnosisStore:
         finally:
             session.close()
 
+    def list_active_sessions(self, terminal_statuses: set[str], limit: int = 100) -> list[dict[str, Any]]:
+        session = new_session()
+        try:
+            rows = (
+                session.query(DiagnosisSessionModel)
+                .filter(~DiagnosisSessionModel.status.in_(terminal_statuses))
+                .order_by(DiagnosisSessionModel.updated_at.asc())
+                .limit(limit)
+                .all()
+            )
+            return [row.to_dict() for row in rows]
+        finally:
+            session.close()
+
     def count_sessions(self) -> int:
         session = new_session()
         try:
@@ -214,7 +233,7 @@ class DiagnosisStore:
         finally:
             session.close()
 
-    def update_session(self, diagnosis_id: str, **fields: Any) -> dict[str, Any]:
+    def update_session(self, diagnosis_id: str, *, expected_version: int | None = None, **fields: Any) -> dict[str, Any]:
         column_map = {
             "normalized_intent": "normalized_intent_json",
             "target_scope": "target_scope_json",
@@ -235,11 +254,21 @@ class DiagnosisStore:
             model = session.get(DiagnosisSessionModel, diagnosis_id)
             if model is None:
                 raise ValueError(f"诊断 {diagnosis_id} 不存在")
-            for key, value in fields.items():
-                setattr(model, column_map[key], value)
-            model.updated_at = utcnow()
+            version = model.row_version
+            if expected_version is not None and version != expected_version:
+                raise RuntimeError("diagnosis session CAS conflict")
+            values = {column_map[key]: value for key, value in fields.items()}
+            values.update({"row_version": version + 1, "updated_at": utcnow()})
+            changed = (
+                session.query(DiagnosisSessionModel)
+                .filter(DiagnosisSessionModel.id == diagnosis_id, DiagnosisSessionModel.row_version == version)
+                .update(values, synchronize_session=False)
+            )
+            if changed != 1:
+                raise RuntimeError("diagnosis session CAS conflict")
             session.commit()
-            return model.to_dict()
+            session.expire_all()
+            return session.get(DiagnosisSessionModel, diagnosis_id).to_dict()
         except Exception:
             session.rollback()
             raise
@@ -259,8 +288,20 @@ class DiagnosisStore:
             if model is None:
                 raise ValueError(f"诊断 {diagnosis_id} 不存在")
             previous = model.status
-            model.status = to_status
-            model.updated_at = utcnow()
+            previous_version = model.row_version
+            changed = (
+                session.query(DiagnosisSessionModel)
+                .filter(
+                    DiagnosisSessionModel.id == diagnosis_id,
+                    DiagnosisSessionModel.status == previous,
+                    DiagnosisSessionModel.row_version == previous_version,
+                )
+                .update({
+                    "status": to_status, "row_version": previous_version + 1, "updated_at": utcnow(),
+                }, synchronize_session=False)
+            )
+            if changed != 1:
+                raise RuntimeError("diagnosis transition CAS conflict")
             session.add(DiagnosisEventModel(
                 diagnosis_id=diagnosis_id,
                 event_type=event_type,
@@ -270,7 +311,8 @@ class DiagnosisStore:
                 created_at=utcnow(),
             ))
             session.commit()
-            return model.to_dict()
+            session.expire_all()
+            return session.get(DiagnosisSessionModel, diagnosis_id).to_dict()
         except Exception:
             session.rollback()
             raise
@@ -308,24 +350,29 @@ class DiagnosisStore:
         now = utcnow()
         session = new_session()
         try:
-            model = (
-                session.query(DiagnosisSessionModel)
-                .filter(DiagnosisSessionModel.id == diagnosis_id)
-                .with_for_update()
-                .first()
-            )
+            model = session.get(DiagnosisSessionModel, diagnosis_id)
             if model is None:
                 return False
             lease_until = model.lease_until
             if lease_until is not None and lease_until.tzinfo is None:
                 lease_until = lease_until.replace(tzinfo=timezone.utc)
-            if lease_until and lease_until > now and model.lease_owner != owner:
-                return False
-            model.lease_owner = owner
-            model.lease_until = now + timedelta(seconds=ttl_seconds)
-            model.updated_at = now
+            changed = (
+                session.query(DiagnosisSessionModel)
+                .filter(
+                    DiagnosisSessionModel.id == diagnosis_id,
+                    DiagnosisSessionModel.row_version == model.row_version,
+                    or_(DiagnosisSessionModel.lease_until.is_(None), DiagnosisSessionModel.lease_until <= now,
+                        DiagnosisSessionModel.lease_owner == owner),
+                )
+                .update({
+                    "lease_owner": owner,
+                    "lease_until": now + timedelta(seconds=ttl_seconds),
+                    "row_version": model.row_version + 1,
+                    "updated_at": now,
+                }, synchronize_session=False)
+            )
             session.commit()
-            return True
+            return changed == 1
         except Exception:
             session.rollback()
             raise
@@ -336,10 +383,15 @@ class DiagnosisStore:
         session = new_session()
         try:
             model = session.get(DiagnosisSessionModel, diagnosis_id)
-            if model is not None and model.lease_owner == owner:
-                model.lease_owner = None
-                model.lease_until = None
-                model.updated_at = utcnow()
+            if model is not None:
+                session.query(DiagnosisSessionModel).filter(
+                    DiagnosisSessionModel.id == diagnosis_id,
+                    DiagnosisSessionModel.lease_owner == owner,
+                    DiagnosisSessionModel.row_version == model.row_version,
+                ).update({
+                    "lease_owner": None, "lease_until": None,
+                    "row_version": model.row_version + 1, "updated_at": utcnow(),
+                }, synchronize_session=False)
                 session.commit()
         finally:
             session.close()
@@ -374,7 +426,7 @@ class DiagnosisStore:
             session.close()
 
     def update_probe(self, step_id: str, **fields: Any) -> dict[str, Any]:
-        allowed = {"status", "task_id", "approved_by", "approved_at"}
+        allowed = {"status", "task_id", "approved_by", "approved_at", "retry_count", "error_code", "error_message"}
         unknown = set(fields) - allowed
         if unknown:
             raise ValueError(f"不允许更新探针字段: {sorted(unknown)}")
@@ -391,6 +443,57 @@ class DiagnosisStore:
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+    def enqueue_probe(self, step_id: str) -> dict[str, Any]:
+        """Atomically mark a ready/approved step scheduled and create one outbox row."""
+        session = new_session()
+        try:
+            probe = session.query(ProbeExecutionModel).filter(ProbeExecutionModel.id == step_id).with_for_update().first()
+            if probe is None:
+                raise ValueError(f"探针步骤 {step_id} 不存在")
+            outbox = session.query(DiagnosisOutboxModel).filter(DiagnosisOutboxModel.step_id == step_id).first()
+            if outbox is None:
+                now = utcnow()
+                outbox = DiagnosisOutboxModel(
+                    id=f"outbox:{step_id}", diagnosis_id=probe.diagnosis_id, step_id=step_id,
+                    status="PENDING", attempt=0, created_at=now, updated_at=now,
+                )
+                session.add(outbox)
+            if probe.status in {"READY", "APPROVED", "PLANNED"}:
+                probe.status = "SCHEDULED"
+                probe.updated_at = utcnow()
+            session.commit()
+            return probe.to_dict()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def list_pending_outbox(self, diagnosis_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        session = new_session()
+        try:
+            rows = (
+                session.query(DiagnosisOutboxModel)
+                .filter(DiagnosisOutboxModel.diagnosis_id == diagnosis_id, DiagnosisOutboxModel.status == "PENDING")
+                .order_by(DiagnosisOutboxModel.created_at.asc()).limit(limit).all()
+            )
+            return [{"outbox_id": row.id, "step_id": row.step_id, "attempt": row.attempt} for row in rows]
+        finally:
+            session.close()
+
+    def complete_outbox(self, outbox_id: str, error: str | None = None) -> None:
+        session = new_session()
+        try:
+            row = session.get(DiagnosisOutboxModel, outbox_id)
+            if row is not None:
+                row.attempt += 1
+                row.status = "FAILED" if error else "COMPLETED"
+                row.last_error = (error or "")[:2000] or None
+                row.updated_at = utcnow()
+                session.commit()
         finally:
             session.close()
 
@@ -490,6 +593,21 @@ class DiagnosisStore:
             session.close()
         item["topology_snapshot"] = self.get_topology(item.get("topology_snapshot_id"))
         item["probes"] = self.list_probes(diagnosis_id)
+        coverage_status = {
+            "READY": "QUEUED", "PLANNED": "PLANNED", "SCHEDULED": "SCHEDULED",
+            "RUNNING": "RUNNING", "COMPLETED": "COMPLETED", "FAILED": "FAILED",
+            "TIMED_OUT": "TIMED_OUT", "UNAVAILABLE": "UNAVAILABLE",
+            "REJECTED": "REJECTED", "REJECTED_POLICY": "REJECTED",
+            "WAITING_APPROVAL": "WAITING_APPROVAL", "SKIPPED": "SKIPPED",
+        }
+        item["coverage"] = [{
+            "target": probe.get("target", {}).get("instance_id"),
+            "requirement": probe.get("probe_id"),
+            "status": coverage_status.get(probe.get("status"), probe.get("status")),
+            "step_id": probe.get("step_id"),
+            "task_id": probe.get("task_id"),
+            "error_code": probe.get("error_code"),
+        } for probe in item["probes"]]
         item["evidence"] = self.list_evidence(diagnosis_id)
         pipeline_nodes = self.list_pipeline_nodes(diagnosis_id)
         if not pipeline_nodes:

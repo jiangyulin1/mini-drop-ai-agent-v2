@@ -323,6 +323,7 @@ class SqlRepository:
                 status=TaskStatus.PENDING.value,
                 status_reason="Web 请求创建任务",
                 request_params=payload.model_dump(),
+                diagnosis_step_id=(payload.options or {}).get("diagnosis_step_id"),
                 created_at=ts,
             )
             session.add(task)
@@ -339,6 +340,13 @@ class SqlRepository:
                               metadata=payload.model_dump())
 
             return task
+
+    def get_task_by_diagnosis_step_id(self, step_id: str) -> TaskModel | None:
+        session = new_session()
+        try:
+            return session.query(TaskModel).filter(TaskModel.diagnosis_step_id == step_id).first()
+        finally:
+            session.close()
 
     def transition_task(
         self, task_id: str, to_status: TaskStatus,

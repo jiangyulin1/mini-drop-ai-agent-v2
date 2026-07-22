@@ -1,6 +1,7 @@
 """AI 集群诊断会话、探针审批、预算和证据链测试。"""
 
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ from server.app.database import init_db, reset_engine
 from server.app.diagnosis import orchestrator as orchestrator_module
 from server.app.diagnosis.domain_analyzers import analyze_observations
 from server.app.diagnosis.report_verifier import verify_report
+from server.app.diagnosis.schemas import ApprovalRequest
 from server.app.main import app, repo
 from server.app.main import diagnosis_orchestrator
 from server.app.models import Base
@@ -112,6 +114,72 @@ def test_verifier_rejects_downstream_claim_without_evidence():
     }, [], {"instances": []})
     assert result["status"] == "failed"
     assert any("缺少 Evidence" in issue for issue in result["issues"])
+
+
+def test_five_instances_are_covered_in_bounded_batches(client: TestClient):
+    payload = _payload("service-a 延迟升高，覆盖全部实例")
+    payload["budget"] = {"max_parallel_probes": 2}
+    for index in range(2, 6):
+        agent_id = f"a{index}"
+        host_id = f"host-{index}"
+        repo.register_agent(agent_id, host_id, f"10.0.0.{index}", capabilities=["sys_metrics"])
+        payload["context"]["instances"].append({
+            "service_id": "service-a", "instance_id": f"service-a-{index}",
+            "host_id": host_id, "agent_id": agent_id, "pid": 1200 + index,
+            "environment": "production",
+        })
+    detail = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    assert len(detail["coverage"]) == 5
+    observed_active = []
+    while detail["status"] not in {"COMPLETED", "PARTIAL_COMPLETED", "INSUFFICIENT_EVIDENCE", "FAILED"}:
+        active = [
+            task for task in repo.tasks.values()
+            if task.request_params.get("options", {}).get("diagnosis_id") == detail["diagnosis_id"]
+            and task.status in {TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.UPLOADING, TaskStatus.ANALYZING}
+        ]
+        observed_active.append(len(active))
+        assert len(active) <= 2
+        for task in active:
+            _finish_sys_metrics_task(task.id, _normal_summary())
+        detail = client.get(f"/api/v1/diagnoses/{detail['diagnosis_id']}").json()["data"]
+    assert max(observed_active) == 2
+    assert {item["status"] for item in detail["coverage"]} == {"COMPLETED"}
+
+
+def test_concurrent_approval_creates_one_task(client: TestClient):
+    detail = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    task_id = detail["child_task_ids"][0]
+    repo.transition_task(task_id, TaskStatus.RUNNING, "accepted", Actor.SERVER)
+    repo.transition_task(task_id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+    repo.transition_task(task_id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+    repo.transition_task(task_id, TaskStatus.DONE, "no artifact", Actor.ANALYZER)
+    waiting = client.get(f"/api/v1/diagnoses/{detail['diagnosis_id']}").json()["data"]
+    r2 = next(item for item in waiting["probes"] if item["risk_level"] == "R2")
+    request = ApprovalRequest(step_id=r2["step_id"], decision="approve", approver_id="operator")
+
+    def approve_once():
+        try:
+            return diagnosis_orchestrator.approve(detail["diagnosis_id"], request)
+        except ValueError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _: approve_once(), range(2)))
+    matching = [
+        task for task in repo.tasks.values()
+        if task.request_params.get("options", {}).get("diagnosis_step_id") == r2["step_id"]
+    ]
+    assert len(matching) == 1
+
+
+def test_concurrent_advance_writes_one_conclusion(client: TestClient):
+    detail = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    _finish_sys_metrics_task(detail["child_task_ids"][0], _normal_summary())
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _: diagnosis_orchestrator.advance(detail["diagnosis_id"]), range(2)))
+    stored = diagnosis_orchestrator.store.get_session(detail["diagnosis_id"])
+    assert stored is not None
+    assert len(stored["conclusion_versions"]) == 1
 
 
 def test_remote_artifact_falls_back_to_object_storage_when_agent_path_is_missing(
@@ -309,7 +377,8 @@ class TestDiagnosisSessionAPI:
         assert len(data["child_task_ids"]) == 1
         probes = {item["probe_id"]: item for item in data["probes"]}
         assert probes["host_process_metrics"]["status"] in {"SCHEDULED", "RUNNING"}
-        assert probes["process_cpu_profile"]["status"] == "WAITING_APPROVAL"
+        assert "process_cpu_profile" not in probes
+        assert data["coverage"][0]["status"] in {"SCHEDULED", "RUNNING"}
 
         task = repo.tasks[data["child_task_ids"][0]]
         assert task.collector_type == "sys_metrics"
@@ -318,7 +387,13 @@ class TestDiagnosisSessionAPI:
 
     def test_r2_probe_requires_explicit_single_execution_approval(self, client: TestClient):
         data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
-        r2 = next(item for item in data["probes"] if item["risk_level"] == "R2")
+        task_id = data["child_task_ids"][0]
+        repo.transition_task(task_id, TaskStatus.RUNNING, "agent accepted", Actor.SERVER)
+        repo.transition_task(task_id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+        repo.transition_task(task_id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+        repo.transition_task(task_id, TaskStatus.DONE, "no structured output", Actor.ANALYZER)
+        waiting = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+        r2 = next(item for item in waiting["probes"] if item["risk_level"] == "R2")
         approved = client.post(
             f"/api/v1/diagnoses/{data['diagnosis_id']}/approvals",
             json={

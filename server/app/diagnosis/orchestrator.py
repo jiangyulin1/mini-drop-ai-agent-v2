@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import socket
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -66,7 +67,13 @@ class DiagnosisOrchestrator:
     def __init__(self, task_repository, store: DiagnosisStore | None = None):
         self.repo = task_repository
         self.store = store or DiagnosisStore()
-        self.owner = f"{socket.gethostname()}:{os.getpid()}"
+        self.owner_prefix = f"{socket.gethostname()}:{os.getpid()}"
+        self._operation_locks: dict[str, threading.Lock] = {}
+        self._operation_locks_guard = threading.Lock()
+
+    def _operation_lock(self, diagnosis_id: str) -> threading.Lock:
+        with self._operation_locks_guard:
+            return self._operation_locks.setdefault(diagnosis_id, threading.Lock())
 
     def _complete_node(
         self,
@@ -120,6 +127,7 @@ class DiagnosisOrchestrator:
             "conclusion_versions": [],
             "model_version": get_ai_settings().model,
             "planner_version": PLANNER_VERSION,
+            "deadline_at": utcnow() + timedelta(minutes=budget.max_duration_minutes),
         })
         self._complete_node(
             diagnosis_id, "understand_intent",
@@ -248,26 +256,39 @@ class DiagnosisOrchestrator:
         return self.store.list_sessions(limit=limit, offset=offset)
 
     def advance(self, diagnosis_id: str) -> dict[str, Any] | None:
-        if not self.store.acquire_lease(diagnosis_id, self.owner):
-            return self.store.get_detail(diagnosis_id)
-        try:
-            self._advance_locked(diagnosis_id)
-        finally:
-            self.store.release_lease(diagnosis_id, self.owner)
+        with self._operation_lock(diagnosis_id):
+            owner = f"{self.owner_prefix}:{threading.get_ident()}:{uuid4().hex}"
+            if not self.store.acquire_lease(diagnosis_id, owner):
+                return self.store.get_detail(diagnosis_id)
+            try:
+                self._advance_locked(diagnosis_id)
+            finally:
+                self.store.release_lease(diagnosis_id, owner)
         return self.store.get_detail(diagnosis_id)
 
     def advance_active(self, limit: int = 100) -> None:
         """由后台扫描器调用，使恢复不依赖用户 GET 请求。"""
-        for item in self.store.list_sessions(limit=limit, offset=0):
-            if item["status"] in TERMINAL_DIAGNOSIS_STATUSES:
-                continue
+        for item in self.store.list_active_sessions(TERMINAL_DIAGNOSIS_STATUSES, limit=limit):
             try:
                 self.advance(item["diagnosis_id"])
-            except Exception:
-                # 单个诊断异常不能阻塞其他会话；HTTP 读取仍可暴露原状态供排查。
-                continue
+            except Exception as exc:
+                self.store.record_event(item["diagnosis_id"], "advance_failed", {"error": str(exc)[:1000]})
+                self.store.update_pipeline_node(
+                    item["diagnosis_id"], "run_probes", "FAILED",
+                    error_code="ADVANCE_FAILED", error_message=str(exc),
+                )
 
     def approve(self, diagnosis_id: str, request: ApprovalRequest) -> dict[str, Any]:
+        with self._operation_lock(diagnosis_id):
+            owner = f"{self.owner_prefix}:{threading.get_ident()}:{uuid4().hex}"
+            if not self.store.acquire_lease(diagnosis_id, owner):
+                raise ValueError("诊断正在由另一个操作推进，请重试")
+            try:
+                return self._approve_locked(diagnosis_id, request)
+            finally:
+                self.store.release_lease(diagnosis_id, owner)
+
+    def _approve_locked(self, diagnosis_id: str, request: ApprovalRequest) -> dict[str, Any]:
         session = self.store.get_session(diagnosis_id)
         if session is None:
             raise ValueError("诊断不存在")
@@ -294,7 +315,8 @@ class DiagnosisOrchestrator:
                 "approval_rejected",
                 {"step_id": request.step_id, "approver_id": request.approver_id},
             )
-            return self.advance(diagnosis_id) or {}
+            self._advance_locked(diagnosis_id)
+            return self.store.get_detail(diagnosis_id) or {}
 
         approved_r2 = sum(
             1 for probe in self.store.list_probes(diagnosis_id)
@@ -348,7 +370,8 @@ class DiagnosisOrchestrator:
             "approval_granted",
             {"step_id": request.step_id, "approver_id": request.approver_id, "scope": request.scope},
         )
-        self._schedule_probe(request.step_id)
+        self.store.enqueue_probe(request.step_id)
+        self._drain_probe_outbox(diagnosis_id)
         approved_step = self.store.get_probe(request.step_id) or {}
         self.store.update_pipeline_node(
             diagnosis_id, "run_probes", "RUNNING",
@@ -368,6 +391,17 @@ class DiagnosisOrchestrator:
         session = self.store.get_session(diagnosis_id)
         if session is None or session["status"] in TERMINAL_DIAGNOSIS_STATUSES:
             return
+        deadline = session.get("deadline_at")
+        if deadline is not None:
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            if utcnow() >= deadline:
+                for probe in self.store.list_probes(diagnosis_id):
+                    if probe["status"] not in {"COMPLETED", "FAILED", "TIMED_OUT", "REJECTED", "UNAVAILABLE", "SKIPPED"}:
+                        self.store.update_probe(probe["step_id"], status="TIMED_OUT", error_code="DIAGNOSIS_DEADLINE")
+                self._ensure_insufficient_conclusion(diagnosis_id, [])
+                self._transition(diagnosis_id, DiagnosisStatus.INSUFFICIENT_EVIDENCE, "diagnosis_deadline_reached")
+                return
         probes = self.store.list_probes(diagnosis_id)
         child_ids = list(session.get("child_task_ids", []))
 
@@ -391,6 +425,11 @@ class DiagnosisOrchestrator:
 
         if child_ids != session.get("child_task_ids", []):
             session = self.store.update_session(diagnosis_id, child_task_ids=child_ids)
+
+        # A completed batch frees slots for READY targets before any analysis.
+        self._fill_ready_queue(diagnosis_id)
+        probes = self.store.list_probes(diagnosis_id)
+        child_ids = list((self.store.get_session(diagnosis_id) or {}).get("child_task_ids", []))
 
         terminal_tasks = []
         active_tasks = []
@@ -443,6 +482,7 @@ class DiagnosisOrchestrator:
                 self._transition(diagnosis_id, DiagnosisStatus.CONCLUDING, "conclusion_generated")
                 self._transition(diagnosis_id, final_status, "diagnosis_completed")
                 return
+            self._plan_adaptive_r2(diagnosis_id, terminal_tasks)
 
         waiting = [probe for probe in self.store.list_probes(diagnosis_id) if probe["status"] == "WAITING_APPROVAL"]
         if waiting:
@@ -471,7 +511,7 @@ class DiagnosisOrchestrator:
 
         probes = self.store.list_probes(diagnosis_id)
         if probes and all(p["status"] in {
-            "UNAVAILABLE", "REJECTED", "REJECTED_POLICY", "INVALID", "FAILED", "SKIPPED",
+            "UNAVAILABLE", "REJECTED", "REJECTED_POLICY", "INVALID", "FAILED", "SKIPPED", "TIMED_OUT",
         } for p in probes):
             self._ensure_insufficient_conclusion(diagnosis_id, [])
             self._transition(
@@ -479,6 +519,43 @@ class DiagnosisOrchestrator:
                 DiagnosisStatus.INSUFFICIENT_EVIDENCE,
                 "diagnosis_completed",
             )
+
+    def _plan_adaptive_r2(self, diagnosis_id: str, tasks: list[Any]) -> bool:
+        session = self.store.get_session(diagnosis_id) or {}
+        if int(session.get("risk_budget", {}).get("max_medium_risk_probes", 0)) <= 0:
+            return False
+        probes = self.store.list_probes(diagnosis_id)
+        if any(item["risk_level"] == "R2" for item in probes):
+            return any(item["status"] == "WAITING_APPROVAL" for item in probes)
+        intent = session.get("normalized_intent", {})
+        r2_ids = [probe_id for probe_id in choose_probe_ids(intent.get("symptom", "")) if get_probe(probe_id).risk_level == "R2"]
+        if not r2_ids:
+            return False
+        scored: list[tuple[float, Any]] = []
+        for task in tasks:
+            values = {kind: value for kind, value, _ in self._structured_artifacts(self.repo.artifacts.get(task.id, []))}
+            summary = _sys_summary(values.get("sys_metrics"))
+            score = sum(1.0 for value in _pressure_flags(summary, values).values() if value)
+            scored.append((score, task))
+        if not scored:
+            return False
+        _, task = max(scored, key=lambda item: item[0])
+        target = self._target_for_task(diagnosis_id, task)
+        definition = get_probe(r2_ids[0])
+        key = f"{diagnosis_id}:{definition.probe_id}:{target.get('instance_id')}:adaptive"
+        step_id = f"step_{hashlib.sha256(key.encode()).hexdigest()[:14]}"
+        self.store.add_probe({
+            "step_id": step_id,
+            "diagnosis_id": diagnosis_id,
+            "probe_id": definition.probe_id,
+            "target": target,
+            "parameters": {"duration_sec": definition.default_duration_seconds, "sample_rate": definition.default_sample_rate},
+            "reason": "R1 全目标指标显示区分性证据缺口，仅在压力最显著节点请求 R2",
+            "risk_level": definition.risk_level,
+            "requires_approval": True,
+            "status": "WAITING_APPROVAL",
+        })
+        return True
 
     def _plan_and_schedule(
         self,
@@ -490,21 +567,14 @@ class DiagnosisOrchestrator:
         instances = target_scope["instances"][:budget.max_service_instances]
         probe_ids = choose_probe_ids(symptom)
         planned: list[ProbePlan] = []
-        r2_count = 0
-        auto_count = 0
         planned_duration = 0
         duration_limit = min(budget.max_duration_minutes * 60, budget.max_total_probe_cpu_seconds)
         for index, instance in enumerate(instances):
             for probe_id in probe_ids:
                 definition = get_probe(probe_id)
                 if definition.risk_level == "R2":
-                    if index > 0 or r2_count >= budget.max_medium_risk_probes:
-                        continue
-                    r2_count += 1
-                elif auto_count >= budget.max_parallel_probes:
+                    # R2 is selected adaptively after the all-target R1 round.
                     continue
-                else:
-                    auto_count += 1
                 duration = min(definition.default_duration_seconds, definition.max_duration_seconds)
                 if planned_duration + duration > duration_limit:
                     continue
@@ -521,14 +591,41 @@ class DiagnosisOrchestrator:
                 ))
 
         for plan in planned:
-            status = "WAITING_APPROVAL" if plan.requires_approval else "PLANNED"
+            status = "WAITING_APPROVAL" if plan.requires_approval else "READY"
             self.store.add_probe({
                 **plan.model_dump(mode="json"),
                 "diagnosis_id": diagnosis_id,
                 "status": status,
             })
-            if not plan.requires_approval:
-                self._schedule_probe(plan.step_id)
+        self._fill_ready_queue(diagnosis_id)
+
+    def _fill_ready_queue(self, diagnosis_id: str) -> None:
+        session = self.store.get_session(diagnosis_id) or {}
+        limit = int(session.get("resource_budget", {}).get("max_parallel_probes", 1))
+        probes = self.store.list_probes(diagnosis_id)
+        active = sum(1 for item in probes if item["status"] in {"SCHEDULED", "RUNNING"})
+        for item in probes:
+            if active >= limit:
+                break
+            if item["status"] != "READY":
+                continue
+            self.store.enqueue_probe(item["step_id"])
+            active += 1
+        self._drain_probe_outbox(diagnosis_id)
+
+    def _drain_probe_outbox(self, diagnosis_id: str) -> None:
+        for item in self.store.list_pending_outbox(diagnosis_id):
+            try:
+                self._schedule_probe(item["step_id"])
+                self.store.complete_outbox(item["outbox_id"])
+            except Exception as exc:
+                step = self.store.get_probe(item["step_id"])
+                if step:
+                    self.store.update_probe(
+                        item["step_id"], status="FAILED", retry_count=int(step.get("retry_count", 0)) + 1,
+                        error_code="TASK_CREATION_FAILED", error_message=str(exc),
+                    )
+                self.store.complete_outbox(item["outbox_id"], str(exc))
 
     def _schedule_probe(self, step_id: str) -> None:
         step = self.store.get_probe(step_id)
@@ -548,7 +645,7 @@ class DiagnosisOrchestrator:
         if target_key not in allowed_targets or step["risk_level"] != definition.risk_level:
             self.store.update_probe(step_id, status="REJECTED_POLICY")
             return
-        if definition.requires_approval and step["status"] != "APPROVED":
+        if definition.requires_approval and step["status"] not in {"APPROVED", "SCHEDULED"}:
             self.store.update_probe(step_id, status="WAITING_APPROVAL")
             return
         self._enforce_service_scope(target.get("service_id"))
@@ -574,12 +671,11 @@ class DiagnosisOrchestrator:
             return
 
         # 恢复时先通过幂等键查找已创建任务，避免重复下发。
-        for task in self.repo.tasks.values():
-            options = (task.request_params or {}).get("options", {})
-            if options.get("diagnosis_step_id") == step_id:
-                self.store.update_probe(step_id, status="SCHEDULED", task_id=task.id)
-                self._append_child_task(step["diagnosis_id"], task.id, definition)
-                return
+        existing_task = self.repo.get_task_by_diagnosis_step_id(step_id)
+        if existing_task is not None:
+            self.store.update_probe(step_id, status="SCHEDULED", task_id=existing_task.id)
+            self._append_child_task(step["diagnosis_id"], existing_task.id, definition)
+            return
 
         task = self.repo.create_task(CreateTaskRequest(
             name=f"AI诊断:{definition.name}:{target['service_id']}",
