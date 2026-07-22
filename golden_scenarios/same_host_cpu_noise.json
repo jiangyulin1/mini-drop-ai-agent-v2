@@ -28,7 +28,7 @@
   ],
   "expected": {
     "classification": "same_host_noisy_neighbor",
-    "finding_types": ["userland_hotspot", "same_host_noisy_neighbor"],
+    "finding_types": ["host_cpu_pressure", "same_host_noisy_neighbor"],
     "knowledge_refs": ["distributed.same_host_noisy_neighbor"],
     "action_collectors": ["sys_metrics", "ebpf_io"]
   }

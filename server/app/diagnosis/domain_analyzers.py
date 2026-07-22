@@ -8,6 +8,16 @@ from typing import Any
 from server.app.diagnosis.schemas import DomainFinding
 
 
+ANALYZER_CONTRACTS = {
+    "os_cpu_analyzer.v2": {"required_facts": ["host.cpu"], "optional_facts": ["process.cpu", "profile.topn"], "minimum_quality": "medium", "scope": "host|process"},
+    "io_wait_analyzer.v2": {"required_facts": ["host.cpu.iowait_ratio|io.block_latency_high"], "optional_facts": ["process.io"], "minimum_quality": "medium", "scope": "host|process"},
+    "memory_pressure_analyzer.v2": {"required_facts": ["process.memory"], "optional_facts": ["container.memory"], "minimum_quality": "medium", "scope": "process|container"},
+    "network_latency_analyzer.v1": {"required_facts": ["host.network"], "optional_facts": ["dependency.peer"], "minimum_quality": "medium", "scope": "host|dependency"},
+    "mysql_lock_analyzer.v1": {"required_facts": ["dependency.mysql_lock_wait"], "optional_facts": ["dependency.blocking_session"], "minimum_quality": "medium", "scope": "dependency"},
+    "jvm_gc_analyzer.v1": {"required_facts": ["runtime.jvm_gc"], "optional_facts": ["process.memory"], "minimum_quality": "medium", "scope": "process"},
+}
+
+
 def analyze_observations(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     findings: list[DomainFinding] = []
     analyzers: tuple[Callable[[dict[str, Any]], list[DomainFinding]], ...] = (
@@ -178,15 +188,21 @@ def _analyze_cpu(obs: dict[str, Any]) -> list[DomainFinding]:
     result: list[DomainFinding] = []
     user = _num(facts.get("avg_cpu_user_pct"))
     system = _num(facts.get("avg_cpu_sys_pct"))
+    process_cores = _num(facts.get("process_cpu_core_usage"))
     top = _num(obs.get("top_function", {}).get("percent"))
-    if user >= 80 or top >= 40:
-        result.append(_finding(obs, "os_cpu_analyzer.v1", "cpu", "userland_hotspot",
+    if top >= 40 or (process_cores >= 0.8 and bool(obs.get("top_function", {}).get("name"))):
+        result.append(_finding(obs, "os_cpu_analyzer.v2", "cpu", "userland_hotspot",
             "用户态 CPU 或单一函数热点明显，优先检查目标进程代码路径。",
-            confidence="高" if top >= 40 and user >= 80 else "中",
-            facts={"cpu_user_pct": user, "top_function_pct": top},
+            confidence="高" if top >= 40 and process_cores >= 0.5 else "中",
+            facts={"process_cpu_core_usage": process_cores, "top_function_pct": top, "scope": "process"},
             knowledge_ids=["linux.cpu.process_pressure"]))
+    elif user + system >= 75:
+        result.append(_finding(obs, "os_cpu_analyzer.v2", "cpu", "host_cpu_pressure",
+            "宿主机 CPU 压力较高，但缺少目标进程贡献度与 Profile，不能判为进程代码热点。",
+            facts={"host_cpu_user_pct": user, "host_cpu_system_pct": system, "scope": "host"},
+            missing=["目标进程 CPU 核心使用量", "目标 PID 对应的 Profile TopN"]))
     if system >= 30:
-        result.append(_finding(obs, "os_cpu_analyzer.v1", "cpu", "kernel_overhead",
+        result.append(_finding(obs, "os_cpu_analyzer.v2", "cpu", "kernel_overhead",
             "系统态 CPU 占比显著，需结合系统调用、网络或内核探针继续区分。",
             facts={"cpu_system_pct": system}, knowledge_ids=["linux.cpu.kernel_overhead"],
             missing=["系统调用或内核栈证据"]))

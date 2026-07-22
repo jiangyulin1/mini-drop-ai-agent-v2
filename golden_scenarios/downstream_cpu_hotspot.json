@@ -24,7 +24,7 @@
   ],
   "expected": {
     "classification": "downstream_dependency",
-    "finding_types": ["userland_hotspot", "downstream_dependency"],
+    "finding_types": ["host_cpu_pressure", "downstream_dependency"],
     "knowledge_refs": ["distributed.downstream_pressure"],
     "action_collectors": ["sys_metrics"]
   }

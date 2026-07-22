@@ -8,6 +8,8 @@ from unittest import mock
 
 from agent.mini_drop_agent.collectors.base import CollectorTask
 from agent.mini_drop_agent.collectors.sys_metrics import SysMetricsCollector
+from server.app.diagnosis.domain_analyzers import analyze_observations
+from server.app.diagnosis.sys_metrics import normalize_sys_metrics
 
 
 class TestSysMetricsCollector:
@@ -115,3 +117,53 @@ class TestSysMetricsCollector:
         result = collector._read_network_dev()
         assert isinstance(result, dict)
         assert "rx_bytes" in result
+
+    def test_proc_stat_parser_handles_spaces_in_comm(self):
+        fields = {index: str(index) for index in range(4, 25)}
+        fields.update({14: "111", 15: "222", 20: "42", 22: "987654", 23: "4096", 24: "100"})
+        line = "1234 (worker pool thread) S " + " ".join(fields[index] for index in range(4, 25))
+        parsed = SysMetricsCollector._parse_proc_stat(line)
+        assert parsed["pid"] == 1234
+        assert parsed["utime_ticks"] == 111
+        assert parsed["stime_ticks"] == 222
+        assert parsed["num_threads"] == 42
+        assert parsed["start_time_ticks"] == 987654
+
+    def test_v2_process_deltas_and_rss_slope(self, monkeypatch):
+        monkeypatch.setattr(os, "cpu_count", lambda: 4)
+        samples = [
+            {"ts": 10.0, "host_cpu": {"user_ratio": .5, "system_ratio": .1, "iowait_ratio": .02},
+             "load": {"load1": 2.0, "load5": 1.0}, "host_memory": {}, "psi": {}, "container": {},
+             "host_network": {"rx_bytes": 100, "tx_bytes": 200},
+             "process": {"utime_ticks": 100, "stime_ticks": 50, "rss_bytes": 1000, "fd_count": 10,
+                         "num_threads": 4, "read_bytes": 1000, "write_bytes": 2000, "start_time_ticks": 99}},
+            {"ts": 12.0, "host_cpu": {"user_ratio": .7, "system_ratio": .2, "iowait_ratio": .04},
+             "load": {"load1": 4.0, "load5": 2.0}, "host_memory": {}, "psi": {}, "container": {},
+             "host_network": {"rx_bytes": 2100, "tx_bytes": 4200},
+             "process": {"utime_ticks": 200, "stime_ticks": 150, "rss_bytes": 5000, "fd_count": 12,
+                         "num_threads": 6, "read_bytes": 3000, "write_bytes": 6000, "start_time_ticks": 99}},
+        ]
+        normalized = SysMetricsCollector._compute_v2(1234, samples)
+        assert normalized["host"]["cpu"]["core_count"] == 4
+        assert normalized["process"]["memory"]["rss_slope_bytes_per_second"] == 2000
+        assert normalized["process"]["io"]["read_bytes_per_second"] == 1000
+        assert normalized["process"]["fd"]["growth_per_minute"] == 60
+        assert normalized["host"]["load"]["load1_window_avg"] == 3
+
+    def test_legacy_normalizer_separates_host_and_process(self):
+        value = normalize_sys_metrics({"pid": 12, "summary": {
+            "avg_cpu_user_pct": 90, "process_cpu_core_usage": .1, "vmrss_mb": 10,
+        }})
+        assert value["normalized_from"] == "legacy.v1"
+        assert value["host"]["cpu"]["user_ratio"] == .9
+        assert value["process"]["cpu"]["normalized_core_usage"] == .1
+
+    def test_host_cpu_high_does_not_claim_process_hotspot(self):
+        findings = analyze_observations([{
+            "task_id": "t", "target": {"instance_id": "i"},
+            "facts": {"avg_cpu_user_pct": 92, "process_cpu_core_usage": .1},
+            "top_function": {"name": "", "percent": 0}, "evidence_refs": ["ev"],
+        }])
+        types = {item["finding_type"] for item in findings}
+        assert "host_cpu_pressure" in types
+        assert "userland_hotspot" not in types

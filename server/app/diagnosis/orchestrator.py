@@ -34,6 +34,7 @@ from server.app.diagnosis.schemas import (
     TERMINAL_DIAGNOSIS_STATUSES,
 )
 from server.app.diagnosis.store import DiagnosisStore, utcnow
+from server.app.diagnosis.sys_metrics import normalize_sys_metrics
 from server.app.event_bus import BUS
 from server.app.rca.calibrator import calibrate
 from server.app.rca.candidates import generate_candidates
@@ -839,6 +840,7 @@ class DiagnosisOrchestrator:
             "target": target,
             "summary": summary,
             "facts": _normalized_facts(values, summary),
+            "fact_domains": normalize_sys_metrics(values.get("sys_metrics")) if values.get("sys_metrics") else {},
             "top_function": {"name": top_name, "percent": top_percent},
             "pressure": pressure,
             "evidence_refs": evidence_refs,
