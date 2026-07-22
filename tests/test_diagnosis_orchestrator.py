@@ -76,6 +76,14 @@ def test_historical_request_never_creates_current_task(client: TestClient):
     assert data["probes"] == []
 
 
+def test_live_effective_window_includes_bounded_collection_period(client: TestClient):
+    data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    requested_end = datetime.fromisoformat(data["requested_time_range"]["end"].replace("Z", "+00:00"))
+    effective_end = datetime.fromisoformat(data["effective_time_range"]["end"].replace("Z", "+00:00"))
+    assert data["effective_time_range"]["source"] == "live_collection_window"
+    assert effective_end > requested_end
+
+
 def test_missing_target_anchor_does_not_expand_to_other_service(client: TestClient):
     payload = _payload()
     payload["context"]["instances"][0]["service_id"] = "service-b"

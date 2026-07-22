@@ -1569,9 +1569,15 @@ class DiagnosisOrchestrator:
 
     @staticmethod
     def _effective_time_range(intent, budget: DiagnosisBudget) -> dict[str, Any]:
-        if intent.diagnosis_mode != DiagnosisMode.REPRODUCTION:
+        if intent.diagnosis_mode == DiagnosisMode.HISTORICAL:
             return intent.time_range.model_dump(mode="json")
         now = utcnow()
+        if intent.diagnosis_mode == DiagnosisMode.LIVE:
+            return {
+                "start": intent.time_range.start.isoformat(),
+                "end": (now + timedelta(minutes=budget.max_duration_minutes)).isoformat(),
+                "source": "live_collection_window",
+            }
         return {
             "start": now.isoformat(),
             "end": (now + timedelta(minutes=budget.max_duration_minutes)).isoformat(),
@@ -1789,7 +1795,11 @@ def _summarize_value(value: Any) -> dict[str, Any]:
     if isinstance(value, list):
         return {"item_count": len(value), "top_items": _minimize(value[:5])}
     if isinstance(value, dict):
-        return {"keys": sorted(value.keys())[:30], "summary": _minimize(value.get("summary", value))}
+        result = {"keys": sorted(value.keys())[:30], "summary": _minimize(value.get("summary", value))}
+        for field in ("schema_version", "fact_domains"):
+            if field in value:
+                result[field] = _minimize(value[field])
+        return result
     return {"value": str(value)[:500]}
 
 

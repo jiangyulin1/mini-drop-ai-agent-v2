@@ -180,9 +180,9 @@ def _verify_evidence_time(
     intent = context.get("normalized_intent", {})
     mode = intent.get("diagnosis_mode", "LIVE")
     policy = intent.get("evidence_time_policy", {})
-    requested = context.get("requested_time_range", {})
-    start = _parse_time(requested.get("start"))
-    end = _parse_time(requested.get("end"))
+    effective = context.get("effective_time_range") or context.get("requested_time_range", {})
+    start = _parse_time(effective.get("start"))
+    end = _parse_time(effective.get("end"))
     skew = timedelta(seconds=int(policy.get("max_clock_skew_seconds", 5) or 0))
     require_overlap = bool(policy.get("require_overlap", True))
     for item in referenced:
@@ -211,8 +211,7 @@ def _verify_cross_target_time(
     if assessment.get("classification") in {None, "insufficient_evidence", "scope_unresolved"}:
         return
     refs = assessment.get("evidence_refs", [])
-    ranges = []
-    targets = set()
+    ranges: list[tuple[tuple[Any, Any], datetime, datetime]] = []
     for ref in refs:
         item = evidence_by_id.get(ref, {})
         event_range = item.get("event_time_range", {})
@@ -220,13 +219,19 @@ def _verify_cross_target_time(
         end = _parse_time(event_range.get("end"))
         target = item.get("target", {})
         if start and end:
-            ranges.append((start, end))
-            targets.add((target.get("agent_id"), target.get("pid")))
-    if len(targets) < 2 or len(ranges) < 2:
+            ranges.append(((target.get("agent_id"), target.get("pid")), start, end))
+    if len({target for target, _, _ in ranges}) < 2:
         return
     policy = context.get("normalized_intent", {}).get("evidence_time_policy", {})
     skew = timedelta(seconds=int(policy.get("max_clock_skew_seconds", 5) or 0))
-    if max(start for start, _ in ranges) > min(end for _, end in ranges) + skew:
+    has_aligned_pair = any(
+        left_target != right_target
+        and left_start <= right_end + skew
+        and right_start <= left_end + skew
+        for index, (left_target, left_start, left_end) in enumerate(ranges)
+        for right_target, right_start, right_end in ranges[index + 1:]
+    )
+    if not has_aligned_pair:
         issues.append("跨目标 Evidence 时间窗不一致，不能用于横向归因")
 
 
