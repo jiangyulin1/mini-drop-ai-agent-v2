@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import threading
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -74,7 +74,50 @@ def _get_sessionmaker() -> sessionmaker:
 
 def init_db() -> None:
     """创建所有表（幂等）。应用启动时调用一次。"""
-    Base.metadata.create_all(bind=_get_engine())
+    engine = _get_engine()
+    Base.metadata.create_all(bind=engine)
+    _upgrade_legacy_schema(engine)
+
+
+_ADDITIVE_MIGRATIONS = {
+    "tasks": {
+        "diagnosis_step_id": "VARCHAR(128)",
+    },
+    "diagnosis_sessions": {
+        "row_version": "INTEGER NOT NULL DEFAULT 0",
+        # Existing rows may not have a meaningful deadline. Keeping the added
+        # column nullable is safer than inventing a historical deadline.
+        "deadline_at": "TIMESTAMP",
+    },
+    "diagnosis_probe_executions": {
+        "retry_count": "INTEGER NOT NULL DEFAULT 0",
+        "error_code": "VARCHAR(128)",
+        "error_message": "TEXT",
+    },
+    "diagnosis_evidence": {
+        "evidence_role": "VARCHAR(32) NOT NULL DEFAULT 'incident'",
+    },
+}
+
+
+def _upgrade_legacy_schema(engine: Engine) -> None:
+    """Apply small, additive upgrades needed by pre-v2 SQLite/Postgres installs."""
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with engine.begin() as connection:
+        for table, columns in _ADDITIVE_MIGRATIONS.items():
+            if table not in tables:
+                continue
+            existing = {item["name"] for item in inspect(engine).get_columns(table)}
+            for column, declaration in columns.items():
+                if column not in existing:
+                    connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {declaration}'))
+        if "tasks" in tables:
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_tasks_diagnosis_step_id "
+                "ON tasks (diagnosis_step_id)"
+            ))
 
 
 def new_session() -> Session:
