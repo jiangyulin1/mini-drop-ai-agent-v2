@@ -27,6 +27,7 @@ import StatusTag from "../components/StatusTag";
 import ErrorAlert from "../components/ErrorAlert";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
 import usePolling from "../hooks/usePolling";
+import echarts from "../lib/echarts";
 
 export default function AgentDetail() {
   const { agentId } = useParams();
@@ -89,7 +90,6 @@ export default function AgentDetail() {
   // ── 渲染 ECharts 指标折线图 ──────────────────────────
   useEffect(() => {
     if (!chartRef.current || cpuHistory.length < 2) return;
-    let cancelled = false;
 
     // 先销毁旧实例
     if (chartInst.current) {
@@ -97,21 +97,19 @@ export default function AgentDetail() {
       chartInst.current = null;
     }
 
-    import("echarts").then((echarts) => {
-      if (cancelled || !chartRef.current) return;
-      chartInst.current = echarts.init(chartRef.current);
-      const inst = chartInst.current;
+    const inst = echarts.init(chartRef.current);
+    chartInst.current = inst;
 
-      const cpuData = cpuHistory.map((p) => [
-        new Date(p.ts).toLocaleTimeString(),
-        p.value,
-      ]);
-      const rssData = rssHistory.map((p) => [
-        new Date(p.ts).toLocaleTimeString(),
-        p.value,
-      ]);
+    const cpuData = cpuHistory.map((p) => [
+      new Date(p.ts).toLocaleTimeString(),
+      p.value,
+    ]);
+    const rssData = rssHistory.map((p) => [
+      new Date(p.ts).toLocaleTimeString(),
+      p.value,
+    ]);
 
-      inst.setOption({
+    inst.setOption({
         tooltip: { trigger: "axis" },
         legend: { data: ["CPU %", "RSS MB"], bottom: 0 },
         grid: { left: 50, right: 20, top: 20, bottom: 30 },
@@ -139,21 +137,15 @@ export default function AgentDetail() {
             itemStyle: { color: COLORS.success },
           },
         ],
-      });
-
-      const onResize = () => inst.resize();
-      window.addEventListener("resize", onResize);
-      return () => {
-        window.removeEventListener("resize", onResize);
-        if (chartInst.current) {
-          chartInst.current.dispose();
-          chartInst.current = null;
-        }
-      };
     });
 
+    const onResize = () => inst.resize();
+    window.addEventListener("resize", onResize);
+
     return () => {
-      cancelled = true;
+      window.removeEventListener("resize", onResize);
+      inst.dispose();
+      if (chartInst.current === inst) chartInst.current = null;
     };
   }, [cpuHistory, rssHistory]);
 

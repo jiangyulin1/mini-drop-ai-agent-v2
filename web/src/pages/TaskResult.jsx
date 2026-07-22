@@ -46,6 +46,7 @@ import EBPFHistogram from "../components/EBPFHistogram";
 import StatusTag from "../components/StatusTag";
 import ErrorAlert from "../components/ErrorAlert";
 import usePolling from "../hooks/usePolling";
+import echarts from "../lib/echarts";
 import { isTaskActive } from "../utils/status";
 import { COLORS, SPACING } from "../theme";
 import styles from "./TaskResult.module.css";
@@ -960,11 +961,10 @@ function SysMetricsView({ taskId, artifact }) {
   useEffect(() => {
     if (!data?.summary || !chartRef.current) return;
 
-    import("echarts").then((echarts) => {
-      const inst = echarts.init(chartRef.current);
-      const s = data.summary;
+    const inst = echarts.init(chartRef.current);
+    const s = data.summary;
 
-      inst.setOption({
+    inst.setOption({
         title: { text: "System Metrics Dashboard", left: "center", textStyle: { fontSize: 13 } },
         tooltip: {},
         grid: [
@@ -1012,12 +1012,14 @@ function SysMetricsView({ taskId, artifact }) {
             { value: s.vmrss_mb_max, itemStyle: { color: "#9a60b4" } },
           ]},
         ],
-      });
-
-      const handleResize = () => inst.resize();
-      window.addEventListener("resize", handleResize);
-      return () => window.removeEventListener("resize", handleResize);
     });
+
+    const handleResize = () => inst.resize();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      inst.dispose();
+    };
   }, [data]);
 
   if (loading) return <Skeleton.Input active block style={{ height: 400, borderRadius: 8 }} />;
@@ -1072,33 +1074,35 @@ function MemoryChart({ taskId, artifact }) {
   useEffect(() => {
     if (!data?.samples?.length || !chartRef.current) return;
 
-    import("echarts").then((echarts) => {
-      if (chartInstance.current) chartInstance.current.dispose();
-      const inst = echarts.init(chartRef.current);
-      chartInstance.current = inst;
+    if (chartInstance.current) chartInstance.current.dispose();
+    const inst = echarts.init(chartRef.current);
+    chartInstance.current = inst;
 
-      const times = data.samples.map((s) => new Date(s.ts * 1000).toLocaleTimeString());
-      const rss = data.samples.map((s) => s.rss_mb ?? 0);
-      const pss = data.samples.some((s) => s.pss_mb != null) ? data.samples.map((s) => s.pss_mb ?? 0) : null;
-      const swap = data.samples.some((s) => s.swap_mb > 0) ? data.samples.map((s) => s.swap_mb ?? 0) : null;
+    const times = data.samples.map((s) => new Date(s.ts * 1000).toLocaleTimeString());
+    const rss = data.samples.map((s) => s.rss_mb ?? 0);
+    const pss = data.samples.some((s) => s.pss_mb != null) ? data.samples.map((s) => s.pss_mb ?? 0) : null;
+    const swap = data.samples.some((s) => s.swap_mb > 0) ? data.samples.map((s) => s.swap_mb ?? 0) : null;
 
-      const series = [{ name: "RSS", type: "line", data: rss, smooth: true, areaStyle: { opacity: 0.15 } }];
-      if (pss) series.push({ name: "PSS", type: "line", data: pss, smooth: true });
-      if (swap) series.push({ name: "Swap", type: "line", data: swap, smooth: true, lineStyle: { type: "dashed" } });
+    const series = [{ name: "RSS", type: "line", data: rss, smooth: true, areaStyle: { opacity: 0.15 } }];
+    if (pss) series.push({ name: "PSS", type: "line", data: pss, smooth: true });
+    if (swap) series.push({ name: "Swap", type: "line", data: swap, smooth: true, lineStyle: { type: "dashed" } });
 
-      inst.setOption({
+    inst.setOption({
         tooltip: { trigger: "axis" },
         legend: { data: series.map((s) => s.name), bottom: 0 },
         grid: { left: 50, right: 20, top: 20, bottom: 30 },
         xAxis: { type: "category", data: times, boundaryGap: false },
         yAxis: { type: "value", name: "MB" },
         series,
-      });
-
-      const handleResize = () => inst.resize();
-      window.addEventListener("resize", handleResize);
-      return () => window.removeEventListener("resize", handleResize);
     });
+
+    const handleResize = () => inst.resize();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      inst.dispose();
+      if (chartInstance.current === inst) chartInstance.current = null;
+    };
   }, [data]);
 
   if (loading) return <Skeleton.Input active block style={{ height: 300, borderRadius: 8 }} />;

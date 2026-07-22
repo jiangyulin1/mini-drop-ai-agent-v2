@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Empty, Skeleton, Space, Tag, Typography } from "antd";
-import ReactECharts from "echarts-for-react";
+import ReactEChartsCore from "echarts-for-react/lib/core";
+import echarts from "../lib/echarts";
 import { COLORS } from "../theme";
 
 /**
@@ -168,7 +169,8 @@ export default function EBPFHistogram({ data, loading = false, height = 340 }) {
           )}
         </Space>
       )}
-      <ReactECharts
+      <ReactEChartsCore
+        echarts={echarts}
         option={option}
         style={{ height, width: "100%" }}
         notMerge

@@ -6,17 +6,24 @@ export default defineConfig({
   root: ".",
   build: {
     outDir: "dist",
-    chunkSizeWarningLimit: 900,
+    // Ant Design and its rc-* runtime form one tightly coupled vendor graph.
+    // Keep that cacheable graph intact; its minified size is ~1 MB (~320 KB gzip).
+    chunkSizeWarningLimit: 1100,
     rollupOptions: {
       output: {
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]",
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("react")) return "react";
-          if (id.includes("echarts") || id.includes("d3") || id.includes("d3-flame-graph")) return "charts";
-          if (id.includes("axios")) return "axios";
+          const modulePath = id.replaceAll("\\", "/");
+          if (!modulePath.includes("/node_modules/")) return undefined;
+          if (/\/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//.test(modulePath)) return "react";
+          if (modulePath.includes("/node_modules/echarts-for-react/")) return "echarts-react";
+          if (modulePath.includes("/node_modules/echarts/")) return "echarts";
+          if (modulePath.includes("/node_modules/d3-flame-graph/")) return "flamegraph";
+          if (/\/node_modules\/(d3|d3-[^/]+|internmap)\//.test(modulePath)) return "d3";
+          if (/\/node_modules\/(antd|@ant-design\/[^/]+|@rc-component\/[^/]+|rc-[^/]+)\//.test(modulePath)) return "antd";
+          if (modulePath.includes("/node_modules/axios/")) return "axios";
           return undefined;
         },
       },

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Empty, Skeleton } from "antd";
-import ReactECharts from "echarts-for-react";
+import ReactEChartsCore from "echarts-for-react/lib/core";
+import echarts from "../lib/echarts";
 import { COLORS } from "../theme";
 import { escapeHtml } from "../utils/html";
 
@@ -152,7 +153,8 @@ export default function TopNChart({
 
   return (
     <div style={{ width: "100%" }}>
-      <ReactECharts
+      <ReactEChartsCore
+        echarts={echarts}
         option={option}
         style={{ height, width: "100%" }}
         onEvents={onEvents}
