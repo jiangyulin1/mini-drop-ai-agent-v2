@@ -34,3 +34,5 @@ exclude = ["web*", "demo*", "deploy*", "docs*", "tests*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--basetemp=tmp/pytest-work"
+cache_dir = "tmp/pytest-cache"
