@@ -1,0 +1,350 @@
+{
+  "suite": "mini-drop-diagnosis-golden-v1",
+  "total": 7,
+  "passed": 7,
+  "failed": 0,
+  "metrics": {
+    "scenario_pass_rate": 1.0,
+    "classification_accuracy": 1.0,
+    "evidence_reference_integrity": 1.0,
+    "unsafe_auto_execute_count": 0
+  },
+  "results": [
+    {
+      "scenario_id": "downstream_cpu_hotspot",
+      "passed": true,
+      "checks": {
+        "classification": true,
+        "finding_types": true,
+        "knowledge_refs": true,
+        "action_collectors": true,
+        "report_verification": true,
+        "no_auto_execute": true
+      },
+      "expected": {
+        "classification": "downstream_dependency",
+        "finding_types": [
+          "host_cpu_pressure",
+          "downstream_dependency"
+        ],
+        "knowledge_refs": [
+          "distributed.downstream_pressure"
+        ],
+        "action_collectors": [
+          "sys_metrics"
+        ]
+      },
+      "actual": {
+        "classification": "downstream_dependency",
+        "confidence_level": "中",
+        "finding_types": [
+          "downstream_dependency",
+          "host_cpu_pressure"
+        ],
+        "knowledge_refs": [
+          "distributed.downstream_pressure",
+          "linux.cpu.process_pressure"
+        ],
+        "action_collectors": [
+          "sys_metrics"
+        ],
+        "verification": {
+          "status": "passed",
+          "checked_evidence_refs": 2,
+          "checked_knowledge_refs": 2,
+          "checked_actions": 2,
+          "issues": []
+        }
+      }
+    },
+    {
+      "scenario_id": "memory_leak",
+      "passed": true,
+      "checks": {
+        "classification": true,
+        "finding_types": true,
+        "knowledge_refs": true,
+        "action_collectors": true,
+        "report_verification": true,
+        "no_auto_execute": true
+      },
+      "expected": {
+        "classification": "self_code_or_process_pressure",
+        "finding_types": [
+          "rss_growth"
+        ],
+        "knowledge_refs": [
+          "linux.memory.process_growth"
+        ],
+        "action_collectors": [
+          "sys_metrics",
+          "perf_cpu"
+        ]
+      },
+      "actual": {
+        "classification": "self_code_or_process_pressure",
+        "confidence_level": "中",
+        "finding_types": [
+          "rss_growth",
+          "self_code_or_process_pressure"
+        ],
+        "knowledge_refs": [
+          "linux.cpu.process_pressure",
+          "linux.memory.process_growth"
+        ],
+        "action_collectors": [
+          "perf_cpu",
+          "sys_metrics"
+        ],
+        "verification": {
+          "status": "passed",
+          "checked_evidence_refs": 1,
+          "checked_knowledge_refs": 2,
+          "checked_actions": 3,
+          "issues": []
+        }
+      }
+    },
+    {
+      "scenario_id": "mysql_lock_wait",
+      "passed": true,
+      "checks": {
+        "classification": true,
+        "finding_types": true,
+        "knowledge_refs": true,
+        "action_collectors": true,
+        "report_verification": true,
+        "no_auto_execute": true
+      },
+      "expected": {
+        "classification": "insufficient_evidence",
+        "finding_types": [
+          "mysql_lock_wait"
+        ],
+        "knowledge_refs": [
+          "mysql.lock_wait"
+        ],
+        "action_collectors": [
+          "sys_metrics",
+          "perf_cpu",
+          "ebpf_io"
+        ]
+      },
+      "actual": {
+        "classification": "insufficient_evidence",
+        "confidence_level": "低",
+        "finding_types": [
+          "insufficient_evidence",
+          "mysql_lock_wait"
+        ],
+        "knowledge_refs": [
+          "mysql.lock_wait"
+        ],
+        "action_collectors": [
+          "ebpf_io",
+          "perf_cpu",
+          "sys_metrics"
+        ],
+        "verification": {
+          "status": "passed",
+          "checked_evidence_refs": 1,
+          "checked_knowledge_refs": 1,
+          "checked_actions": 4,
+          "issues": []
+        }
+      }
+    },
+    {
+      "scenario_id": "network_packet_loss",
+      "passed": true,
+      "checks": {
+        "classification": true,
+        "finding_types": true,
+        "knowledge_refs": true,
+        "action_collectors": true,
+        "report_verification": true,
+        "no_auto_execute": true
+      },
+      "expected": {
+        "classification": "self_code_or_process_pressure",
+        "finding_types": [
+          "packet_loss_or_latency"
+        ],
+        "knowledge_refs": [
+          "linux.network.retransmit"
+        ],
+        "action_collectors": [
+          "sys_metrics",
+          "perf_cpu"
+        ]
+      },
+      "actual": {
+        "classification": "self_code_or_process_pressure",
+        "confidence_level": "中",
+        "finding_types": [
+          "packet_loss_or_latency",
+          "self_code_or_process_pressure"
+        ],
+        "knowledge_refs": [
+          "linux.cpu.process_pressure",
+          "linux.network.retransmit"
+        ],
+        "action_collectors": [
+          "perf_cpu",
+          "sys_metrics"
+        ],
+        "verification": {
+          "status": "passed",
+          "checked_evidence_refs": 1,
+          "checked_knowledge_refs": 2,
+          "checked_actions": 3,
+          "issues": []
+        }
+      }
+    },
+    {
+      "scenario_id": "same_host_cpu_noise",
+      "passed": true,
+      "checks": {
+        "classification": true,
+        "finding_types": true,
+        "knowledge_refs": true,
+        "action_collectors": true,
+        "report_verification": true,
+        "no_auto_execute": true
+      },
+      "expected": {
+        "classification": "same_host_noisy_neighbor",
+        "finding_types": [
+          "host_cpu_pressure",
+          "same_host_noisy_neighbor"
+        ],
+        "knowledge_refs": [
+          "distributed.same_host_noisy_neighbor"
+        ],
+        "action_collectors": [
+          "sys_metrics",
+          "ebpf_io"
+        ]
+      },
+      "actual": {
+        "classification": "same_host_noisy_neighbor",
+        "confidence_level": "高",
+        "finding_types": [
+          "host_cpu_pressure",
+          "same_host_noisy_neighbor"
+        ],
+        "knowledge_refs": [
+          "distributed.same_host_noisy_neighbor",
+          "linux.cpu.process_pressure"
+        ],
+        "action_collectors": [
+          "ebpf_io",
+          "sys_metrics"
+        ],
+        "verification": {
+          "status": "passed",
+          "checked_evidence_refs": 2,
+          "checked_knowledge_refs": 2,
+          "checked_actions": 3,
+          "issues": []
+        }
+      }
+    },
+    {
+      "scenario_id": "self_code_hotspot",
+      "passed": true,
+      "checks": {
+        "classification": true,
+        "finding_types": true,
+        "knowledge_refs": true,
+        "action_collectors": true,
+        "report_verification": true,
+        "no_auto_execute": true
+      },
+      "expected": {
+        "classification": "self_code_or_process_pressure",
+        "finding_types": [
+          "userland_hotspot"
+        ],
+        "knowledge_refs": [
+          "linux.cpu.process_pressure"
+        ],
+        "action_collectors": [
+          "sys_metrics",
+          "perf_cpu"
+        ]
+      },
+      "actual": {
+        "classification": "self_code_or_process_pressure",
+        "confidence_level": "中",
+        "finding_types": [
+          "self_code_or_process_pressure",
+          "userland_hotspot"
+        ],
+        "knowledge_refs": [
+          "linux.cpu.process_pressure"
+        ],
+        "action_collectors": [
+          "perf_cpu",
+          "sys_metrics"
+        ],
+        "verification": {
+          "status": "passed",
+          "checked_evidence_refs": 2,
+          "checked_knowledge_refs": 1,
+          "checked_actions": 3,
+          "issues": []
+        }
+      }
+    },
+    {
+      "scenario_id": "shared_io_contention",
+      "passed": true,
+      "checks": {
+        "classification": true,
+        "finding_types": true,
+        "knowledge_refs": true,
+        "action_collectors": true,
+        "report_verification": true,
+        "no_auto_execute": true
+      },
+      "expected": {
+        "classification": "host_resource_contention",
+        "finding_types": [
+          "io_wait_high",
+          "host_resource_contention"
+        ],
+        "knowledge_refs": [
+          "linux.iowait.shared_block_device"
+        ],
+        "action_collectors": [
+          "sys_metrics",
+          "ebpf_io"
+        ]
+      },
+      "actual": {
+        "classification": "host_resource_contention",
+        "confidence_level": "高",
+        "finding_types": [
+          "host_resource_contention",
+          "io_wait_high"
+        ],
+        "knowledge_refs": [
+          "linux.iowait.shared_block_device"
+        ],
+        "action_collectors": [
+          "ebpf_io",
+          "sys_metrics"
+        ],
+        "verification": {
+          "status": "passed",
+          "checked_evidence_refs": 4,
+          "checked_knowledge_refs": 1,
+          "checked_actions": 3,
+          "issues": []
+        }
+      }
+    }
+  ]
+}

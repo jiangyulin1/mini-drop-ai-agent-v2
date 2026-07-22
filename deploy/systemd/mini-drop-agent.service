@@ -9,6 +9,7 @@ User=root
 Group=root
 WorkingDirectory=@MINI_DROP_ROOT@
 EnvironmentFile=/etc/mini-drop/worker.env
+ExecStartPre=+/usr/bin/install -d -m 0750 -o %U -g %G /tmp/mini-drop
 ExecStart=@MINI_DROP_ROOT@/.venv/bin/python -m agent.mini_drop_agent.main
 Restart=always
 RestartSec=5
@@ -18,7 +19,7 @@ LimitNOFILE=65536
 PrivateTmp=false
 ProtectHome=read-only
 ProtectSystem=full
-ReadWritePaths=/tmp/mini-drop
+ReadWritePaths=-/tmp/mini-drop
 
 [Install]
 WantedBy=multi-user.target

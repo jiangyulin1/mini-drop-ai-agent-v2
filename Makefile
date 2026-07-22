@@ -1,6 +1,6 @@
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,$(if $(wildcard .venv/Scripts/python.exe),.venv/Scripts/python.exe,python))
 
-.PHONY: server agent analyzer test coverage lint fmt demo proto deploy deploy-down
+.PHONY: server agent analyzer test eval coverage lint fmt demo proto deploy deploy-down
 
 proto:
 	cd proto && bash compile.sh
@@ -18,6 +18,9 @@ analyzer:
 
 test:
 	$(PYTHON) -m pytest tests -v
+
+eval:
+	$(PYTHON) scripts/run_diagnosis_eval.py --output-dir reports/eval
 
 coverage:
 	$(PYTHON) -m pytest --cov=server --cov=agent --cov=analyzer --cov-report=term-missing tests
