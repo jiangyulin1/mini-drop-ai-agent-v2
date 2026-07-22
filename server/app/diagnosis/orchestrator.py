@@ -443,6 +443,18 @@ class DiagnosisOrchestrator:
             elif task_status in ACTIVE_TASK_STATUSES:
                 active_tasks.append(task)
 
+        waiting = [probe for probe in probes if probe["status"] == "WAITING_APPROVAL"]
+        if session["status"] == DiagnosisStatus.WAITING_APPROVAL.value and waiting:
+            # Completed R1 tasks remain children while an R2 gate is open.
+            # Re-analyzing them on every GET would attempt the illegal
+            # WAITING_APPROVAL -> ANALYZING transition and return HTTP 500.
+            self.store.update_pipeline_node(
+                diagnosis_id, "run_probes", "WAITING",
+                input_refs=[probe["step_id"] for probe in waiting],
+                metrics={"approval_required_count": len(waiting)},
+            )
+            return
+
         # A faster worker may finish while another target is still collecting.
         # Cross-node attribution must use one coherent collection round, so do
         # not conclude from the first terminal child task.

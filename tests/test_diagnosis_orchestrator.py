@@ -521,6 +521,9 @@ class TestDiagnosisSessionAPI:
         repo.transition_task(task_id, TaskStatus.DONE, "no structured output", Actor.ANALYZER)
         waiting = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
         assert waiting["status"] == "WAITING_APPROVAL"
+        repeated = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}")
+        assert repeated.status_code == 200
+        assert repeated.json()["data"]["status"] == "WAITING_APPROVAL"
         r2 = next(item for item in waiting["probes"] if item["risk_level"] == "R2")
 
         rejected = client.post(
