@@ -228,6 +228,13 @@ def _analyze_cpu(obs: dict[str, Any]) -> list[DomainFinding]:
             confidence="高" if top >= 40 and process_cores >= 0.5 else "中",
             facts={"process_cpu_core_usage": process_cores, "top_function_pct": top, "scope": "process"},
             knowledge_ids=["linux.cpu.process_pressure"]))
+    elif process_cores >= 0.8:
+        result.append(_finding(obs, "os_cpu_analyzer.v2", "cpu", "process_cpu_pressure",
+            "目标进程 CPU tick 增量显示其持续占用核心，但缺少 Profile，不能进一步断言具体代码热点。",
+            confidence="中",
+            facts={"process_cpu_core_usage": process_cores, "scope": "process"},
+            knowledge_ids=["linux.cpu.process_pressure"],
+            missing=["目标 PID 对应的 Profile TopN"]))
     elif user + system >= 75:
         result.append(_finding(obs, "os_cpu_analyzer.v2", "cpu", "host_cpu_pressure",
             "宿主机 CPU 压力较高，但缺少目标进程贡献度与 Profile，不能判为进程代码热点。",
@@ -336,8 +343,11 @@ def _domain_cause(observations: list[dict[str, Any]]) -> tuple[str, str]:
     if any(obs.get("pressure", {}).get("memory") for obs in observations):
         return "memory", "process_or_container_memory_pressure"
     if any(obs.get("pressure", {}).get("cpu") for obs in observations):
-        process_hot = any(_has_self_hotspot(obs) for obs in observations)
-        return "cpu", "process_cpu_hotspot" if process_hot else "host_cpu_saturation"
+        process_hot = any(
+            _has_self_hotspot(obs) or _num(_facts(obs).get("process_cpu_core_usage")) >= 0.8
+            for obs in observations
+        )
+        return "cpu", "process_cpu_pressure" if process_hot else "host_cpu_saturation"
     return "unknown", "unknown"
 
 

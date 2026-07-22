@@ -121,6 +121,29 @@ def test_process_cpu_delta_detects_hot_process_on_non_saturated_host():
         "process_cpu_core_usage": 1.2,
     }, {})
     assert pressure["cpu"] is True
+    observations = [{
+        "task_id": "t-target",
+        "target": {"service_id": "service-a", "instance_id": "service-a-1"},
+        "facts": {"avg_cpu_user_pct": 10, "process_cpu_core_usage": 0.1},
+        "top_function": {"name": "", "percent": 0},
+        "pressure": {name: False for name in pressure},
+        "evidence_refs": ["ev-target"],
+    }, {
+        "task_id": "t-process",
+        "target": {"service_id": "service-b", "instance_id": "service-b-1"},
+        "facts": {"avg_cpu_user_pct": 25, "process_cpu_core_usage": 1.2},
+        "top_function": {"name": "", "percent": 0},
+        "pressure": pressure,
+        "evidence_refs": ["ev-process"],
+    }]
+    findings = analyze_observations(observations)
+    assert {item["finding_type"] for item in findings} == {"process_cpu_pressure"}
+    assessment = assess_cluster({
+        "target_service": "service-a",
+        "downstream_service_ids": ["service-b"],
+        "same_host_instance_ids": [],
+    }, observations)
+    assert assessment["domain_cause"]["subtype"] == "process_cpu_pressure"
 
 
 def test_verifier_rejects_downstream_claim_without_evidence():
