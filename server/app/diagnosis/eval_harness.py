@@ -29,18 +29,31 @@ def evaluate_scenario(scenario: dict[str, Any]) -> dict[str, Any]:
     knowledge_refs = [item["knowledge_id"] for item in knowledge]
     actions = _evaluation_actions(scenario["scenario_id"], observations, assessment)
     evidence_by_ref = {
-        ref: {"evidence_id": ref, "target": dict(obs.get("target", {})), "evidence_role": "incident"}
+        ref: {
+            "evidence_id": ref,
+            "target": dict(obs.get("target", {})),
+            "evidence_role": "incident",
+            "data_quality": {
+                "completeness": "high",
+                "domains": _observation_domains(obs),
+            },
+        }
         for obs in observations
         for ref in obs.get("evidence_refs", [])
     }
     evidence_refs = sorted(evidence_by_ref)
     evidence = [evidence_by_ref[ref] for ref in evidence_refs]
     conclusion = {
+        "summary": assessment["summary"],
         "cluster_assessment": assessment,
+        "root_location": assessment["root_location"],
+        "domain_cause": assessment["domain_cause"],
         "findings": findings,
         "knowledge_refs": knowledge_refs,
         "knowledge_context": knowledge,
         "actions": actions,
+        "limitations": [],
+        "coverage": {"observation_count": len(observations), "evidence_count": len(evidence)},
     }
     verification = verify_report(conclusion, evidence, scenario["scope"])
 
@@ -145,3 +158,14 @@ def _evaluation_actions(
             evidence_refs=assessment.get("evidence_refs", []), confidence_level="中",
         ))
     return actions
+
+
+def _observation_domains(observation: dict[str, Any]) -> list[str]:
+    collector = observation.get("collector_type")
+    if collector == "database_metrics":
+        return ["dependency"]
+    if collector in {"perf_cpu", "jvm_metrics"}:
+        return ["host", "process"]
+    if collector == "network_metrics":
+        return ["host"]
+    return ["host", "process", "container"]

@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--task-id", required=True)
     p_watch.add_argument("--interval", type=float, default=2.0)
     p_watch.add_argument("--timeout", type=float, default=120.0)
+    p_watch.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_keywords = sub.add_parser("keywords", help="print CLI keyword dictionaries")
     p_keywords.add_argument("--kind", choices=["all", "commands", "collectors", "causes", "fields"], default="all")
@@ -108,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     p_status.add_argument("--url", default="http://localhost:8191")
     p_status.add_argument("--agents", action="store_true", help="show agent list with resource metrics")
     p_status.add_argument("--tasks", action="store_true", help="show active tasks only")
+    p_status.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_perf_top = sub.add_parser("perf-top", help="local perf top-N without Agent/Server")
     p_perf_top.add_argument("--pid", type=int, required=True)
@@ -121,11 +123,13 @@ def main(argv: list[str] | None = None) -> int:
     p_cancel = sub.add_parser("task-cancel", help="cancel a running task via Server API")
     p_cancel.add_argument("--url", default="http://localhost:8191")
     p_cancel.add_argument("--task-id", required=True)
+    p_cancel.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_remote_diag = sub.add_parser("diagnose-remote", help="trigger remote diagnosis via Server API")
     p_remote_diag.add_argument("--url", default="http://localhost:8191")
     p_remote_diag.add_argument("--task-id", required=True)
     p_remote_diag.add_argument("--wait", action="store_true", help="wait for diagnosis to complete")
+    p_remote_diag.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_report = sub.add_parser("report", help="generate a comprehensive profiling report")
     p_report.add_argument("--top-json", required=True)
@@ -135,21 +139,25 @@ def main(argv: list[str] | None = None) -> int:
 
     p_feedback = sub.add_parser("feedback-stats", help="show RCA feedback statistics")
     p_feedback.add_argument("--url", default="http://localhost:8191")
+    p_feedback.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_storage_ls = sub.add_parser("storage-ls", help="list tasks in object storage")
     p_storage_ls.add_argument("--url", default="http://localhost:8191")
     p_storage_ls.add_argument("--task-id", default="", help="filter by task ID prefix")
+    p_storage_ls.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_storage_prune = sub.add_parser("storage-prune", help="delete old task artifacts (dry-run by default)")
     p_storage_prune.add_argument("--url", default="http://localhost:8191")
     p_storage_prune.add_argument("--older-than-days", type=int, default=30)
     p_storage_prune.add_argument("--execute", action="store_true", help="actually delete (default: dry-run)")
     p_storage_prune.add_argument("--task-id", default="", help="only prune specified task ID prefix")
+    p_storage_prune.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_agent_exec = sub.add_parser("agent-exec", help="execute a diagnostic/repair command on agent host (via task)")
     p_agent_exec.add_argument("--url", default="http://localhost:8191")
     p_agent_exec.add_argument("--diagnosis-id", required=True)
     p_agent_exec.add_argument("--action-index", type=int, default=0, help="which repair action to execute")
+    p_agent_exec.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_install_check = sub.add_parser("install-check", help="check system dependencies and permissions")
     p_install_check.add_argument("--full", action="store_true", help="run full check including optional tools")
@@ -275,7 +283,10 @@ def _cmd_watch_task(args) -> int:
     deadline = time.time() + args.timeout
     last = None
     while time.time() <= deadline:
-        resp = requests.get(f"{args.url.rstrip('/')}/api/tasks/{args.task_id}", timeout=5)
+        resp = requests.get(
+            f"{args.url.rstrip('/')}/api/tasks/{args.task_id}",
+            headers=_api_headers(args.api_key_env), timeout=5,
+        )
         resp.raise_for_status()
         data = resp.json()["data"]
         last = data
@@ -512,6 +523,13 @@ def _api_headers(environment_name: str = "MINI_DROP_API_KEY") -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 
+def _api_request(url: str, *, api_key_env: str = "MINI_DROP_API_KEY", data=None, method=None, headers=None):
+    import urllib.request
+
+    merged = {**(headers or {}), **_api_headers(api_key_env)}
+    return urllib.request.Request(url, data=data, headers=merged, method=method)
+
+
 def _cmd_status(args) -> int:
     """查询 Server/Agent 状态。"""
     import urllib.request
@@ -520,7 +538,7 @@ def _cmd_status(args) -> int:
     url = args.url.rstrip("/")
 
     try:
-        with urllib.request.urlopen(f"{url}/api/healthz", timeout=5) as resp:
+        with urllib.request.urlopen(_api_request(f"{url}/api/healthz", api_key_env=args.api_key_env), timeout=5) as resp:
             hz = json.loads(resp.read())
         if hz.get("code") != 0:
             print(json.dumps({"error": "server unhealthy", "detail": hz}))
@@ -532,7 +550,7 @@ def _cmd_status(args) -> int:
     # 获取 Agent 列表
     if args.agents:
         try:
-            with urllib.request.urlopen(f"{url}/api/agents", timeout=5) as resp:
+            with urllib.request.urlopen(_api_request(f"{url}/api/agents", api_key_env=args.api_key_env), timeout=5) as resp:
                 agents_data = json.loads(resp.read())
             agents = agents_data.get("data", {}).get("items", [])
             print(json.dumps({
@@ -552,7 +570,7 @@ def _cmd_status(args) -> int:
     # 获取任务列表
     if args.tasks:
         try:
-            with urllib.request.urlopen(f"{url}/api/tasks?limit=50", timeout=5) as resp:
+            with urllib.request.urlopen(_api_request(f"{url}/api/tasks?limit=50", api_key_env=args.api_key_env), timeout=5) as resp:
                 tasks_data = json.loads(resp.read())
             tasks = tasks_data.get("data", {}).get("items", [])
             active = [t for t in tasks if t["status"] in ("PENDING", "RUNNING", "UPLOADING", "ANALYZING")]
@@ -569,12 +587,12 @@ def _cmd_status(args) -> int:
     # 缺省：总体概览
     if not args.agents and not args.tasks:
         try:
-            with urllib.request.urlopen(f"{url}/api/agents", timeout=5) as resp:
+            with urllib.request.urlopen(_api_request(f"{url}/api/agents", api_key_env=args.api_key_env), timeout=5) as resp:
                 agents_data = json.loads(resp.read())
             agents = agents_data.get("data", {}).get("items", [])
             online = sum(1 for a in agents if a["status"] == "ONLINE")
 
-            with urllib.request.urlopen(f"{url}/api/tasks?limit=100", timeout=5) as resp:
+            with urllib.request.urlopen(_api_request(f"{url}/api/tasks?limit=100", api_key_env=args.api_key_env), timeout=5) as resp:
                 tasks_data = json.loads(resp.read())
             tasks = tasks_data.get("data", {}).get("items", [])
             active = sum(1 for t in tasks if t["status"] in ("PENDING", "RUNNING", "UPLOADING", "ANALYZING"))
@@ -688,10 +706,10 @@ def _cmd_task_cancel(args) -> int:
     try:
         # 通过 control service 或直接设置状态为 FAILED
         payload = json.dumps({"status": "CANCELLED", "reason": "CLI task-cancel"}).encode("utf-8")
-        req = urllib.request.Request(
+        req = _api_request(
             f"{url}/api/tasks/{args.task_id}/cancel",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json"}, api_key_env=args.api_key_env,
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -714,9 +732,9 @@ def _cmd_diagnose_remote(args) -> int:
 
     url = args.url.rstrip("/")
     try:
-        req = urllib.request.Request(
+        req = _api_request(
             f"{url}/api/tasks/{args.task_id}/diagnose",
-            method="POST",
+            method="POST", api_key_env=args.api_key_env,
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read())
@@ -820,7 +838,7 @@ def _cmd_feedback_stats(args) -> int:
     url = args.url.rstrip("/")
     try:
         # 获取最近诊断列表并提取反馈信息
-        with urllib.request.urlopen(f"{url}/api/tasks?limit=100", timeout=10) as resp:
+        with urllib.request.urlopen(_api_request(f"{url}/api/tasks?limit=100", api_key_env=args.api_key_env), timeout=10) as resp:
             tasks_data = json.loads(resp.read())
 
         tasks = tasks_data.get("data", {}).get("items", [])
@@ -829,7 +847,7 @@ def _cmd_feedback_stats(args) -> int:
         for task in tasks:
             tid = task["id"]
             try:
-                with urllib.request.urlopen(f"{url}/api/tasks/{tid}/diagnoses", timeout=5) as resp:
+                with urllib.request.urlopen(_api_request(f"{url}/api/tasks/{tid}/diagnoses", api_key_env=args.api_key_env), timeout=5) as resp:
                     diag_list = json.loads(resp.read())
                 for d in (diag_list.get("data", diag_list) or []):
                     fb = d.get("feedback")
@@ -865,7 +883,7 @@ def _cmd_storage_ls(args) -> int:
 
     url = args.url.rstrip("/")
     try:
-        with urllib.request.urlopen(f"{url}/api/tasks?limit=500", timeout=10) as resp:
+        with urllib.request.urlopen(_api_request(f"{url}/api/tasks?limit=500", api_key_env=args.api_key_env), timeout=10) as resp:
             tasks_data = json.loads(resp.read())
 
         tasks = tasks_data.get("data", {}).get("items", [])
@@ -875,7 +893,7 @@ def _cmd_storage_ls(args) -> int:
             if args.task_id and args.task_id not in tid:
                 continue
             try:
-                with urllib.request.urlopen(f"{url}/api/tasks/{tid}/artifacts", timeout=5) as resp:
+                with urllib.request.urlopen(_api_request(f"{url}/api/tasks/{tid}/artifacts", api_key_env=args.api_key_env), timeout=5) as resp:
                     artifacts = json.loads(resp.read())
                 artifact_list = artifacts.get("data", artifacts) or []
                 for a in artifact_list:
@@ -911,7 +929,7 @@ def _cmd_storage_prune(args) -> int:
     cutoff = datetime.now(_tz.utc) - timedelta(days=args.older_than_days)
 
     try:
-        with urllib.request.urlopen(f"{url}/api/tasks?limit=500", timeout=10) as resp:
+        with urllib.request.urlopen(_api_request(f"{url}/api/tasks?limit=500", api_key_env=args.api_key_env), timeout=10) as resp:
             tasks_data = json.loads(resp.read())
 
         tasks = tasks_data.get("data", {}).get("items", [])
@@ -935,7 +953,7 @@ def _cmd_storage_prune(args) -> int:
 
             if created_dt < cutoff:
                 try:
-                    with urllib.request.urlopen(f"{url}/api/tasks/{tid}/artifacts", timeout=5) as resp:
+                    with urllib.request.urlopen(_api_request(f"{url}/api/tasks/{tid}/artifacts", api_key_env=args.api_key_env), timeout=5) as resp:
                         artifacts = json.loads(resp.read())
                     artifact_list = artifacts.get("data", artifacts) or []
                     size = sum(a.get("size_bytes", 0) for a in artifact_list)
@@ -950,9 +968,9 @@ def _cmd_storage_prune(args) -> int:
             deleted = 0
             for item in to_prune:
                 try:
-                    req = urllib.request.Request(
+                    req = _api_request(
                         f"{url}/api/tasks/{item['task_id']}",
-                        method="DELETE",
+                        method="DELETE", api_key_env=args.api_key_env,
                     )
                     with urllib.request.urlopen(req, timeout=10) as resp:
                         pass
@@ -992,7 +1010,7 @@ def _cmd_agent_exec(args) -> int:
     url = args.url.rstrip("/")
     try:
         # 获取诊断详情
-        with urllib.request.urlopen(f"{url}/api/diagnoses/{args.diagnosis_id}", timeout=10) as resp:
+        with urllib.request.urlopen(_api_request(f"{url}/api/diagnoses/{args.diagnosis_id}", api_key_env=args.api_key_env), timeout=10) as resp:
             diag = json.loads(resp.read())
 
         diag_data = diag.get("data", diag)

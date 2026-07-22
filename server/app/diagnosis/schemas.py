@@ -273,3 +273,17 @@ class ReportVerification(StrictModel):
     checked_knowledge_refs: int = 0
     checked_actions: int = 0
     issues: list[str] = Field(default_factory=list)
+
+
+class DiagnosisReport(StrictModel):
+    """The stable, machine-validated core of every persisted diagnosis report."""
+
+    summary: str = Field(min_length=1, max_length=4000)
+    root_location: RootLocation
+    domain_cause: DomainCause
+    findings: list[DomainFinding]
+    actions: list[DiagnosisAction]
+    knowledge_refs: list[str]
+    limitations: list[str]
+    coverage: dict[str, Any]
+    verification: Optional[ReportVerification] = None

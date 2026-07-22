@@ -1054,8 +1054,10 @@ class DiagnosisOrchestrator:
             },
             "root_location": {"type": "unknown", "target_ref": None, "evidence_refs": []},
             "domain_cause": {"type": "unknown", "subtype": "unknown", "evidence_refs": []},
+            "findings": [],
             "root_cause_candidates": [],
             "ruled_out": [],
+            "knowledge_refs": [],
             "actions": actions,
             "diagnostic_commands": actions,
             "recommendations": [{

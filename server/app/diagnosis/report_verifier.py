@@ -15,7 +15,7 @@ from server.app.diagnosis.actions import render_action_argv
 from server.app.diagnosis.domain_analyzers import ANALYZER_CONTRACTS
 from server.app.diagnosis.probe_registry import list_probes
 from server.app.diagnosis.schemas import (
-    DiagnosisAction, DomainCause, DomainFinding, ReportVerification, RootLocation,
+    DiagnosisAction, DiagnosisReport, DomainCause, DomainFinding, ReportVerification, RootLocation,
 )
 
 
@@ -63,6 +63,17 @@ def verify_report(
             issues.append(f"未注册 Analyzer: {finding.analyzer_id}")
         if finding.severity != "info" and not finding.evidence_refs:
             issues.append(f"Finding 缺少 Evidence: {finding.finding_id}")
+        referenced_items = [evidence_by_id[ref] for ref in finding.evidence_refs if ref in evidence_by_id]
+        if finding.severity != "info" and referenced_items:
+            minimum = ANALYZER_CONTRACTS.get(finding.analyzer_id, {}).get("minimum_quality", "medium")
+            if not any(_quality_at_least(item, minimum) for item in referenced_items):
+                issues.append(f"Finding 证据质量低于 {minimum}: {finding.finding_id}")
+            required_domain = _required_evidence_domain(finding)
+            if required_domain and not any(
+                required_domain in item.get("data_quality", {}).get("domains", [])
+                for item in referenced_items
+            ):
+                issues.append(f"Finding 缺少 {required_domain} 域 Evidence: {finding.finding_id}")
 
     allowed_targets = {
         (item.get("agent_id"), item.get("pid"))
@@ -86,12 +97,15 @@ def verify_report(
         [evidence_by_id[ref] for ref in evidence_refs if ref in evidence_by_id],
         diagnosis_context or {},
     )
+    _verify_cross_target_time(issues, conclusion, evidence_by_id, diagnosis_context or {})
     registered_collectors = {item.runner_task_kind for item in list_probes()}
     actions = conclusion.get("actions") or conclusion.get("diagnostic_commands") or []
+    validated_actions: list[dict[str, Any]] = []
     for raw in actions:
         payload = {key: value for key, value in raw.items() if key not in LEGACY_ACTION_FIELDS}
         try:
             action = DiagnosisAction.model_validate(payload)
+            validated_actions.append(action.model_dump(mode="json"))
         except ValidationError as exc:
             issues.append(f"Action Schema 校验失败 {raw.get('action_id')}: {exc.errors()[0]['msg']}")
             continue
@@ -112,6 +126,22 @@ def verify_report(
                 issues.append(f"Action 未配置 CLI 认证来源: {action.action_id}")
         if action.auto_execute is not False:
             issues.append(f"Action 禁止自动执行: {action.action_id}")
+
+    report_core = {
+        "summary": conclusion.get("summary"),
+        "root_location": conclusion.get("root_location"),
+        "domain_cause": conclusion.get("domain_cause"),
+        "findings": conclusion.get("findings"),
+        "actions": validated_actions,
+        "knowledge_refs": conclusion.get("knowledge_refs"),
+        "limitations": conclusion.get("limitations"),
+        "coverage": conclusion.get("coverage"),
+    }
+    try:
+        DiagnosisReport.model_validate(report_core)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        issues.append(f"DiagnosisReport Schema 校验失败: {'.'.join(map(str, first['loc']))}: {first['msg']}")
 
     result = ReportVerification(
         status="failed" if issues else "passed",
@@ -171,6 +201,35 @@ def _verify_evidence_time(
             issues.append(f"Evidence 时间窗与请求不重叠: {ref}")
 
 
+def _verify_cross_target_time(
+    issues: list[str],
+    conclusion: dict[str, Any],
+    evidence_by_id: dict[str, dict[str, Any]],
+    context: dict[str, Any],
+) -> None:
+    assessment = conclusion.get("cluster_assessment", {})
+    if assessment.get("classification") in {None, "insufficient_evidence", "scope_unresolved"}:
+        return
+    refs = assessment.get("evidence_refs", [])
+    ranges = []
+    targets = set()
+    for ref in refs:
+        item = evidence_by_id.get(ref, {})
+        event_range = item.get("event_time_range", {})
+        start = _parse_time(event_range.get("start"))
+        end = _parse_time(event_range.get("end"))
+        target = item.get("target", {})
+        if start and end:
+            ranges.append((start, end))
+            targets.add((target.get("agent_id"), target.get("pid")))
+    if len(targets) < 2 or len(ranges) < 2:
+        return
+    policy = context.get("normalized_intent", {}).get("evidence_time_policy", {})
+    skew = timedelta(seconds=int(policy.get("max_clock_skew_seconds", 5) or 0))
+    if max(start for start, _ in ranges) > min(end for _, end in ranges) + skew:
+        issues.append("跨目标 Evidence 时间窗不一致，不能用于横向归因")
+
+
 def _parse_time(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         parsed = value
@@ -184,6 +243,25 @@ def _parse_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _quality_at_least(item: dict[str, Any], minimum: str) -> bool:
+    ranks = {"low": 0, "medium": 1, "high": 2}
+    actual = str(item.get("data_quality", {}).get("completeness", "low")).lower()
+    return ranks.get(actual, 0) >= ranks.get(str(minimum).lower(), 1)
+
+
+def _required_evidence_domain(finding: DomainFinding) -> str | None:
+    declared = finding.facts.get("scope")
+    if declared in {"host", "process", "container", "dependency"}:
+        return declared
+    if finding.category in {"memory", "runtime"}:
+        return "process"
+    if finding.category == "database":
+        return "dependency"
+    if finding.category in {"network", "io"}:
+        return "host"
+    return None
 
 
 EVIDENCE_HASH_FIELDS = (
