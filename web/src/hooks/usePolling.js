@@ -1,36 +1,15 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-/**
- * 可暂停的轮询 Hook。
- *
- * 特性：
- * - 页面隐藏时自动暂停轮询（减少服务端压力）
- * - 组件卸载时自动清理定时器
- * - enabled=false 时自动停止
- *
- * @param {() => Promise<void> | void} callback  每次轮询执行的回调
- * @param {object} options
- * @param {number} [options.interval=10000]  轮询间隔（毫秒）
- * @param {boolean} [options.enabled=true]   是否启用轮询
- * @returns {{ lastRefreshed: number | null, isPolling: boolean }}
- */
+/** Poll only after the previous async callback has settled, and pause when hidden. */
 export default function usePolling(callback, { interval = 10000, enabled = true } = {}) {
   const callbackRef = useRef(callback);
   callbackRef.current = callback;
 
   const [lastRefreshed, setLastRefreshed] = useState(null);
-  const intervalRef = useRef(null);
-  const visibleRef = useRef(true);
-
-  const tick = useCallback(async () => {
-    try {
-      await callbackRef.current();
-      setLastRefreshed(Date.now());
-    } catch (err) {
-      // 避免每 N 秒弹错误提示，但记录到 console 便于调试
-      console.warn("usePolling tick failed:", err?.message || err);
-    }
-  }, []);
+  const [inFlight, setInFlight] = useState(false);
+  const timerRef = useRef(null);
+  const runningRef = useRef(false);
+  const visibleRef = useRef(document.visibilityState === "visible");
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -41,21 +20,39 @@ export default function usePolling(callback, { interval = 10000, enabled = true 
   }, []);
 
   useEffect(() => {
-    if (!enabled) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      return;
-    }
+    let cancelled = false;
 
-    intervalRef.current = setInterval(() => {
-      if (visibleRef.current) {
-        tick();
-      }
-    }, interval);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    const schedule = () => {
+      if (!cancelled && enabled) timerRef.current = setTimeout(tick, interval);
     };
-  }, [enabled, interval, tick]);
+    const tick = async () => {
+      if (cancelled || !enabled) return;
+      if (!visibleRef.current || runningRef.current) {
+        schedule();
+        return;
+      }
+      runningRef.current = true;
+      setInFlight(true);
+      try {
+        await callbackRef.current();
+        if (!cancelled) setLastRefreshed(Date.now());
+      } catch (err) {
+        console.warn("usePolling tick failed:", err?.message || err);
+      } finally {
+        runningRef.current = false;
+        if (!cancelled) setInFlight(false);
+        schedule();
+      }
+    };
 
-  return { lastRefreshed, isPolling: enabled };
+    if (enabled) schedule();
+    return () => {
+      cancelled = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      runningRef.current = false;
+    };
+  }, [enabled, interval]);
+
+  return { lastRefreshed, isPolling: enabled && !inFlight, inFlight };
 }

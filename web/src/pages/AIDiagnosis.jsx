@@ -15,6 +15,7 @@ import {
   Select,
   Space,
   Spin,
+  Steps,
   Table,
   Tag,
   Timeline,
@@ -39,6 +40,7 @@ import {
   listDiagnosisSessions,
   runAIValidation,
 } from "../api/client";
+import usePolling from "../hooks/usePolling";
 
 const TERMINAL = new Set([
   "COMPLETED",
@@ -62,8 +64,35 @@ const STATUS_COLORS = {
   NEEDS_SCOPE_CONFIRMATION: "orange",
 };
 
+const NODE_LABELS = {
+  understand_intent: "意图理解",
+  resolve_scope: "范围/拓扑",
+  build_hypotheses: "候选假设",
+  plan_evidence: "证据规划",
+  risk_gate: "风险门禁",
+  run_probes: "受控采集",
+  normalize_evidence: "证据归一化",
+  analyze_evidence: "领域分析",
+  assess_cluster: "跨节点归因",
+  retrieve_knowledge: "知识检索",
+  generate_actions: "动作生成",
+  verify_report: "报告校验",
+};
+
+function nodeStepStatus(value) {
+  if (value === "FAILED") return "error";
+  if (value === "COMPLETED" || value === "SKIPPED") return "finish";
+  if (value === "RUNNING" || value === "WAITING") return "process";
+  return "wait";
+}
+
 function Status({ value }) {
   return <Tag color={STATUS_COLORS[value] || "default"}>{value || "UNKNOWN"}</Tag>;
+}
+
+function formatTimeRange(value) {
+  if (!value?.start && !value?.end) return "未指定";
+  return `${value.start || "?"} → ${value.end || "?"}`;
 }
 
 export default function AIDiagnosis() {
@@ -106,19 +135,14 @@ export default function AIDiagnosis() {
       .catch((err) => setError(err.message));
   }, [form]);
 
-  useEffect(() => {
-    if (!selected?.diagnosis_id || TERMINAL.has(selected.status)) return undefined;
-    const timer = window.setInterval(async () => {
-      try {
-        const detail = await getDiagnosisSession(selected.diagnosis_id);
-        setSelected(detail);
-        refreshSessions();
-      } catch (err) {
-        setError(err.message);
-      }
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [selected?.diagnosis_id, selected?.status]);
+  usePolling(async () => {
+    const detail = await getDiagnosisSession(selected.diagnosis_id);
+    setSelected(detail);
+    await refreshSessions();
+  }, {
+    interval: 3000,
+    enabled: Boolean(selected?.diagnosis_id && !TERMINAL.has(selected.status)),
+  });
 
   async function submit(values) {
     setLoading(true);
@@ -466,11 +490,38 @@ function DiagnosisDetail({ detail, onDecision }) {
   const conclusion = detail.latest_conclusion;
   const candidates = conclusion?.root_cause_candidates || [];
   const assessment = conclusion?.cluster_assessment;
-  const commands = conclusion?.diagnostic_commands || [];
+  const commands = conclusion?.actions || conclusion?.diagnostic_commands || [];
+  const findings = conclusion?.findings || [];
+  const knowledge = conclusion?.knowledge_context || [];
+  const verification = conclusion?.verification;
+  const pipelineNodes = detail.pipeline_nodes || [];
   const hypotheses = detail.hypothesis_graph?.hypotheses || [];
   const probes = detail.probes || [];
   const evidence = detail.evidence || [];
+  const coverage = detail.coverage || [];
   const evidenceMap = useMemo(() => new Map(evidence.map((item) => [item.evidence_id, item])), [evidence]);
+
+  function requestDecision(item, decision) {
+    if (decision === "reject") {
+      onDecision(item.step_id, decision);
+      return;
+    }
+    Modal.confirm({
+      title: `单次批准 ${item.probe_id}？`,
+      width: 720,
+      okText: "仅批准本次执行",
+      cancelText: "取消",
+      content: (
+        <Descriptions size="small" bordered column={1} style={{ marginTop: 16 }}>
+          <Descriptions.Item label="目标">{JSON.stringify(item.target || {})}</Descriptions.Item>
+          <Descriptions.Item label="参数">{JSON.stringify(item.parameters || {})}</Descriptions.Item>
+          <Descriptions.Item label="风险"><Tag color="orange">{item.risk_level}</Tag> {item.reason}</Descriptions.Item>
+          <Descriptions.Item label="预计成本">{item.estimated_cost || `${item.parameters?.duration_sec || 0}s`}</Descriptions.Item>
+        </Descriptions>
+      ),
+      onOk: () => onDecision(item.step_id, decision),
+    });
+  }
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -480,9 +531,30 @@ function DiagnosisDetail({ detail, onDecision }) {
           <Descriptions.Item label="目标服务">{detail.target_scope?.target_service || "未解析"}</Descriptions.Item>
           <Descriptions.Item label="拓扑快照">{detail.topology_snapshot_id}</Descriptions.Item>
           <Descriptions.Item label="症状">{detail.normalized_intent?.symptom}</Descriptions.Item>
+          <Descriptions.Item label="诊断模式"><Tag>{detail.normalized_intent?.diagnosis_mode || "UNKNOWN"}</Tag></Descriptions.Item>
+          <Descriptions.Item label="请求时间窗" span={2}>{formatTimeRange(detail.requested_time_range)}</Descriptions.Item>
+          <Descriptions.Item label="有效时间窗" span={2}>{formatTimeRange(detail.effective_time_range)}</Descriptions.Item>
           <Descriptions.Item label="模型">{detail.model_version}</Descriptions.Item>
           <Descriptions.Item label="规划器">{detail.planner_version}</Descriptions.Item>
         </Descriptions>
+      </Card>
+
+      <Card title="诊断流水线" extra={<Typography.Text type="secondary">状态、重试和节点输出均持久化</Typography.Text>}>
+        <Steps
+          size="small"
+          responsive
+          labelPlacement="vertical"
+          items={pipelineNodes.map((node) => ({
+            title: NODE_LABELS[node.node_name] || node.node_name,
+            status: nodeStepStatus(node.status),
+            description: (
+              <Space direction="vertical" size={0}>
+                <Tag color={node.status === "FAILED" ? "red" : node.status === "WAITING" ? "purple" : "default"}>{node.status}</Tag>
+                {node.attempt > 0 && <Typography.Text type="secondary">attempt {node.attempt}</Typography.Text>}
+              </Space>
+            ),
+          }))}
+        />
       </Card>
 
       {conclusion && (
@@ -491,7 +563,7 @@ function DiagnosisDetail({ detail, onDecision }) {
             showIcon
             type={detail.status === "INSUFFICIENT_EVIDENCE" ? "warning" : "info"}
             message={conclusion.summary}
-            description={`置信等级：${conclusion.confidence_level}`}
+            description={`置信等级：${conclusion.confidence_level || "不可判断"}`}
             style={{ marginBottom: 12 }}
           />
           {assessment && (
@@ -502,8 +574,10 @@ function DiagnosisDetail({ detail, onDecision }) {
               style={{ marginBottom: 12 }}
             >
               <Descriptions.Item label="跨节点判断">{assessment.classification}</Descriptions.Item>
-              <Descriptions.Item label="判断置信度">{assessment.confidence}</Descriptions.Item>
+              <Descriptions.Item label="判断置信等级">{assessment.confidence_level || conclusion.confidence_level}</Descriptions.Item>
               <Descriptions.Item label="对比目标">{assessment.compared_targets?.length || 0}</Descriptions.Item>
+              <Descriptions.Item label="根因位置">{conclusion.root_location?.type || "unknown"} / {conclusion.root_location?.target_ref || "-"}</Descriptions.Item>
+              <Descriptions.Item label="问题领域">{conclusion.domain_cause?.type || "unknown"} / {conclusion.domain_cause?.subtype || "unknown"}</Descriptions.Item>
               <Descriptions.Item label="证据引用" span={3}>
                 <Space wrap>
                   {(assessment.evidence_refs || []).map((ref) => (
@@ -533,11 +607,20 @@ function DiagnosisDetail({ detail, onDecision }) {
           {conclusion.limitations?.length > 0 && (
             <Alert type="warning" message="限制与缺失证据" description={conclusion.limitations.join("；")} style={{ marginTop: 12 }} />
           )}
+          {verification && (
+            <Alert
+              showIcon
+              type={verification.status === "passed" ? "success" : "error"}
+              message={`报告校验：${verification.status}`}
+              description={verification.issues?.length ? verification.issues.join("；") : `已检查 ${verification.checked_evidence_refs} 个证据引用、${verification.checked_knowledge_refs} 个知识引用和 ${verification.checked_actions} 个动作。`}
+              style={{ marginTop: 12 }}
+            />
+          )}
         </Card>
       )}
 
       {commands.length > 0 && (
-        <Card title="可审核命令">
+        <Card title="结构化诊断动作">
           <Alert
             showIcon
             type="warning"
@@ -545,12 +628,13 @@ function DiagnosisDetail({ detail, onDecision }) {
             style={{ marginBottom: 12 }}
           />
           <Table
-            rowKey="command_id"
+            rowKey="action_id"
             size="small"
             pagination={false}
             dataSource={commands}
             columns={[
-              { title: "用途", dataIndex: "title", width: 180 },
+              { title: "类型", dataIndex: "action_type", width: 90, render: (value) => <Tag>{value}</Tag> },
+              { title: "用途", dataIndex: "title", width: 170 },
               {
                 title: "风险",
                 dataIndex: "risk_level",
@@ -564,11 +648,45 @@ function DiagnosisDetail({ detail, onDecision }) {
               },
               {
                 title: "命令",
-                dataIndex: "command",
+                dataIndex: "rendered_command",
                 render: (value) => <Typography.Text copyable code>{value}</Typography.Text>,
               },
               { title: "审核注释", dataIndex: "comment" },
             ]}
+          />
+        </Card>
+      )}
+
+      {findings.length > 0 && (
+        <Card title={`确定性领域发现 (${findings.length})`}>
+          <Table
+            rowKey="finding_id"
+            size="small"
+            pagination={false}
+            dataSource={findings}
+            columns={[
+              { title: "领域", dataIndex: "category", width: 90, render: (value) => <Tag>{value}</Tag> },
+              { title: "发现", dataIndex: "finding_type", width: 210 },
+              { title: "分析器", dataIndex: "analyzer_id", width: 190 },
+              { title: "置信等级", dataIndex: "confidence_level", width: 100 },
+              { title: "说明", dataIndex: "summary" },
+            ]}
+          />
+        </Card>
+      )}
+
+      {knowledge.length > 0 && (
+        <Card title="系统知识引用">
+          <List
+            dataSource={knowledge}
+            renderItem={(item) => (
+              <List.Item>
+                <List.Item.Meta
+                  title={<Space><Typography.Text>{item.title}</Typography.Text><Tag color="geekblue">{item.knowledge_id}</Tag></Space>}
+                  description={<Space direction="vertical" size={2}><span>{item.summary}</span>{item.caveats?.length > 0 && <Typography.Text type="secondary">限制：{item.caveats.join("；")}</Typography.Text>}</Space>}
+                />
+              </List.Item>
+            )}
           />
         </Card>
       )}
@@ -597,8 +715,8 @@ function DiagnosisDetail({ detail, onDecision }) {
               renderItem={(item) => (
                 <List.Item
                   actions={item.status === "WAITING_APPROVAL" ? [
-                    <Button key="approve" size="small" type="primary" icon={<CheckOutlined />} onClick={() => onDecision(item.step_id, "approve")}>单次批准</Button>,
-                    <Button key="reject" size="small" danger icon={<CloseOutlined />} onClick={() => onDecision(item.step_id, "reject")}>拒绝</Button>,
+                    <Button key="approve" size="small" type="primary" icon={<CheckOutlined />} onClick={() => requestDecision(item, "approve")}>单次批准</Button>,
+                    <Button key="reject" size="small" danger icon={<CloseOutlined />} onClick={() => requestDecision(item, "reject")}>拒绝</Button>,
                   ] : []}
                 >
                   <List.Item.Meta
@@ -612,19 +730,42 @@ function DiagnosisDetail({ detail, onDecision }) {
         </Col>
       </Row>
 
+      <Card title={`覆盖矩阵 (${coverage.length})`}>
+        <Table
+          rowKey="step_id"
+          size="small"
+          pagination={false}
+          dataSource={coverage}
+          columns={[
+            { title: "目标", dataIndex: "target" },
+            { title: "证据需求", dataIndex: "requirement" },
+            { title: "状态", dataIndex: "status", render: (value) => <Status value={value} /> },
+            { title: "任务 ID", dataIndex: "task_id", render: (value) => value || "-" },
+            { title: "错误码", dataIndex: "error_code", render: (value) => value || "-" },
+          ]}
+        />
+      </Card>
+
       <Card title={`证据血缘 (${evidence.length})`}>
         <Table
           rowKey="evidence_id"
           size="small"
           pagination={{ pageSize: 6 }}
-          scroll={{ x: 900 }}
+          scroll={{ x: 1600 }}
           dataSource={evidence}
           columns={[
             { title: "Evidence ID", dataIndex: "evidence_id", width: 210, render: (value) => <Typography.Text copyable>{value}</Typography.Text> },
             { title: "来源", dataIndex: "source_system", width: 170 },
             { title: "类型", dataIndex: "source_type", width: 150 },
+            { title: "角色", dataIndex: "evidence_role", width: 110, render: (value) => <Tag>{value || "incident"}</Tag> },
+            { title: "事件时间窗", dataIndex: "event_time_range", width: 310, render: formatTimeRange },
+            { title: "目标", dataIndex: "target", width: 260, render: (value) => JSON.stringify(value || {}) },
             { title: "探针/查询", dataIndex: "query_or_probe", width: 150 },
-            { title: "完整性 Hash", dataIndex: "integrity_hash", ellipsis: true },
+            { title: "质量", dataIndex: "data_quality", width: 180, render: (value) => `${value?.completeness || "unknown"} / ${(value?.domains || []).join(",") || "-"}` },
+            { title: "原始产物", dataIndex: "raw_artifact_ref", width: 180, ellipsis: true },
+            { title: "派生产物", dataIndex: "derived_artifact_ref", width: 180, ellipsis: true },
+            { title: "派生版本", dataIndex: "derivation_version", width: 130 },
+            { title: "完整性 Hash", dataIndex: "integrity_hash", width: 260, ellipsis: true },
           ]}
         />
       </Card>
