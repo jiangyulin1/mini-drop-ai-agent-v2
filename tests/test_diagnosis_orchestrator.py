@@ -557,6 +557,12 @@ class TestDiagnosisSessionAPI:
         assert all(action["action_type"] in {"inspect", "collect", "manual_remediation"} for action in actions)
         assert all(action["rendered_command"] == action["command"] for action in actions)
         assert all(action["auto_execute"] is False for action in actions)
+        recommendations = detail["latest_conclusion"]["recommendations"]
+        assert {item["category"] for item in recommendations} == {
+            "mitigation", "optimization", "validation",
+        }
+        assert all(item["detail"] for item in recommendations)
+        assert all(set(item["evidence_refs"]).issubset(evidence_ids) for item in recommendations)
         graph = detail["hypothesis_graph"]
         assert graph["updated_at"]
         assert graph["edges"]

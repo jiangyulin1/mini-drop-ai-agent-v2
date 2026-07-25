@@ -575,6 +575,7 @@ function DiagnosisDetail({ detail, sessions, onDecision }) {
   const assessment = conclusion?.cluster_assessment;
   const commands = conclusion?.actions || conclusion?.diagnostic_commands || [];
   const findings = conclusion?.findings || [];
+  const recommendations = conclusion?.recommendations || [];
   const knowledge = conclusion?.knowledge_context || [];
   const verification = conclusion?.verification;
   const pipelineNodes = detail.pipeline_nodes || [];
@@ -697,6 +698,49 @@ function DiagnosisDetail({ detail, sessions, onDecision }) {
               },
             ]}
           />
+          {recommendations.length > 0 && (
+            <Card
+              size="small"
+              title="分层优化与验证建议"
+              style={{ marginTop: 12, background: "#fafafa" }}
+            >
+              <Row gutter={[12, 12]}>
+                {recommendations.map((item) => (
+                  <Col xs={24} lg={8} key={item.recommendation_id || item.title}>
+                    <Card
+                      size="small"
+                      title={item.title || item.action}
+                      extra={(
+                        <Space size={4}>
+                          {item.category && <Tag color="blue">{item.category}</Tag>}
+                          <Tag color={item.risk_level === "R3" ? "red" : item.risk_level === "R2" ? "orange" : "green"}>
+                            {item.risk_level}
+                          </Tag>
+                        </Space>
+                      )}
+                      style={{ height: "100%" }}
+                    >
+                      <Typography.Paragraph>
+                        {item.detail || item.action}
+                      </Typography.Paragraph>
+                      <Typography.Text type="secondary">
+                        执行策略：{item.execution}
+                      </Typography.Text>
+                      {(item.evidence_refs || []).length > 0 && (
+                        <Space wrap style={{ marginTop: 8 }}>
+                          {(item.evidence_refs || []).map((ref) => (
+                            <Tag key={ref} color={evidenceMap.has(ref) ? "green" : "red"}>
+                              {ref}
+                            </Tag>
+                          ))}
+                        </Space>
+                      )}
+                    </Card>
+                  </Col>
+                ))}
+              </Row>
+            </Card>
+          )}
           {conclusion.limitations?.length > 0 && (
             <Alert type="warning" message="限制与缺失证据" description={conclusion.limitations.join("；")} style={{ marginTop: 12 }} />
           )}

@@ -937,11 +937,7 @@ class DiagnosisOrchestrator:
             "knowledge_context": knowledge_context,
             "actions": diagnostic_actions,
             "diagnostic_commands": diagnostic_actions,
-            "recommendations": [{
-                "action": "由人工依据证据确认根因后再执行变更；本诊断不会自动重启、迁移或修改配置。",
-                "risk_level": "R3",
-                "execution": "manual_confirmation_required",
-            }],
+            "recommendations": self._build_recommendations(cluster_assessment),
             "limitations": sorted(set(missing + (["部分目标采集失败"] if failed_targets else []))),
             "coverage": {
                 "task_count": len(tasks),
@@ -1068,6 +1064,79 @@ class DiagnosisOrchestrator:
                     confidence_level="中",
                 ))
         return commands
+
+    @staticmethod
+    def _build_recommendations(assessment: dict[str, Any]) -> list[dict[str, Any]]:
+        """由已验证领域分类生成可执行、可复核的分层建议。"""
+
+        domain = assessment.get("domain_cause", {}).get("type", "unknown")
+        location = assessment.get("root_location", {}).get("type", "unknown")
+        refs = list(dict.fromkeys(assessment.get("evidence_refs", [])))
+        optimization = {
+            "cpu": (
+                "优化热点函数或线程竞争",
+                "依据 CPU Profile 的 TopN/火焰图定位高占比调用栈，优先评估算法复杂度、重复计算、缓存和锁粒度。",
+            ),
+            "io": (
+                "降低共享 I/O 争抢",
+                "核对块设备延迟与队列深度，拆分高 I/O 工作负载、合并小 I/O，并评估存储限额或独立卷。",
+            ),
+            "memory": (
+                "控制进程内存增长",
+                "检查 RSS/PSS、Swap 和分配热点，修复未释放对象或无界缓存，并设置与工作集匹配的资源限制。",
+            ),
+            "network": (
+                "降低网络与下游调用开销",
+                "检查重传、连接池、超时和重试放大，优先修复异常依赖并限制无界重试。",
+            ),
+            "database": (
+                "消除数据库等待链",
+                "核对慢查询、锁等待和连接池耗尽，优化索引与事务范围，避免直接执行未经验证的结构变更。",
+            ),
+            "runtime": (
+                "优化运行时暂停或锁竞争",
+                "结合 GC、线程和运行时 Profile 调整对象生命周期、堆配置或临界区。",
+            ),
+        }.get(domain, (
+            "补充区分性证据",
+            "当前领域尚不可判断；先完成缺失探针并重新校验证据覆盖率，不应直接修改生产配置。",
+        ))
+        target_hint = assessment.get("root_location", {}).get("target_ref") or "候选实例"
+        return [
+            {
+                "recommendation_id": "rec_mitigation",
+                "category": "mitigation",
+                "title": "人工确认后的临时缓解",
+                "detail": (
+                    f"在确认业务容量和回滚方案后，可临时隔离或降低 {target_hint} 的流量；"
+                    f"当前归因层级为 {location}，系统不会自动执行摘流、重启或迁移。"
+                ),
+                "risk_level": "R3",
+                "execution": "manual_confirmation_required",
+                "evidence_refs": refs,
+            },
+            {
+                "recommendation_id": "rec_optimization",
+                "category": "optimization",
+                "title": optimization[0],
+                "detail": optimization[1],
+                "risk_level": "R2",
+                "execution": "review_before_change",
+                "evidence_refs": refs,
+            },
+            {
+                "recommendation_id": "rec_validation",
+                "category": "validation",
+                "title": "使用同域证据验证优化效果",
+                "detail": (
+                    "修复后保持相同目标、负载、采样参数和可比较时间窗重新采集，"
+                    "对比 P99、资源指标、TopN 与火焰图；覆盖不完整时不得宣称优化有效。"
+                ),
+                "risk_level": "R1",
+                "execution": "recollect_and_compare",
+                "evidence_refs": refs,
+            },
+        ]
 
     def _append_scope_help_conclusion(
         self,

@@ -250,12 +250,28 @@ function ReplayView({ detail }) {
       )}
       {showEvidence && <EvidenceChain detail={detail} compact />}
       {showConclusion && (
-        <Alert
-          type={conclusion.verification?.status === "passed" ? "success" : "warning"}
-          showIcon
-          message={`最终结论：${conclusion.summary}`}
-          description={`根因位置：${conclusion.root_location?.type || "unknown"} / ${conclusion.root_location?.target_ref || "-"}；报告校验：${conclusion.verification?.status || "unknown"}`}
-        />
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Alert
+            type={conclusion.verification?.status === "passed" ? "success" : "warning"}
+            showIcon
+            message={`最终结论：${conclusion.summary}`}
+            description={`根因位置：${conclusion.root_location?.type || "unknown"} / ${conclusion.root_location?.target_ref || "-"}；报告校验：${conclusion.verification?.status || "unknown"}`}
+          />
+          <Card size="small" title="优化、缓解与验证建议">
+            <Table
+              rowKey={(item) => item.recommendation_id || item.title}
+              size="small"
+              pagination={false}
+              dataSource={conclusion.recommendations || []}
+              columns={[
+                { title: "类别", dataIndex: "category", width: 110, render: (value) => <Tag color="blue">{value || "建议"}</Tag> },
+                { title: "建议", dataIndex: "title", width: 210 },
+                { title: "具体内容", dataIndex: "detail" },
+                { title: "风险", dataIndex: "risk_level", width: 80, render: (value) => <Tag color={value === "R3" ? "red" : value === "R2" ? "orange" : "green"}>{value}</Tag> },
+              ]}
+            />
+          </Card>
+        </Space>
       )}
     </Space>
   );
