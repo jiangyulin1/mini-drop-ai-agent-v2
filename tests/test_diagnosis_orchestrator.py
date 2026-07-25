@@ -557,6 +557,31 @@ class TestDiagnosisSessionAPI:
         assert all(action["action_type"] in {"inspect", "collect", "manual_remediation"} for action in actions)
         assert all(action["rendered_command"] == action["command"] for action in actions)
         assert all(action["auto_execute"] is False for action in actions)
+        graph = detail["hypothesis_graph"]
+        assert graph["updated_at"]
+        assert graph["edges"]
+        assert any(item["status"] == "SUPPORTED" for item in graph["hypotheses"])
+        assert all(len(item["history"]) >= 2 for item in graph["hypotheses"])
+        assert all("evidence_score" in item for item in graph["hypotheses"])
+
+    def test_analysis_strategy_is_persisted_and_changes_probe_plan(self, client: TestClient):
+        decision_tree = _payload()
+        decision_tree["analysis_strategy"] = "DECISION_TREE"
+        tree_detail = client.post("/api/v1/diagnoses", json=decision_tree).json()["data"]
+        assert tree_detail["normalized_intent"]["analysis_strategy"] == "DECISION_TREE"
+        assert tree_detail["planner_version"].endswith(":decision_tree")
+        assert any(
+            item["risk_level"] == "R2" and item["status"] == "WAITING_APPROVAL"
+            for item in tree_detail["probes"]
+        )
+
+        exploratory = _payload()
+        exploratory["analysis_strategy"] = "EXPLORATORY"
+        exploratory_detail = client.post("/api/v1/diagnoses", json=exploratory).json()["data"]
+        assert exploratory_detail["normalized_intent"]["analysis_strategy"] == "EXPLORATORY"
+        assert {
+            item["probe_id"] for item in exploratory_detail["probes"]
+        } >= {"host_process_metrics", "process_memory_map"}
 
     def test_rejected_deep_probe_can_end_as_insufficient_evidence(self, client: TestClient):
         data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]

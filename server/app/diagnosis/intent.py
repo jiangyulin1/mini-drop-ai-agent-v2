@@ -82,6 +82,7 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
             intent.time_range = request.context.time_range
         # 模式和时间策略属于可信请求策略，不能由模型放宽。
         intent.diagnosis_mode = _resolve_mode(request, intent.time_range)
+        intent.analysis_strategy = request.analysis_strategy
         intent.evidence_time_policy = request.evidence_time_policy
         if intent.diagnosis_mode == DiagnosisMode.REPRODUCTION:
             intent.evidence_time_policy.allow_reproduction_evidence = True
@@ -132,6 +133,7 @@ def _fallback_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
         environment=request.context.environment,
         time_range=time_range,
         diagnosis_mode=mode,
+        analysis_strategy=request.analysis_strategy,
         evidence_time_policy=policy,
         scope={"self": True, "same_host": True, "downstream_hops": 1},
         constraints={

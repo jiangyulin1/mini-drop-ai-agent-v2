@@ -23,7 +23,7 @@ from server.app.diagnosis.domain_analyzers import (
     cluster_finding,
 )
 from server.app.diagnosis.knowledge import retrieve_knowledge
-from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe
+from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe, list_probes
 from server.app.diagnosis.report_verifier import evidence_integrity_hash, verify_report
 from server.app.diagnosis.schemas import (
     ApprovalRequest,
@@ -126,7 +126,7 @@ class DiagnosisOrchestrator:
             "child_task_ids": [],
             "conclusion_versions": [],
             "model_version": get_ai_settings().model,
-            "planner_version": PLANNER_VERSION,
+            "planner_version": f"{PLANNER_VERSION}:{intent.analysis_strategy.value.lower()}",
             "deadline_at": utcnow() + timedelta(minutes=budget.max_duration_minutes),
         })
         self._complete_node(
@@ -558,6 +558,11 @@ class DiagnosisOrchestrator:
 
     def _plan_adaptive_r2(self, diagnosis_id: str, tasks: list[Any]) -> bool:
         session = self.store.get_session(diagnosis_id) or {}
+        strategy = session.get("normalized_intent", {}).get(
+            "analysis_strategy", "CONSTRAINED_HYBRID",
+        )
+        if strategy == "DECISION_TREE":
+            return False
         if int(session.get("risk_budget", {}).get("max_medium_risk_probes", 0)) <= 0:
             return False
         probes = self.store.list_probes(diagnosis_id)
@@ -601,14 +606,24 @@ class DiagnosisOrchestrator:
         budget: DiagnosisBudget,
     ) -> None:
         instances = target_scope["instances"][:budget.max_service_instances]
-        probe_ids = choose_probe_ids(symptom)
+        session = self.store.get_session(diagnosis_id) or {}
+        strategy = session.get("normalized_intent", {}).get(
+            "analysis_strategy", "CONSTRAINED_HYBRID",
+        )
+        probe_ids = (
+            [item.probe_id for item in list_probes()]
+            if strategy == "EXPLORATORY"
+            else choose_probe_ids(symptom)
+        )
         planned: list[ProbePlan] = []
         planned_duration = 0
         duration_limit = min(budget.max_duration_minutes * 60, budget.max_total_probe_cpu_seconds)
         for index, instance in enumerate(instances):
             for probe_id in probe_ids:
                 definition = get_probe(probe_id)
-                if definition.risk_level == "R2":
+                if definition.risk_level == "R2" and (
+                    strategy != "DECISION_TREE" or index > 0
+                ):
                     # R2 is selected adaptively after the all-target R1 round.
                     continue
                 duration = min(definition.default_duration_seconds, definition.max_duration_seconds)
@@ -621,7 +636,11 @@ class DiagnosisOrchestrator:
                     probe_id=probe_id,
                     target=instance,
                     parameters={"duration_sec": duration, "sample_rate": definition.default_sample_rate},
-                    reason=f"用于区分 {', '.join(definition.applicable_hypotheses[:3])} 等候选假设",
+                    reason=(
+                        f"固定决策树路径：用于验证 {', '.join(definition.applicable_hypotheses[:3])}"
+                        if strategy == "DECISION_TREE"
+                        else f"用于区分 {', '.join(definition.applicable_hypotheses[:3])} 等候选假设"
+                    ),
                     risk_level=definition.risk_level,
                     requires_approval=definition.requires_approval,
                 ))
@@ -952,7 +971,7 @@ class DiagnosisOrchestrator:
             output_refs=["verified_report"], metrics=verification,
         )
         self._append_conclusion(diagnosis_id, conclusion)
-        self._update_hypotheses(diagnosis_id, deduped)
+        self._update_hypotheses(diagnosis_id, deduped, cluster_assessment)
         return cluster_assessment["classification"] not in {
             "insufficient_evidence", "scope_unresolved",
         }
@@ -1512,33 +1531,107 @@ class DiagnosisOrchestrator:
             "noisy_neighbor": ["SAME_HOST_NOISY_NEIGHBOR", "HOST_DISK_CONTENTION", "TRAFFIC_SURGE"],
         }.get(symptom, ["CPU_SATURATION", "DOWNSTREAM_LATENCY", "INSUFFICIENT_EVIDENCE"])
         targets = [item["instance_id"] for item in target_scope.get("instances", [])]
+        created_at = utcnow().isoformat()
         return [{
             "hypothesis_id": f"hyp_{index + 1}_{kind.lower()}",
             "type": kind,
             "description": kind.replace("_", " ").title(),
             "affected_targets": targets,
             "status": "UNTESTED",
+            "evidence_score": 0,
             "supporting_evidence_refs": [],
             "contradicting_evidence_refs": [],
             "missing_evidence_requirements": [],
             "score_components": {},
             "next_probe_candidates": choose_probe_ids(symptom),
+            "history": [{
+                "stage": "build_hypotheses",
+                "status": "UNTESTED",
+                "evidence_score": 0,
+                "reason": "根据症状、目标范围和已注册探针生成初始候选，尚未采集区分性证据。",
+                "evidence_refs": [],
+                "recorded_at": created_at,
+            }],
         } for index, kind in enumerate(base)]
 
-    def _update_hypotheses(self, diagnosis_id: str, candidates: list[dict[str, Any]]) -> None:
+    def _update_hypotheses(
+        self,
+        diagnosis_id: str,
+        candidates: list[dict[str, Any]],
+        cluster_assessment: dict[str, Any],
+    ) -> None:
         session = self.store.get_session(diagnosis_id)
         if session is None:
             return
         graph = dict(session.get("hypothesis_graph", {}))
         hypotheses = list(graph.get("hypotheses", []))
+        edges = list(graph.get("edges", []))
+        ruled_out = {
+            str(item.get("hypothesis", "")).upper(): item
+            for item in cluster_assessment.get("ruled_out", [])
+        }
+        recorded_at = utcnow().isoformat()
         for hypothesis in hypotheses:
             matched = next((c for c in candidates if _candidate_matches_hypothesis(c["candidate_id"], hypothesis["type"])), None)
+            contradicted = ruled_out.get(hypothesis["type"])
             if matched:
                 hypothesis["status"] = "SUPPORTED"
                 hypothesis["supporting_evidence_refs"] = matched["evidence_refs"]
                 hypothesis["missing_evidence_requirements"] = matched["missing_evidence"]
                 hypothesis["score_components"] = matched["score_components"]
+                base_score = {"高": 85, "中": 65, "低": 40}.get(
+                    matched.get("confidence_level"), 30,
+                )
+                hypothesis["evidence_score"] = min(
+                    95, base_score + min(10, len(matched["evidence_refs"]) * 2),
+                )
+                reason = matched["description"]
+                refs = matched["evidence_refs"]
+                relation = "SUPPORTS"
+            elif contradicted:
+                hypothesis["status"] = "RULED_OUT"
+                hypothesis["evidence_score"] = 10
+                hypothesis["contradicting_evidence_refs"] = contradicted.get(
+                    "evidence_refs", [],
+                )
+                hypothesis["next_probe_candidates"] = []
+                reason = contradicted.get("reason", "跨节点对比证据不支持该假设。")
+                refs = hypothesis["contradicting_evidence_refs"]
+                relation = "CONTRADICTS"
+            else:
+                hypothesis["status"] = "INCONCLUSIVE"
+                hypothesis["evidence_score"] = max(
+                    20, int(hypothesis.get("evidence_score", 0)),
+                )
+                reason = "当前证据尚不足以支持或排除该假设。"
+                refs = []
+                relation = None
+            hypothesis.setdefault("history", []).append({
+                "stage": "assess_cluster",
+                "status": hypothesis["status"],
+                "evidence_score": hypothesis["evidence_score"],
+                "reason": reason,
+                "evidence_refs": refs,
+                "recorded_at": recorded_at,
+            })
+            if relation:
+                for evidence_ref in refs:
+                    edge = {
+                        "source": evidence_ref,
+                        "target": hypothesis["hypothesis_id"],
+                        "relation": relation,
+                        "recorded_at": recorded_at,
+                    }
+                    if not any(
+                        item.get("source") == evidence_ref
+                        and item.get("target") == hypothesis["hypothesis_id"]
+                        and item.get("relation") == relation
+                        for item in edges
+                    ):
+                        edges.append(edge)
         graph["hypotheses"] = hypotheses
+        graph["edges"] = edges
+        graph["updated_at"] = recorded_at
         self.store.update_session(diagnosis_id, hypothesis_graph=graph)
 
     def _find_reusable_tasks(

@@ -42,6 +42,14 @@ class DiagnosisMode(str, Enum):
     REPRODUCTION = "REPRODUCTION"
 
 
+class AnalysisStrategy(str, Enum):
+    """可复现实验使用的诊断规划路径；安全与副作用约束对所有路径都生效。"""
+
+    CONSTRAINED_HYBRID = "CONSTRAINED_HYBRID"
+    DECISION_TREE = "DECISION_TREE"
+    EXPLORATORY = "EXPLORATORY"
+
+
 class EvidenceRole(str, Enum):
     INCIDENT = "incident"
     BASELINE = "baseline"
@@ -132,6 +140,7 @@ class CreateDiagnosisRequest(StrictModel):
     budget_profile: Literal["production_safe", "staging", "development"] = "production_safe"
     budget: Optional[DiagnosisBudget] = None
     diagnosis_mode: DiagnosisMode = DiagnosisMode.AUTO
+    analysis_strategy: AnalysisStrategy = AnalysisStrategy.CONSTRAINED_HYBRID
     evidence_time_policy: EvidenceTimePolicy = Field(default_factory=EvidenceTimePolicy)
 
 
@@ -164,6 +173,7 @@ class NormalizedIntent(StrictModel):
     environment: str = "unknown"
     time_range: TimeRange
     diagnosis_mode: DiagnosisMode = DiagnosisMode.LIVE
+    analysis_strategy: AnalysisStrategy = AnalysisStrategy.CONSTRAINED_HYBRID
     evidence_time_policy: EvidenceTimePolicy = Field(default_factory=EvidenceTimePolicy)
     scope: DiagnosisScope = Field(default_factory=DiagnosisScope)
     constraints: DiagnosisConstraints = Field(default_factory=DiagnosisConstraints)
