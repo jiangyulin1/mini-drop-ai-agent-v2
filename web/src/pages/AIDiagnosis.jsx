@@ -44,6 +44,7 @@ import {
   runAIValidation,
 } from "../api/client";
 import usePolling from "../hooks/usePolling";
+import DiagnosisWorkbench from "../components/DiagnosisWorkbench";
 import TaskVisualizationPreview from "../components/TaskVisualizationPreview";
 
 const TERMINAL = new Set([
@@ -82,6 +83,24 @@ const NODE_LABELS = {
   generate_actions: "动作生成",
   verify_report: "报告校验",
 };
+
+const ANALYSIS_STRATEGY_OPTIONS = [
+  {
+    value: "CONSTRAINED_HYBRID",
+    label: "受约束混合路径（推荐）",
+    description: "全目标低风险采集后，只在最异常节点申请深度探针。",
+  },
+  {
+    value: "DECISION_TREE",
+    label: "固定决策树",
+    description: "按症状执行固定探针序列，便于建立稳定基线。",
+  },
+  {
+    value: "EXPLORATORY",
+    label: "广度探索路径",
+    description: "在预算内并行采集更多已注册低风险信号。",
+  },
+];
 
 function nodeStepStatus(value) {
   if (value === "FAILED") return "error";
@@ -198,6 +217,7 @@ export default function AIDiagnosis() {
           dependencies: values.dependencies || [],
         },
         budget_profile: values.budget_profile,
+        analysis_strategy: values.analysis_strategy,
       });
       setSelected(detail);
       await refreshSessions();
@@ -344,6 +364,7 @@ export default function AIDiagnosis() {
               initialValues={{
                 environment: "production",
                 budget_profile: "production_safe",
+                analysis_strategy: "CONSTRAINED_HYBRID",
                 target_service: "service-a",
                 instances: [{
                   service_id: "service-a",
@@ -375,6 +396,21 @@ export default function AIDiagnosis() {
                       { value: "staging", label: "预发布" },
                       { value: "development", label: "开发" },
                     ]} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Form.Item
+                    name="analysis_strategy"
+                    label="分析路径"
+                    extra="三条路径均保留时间、目标、风险和唯一副作用等安全底线。"
+                  >
+                    <Select
+                      options={ANALYSIS_STRATEGY_OPTIONS.map((item) => ({
+                        value: item.value,
+                        label: item.label,
+                        title: item.description,
+                      }))}
+                    />
                   </Form.Item>
                 </Col>
               </Row>
@@ -502,7 +538,17 @@ export default function AIDiagnosis() {
               renderItem={(item) => (
                 <List.Item actions={[<Button key="open" type="link" onClick={() => openSession(item.diagnosis_id)}>查看</Button>]}>
                   <List.Item.Meta
-                    title={<Space><Typography.Text>{item.target_scope?.target_service || "未绑定服务"}</Typography.Text><Status value={item.status} /></Space>}
+                    title={(
+                      <Space wrap>
+                        <Typography.Text>{item.target_scope?.target_service || "未绑定服务"}</Typography.Text>
+                        <Status value={item.status} />
+                        <Tag color="purple">
+                          {ANALYSIS_STRATEGY_OPTIONS.find(
+                            (option) => option.value === item.normalized_intent?.analysis_strategy,
+                          )?.label || "受约束混合路径"}
+                        </Tag>
+                      </Space>
+                    )}
                     description={<Typography.Text type="secondary" ellipsis>{item.raw_query}</Typography.Text>}
                   />
                 </List.Item>
@@ -513,13 +559,17 @@ export default function AIDiagnosis() {
       </Row>
 
       <Spin spinning={loading}>
-        {selected ? <DiagnosisDetail detail={selected} onDecision={decideProbe} /> : <Card><Empty description="创建或打开一个诊断会话以查看假设、探针和证据" /></Card>}
+        {selected ? (
+          <DiagnosisDetail detail={selected} sessions={sessions} onDecision={decideProbe} />
+        ) : (
+          <Card><Empty description="创建或打开一个诊断会话以查看假设、探针和证据" /></Card>
+        )}
       </Spin>
     </Space>
   );
 }
 
-function DiagnosisDetail({ detail, onDecision }) {
+function DiagnosisDetail({ detail, sessions, onDecision }) {
   const conclusion = detail.latest_conclusion;
   const candidates = conclusion?.root_cause_candidates || [];
   const assessment = conclusion?.cluster_assessment;
@@ -566,12 +616,21 @@ function DiagnosisDetail({ detail, onDecision }) {
           <Descriptions.Item label="拓扑快照">{detail.topology_snapshot_id}</Descriptions.Item>
           <Descriptions.Item label="症状">{detail.normalized_intent?.symptom}</Descriptions.Item>
           <Descriptions.Item label="诊断模式"><Tag>{detail.normalized_intent?.diagnosis_mode || "UNKNOWN"}</Tag></Descriptions.Item>
+          <Descriptions.Item label="分析路径">
+            <Tag color="purple">
+              {ANALYSIS_STRATEGY_OPTIONS.find(
+                (item) => item.value === detail.normalized_intent?.analysis_strategy,
+              )?.label || "受约束混合路径"}
+            </Tag>
+          </Descriptions.Item>
           <Descriptions.Item label="请求时间窗" span={2}>{formatTimeRange(detail.requested_time_range)}</Descriptions.Item>
           <Descriptions.Item label="有效时间窗" span={2}>{formatTimeRange(detail.effective_time_range)}</Descriptions.Item>
           <Descriptions.Item label="模型">{detail.model_version}</Descriptions.Item>
           <Descriptions.Item label="规划器">{detail.planner_version}</Descriptions.Item>
         </Descriptions>
       </Card>
+
+      <DiagnosisWorkbench detail={detail} sessions={sessions} />
 
       <Card title="诊断流水线" extra={<Typography.Text type="secondary">状态、重试和节点输出均持久化</Typography.Text>}>
         <Steps

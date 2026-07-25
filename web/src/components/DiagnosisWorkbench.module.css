@@ -1,0 +1,41 @@
+.workbench {
+  border-color: #d3adf7;
+  box-shadow: 0 8px 28px rgba(114, 46, 209, 0.08);
+}
+
+.summary {
+  margin-bottom: 20px;
+  padding: 14px;
+  background: linear-gradient(135deg, #faf5ff 0%, #f5f8ff 100%);
+  border: 1px solid #efdbff;
+  border-radius: 8px;
+}
+
+.stageCard {
+  border-left: 4px solid #722ed1;
+}
+
+.hypothesisCard {
+  height: 100%;
+  border-top: 3px solid #b37feb;
+}
+
+.hypothesisTimeline {
+  margin-top: 18px;
+}
+
+.jsonBlock {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .workbench :global(.ant-card-extra) {
+    width: 100%;
+    margin-top: 10px;
+  }
+}
