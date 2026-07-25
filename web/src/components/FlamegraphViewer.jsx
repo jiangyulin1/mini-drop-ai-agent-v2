@@ -85,13 +85,14 @@ function normalizeFlamegraphPayload(payload) {
  * - 搜索高亮
  * - 重置缩放
  *
- * @param {{ taskId: string, artifactType?: string, artifactIndex?: number }} props
+ * @param {{ taskId: string, artifactType?: string, artifactIndex?: number, height?: number }} props
  * @param {React.Ref} ref — 暴露 search(text) 方法供 TopNChart 联动
  */
 const FlamegraphViewer = forwardRef(function FlamegraphViewer({
   taskId,
   artifactType = "flamegraph_json",
   artifactIndex = null,
+  height = FG.defaultHeight,
 }, ref) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
@@ -185,7 +186,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
   const createChart = useCallback((width) => (
     flamegraph()
       .width(width)
-      .height(FG.defaultHeight)
+      .height(height)
       .cellHeight(FG.cellHeight)
       .transitionDuration(FG.transitionDuration)
       .transitionEase(d3.easeCubicOut)
@@ -222,7 +223,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
         currentNodeRef.current = d;
         setZoomLabel(nodeName(d));
       })
-  ), []);
+  ), [height]);
 
   // ── 渲染火焰图 ─────────────────────────────────────────
   const renderChart = useCallback(() => {
@@ -316,7 +317,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
 
   // ── Render ─────────────────────────────────────────────
   if (loading) {
-    return <Skeleton.Input active block style={{ height: FG.defaultHeight, borderRadius: 8 }} />;
+    return <Skeleton.Input active block style={{ height, borderRadius: 8 }} />;
   }
 
   if (error) {
@@ -434,7 +435,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
         }}
         style={{
           width: "100%",
-          minHeight: FG.defaultHeight,
+          minHeight: height,
           border: `1px solid ${COLORS.border}`,
           borderRadius: 6,
           overflow: "hidden",

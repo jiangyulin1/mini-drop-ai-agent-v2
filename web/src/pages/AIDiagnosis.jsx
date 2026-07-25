@@ -17,6 +17,7 @@ import {
   Spin,
   Steps,
   Table,
+  Tabs,
   Tag,
   Timeline,
   Typography,
@@ -26,12 +27,14 @@ import {
   CheckOutlined,
   CloseOutlined,
   ExperimentOutlined,
+  EyeOutlined,
   MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
+import { Link } from "react-router-dom";
 import {
   approveDiagnosisProbe,
   createDiagnosisSession,
@@ -41,6 +44,7 @@ import {
   runAIValidation,
 } from "../api/client";
 import usePolling from "../hooks/usePolling";
+import TaskVisualizationPreview from "../components/TaskVisualizationPreview";
 
 const TERMINAL = new Set([
   "COMPLETED",
@@ -88,6 +92,35 @@ function nodeStepStatus(value) {
 
 function Status({ value }) {
   return <Tag color={STATUS_COLORS[value] || "default"}>{value || "UNKNOWN"}</Tag>;
+}
+
+function taskIdFromArtifactRef(value) {
+  const match = String(value || "").match(/^task:([^:]+)/);
+  return match?.[1] || "";
+}
+
+function TaskResultLink({ taskId, label = "查看结果" }) {
+  if (!taskId) return "-";
+  return (
+    <Link to={`/task/${taskId}`}>
+      <Button type="link" size="small" icon={<EyeOutlined />}>
+        {label}
+      </Button>
+    </Link>
+  );
+}
+
+function ArtifactReference({ value }) {
+  if (!value) return "-";
+  const taskId = taskIdFromArtifactRef(value);
+  return (
+    <Space size={4}>
+      <Typography.Text ellipsis style={{ maxWidth: 150 }} title={value}>
+        {value}
+      </Typography.Text>
+      {taskId && <TaskResultLink taskId={taskId} label="任务" />}
+    </Space>
+  );
 }
 
 function formatTimeRange(value) {
@@ -499,6 +532,7 @@ function DiagnosisDetail({ detail, onDecision }) {
   const probes = detail.probes || [];
   const evidence = detail.evidence || [];
   const coverage = detail.coverage || [];
+  const probeTasks = probes.filter((item) => item.task_id);
   const evidenceMap = useMemo(() => new Map(evidence.map((item) => [item.evidence_id, item])), [evidence]);
 
   function requestDecision(item, decision) {
@@ -619,6 +653,26 @@ function DiagnosisDetail({ detail, onDecision }) {
         </Card>
       )}
 
+      {probeTasks.length > 0 && (
+        <Card
+          title={`采集可视化证据 (${probeTasks.length})`}
+          extra={<Typography.Text type="secondary">火焰图、TopN 与原始任务状态保持一致</Typography.Text>}
+        >
+          <Tabs
+            items={probeTasks.map((probe) => ({
+              key: probe.task_id,
+              label: (
+                <Space size={4}>
+                  <Typography.Text>{probe.probe_id}</Typography.Text>
+                  <Status value={probe.status} />
+                </Space>
+              ),
+              children: <TaskVisualizationPreview taskId={probe.task_id} />,
+            }))}
+          />
+        </Card>
+      )}
+
       {commands.length > 0 && (
         <Card title="结构化诊断动作">
           <Alert
@@ -712,19 +766,26 @@ function DiagnosisDetail({ detail, onDecision }) {
             <List
               dataSource={probes}
               locale={{ emptyText: "尚未规划探针" }}
-              renderItem={(item) => (
-                <List.Item
-                  actions={item.status === "WAITING_APPROVAL" ? [
+              renderItem={(item) => {
+                const actions = [];
+                if (item.status === "WAITING_APPROVAL") {
+                  actions.push(
                     <Button key="approve" size="small" type="primary" icon={<CheckOutlined />} onClick={() => requestDecision(item, "approve")}>单次批准</Button>,
                     <Button key="reject" size="small" danger icon={<CloseOutlined />} onClick={() => requestDecision(item, "reject")}>拒绝</Button>,
-                  ] : []}
-                >
-                  <List.Item.Meta
-                    title={<Space><Typography.Text>{item.probe_id}</Typography.Text><Tag color={item.risk_level === "R2" ? "orange" : "green"}>{item.risk_level}</Tag><Status value={item.status} /></Space>}
-                    description={`${item.reason} · ${item.parameters?.duration_sec || 0}s`}
-                  />
-                </List.Item>
-              )}
+                  );
+                }
+                if (item.task_id) {
+                  actions.push(<TaskResultLink key="result" taskId={item.task_id} />);
+                }
+                return (
+                  <List.Item actions={actions}>
+                    <List.Item.Meta
+                      title={<Space><Typography.Text>{item.probe_id}</Typography.Text><Tag color={item.risk_level === "R2" ? "orange" : "green"}>{item.risk_level}</Tag><Status value={item.status} /></Space>}
+                      description={`${item.reason} · ${item.parameters?.duration_sec || 0}s`}
+                    />
+                  </List.Item>
+                );
+              }}
             />
           </Card>
         </Col>
@@ -740,7 +801,11 @@ function DiagnosisDetail({ detail, onDecision }) {
             { title: "目标", dataIndex: "target" },
             { title: "证据需求", dataIndex: "requirement" },
             { title: "状态", dataIndex: "status", render: (value) => <Status value={value} /> },
-            { title: "任务 ID", dataIndex: "task_id", render: (value) => value || "-" },
+            {
+              title: "任务结果",
+              dataIndex: "task_id",
+              render: (value) => <TaskResultLink taskId={value} />,
+            },
             { title: "错误码", dataIndex: "error_code", render: (value) => value || "-" },
           ]}
         />
@@ -762,8 +827,18 @@ function DiagnosisDetail({ detail, onDecision }) {
             { title: "目标", dataIndex: "target", width: 260, render: (value) => JSON.stringify(value || {}) },
             { title: "探针/查询", dataIndex: "query_or_probe", width: 150 },
             { title: "质量", dataIndex: "data_quality", width: 180, render: (value) => `${value?.completeness || "unknown"} / ${(value?.domains || []).join(",") || "-"}` },
-            { title: "原始产物", dataIndex: "raw_artifact_ref", width: 180, ellipsis: true },
-            { title: "派生产物", dataIndex: "derived_artifact_ref", width: 180, ellipsis: true },
+            {
+              title: "原始产物",
+              dataIndex: "raw_artifact_ref",
+              width: 240,
+              render: (value) => <ArtifactReference value={value} />,
+            },
+            {
+              title: "派生产物",
+              dataIndex: "derived_artifact_ref",
+              width: 240,
+              render: (value) => <ArtifactReference value={value} />,
+            },
             { title: "派生版本", dataIndex: "derivation_version", width: 130 },
             { title: "完整性 Hash", dataIndex: "integrity_hash", width: 260, ellipsis: true },
           ]}

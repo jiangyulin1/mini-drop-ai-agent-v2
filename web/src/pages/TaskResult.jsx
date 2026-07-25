@@ -26,10 +26,12 @@ import {
   DownloadOutlined,
   ExperimentOutlined,
   FileTextOutlined,
+  RedoOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useParams, useNavigate } from "react-router-dom";
 import {
+  createTask,
   downloadTaskArtifact,
   getDiagnosis,
   getTask,
@@ -48,6 +50,7 @@ import ErrorAlert from "../components/ErrorAlert";
 import usePolling from "../hooks/usePolling";
 import echarts from "../lib/echarts";
 import { isTaskActive } from "../utils/status";
+import { collectorMeta } from "../utils/collectors";
 import { COLORS, SPACING } from "../theme";
 import styles from "./TaskResult.module.css";
 
@@ -68,6 +71,7 @@ export default function TaskResult() {
   const [analysisLoading, setAnalysisLoading] = useState(true);
   const [selectedContinuousIndex, setSelectedContinuousIndex] = useState(null);
   const [downloadingArtifact, setDownloadingArtifact] = useState("");
+  const [recreating, setRecreating] = useState(false);
 
   // ── 数据加载 ──────────────────────────────────────────
 
@@ -139,6 +143,7 @@ export default function TaskResult() {
 
   // 任务活跃时每 5 秒自动刷新
   const isActive = isTaskActive(task?.status);
+  const taskCollector = collectorMeta(task?.collector_type);
   usePolling(loadAll, { interval: 5000, enabled: isActive });
 
   // ── 诊断操作 ──────────────────────────────────────────
@@ -228,6 +233,9 @@ export default function TaskResult() {
   const hasFlameOrTop = Boolean(flameArtifact || topArtifact);
   const hasContinuousAnalysis = continuousFlameArtifacts.length > 0;
   const hasPrimaryAnalysis = Boolean(hasFlameOrTop || ebpfArtifact || hasContinuousAnalysis);
+  const hasDedicatedVisualization = Boolean(
+    sysMetricsArtifact || memoryArtifact || pprofArtifact,
+  );
 
   useEffect(() => {
     if (selectedContinuousIndex === null && continuousWindows.length > 0) {
@@ -256,6 +264,42 @@ export default function TaskResult() {
     } finally {
       setDownloadingArtifact("");
     }
+  }
+
+  function recreateTask() {
+    if (!task) return;
+    Modal.confirm({
+      title: `重新采集 ${taskCollector.label}？`,
+      content: `将在 ${task.agent_id} 上对 PID ${task.target_pid} 使用相同参数创建一个新任务，原任务和产物不会被修改。`,
+      okText: "创建并打开",
+      cancelText: "取消",
+      onOk: async () => {
+        setRecreating(true);
+        try {
+          const safeOptions = { ...(task.request_params?.options || {}) };
+          delete safeOptions.diagnosis_step_id;
+          const response = await createTask({
+            name: `重采集: ${task.name || taskCollector.label}`,
+            agent_id: task.agent_id,
+            target_pid: task.target_pid,
+            collector_type: task.collector_type,
+            sample_rate: task.sample_rate,
+            duration_sec: task.duration_sec,
+            options: {
+              ...safeOptions,
+              source: "web_recollect",
+              rerun_of: task.id,
+            },
+          });
+          message.success("新任务已创建");
+          navigate(`/task/${response.task_id}`);
+        } catch (err) {
+          message.error(`重新采集失败：${err.message}`);
+        } finally {
+          setRecreating(false);
+        }
+      },
+    });
   }
 
   const artifactColumns = [
@@ -353,35 +397,65 @@ export default function TaskResult() {
             任务详情
           </Typography.Title>
         </Space>
-        {isActive && (
-          <Tag color="blue">自动刷新中（任务运行中）</Tag>
-        )}
+        <Space>
+          {isActive && <Tag color="blue">自动刷新中（任务运行中）</Tag>}
+          {task && (
+            <Button
+              icon={<RedoOutlined />}
+              loading={recreating}
+              disabled={isActive}
+              onClick={recreateTask}
+              title={isActive ? "当前任务结束后才能重新采集" : "使用相同参数创建新任务"}
+            >
+              使用相同参数重新采集
+            </Button>
+          )}
+        </Space>
       </div>
 
       <ErrorAlert error={error} style={{ marginBottom: 0 }} onClose={() => setError("")} />
 
       {/* 任务基本信息 */}
       {task && (
-        <Card size="small">
-          <Descriptions column={{ xs: 1, sm: 2, md: 2, lg: 4 }} size="small">
-            <Descriptions.Item label="任务 ID">
-              <Typography.Text copyable={{ text: task.id }} style={{ fontSize: 12 }}>
-                {task.id}
-              </Typography.Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="状态">
-              <StatusTag status={task.status} />
-            </Descriptions.Item>
-            <Descriptions.Item label="名称">{task.name}</Descriptions.Item>
-            <Descriptions.Item label="Agent">{task.agent_id}</Descriptions.Item>
-            <Descriptions.Item label="PID">{task.target_pid}</Descriptions.Item>
-            <Descriptions.Item label="采集器">
-              <Tag>{task.collector_type}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="采样率">{task.sample_rate} Hz</Descriptions.Item>
-            <Descriptions.Item label="采样时长">{task.duration_sec}s</Descriptions.Item>
-          </Descriptions>
-        </Card>
+        <>
+          <Card size="small">
+            <Descriptions column={{ xs: 1, sm: 2, md: 2, lg: 4 }} size="small">
+              <Descriptions.Item label="任务 ID">
+                <Typography.Text copyable={{ text: task.id }} style={{ fontSize: 12 }}>
+                  {task.id}
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                <StatusTag status={task.status} />
+              </Descriptions.Item>
+              <Descriptions.Item label="名称">{task.name}</Descriptions.Item>
+              <Descriptions.Item label="Agent">{task.agent_id}</Descriptions.Item>
+              <Descriptions.Item label="PID">{task.target_pid}</Descriptions.Item>
+              <Descriptions.Item label="采集器">
+                <Tag color={taskCollector.color}>{taskCollector.label}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="采样率">{task.sample_rate} Hz</Descriptions.Item>
+              <Descriptions.Item label="采样时长">{task.duration_sec}s</Descriptions.Item>
+            </Descriptions>
+          </Card>
+          <Alert
+            type={task.status === "FAILED" ? "error" : taskCollector.flamegraph ? "success" : "info"}
+            showIcon
+            message={`预期可视化：${taskCollector.resultLabel}`}
+            description={
+              task.status === "FAILED"
+                ? `任务失败原因：${task.status_reason || "未提供失败原因"}`
+                : `${taskCollector.description}${task.status_reason ? ` 当前状态：${task.status_reason}` : ""}`
+            }
+            action={
+              task.status === "FAILED" ? (
+                <Button size="small" icon={<RedoOutlined />} onClick={recreateTask}>
+                  重新采集
+                </Button>
+              ) : null
+            }
+          />
+        </>
       )}
 
       {/* 状态时间线 + 产物 并排 */}
@@ -436,7 +510,7 @@ export default function TaskResult() {
         title={
           <Space>
             <FileTextOutlined style={{ color: COLORS.primary }} />
-            分析结果
+            核心可视化 · {taskCollector.resultLabel}
             {isActive && <Spin size="small" />}
           </Space>
         }
@@ -451,7 +525,11 @@ export default function TaskResult() {
                   🔥 火焰图
                 </Typography.Text>
                 {analysis.hasFlameJson ? (
-                  <FlamegraphViewer ref={flameRef} taskId={taskId} />
+                  <FlamegraphViewer
+                    ref={flameRef}
+                    taskId={taskId}
+                    height={FLAMEGRAPH_HEIGHT}
+                  />
                 ) : analysis.hasJavaHtml ? (
                   <JavaFlameViewer taskId={taskId} artifact={javaHtmlArtifact} />
                 ) : analysis.svg ? (
@@ -526,7 +604,9 @@ export default function TaskResult() {
             description={
               isActive
                 ? "任务运行中，分析产物将在完成后生成…"
-                : "暂无火焰图或 TopN 分析结果"
+                : hasDedicatedVisualization
+                ? `“${taskCollector.resultLabel}”已在下方专属卡片展示`
+                : `未生成“${taskCollector.resultLabel}”${task?.status_reason ? `：${task.status_reason}` : ""}`
             }
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           >
@@ -610,6 +690,7 @@ export default function TaskResult() {
                   taskId={taskId}
                   artifactType="continuous_flamegraph_json"
                   artifactIndex={selectedContinuousIndex}
+                  height={FLAMEGRAPH_HEIGHT}
                 />
               </div>
             )}
