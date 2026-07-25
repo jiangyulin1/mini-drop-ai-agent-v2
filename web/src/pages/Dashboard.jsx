@@ -31,6 +31,8 @@ import {
   SearchOutlined,
   SortAscendingOutlined,
   ExclamationCircleOutlined,
+  EyeOutlined,
+  FireOutlined,
   ThunderboltOutlined,
   HddOutlined,
 } from "@ant-design/icons";
@@ -42,6 +44,7 @@ import ErrorAlert from "../components/ErrorAlert";
 import usePolling from "../hooks/usePolling";
 import useSSE from "../hooks/useSSE";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
+import { collectorMeta } from "../utils/collectors";
 
 // ── 通知列表（最近 5 条 toast 通知）──────────────────────
 
@@ -237,6 +240,12 @@ export default function Dashboard() {
     () => tasks.filter((t) => t.status === "DONE").slice(0, 3),
     [tasks]
   );
+  const recentVisualTasks = useMemo(
+    () => tasks
+      .filter((task) => task.status === "DONE")
+      .slice(0, 4),
+    [tasks],
+  );
 
   // ── 表格列 ────────────────────────────────────────────
 
@@ -270,19 +279,10 @@ export default function Dashboard() {
         dataIndex: "collector_type",
         width: 130,
         render: (value) => {
-          const colors = {
-            perf_cpu: "blue",
-            ebpf_io: "green",
-            pyspy: "purple",
-            continuous_perf: "cyan",
-            java_async: "magenta",
-            go_pprof: "geekblue",
-            memory_smaps: "orange",
-            sys_metrics: "gold",
-          };
+          const meta = collectorMeta(value);
           return (
-            <Tag color={colors[value] || "default"} style={{ fontSize: 11 }}>
-              {value}
+            <Tag color={meta.color} style={{ fontSize: 11 }}>
+              {meta.label}
             </Tag>
           );
         },
@@ -301,20 +301,39 @@ export default function Dashboard() {
       },
       {
         title: "操作",
-        width: 80,
+        width: 190,
+        fixed: "right",
         render: (_, record) => {
           const isActive = ["PENDING", "RUNNING", "UPLOADING", "ANALYZING"].includes(record.status);
+          const meta = collectorMeta(record.collector_type);
+          const resultLabel = isActive
+            ? "查看进度"
+            : record.status === "FAILED"
+            ? "查看原因"
+            : meta.flamegraph
+            ? "查看火焰图"
+            : "查看图表";
           return (
-            <Button
-              type="link"
-              danger
-              size="small"
-              icon={<DeleteOutlined />}
-              loading={deleting === record.id}
-              disabled={isActive}
-              onClick={() => handleDeleteTask(record)}
-              title={isActive ? "仅终态任务（DONE/FAILED）可删除" : "删除此任务"}
-            />
+            <Space size={0}>
+              <Button
+                type="link"
+                size="small"
+                icon={meta.flamegraph ? <FireOutlined /> : <EyeOutlined />}
+                onClick={() => navigate(`/task/${record.id}`)}
+              >
+                {resultLabel}
+              </Button>
+              <Button
+                type="link"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                loading={deleting === record.id}
+                disabled={isActive}
+                onClick={() => handleDeleteTask(record)}
+                title={isActive ? "仅终态任务（DONE/FAILED）可删除" : "删除此任务"}
+              />
+            </Space>
           );
         },
       },
@@ -426,9 +445,63 @@ export default function Dashboard() {
       </div>
 
       {/* ── NLP 输入 ──────────────────────────────────────── */}
-      <NLPTaskInput onTaskCreated={(taskId) => { refresh(); }} />
+      <NLPTaskInput
+        onTaskCreated={(taskId) => {
+          refresh();
+          navigate(`/task/${taskId}`);
+        }}
+      />
 
       <ErrorAlert error={error} onClose={() => setError("")} />
+
+      {/* ── 最近可视化结果 ─────────────────────────────────── */}
+      <Card
+        title={
+          <Space>
+            <FireOutlined style={{ color: COLORS.error }} />
+            最近可视化结果
+          </Space>
+        }
+        size="small"
+      >
+        {recentVisualTasks.length > 0 ? (
+          <Row gutter={[12, 12]}>
+            {recentVisualTasks.map((task) => {
+              const meta = collectorMeta(task.collector_type);
+              return (
+                <Col xs={24} md={12} xl={6} key={task.id}>
+                  <Card
+                    size="small"
+                    hoverable
+                    onClick={() => navigate(`/task/${task.id}`)}
+                    style={{ height: "100%", cursor: "pointer" }}
+                  >
+                    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                      <Space style={{ width: "100%", justifyContent: "space-between" }}>
+                        <Tag color={meta.color}>{meta.label}</Tag>
+                        <EyeOutlined style={{ color: COLORS.primary }} />
+                      </Space>
+                      <Typography.Text strong ellipsis>
+                        {task.name || task.id}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        PID {task.target_pid} · {meta.resultLabel}
+                      </Typography.Text>
+                    </Space>
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+        ) : (
+          <Alert
+            type="info"
+            showIcon
+            message="尚无已完成的可视化任务"
+            description="使用上方“快速可视化”创建 CPU 火焰图、I/O 延迟图或系统指标任务，完成后会直接出现在这里。"
+          />
+        )}
+      </Card>
 
       {/* ── 统计卡片组 ────────────────────────────────────── */}
       <Row gutter={[SPACING.lg, SPACING.lg]}>
@@ -639,7 +712,7 @@ export default function Dashboard() {
           dataSource={tasks}
           pagination={{ pageSize: 8, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           size="middle"
-          scroll={{ x: 880 }}
+          scroll={{ x: 1050 }}
           locale={{ emptyText: "暂无任务，使用上方 NLP 输入或 API 创建第一个采集任务" }}
         />
       </Card>
