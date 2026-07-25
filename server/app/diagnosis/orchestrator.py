@@ -288,7 +288,7 @@ class DiagnosisOrchestrator:
                 self._advance_locked(diagnosis_id)
             finally:
                 self.store.release_lease(diagnosis_id, owner)
-        return self.store.get_detail(diagnosis_id)
+            return self.store.get_detail(diagnosis_id)
 
     def advance_active(self, limit: int = 100) -> None:
         """由后台扫描器调用，使恢复不依赖用户 GET 请求。"""
