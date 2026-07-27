@@ -380,6 +380,7 @@ class DiagnosisSessionModel(Base):
     resource_budget_json = Column(JSON, default=dict)
     budget_used_json = Column(JSON, default=dict)
     hypothesis_graph_json = Column(JSON, default=dict)
+    evaluation_oracle_json = Column(JSON, default=dict)
     child_task_ids_json = Column(JSON, default=list)
     conclusion_versions_json = Column(JSON, default=list)
     model_version = Column(String(128), nullable=False)
@@ -408,6 +409,7 @@ class DiagnosisSessionModel(Base):
             "resource_budget": self.resource_budget_json or {},
             "budget_used": self.budget_used_json or {},
             "hypothesis_graph": self.hypothesis_graph_json or {},
+            "evaluation_oracle": self.evaluation_oracle_json or {},
             "child_task_ids": self.child_task_ids_json or [],
             "conclusion_versions": self.conclusion_versions_json or [],
             "model_version": self.model_version,

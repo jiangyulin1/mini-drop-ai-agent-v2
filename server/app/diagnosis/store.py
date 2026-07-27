@@ -64,6 +64,7 @@ class DiagnosisStore:
                 resource_budget_json=data.get("resource_budget", {}),
                 budget_used_json=data.get("budget_used", {}),
                 hypothesis_graph_json=data.get("hypothesis_graph", {}),
+                evaluation_oracle_json=data.get("evaluation_oracle", {}),
                 child_task_ids_json=data.get("child_task_ids", []),
                 conclusion_versions_json=data.get("conclusion_versions", []),
                 model_version=data["model_version"],

@@ -123,6 +123,11 @@ class DiagnosisOrchestrator:
             "resource_budget": budget.model_dump(mode="json"),
             "budget_used": budget_usage,
             "hypothesis_graph": {"hypotheses": hypotheses, "edges": []},
+            "evaluation_oracle": (
+                request.evaluation_oracle.model_dump(mode="json", exclude_none=True)
+                if request.evaluation_oracle
+                else {}
+            ),
             "child_task_ids": [],
             "conclusion_versions": [],
             "model_version": get_ai_settings().model,
@@ -1302,6 +1307,9 @@ class DiagnosisOrchestrator:
         session = self.store.get_session(diagnosis_id)
         if session is None:
             return
+        evaluation = self._evaluate_conclusion(session.get("evaluation_oracle", {}), conclusion)
+        if evaluation:
+            conclusion["evaluation"] = evaluation
         versions = list(session.get("conclusion_versions", []))
         fingerprint = hashlib.sha256(
             json.dumps(conclusion, sort_keys=True, ensure_ascii=False).encode()
@@ -1309,6 +1317,51 @@ class DiagnosisOrchestrator:
         conclusion["integrity_hash"] = f"sha256:{fingerprint}"
         versions.append(conclusion)
         self.store.update_session(diagnosis_id, conclusion_versions=versions)
+
+    @staticmethod
+    def _evaluate_conclusion(
+        oracle: dict[str, Any],
+        conclusion: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Score a finished report against hidden ground truth without model involvement."""
+
+        if not oracle:
+            return None
+        actual = {
+            "instance_id": conclusion.get("root_location", {}).get("target_ref"),
+            "location_type": conclusion.get("root_location", {}).get("type"),
+            "domain_type": conclusion.get("domain_cause", {}).get("type"),
+            "classification": conclusion.get("cluster_assessment", {}).get("classification"),
+        }
+        pairs = (
+            ("instance_id", "expected_instance_id"),
+            ("location_type", "expected_location_type"),
+            ("domain_type", "expected_domain_type"),
+            ("classification", "expected_classification"),
+        )
+        checks = []
+        for dimension, expected_key in pairs:
+            expected = oracle.get(expected_key)
+            if expected is None:
+                continue
+            observed = actual[dimension]
+            checks.append({
+                "dimension": dimension,
+                "expected": expected,
+                "actual": observed,
+                "matched": observed == expected,
+            })
+        matched_count = sum(1 for item in checks if item["matched"])
+        specified_count = len(checks)
+        return {
+            "case_id": oracle.get("case_id"),
+            "specified_count": specified_count,
+            "matched_count": matched_count,
+            "score_pct": round(matched_count / specified_count * 100, 1) if specified_count else 0.0,
+            "exact_match": bool(specified_count and matched_count == specified_count),
+            "checks": checks,
+            "oracle_isolated": True,
+        }
 
     def _add_task_evidence(self, diagnosis_id: str, task) -> str:
         payload = {

@@ -503,7 +503,17 @@ class TestDiagnosisSessionAPI:
         assert repo.tasks[approved_probe["task_id"]].collector_type == "perf_cpu"
 
     def test_completed_probe_produces_evidence_linked_candidate(self, client: TestClient):
-        data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+        payload = _payload()
+        payload["evaluation_oracle"] = {
+            "case_id": "cpu-hotspot-001",
+            "expected_instance_id": "service-a-1",
+            "expected_location_type": "self",
+            "expected_domain_type": "cpu",
+            "expected_classification": "self_code_or_process_pressure",
+        }
+        data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+        assert data["evaluation_oracle"]["case_id"] == "cpu-hotspot-001"
+        assert "evaluation_oracle" not in data["normalized_intent"]
         task_id = data["child_task_ids"][0]
         repo.transition_task(task_id, TaskStatus.RUNNING, "agent accepted", Actor.SERVER)
         repo.transition_task(task_id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
@@ -552,6 +562,12 @@ class TestDiagnosisSessionAPI:
         assert detail["latest_conclusion"]["verification"]["status"] == "passed"
         assert detail["latest_conclusion"]["findings"]
         assert detail["latest_conclusion"]["knowledge_refs"]
+        evaluation = detail["latest_conclusion"]["evaluation"]
+        assert evaluation["case_id"] == "cpu-hotspot-001"
+        assert evaluation["oracle_isolated"] is True
+        assert evaluation["exact_match"] is True
+        assert evaluation["score_pct"] == 100.0
+        assert evaluation["matched_count"] == evaluation["specified_count"] == 4
         actions = detail["latest_conclusion"]["actions"]
         assert actions
         assert all(action["action_type"] in {"inspect", "collect", "manual_remediation"} for action in actions)

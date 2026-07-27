@@ -88,6 +88,7 @@ _ADDITIVE_MIGRATIONS = {
         # Existing rows may not have a meaningful deadline. Keeping the added
         # column nullable is safer than inventing a historical deadline.
         "deadline_at": "TIMESTAMP",
+        "evaluation_oracle_json": "JSON",
     },
     "diagnosis_probe_executions": {
         "retry_count": "INTEGER NOT NULL DEFAULT 0",
