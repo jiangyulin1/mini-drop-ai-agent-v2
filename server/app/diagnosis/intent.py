@@ -80,6 +80,11 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
             intent.environment = request.context.environment
         if request.context.time_range:
             intent.time_range = request.context.time_range
+        elif intent.time_range.source != "user_expression":
+            # A model may emit a syntactically valid but stale default window.
+            # Only an explicit user time expression may supply time when trusted
+            # request context has no range; server defaults are deterministic.
+            intent.time_range = fallback.time_range
         # 模式和时间策略属于可信请求策略，不能由模型放宽。
         intent.diagnosis_mode = _resolve_mode(request, intent.time_range)
         intent.analysis_strategy = request.analysis_strategy
