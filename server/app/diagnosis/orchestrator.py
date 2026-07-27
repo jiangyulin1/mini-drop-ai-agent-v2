@@ -153,7 +153,10 @@ class DiagnosisOrchestrator:
         )
         self._transition(diagnosis_id, DiagnosisStatus.UNDERSTANDING, "intent_parsed")
 
-        if intent.ambiguities or not target_scope["instances"]:
+        # Model notes are useful for the report but are not automatically
+        # blocking. Scope confirmation is required only when the deterministic
+        # resolver cannot establish a credible target anchor.
+        if target_scope.get("scope_completeness") == "unresolved" or not target_scope["instances"]:
             self._transition(
                 diagnosis_id,
                 DiagnosisStatus.NEEDS_SCOPE_CONFIRMATION,

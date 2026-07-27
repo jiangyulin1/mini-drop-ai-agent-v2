@@ -85,6 +85,25 @@ def test_live_effective_window_includes_bounded_collection_period(client: TestCl
     assert effective_end > requested_end
 
 
+def test_non_blocking_model_note_does_not_stop_resolved_scope(
+    client: TestClient,
+    monkeypatch,
+):
+    from server.app.diagnosis.intent import _fallback_intent
+
+    def parsed_with_note(request):
+        intent = _fallback_intent(request)
+        intent.ambiguities = ["未提供时间范围，已使用服务器默认窗口"]
+        return intent
+
+    monkeypatch.setattr(orchestrator_module, "parse_diagnosis_intent", parsed_with_note)
+    data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+
+    assert data["target_scope"]["scope_completeness"] == "complete"
+    assert data["status"] == "COLLECTING"
+    assert data["child_task_ids"]
+
+
 def test_missing_target_anchor_does_not_expand_to_other_service(client: TestClient):
     payload = _payload()
     payload["context"]["instances"][0]["service_id"] = "service-b"
