@@ -166,3 +166,75 @@ Control 实际运行
 4. 真实调用链/变更事件接入后的下游根因定位；
 5. AI Provider 的超时、限流、余额耗尽和降级故障注入测试；
 6. SSH 密钥替换密码认证，并轮换当前实验密码和随机服务密钥。
+
+## 7. 2026-07-27 展示环境复测
+
+本次将 `main` 的最新版本部署到独立目录 `mini-drop-current`，保留 7 月 22 日的旧目录作为回退副本。
+Control、两个 Worker、Nginx、实验 S3 和两个 Agent 均保持运行，访问入口仍为
+`https://192.168.10.10`。由于 Docker Hub 及镜像层 CDN 继续超时，沿用原生 systemd
+部署；Python 依赖由阿里云 PyPI 镜像安装。
+
+### 7.1 新增展示能力
+
+- 实验 Oracle 与模型输入隔离，只在报告通过 Verifier 后计算实例、位置、领域和分类四维得分；
+- 前端新增“目标 → 结构化证据 → 候选假设 → 已校验结论”的全局因果证据图；
+- 路径对比表同时展示探针数、R2 数、证据量、覆盖率、置信等级和 Oracle 客观得分；
+- 目标、时间、证据域、动作风险与副作用幂等约束继续对所有分析路径生效。
+
+### 7.2 实际发现并修复的问题
+
+1. AI 在用户未指定时间时可能返回一个格式合法但已经过期的默认窗口，使 LIVE 请求被误判为
+   HISTORICAL。修复后，只有明确的用户时间表达式可以补充时间；默认窗口必须由服务器当前时钟生成。
+2. AI 将“未提供时间，已使用默认窗口”写入说明性歧义时，旧逻辑会无条件进入
+   `NEEDS_SCOPE_CONFIRMATION`。修复后，只有确定性解析器无法建立可信目标锚点时才阻塞；说明性备注
+   仍保留在回放中。
+
+### 7.3 三节点端到端结果
+
+真实火焰图任务 `task_20260727_081136_6b67b5` 在 Worker 1 完成，生成：
+
+- `raw`
+- `flamegraph_json`
+- `flamegraph_svg`
+- `top_json`
+- `suggestions_md`
+
+跨节点案例 `diag_session_20260727_081839_35d170f5` 使用
+`service-a (Worker 1) → service-b (Worker 2)`：
+
+- 两个目标均完成 R1 采集；
+- 12/12 流水线节点完成；
+- 4 条结构化 Evidence 通过完整性与同域校验；
+- 归因为 `downstream / service-b-1`；
+- 领域原因为 `cpu / process_cpu_pressure`；
+- 分类为 `downstream_dependency`；
+- Oracle 四维全部命中，得分 `100%`；
+- 生成缓解、优化和复测三类证据关联建议。
+
+### 7.4 同类故障的三路径对比
+
+| 路径 | 会话 | 探针 | R2 | 证据 | Oracle |
+|---|---|---:|---:|---:|---:|
+| 受约束混合 | `diag_session_20260727_083237_2794726f` | 1 | 0 | 2 | 100% |
+| 固定决策树 | `diag_session_20260727_083301_222e6f22` | 2 | 1 | 4 | 100% |
+| 广度探索 | `diag_session_20260727_082854_4cb19299` | 2 | 0 | 4 | 100% |
+
+三条路径均定位到 `self / cpu / self_code_or_process_pressure`。固定决策树使用了经人工单次审批
+的 CPU Profile；广度探索使用系统指标和内存映射；受约束混合路径在低风险证据已经足够时没有继续
+申请 R2。因此课堂展示可以直接比较“相同正确率下的取证成本、风险和可解释性”，而不是比较模型
+自报置信度。
+
+在线 AI 验证 `ai_validation_b7f60cd8cb22` 的 8 项检查全部通过，包括模型发现、基础对话、
+受约束 NLP Tool Call、集群诊断意图、安全动作约束、摘要长度和 RCA 证据引用校验。
+
+展示负载由以下 transient systemd unit 提供：
+
+- Worker 1：`mini-drop-demo-service-a`、`mini-drop-demo-load`、
+  `mini-drop-demo-path-hybrid/tree/explore`
+- Worker 2：`mini-drop-demo-service-b`
+
+展示结束后可在对应 Worker 执行：
+
+```bash
+sudo systemctl stop 'mini-drop-demo-*'
+```
