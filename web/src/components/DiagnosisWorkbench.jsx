@@ -89,6 +89,11 @@ function compactRef(value) {
   return text.length > 34 ? `${text.slice(0, 16)}…${text.slice(-12)}` : text;
 }
 
+function compactLabel(value, size = 22) {
+  const text = String(value || "-");
+  return text.length > size ? `${text.slice(0, size - 1)}…` : text;
+}
+
 function stepStatus(node, replayIndex, nodeIndex) {
   if (nodeIndex < replayIndex) return "finish";
   if (nodeIndex === replayIndex) {
@@ -407,6 +412,196 @@ function EvidenceChain({ detail, compact = false }) {
   );
 }
 
+function OracleEvaluation({ evaluation }) {
+  if (!evaluation) return null;
+  return (
+    <Card
+      size="small"
+      title={`独立 Oracle 评测 · ${evaluation.case_id || "未命名案例"}`}
+      extra={(
+        <Tag color={evaluation.exact_match ? "green" : "orange"}>
+          {evaluation.exact_match ? "全部命中" : `${evaluation.matched_count}/${evaluation.specified_count} 命中`}
+        </Tag>
+      )}
+    >
+      <Alert
+        type={evaluation.exact_match ? "success" : "warning"}
+        showIcon
+        message={`客观得分 ${evaluation.score_pct}%`}
+        description="标准答案与 AI 输入隔离，只在报告生成并校验后评分；该得分不是模型自报置信度。"
+        style={{ marginBottom: 12 }}
+      />
+      <Table
+        size="small"
+        pagination={false}
+        rowKey="dimension"
+        dataSource={evaluation.checks || []}
+        columns={[
+          { title: "评测维度", dataIndex: "dimension" },
+          { title: "标准答案", dataIndex: "expected" },
+          { title: "分析结果", dataIndex: "actual", render: (value) => value || "-" },
+          {
+            title: "结果",
+            dataIndex: "matched",
+            width: 90,
+            render: (value) => <Tag color={value ? "green" : "red"}>{value ? "命中" : "未命中"}</Tag>,
+          },
+        ]}
+      />
+    </Card>
+  );
+}
+
+function EvidenceGraph({ detail }) {
+  const evidence = (detail.evidence || []).slice(0, 8);
+  const hypotheses = (detail.hypothesis_graph?.hypotheses || []).slice(0, 5);
+  const graphEdges = detail.hypothesis_graph?.edges || [];
+  const conclusion = detail.latest_conclusion;
+  const targetMap = new Map();
+  evidence.forEach((item) => {
+    const targetId = item.target?.instance_id || item.target?.host_id || item.target?.agent_id;
+    if (targetId) targetMap.set(targetId, { id: targetId, label: targetId });
+  });
+  if (!targetMap.size) {
+    (detail.target_scope?.instances || []).slice(0, 5).forEach((item) => {
+      const targetId = item.instance_id || item.host_id;
+      if (targetId) targetMap.set(targetId, { id: targetId, label: targetId });
+    });
+  }
+  const targets = [...targetMap.values()].slice(0, 5);
+  if (!evidence.length && !hypotheses.length) {
+    return <Empty description="尚无可绘制的因果证据关系" />;
+  }
+
+  const width = 1160;
+  const rowCount = Math.max(targets.length, evidence.length, hypotheses.length, 1);
+  const height = Math.max(420, rowCount * 72 + 92);
+  const columns = { target: 24, evidence: 310, hypothesis: 650, conclusion: 980 };
+  const nodeWidth = { target: 170, evidence: 220, hypothesis: 220, conclusion: 156 };
+  const positions = (items, x) => items.map((item, index) => ({
+    ...item,
+    x,
+    y: 58 + ((height - 116) * (index + 0.5)) / Math.max(items.length, 1),
+  }));
+  const targetNodes = positions(targets, columns.target);
+  const evidenceNodes = positions(evidence.map((item) => ({
+    ...item,
+    id: item.evidence_id,
+    label: item.source_type || item.query_or_probe || item.evidence_id,
+  })), columns.evidence);
+  const hypothesisNodes = positions(hypotheses.map((item) => ({
+    ...item,
+    id: item.hypothesis_id,
+    label: item.type || item.description,
+  })), columns.hypothesis);
+  const targetById = new Map(targetNodes.map((item) => [item.id, item]));
+  const evidenceById = new Map(evidenceNodes.map((item) => [item.id, item]));
+  const hypothesisById = new Map(hypothesisNodes.map((item) => [item.id, item]));
+  const conclusionNode = conclusion ? {
+    id: "verified-conclusion",
+    label: conclusion.cluster_assessment?.classification || "已校验结论",
+    x: columns.conclusion,
+    y: height / 2,
+  } : null;
+  const line = (source, target, color, key, dashed = false) => (
+    <path
+      key={key}
+      d={`M ${source.x + (nodeWidth[source.kind] || 220)} ${source.y} C ${source.x + 245} ${source.y}, ${target.x - 45} ${target.y}, ${target.x} ${target.y}`}
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeDasharray={dashed ? "6 5" : undefined}
+      opacity="0.72"
+    />
+  );
+
+  return (
+    <Card
+      size="small"
+      title="全局因果证据图"
+      extra={<Typography.Text type="secondary">目标 → 证据 → 假设 → 已校验结论</Typography.Text>}
+    >
+      <Space wrap style={{ marginBottom: 10 }}>
+        <Tag color="blue">同一目标/采集域</Tag>
+        <Tag color="green">支持</Tag>
+        <Tag color="red">反驳</Tag>
+        <Tag>待判定</Tag>
+        {(detail.evidence || []).length > evidence.length && <Tag color="gold">仅显示前 {evidence.length} 条证据</Tag>}
+      </Space>
+      <div className={styles.graphViewport}>
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="诊断因果证据图">
+          <text x={columns.target} y="28" className={styles.graphHeading}>诊断目标</text>
+          <text x={columns.evidence} y="28" className={styles.graphHeading}>结构化证据</text>
+          <text x={columns.hypothesis} y="28" className={styles.graphHeading}>候选假设</text>
+          <text x={columns.conclusion} y="28" className={styles.graphHeading}>最终结论</text>
+
+          {evidenceNodes.map((item) => {
+            const targetId = item.target?.instance_id || item.target?.host_id || item.target?.agent_id;
+            const target = targetById.get(targetId);
+            return target ? line({ ...target, kind: "target" }, item, "#1677ff", `scope-${item.id}`) : null;
+          })}
+          {graphEdges.map((edge, index) => {
+            const source = evidenceById.get(edge.source);
+            const target = hypothesisById.get(edge.target);
+            if (!source || !target) return null;
+            return line(
+              { ...source, kind: "evidence" },
+              target,
+              edge.relation === "SUPPORTS" ? "#389e0d" : "#cf1322",
+              `relation-${index}-${edge.source}-${edge.target}`,
+              edge.relation !== "SUPPORTS",
+            );
+          })}
+          {conclusionNode && hypothesisNodes.map((item) => line(
+            { ...item, kind: "hypothesis" },
+            conclusionNode,
+            item.status === "SUPPORTED" ? "#389e0d" : item.status === "RULED_OUT" ? "#cf1322" : "#8c8c8c",
+            `conclusion-${item.id}`,
+            item.status !== "SUPPORTED",
+          ))}
+
+          {targetNodes.map((item) => (
+            <g key={item.id} transform={`translate(${item.x}, ${item.y - 23})`}>
+              <title>{item.label}</title>
+              <rect width={nodeWidth.target} height="46" rx="8" className={styles.targetNode} />
+              <text x="12" y="28" className={styles.graphText}>{compactLabel(item.label, 20)}</text>
+            </g>
+          ))}
+          {evidenceNodes.map((item) => (
+            <g key={item.id} transform={`translate(${item.x}, ${item.y - 25})`}>
+              <title>{`${item.id}\n${item.label}`}</title>
+              <rect width={nodeWidth.evidence} height="50" rx="8" className={styles.evidenceNode} />
+              <text x="12" y="22" className={styles.graphText}>{compactLabel(item.label, 24)}</text>
+              <text x="12" y="39" className={styles.graphSubtext}>{compactLabel(item.id, 28)}</text>
+            </g>
+          ))}
+          {hypothesisNodes.map((item) => (
+            <g key={item.id} transform={`translate(${item.x}, ${item.y - 25})`}>
+              <title>{item.description || item.label}</title>
+              <rect
+                width={nodeWidth.hypothesis}
+                height="50"
+                rx="8"
+                className={item.status === "SUPPORTED" ? styles.supportedNode : item.status === "RULED_OUT" ? styles.ruledOutNode : styles.hypothesisNode}
+              />
+              <text x="12" y="22" className={styles.graphText}>{compactLabel(item.label, 24)}</text>
+              <text x="12" y="39" className={styles.graphSubtext}>{item.status} · {item.evidence_score ?? 0}/100</text>
+            </g>
+          ))}
+          {conclusionNode && (
+            <g transform={`translate(${conclusionNode.x}, ${conclusionNode.y - 31})`}>
+              <title>{conclusion.summary}</title>
+              <rect width={nodeWidth.conclusion} height="62" rx="10" className={styles.conclusionNode} />
+              <text x="12" y="25" className={styles.graphText}>已校验结论</text>
+              <text x="12" y="44" className={styles.graphSubtext}>{compactLabel(conclusionNode.label, 17)}</text>
+            </g>
+          )}
+        </svg>
+      </div>
+    </Card>
+  );
+}
+
 function runMetrics(detail) {
   const probes = detail.probes || [];
   const evidence = detail.evidence || [];
@@ -431,6 +626,8 @@ function runMetrics(detail) {
       ? `${conclusion.root_location?.type || "unknown"} / ${conclusion.domain_cause?.type || "unknown"}`
       : "尚无结论",
     model_calls: detail.budget_used?.model_calls ?? 0,
+    oracle_score: conclusion?.evaluation?.score_pct,
+    exact_match: conclusion?.evaluation?.exact_match,
   };
 }
 
@@ -477,7 +674,7 @@ function ComparisonView({ detail, sessions }) {
         type="info"
         showIcon
         message="这里比较真实会话的路径成本、覆盖率和结论稳定性"
-        description="若要评估“根因是否正确”，演示案例还需配置独立故障 Oracle；前端不会把高置信度冒充正确率。"
+        description="配置独立故障 Oracle 后，表格会显示客观正确率；Oracle 不进入分析上下文，前端不会把高置信度冒充正确率。"
       />
       <Select
         mode="multiple"
@@ -509,6 +706,16 @@ function ComparisonView({ detail, sessions }) {
           { title: "失败步骤", dataIndex: "failed_steps", width: 90 },
           { title: "置信等级", dataIndex: "confidence", width: 90 },
           { title: "根因位置 / 领域", dataIndex: "root", width: 190 },
+          {
+            title: "Oracle 得分",
+            dataIndex: "oracle_score",
+            width: 120,
+            render: (value, row) => (
+              value === undefined
+                ? <Tag>未配置</Tag>
+                : <Tag color={row.exact_match ? "green" : "orange"}>{value}%</Tag>
+            ),
+          },
         ]}
       />
     </Space>
@@ -547,8 +754,10 @@ export default function DiagnosisWorkbench({ detail, sessions = [] }) {
       {mode === "演示回放" && <ReplayView detail={detail} />}
       {mode === "假设与证据" && (
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <EvidenceGraph detail={detail} />
           <HypothesisBoard hypotheses={detail.hypothesis_graph?.hypotheses || []} />
           <EvidenceChain detail={detail} />
+          <OracleEvaluation evaluation={detail.latest_conclusion?.evaluation} />
         </Space>
       )}
       {mode === "路径对比" && <ComparisonView detail={detail} sessions={sessions} />}

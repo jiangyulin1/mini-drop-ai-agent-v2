@@ -33,6 +33,70 @@
   font-size: 12px;
 }
 
+.graphViewport {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(22, 119, 255, 0.025), rgba(114, 46, 209, 0.025)),
+    #fff;
+}
+
+.graphViewport svg {
+  display: block;
+  min-width: 900px;
+  width: 100%;
+}
+
+.graphHeading {
+  fill: #595959;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.graphText {
+  fill: #262626;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.graphSubtext {
+  fill: #595959;
+  font-size: 11px;
+}
+
+.targetNode {
+  fill: #e6f4ff;
+  stroke: #1677ff;
+}
+
+.evidenceNode {
+  fill: #f9f0ff;
+  stroke: #722ed1;
+}
+
+.hypothesisNode {
+  fill: #fffbe6;
+  stroke: #d4b106;
+}
+
+.supportedNode {
+  fill: #f6ffed;
+  stroke: #389e0d;
+}
+
+.ruledOutNode {
+  fill: #fff1f0;
+  stroke: #cf1322;
+}
+
+.conclusionNode {
+  fill: #e6fffb;
+  stroke: #08979c;
+  stroke-width: 2;
+}
+
 @media (max-width: 768px) {
   .workbench :global(.ant-card-extra) {
     width: 100%;

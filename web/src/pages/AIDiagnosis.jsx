@@ -218,6 +218,11 @@ export default function AIDiagnosis() {
         },
         budget_profile: values.budget_profile,
         analysis_strategy: values.analysis_strategy,
+        ...(values.evaluation_oracle?.case_id ? {
+          evaluation_oracle: Object.fromEntries(
+            Object.entries(values.evaluation_oracle).filter(([, value]) => value !== undefined && value !== ""),
+          ),
+        } : {}),
       });
       setSelected(detail);
       await refreshSessions();
@@ -519,6 +524,57 @@ export default function AIDiagnosis() {
                   </Space>
                 )}
               </Form.List>
+
+              <Card
+                size="small"
+                title="实验评测 Oracle（可选）"
+                style={{ marginBottom: 20, background: "#fafafa" }}
+                extra={<Tag color="cyan">不提供给 AI</Tag>}
+              >
+                <Alert
+                  type="info"
+                  showIcon
+                  message="用于客观比较不同分析路径"
+                  description="标准答案独立保存，只在报告生成后评分。正式未知故障请留空；教师演示案例建议填写。"
+                  style={{ marginBottom: 12 }}
+                />
+                <Row gutter={12}>
+                  <Col xs={24} md={8}>
+                    <Form.Item name={["evaluation_oracle", "case_id"]} label="案例 ID">
+                      <Input placeholder="cpu-hotspot-001" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Form.Item name={["evaluation_oracle", "expected_instance_id"]} label="期望根因实例">
+                      <Input placeholder="service-a-1" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Form.Item name={["evaluation_oracle", "expected_location_type"]} label="期望归因位置">
+                      <Select allowClear options={[
+                        { value: "self", label: "目标自身" },
+                        { value: "same_host", label: "同宿主实例" },
+                        { value: "downstream", label: "下游依赖" },
+                        { value: "shared_resource", label: "共享资源" },
+                        { value: "unknown", label: "未知" },
+                      ]} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Form.Item name={["evaluation_oracle", "expected_domain_type"]} label="期望故障领域">
+                      <Select allowClear options={[
+                        "cpu", "io", "memory", "network", "database", "runtime", "unknown",
+                      ].map((value) => ({ value }))} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={16}>
+                    <Form.Item name={["evaluation_oracle", "expected_classification"]} label="期望分类">
+                      <Input placeholder="self_code_or_process_pressure" />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Card>
+
               <Button type="primary" htmlType="submit" loading={loading} icon={<RobotOutlined />}>
                 创建诊断会话
               </Button>
