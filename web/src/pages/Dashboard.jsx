@@ -35,6 +35,7 @@ import {
   FireOutlined,
   ThunderboltOutlined,
   HddOutlined,
+  WifiOutlined,
 } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { healthz, listAgents, listTasks, deleteTask } from "../api/client";
@@ -123,12 +124,17 @@ export default function Dashboard() {
       params.sort_by = sortBy;
       params.sort_order = sortOrder;
 
-      const [healthRes, taskRes, agentRes] = await Promise.allSettled([
-        healthz(),
+      // Dependency health is informative and can be slower than the query
+      // plane (for example while MinIO is unavailable). Do not make the task
+      // and Agent UI wait for that independent probe.
+      healthz()
+        .then(setService)
+        .catch(() => setService((current) => current));
+
+      const [taskRes, agentRes] = await Promise.allSettled([
         listTasks(params),
         listAgents(),
       ]);
-      if (healthRes.status === "fulfilled") setService(healthRes.value);
       if (taskRes.status === "fulfilled") setTasks(taskRes.value || []);
       if (agentRes.status === "fulfilled") {
         setAgents(agentRes.value || []);
@@ -151,8 +157,10 @@ export default function Dashboard() {
     refresh();
   }, [refresh]);
 
-  // 每 10 秒自动轮询（SSE 断线时兜底）
-  const { isPolling } = usePolling(refresh, { interval: 10000, enabled: !loading });
+  useEffect(() => {
+    window.addEventListener("mini-drop:auth-changed", refresh);
+    return () => window.removeEventListener("mini-drop:auth-changed", refresh);
+  }, [refresh]);
 
   // ── 删除任务 ──────────────────────────────────────────
 
@@ -194,7 +202,7 @@ export default function Dashboard() {
 
   // ── SSE 实时事件 ──────────────────────────────────────
 
-  useSSE({
+  const { connected: sseConnected } = useSSE({
     onTaskChanged(data) {
       showEventNotification("task_changed", data);
       refresh(); // 事件到达后刷新数据
@@ -207,6 +215,12 @@ export default function Dashboard() {
       showEventNotification("diagnosis_complete", data);
       refresh();
     },
+  });
+
+  // SSE 正常时由事件触发刷新；只有断线时才启用 10 秒轮询兜底。
+  const { isPolling } = usePolling(refresh, {
+    interval: 10000,
+    enabled: !loading && !sseConnected,
   });
 
   // ── 统计 ──────────────────────────────────────────────
@@ -433,11 +447,15 @@ export default function Dashboard() {
           </Typography.Title>
         </Space>
         <Space size="small">
-          {isPolling && (
+          {sseConnected ? (
+            <Tag icon={<WifiOutlined />} color="success">
+              SSE 实时刷新
+            </Tag>
+          ) : isPolling ? (
             <Tag icon={<SyncOutlined spin />} color="processing">
               10s 自动刷新
             </Tag>
-          )}
+          ) : null}
           <Button icon={<ReloadOutlined />} onClick={refresh}>
             刷新
           </Button>

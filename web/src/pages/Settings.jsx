@@ -45,12 +45,14 @@ export default function Settings() {
     try {
       const results = await Promise.allSettled([
         healthz(),
-        getAIConfig().catch(() => null),
+        getAIConfig(),
       ]);
       if (results[0].status === "fulfilled") setHealth(results[0].value);
       if (results[1].status === "fulfilled") setAiConfig(results[1].value);
-    } catch (err) {
-      setError(err.message);
+      const failures = results
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason?.message || "配置加载失败");
+      if (failures.length) setError([...new Set(failures)].join("；"));
     } finally {
       setLoading(false);
     }
@@ -73,7 +75,9 @@ export default function Settings() {
     try {
       await saveApiKey(apiKey.trim());
       setApiKey(apiKey.trim());
-      message.success(apiKey.trim() ? "API Key 已保存" : "API Key 已清除");
+      message.success(apiKey.trim() ? "API Key 已验证并保存" : "API Key 已清除");
+      window.dispatchEvent(new Event("mini-drop:auth-changed"));
+      await load();
     } catch (err) {
       message.error(err.message);
     } finally {
@@ -271,7 +275,9 @@ export default function Settings() {
                 onClick={async () => {
                   setApiKey("");
                   await saveApiKey("");
+                  window.dispatchEvent(new Event("mini-drop:auth-changed"));
                   message.success("API Key 已清除");
+                  await load();
                 }}
               >
                 清除 Key

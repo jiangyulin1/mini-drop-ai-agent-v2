@@ -31,7 +31,8 @@ message TaskDesc {
   uint32 timeout_sec     = 7;  // 任务超时秒数，Agent 应在此时限内完成采集
   CosConfig cos_config   = 8;  // 对象存储上传凭证（本次任务专用，覆盖全局配置）
   string script_content  = 9;  // 仅 ScriptExec 类任务使用，存放脚本内容
-  reserved 10 to 19;            // 预留给未来采集器参数
+  string options_json    = 10; // 经 Server 校验的采集器扩展参数（最大 8 KiB）
+  reserved 11 to 19;            // 预留给未来采集器参数
 }
 
 
@@ -59,4 +60,5 @@ message TaskResult {
   // Server 收到后写入 artifacts 表。
   string artifact_type               = 7;  // raw / folded / flamegraph_svg / top_json / ebpf_metrics
   string artifact_metadata_json      = 8;  // JSON 序列化的元数据，含 bucket/object_key/content_type/size_bytes
+  string result_message              = 9;  // 成功结果摘要，例如采样数量；失败信息仍使用 error_message
 }

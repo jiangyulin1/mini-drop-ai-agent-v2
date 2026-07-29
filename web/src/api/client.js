@@ -77,7 +77,10 @@ export async function clearCookieApiKey() {
   await axios.post("/api/auth/clear-cookie");
 }
 
-/** 统一设置 API Key：优先 HttpOnly cookie，同时更新 localStorage 作为降级。*/
+/**
+ * 统一设置 API Key：优先 HttpOnly cookie，同时更新 localStorage 作为降级。
+ * 非空 Key 会立即请求受保护的 /me 验证；验证失败时自动回滚，避免界面误报保存成功。
+ */
 export async function saveApiKey(token) {
   const trimmed = (token || "").trim();
   setStoredApiKey(trimmed);  // 降级方案
@@ -87,6 +90,17 @@ export async function saveApiKey(token) {
     } catch {
       // cookie 设置失败时不影响 localStorage 降级
       console.warn("HttpOnly cookie 设置失败，使用 localStorage 降级方案");
+    }
+    try {
+      await getCurrentUser();
+    } catch (error) {
+      setStoredApiKey("");
+      try {
+        await clearCookieApiKey();
+      } catch {
+        // The invalid header was already removed; cookie cleanup is best effort.
+      }
+      throw error;
     }
   } else {
     try {
@@ -98,7 +112,9 @@ export async function saveApiKey(token) {
 }
 
 export function healthz() {
-  return api.get("/healthz");
+  // Health checks may wait on an unavailable object store. They must not keep
+  // the operational task UI in a loading state for the global 30s timeout.
+  return api.get("/healthz", { timeout: 5000 });
 }
 
 function itemsOf(value) {
@@ -118,8 +134,20 @@ export function listAuditLogs() {
 
 // ── 任务 ────────────────────────────────────────────────────────
 
-export function createTask(payload) {
-  return api.post("/tasks", payload);
+function newIdempotencyKey(prefix = "web") {
+  const random = globalThis.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${random}`;
+}
+
+export function createTask(payload, idempotencyKey = newIdempotencyKey("create")) {
+  return api.post("/tasks", payload, {
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+export function listTaskKinds(params = {}) {
+  return api.get("/task-kinds", { params }).then(itemsOf);
 }
 
 export function listTasks(params = {}) {
@@ -132,6 +160,16 @@ export function getTask(taskId) {
 
 export function deleteTask(taskId) {
   return api.delete(`/tasks/${taskId}`);
+}
+
+export function cancelTask(taskId, reason = "用户从 Web 取消任务") {
+  return api.post(`/tasks/${taskId}/cancel`, { reason });
+}
+
+export function retryTask(taskId, payload = {}, idempotencyKey = newIdempotencyKey("retry")) {
+  return api.post(`/tasks/${taskId}/retry`, payload, {
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }
 
 export function getTaskEvents(taskId) {

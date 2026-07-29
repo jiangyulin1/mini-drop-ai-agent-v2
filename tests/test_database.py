@@ -48,4 +48,26 @@ def test_init_db_adds_v2_columns_to_legacy_database(monkeypatch, tmp_path):
     assert "evidence_role" in {
         item["name"] for item in inspector.get_columns("diagnosis_evidence")
     }
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
+            "0002_release"
+        )
+    reset_engine()
+
+
+def test_init_db_creates_fresh_schema_at_head(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'new.db'}")
+    reset_engine()
+
+    init_db()
+
+    engine = _get_engine()
+    inspector = inspect(engine)
+    assert {"agents", "tasks", "artifacts", "diagnosis_sessions"}.issubset(
+        inspector.get_table_names()
+    )
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
+            "0002_release"
+        )
     reset_engine()

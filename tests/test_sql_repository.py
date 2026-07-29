@@ -219,6 +219,55 @@ class TestTaskPersistence:
         assert pulled.id == task.id
         assert pulled.status == TaskStatus.RUNNING.value
 
+    def test_stale_running_task_is_failed_with_retryable_code(self, repo: SqlRepository):
+        repo.register_agent(self.AGENT_ID, "h", self.IP)
+        task = repo.create_task(CreateTaskRequest(
+            name="stale", agent_id=self.AGENT_ID,
+            target_pid=402, collector_type="perf_cpu",
+        ))
+        repo.transition_task(task.id, TaskStatus.RUNNING, "pulled", Actor.SERVER)
+        from server.app.database import new_session
+        from server.app.models import TaskModel
+        from server.app.state_machine import now_utc
+        from datetime import timedelta
+        session = new_session()
+        try:
+            row = session.get(TaskModel, task.id)
+            row.started_at = now_utc() - timedelta(hours=1)
+            session.commit()
+        finally:
+            session.close()
+
+        recovered = repo.recover_stale_tasks(timeout_sec=60)
+
+        assert recovered == [task.id]
+        assert repo.tasks[task.id].status == TaskStatus.FAILED.value
+
+    def test_stale_pending_task_is_failed_instead_of_waiting_forever(
+        self, repo: SqlRepository
+    ):
+        repo.register_agent(self.AGENT_ID, "h", self.IP)
+        task = repo.create_task(CreateTaskRequest(
+            name="stale-pending", agent_id=self.AGENT_ID,
+            target_pid=403, collector_type="perf_cpu",
+        ))
+        from server.app.database import new_session
+        from server.app.models import TaskModel
+        from server.app.state_machine import now_utc
+        from datetime import timedelta
+        session = new_session()
+        try:
+            row = session.get(TaskModel, task.id)
+            row.created_at = now_utc() - timedelta(hours=1)
+            session.commit()
+        finally:
+            session.close()
+
+        recovered = repo.recover_stale_tasks(timeout_sec=60)
+
+        assert recovered == [task.id]
+        assert repo.tasks[task.id].status == TaskStatus.FAILED.value
+
 
 class TestArtifactPersistence:
     """产物存储持久化。"""

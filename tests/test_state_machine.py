@@ -72,6 +72,15 @@ class TestValidateTransition:
         for state in active_states:
             validate_transition(state, TaskStatus.FAILED, f"{state.value} 阶段发生错误")
 
+    def test_each_active_state_can_be_cancelled(self):
+        for state in [
+            TaskStatus.PENDING,
+            TaskStatus.RUNNING,
+            TaskStatus.UPLOADING,
+            TaskStatus.ANALYZING,
+        ]:
+            validate_transition(state, TaskStatus.CANCELLED, "用户取消")
+
 
 class TestBuildStatusEvent:
     """build_status_event() 构造完整事件对象。"""
@@ -176,9 +185,10 @@ class TestAllowedTransitions:
     """ALLOWED_TRANSITIONS 表的结构正确性。"""
 
     def test_terminal_states_have_no_exits(self):
-        """DONE 和 FAILED 的目标集必须为空。"""
+        """所有终态的目标集必须为空。"""
         assert ALLOWED_TRANSITIONS[TaskStatus.DONE] == set()
         assert ALLOWED_TRANSITIONS[TaskStatus.FAILED] == set()
+        assert ALLOWED_TRANSITIONS[TaskStatus.CANCELLED] == set()
 
     def test_active_states_have_at_least_one_exit(self):
         """每个活跃状态至少有 FAILED 出口。"""
@@ -196,6 +206,7 @@ class TestTerminalCheck:
     def test_done_and_failed_are_terminal(self):
         assert is_terminal(TaskStatus.DONE) is True
         assert is_terminal(TaskStatus.FAILED) is True
+        assert is_terminal(TaskStatus.CANCELLED) is True
 
     def test_active_states_are_not_terminal(self):
         for state in [TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.UPLOADING, TaskStatus.ANALYZING]:

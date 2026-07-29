@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 from agent.mini_drop_agent.collectors.base import CollectorResult, CollectorTask
 
@@ -19,7 +21,7 @@ class PySpyCollector:
     OUTPUT_BASE = "/tmp/mini-drop"
 
     def collect(self, task: CollectorTask) -> CollectorResult:
-        pyspy = shutil.which("py-spy")
+        pyspy = self._find_pyspy()
         if pyspy is None:
             return CollectorResult(
                 ok=False,
@@ -113,6 +115,20 @@ class PySpyCollector:
     @staticmethod
     def _pid_exists(pid: int) -> bool:
         return os.path.isdir(f"/proc/{pid}")
+
+    @staticmethod
+    def _find_pyspy() -> str | None:
+        """Find py-spy from PATH or beside the running Agent interpreter."""
+        discovered = shutil.which("py-spy")
+        if discovered:
+            return discovered
+        executable = "py-spy.exe" if os.name == "nt" else "py-spy"
+        # Do not resolve the interpreter symlink: in a venv, ``python`` often
+        # points to /usr/bin/python while py-spy lives beside the venv launcher.
+        bundled = Path(sys.executable).parent / executable
+        if bundled.is_file():
+            return str(bundled)
+        return None
 
     @staticmethod
     def _should_retry_without_native(stderr: bytes) -> bool:

@@ -44,13 +44,17 @@ from server.app.diagnosis.schemas import ApprovalRequest, CreateDiagnosisRequest
 from server.app.rca.report import run_diagnosis_context
 from server.app.schemas import (
     APIResponse,
+    CancelTaskRequest,
     CreateTaskRequest,
     MAX_SAMPLE_RATE,
     MAX_TASK_DURATION_SEC,
     RCAFeedbackRequest,
+    RetryTaskRequest,
     TaskView,
 )
 from server.app.sql_repository import SqlRepository
+from server.app.state_machine import Actor, TaskStatus
+from server.app.task_kinds import list_task_kinds
 from server.app import storage as store
 
 repo = SqlRepository()
@@ -63,7 +67,10 @@ async def _lifespan(_app: FastAPI):
     init_db()
     if os.getenv("MINIO_AUTO_CREATE_BUCKET", "0") == "1":
         _ensure_minio_bucket_with_retry(os.getenv("MINIO_BUCKET", "mini-drop"))
-    _grpc = serve_in_background(repo)
+    grpc_port = int(os.getenv("MINI_DROP_GRPC_PORT", "50051"))
+    if not 1 <= grpc_port <= 65535:
+        raise RuntimeError("MINI_DROP_GRPC_PORT must be between 1 and 65535")
+    _grpc = serve_in_background(repo, port=grpc_port)
     _offline_task = asyncio.create_task(_offline_sweeper())
     try:
         yield
@@ -78,9 +85,11 @@ async def _lifespan(_app: FastAPI):
 
 async def _offline_sweeper() -> None:
     timeout_sec = int(os.getenv("AGENT_OFFLINE_TIMEOUT_SEC", "30"))
+    stale_task_timeout_sec = int(os.getenv("TASK_STALE_TIMEOUT_SEC", "900"))
     interval_sec = max(1, min(timeout_sec // 2, 15))
     while True:
         repo.mark_offline_agents(timeout_sec=timeout_sec)
+        repo.recover_stale_tasks(timeout_sec=stale_task_timeout_sec)
         if hasattr(repo, "persist_agent_metric_snapshots"):
             repo.persist_agent_metric_snapshots()
         diagnosis_orchestrator.advance_active()
@@ -242,15 +251,25 @@ async def sse_stream(request: Request, since: str = ""):
     async def event_generator():
         queue = BUS.subscribe()
         try:
-            # 先发送历史事件（如果客户端提供了 since 时间戳）
-            for event in BUS.get_history(since if since else None):
-                yield f"event: {event['event']}\ndata: {_json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
+            # 仅断线续传时回放游标之后的事件。首次连接没有游标，
+            # 不应把整个进程历史重新弹成前端通知。
+            if since:
+                for event in BUS.get_history(since):
+                    yield (
+                        f"id: {event['id']}\n"
+                        f"event: {event['event']}\n"
+                        f"data: {_json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
+                    )
 
             # 持续推送新事件
             while True:
                 try:
                     event = await asyncio.to_thread(queue.get, True, 30.0)
-                    yield f"event: {event['event']}\ndata: {_json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
+                    yield (
+                        f"id: {event['id']}\n"
+                        f"event: {event['event']}\n"
+                        f"data: {_json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
+                    )
                 except _queue.Empty:
                     # 每 30 秒发一个注释行保活
                     yield ":keepalive\n\n"
@@ -435,8 +454,44 @@ def list_audit_logs(
 # ── 任务 ──────────────────────────────────────────────────────
 
 
+@app.get("/api/task-kinds")
+def get_task_kinds(agent_id: str = "") -> APIResponse:
+    """Return metadata used to build task forms.
+
+    When ``agent_id`` is supplied, unsupported collectors are filtered out at
+    the source.  The create-task endpoint still performs authoritative
+    validation, so this filtering is only a usability aid.
+    """
+
+    capabilities: set[str] | None = None
+    if agent_id:
+        agent = repo.agents.get(agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent 不存在")
+        capabilities = set(agent.capabilities or [])
+    return APIResponse(data={
+        "schema_version": "1.0",
+        "items": list_task_kinds(capabilities),
+    })
+
+
+def _validate_task_agent_capability(agent_id: str, collector_type: str) -> None:
+    agent = repo.agents.get(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent 不存在")
+    capabilities = set(agent.capabilities or [])
+    # Empty capability lists are retained for compatibility with older Agents
+    # that registered before capability discovery was introduced.
+    if capabilities and collector_type not in capabilities:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Agent {agent_id} 不支持采集器 {collector_type}",
+        )
+
+
 @app.post("/api/tasks")
-def create_task(payload: CreateTaskRequest) -> APIResponse:
+def create_task(payload: CreateTaskRequest, request: Request) -> APIResponse:
+    _validate_task_agent_capability(payload.agent_id, payload.collector_type)
     if payload.target_pid <= 0:
         raise HTTPException(status_code=400, detail="target_pid 必须为正整数")
     if payload.target_pid > 4194304:  # Linux pid_max 上限
@@ -449,10 +504,16 @@ def create_task(payload: CreateTaskRequest) -> APIResponse:
         raise HTTPException(status_code=400, detail="sample_rate 必须为正整数")
     if payload.sample_rate > MAX_SAMPLE_RATE:
         raise HTTPException(status_code=400, detail=f"sample_rate 不能超过 {MAX_SAMPLE_RATE}")
+    idempotency_key = request.headers.get("idempotency-key", "").strip()
+    if len(idempotency_key) > 128:
+        raise HTTPException(status_code=400, detail="Idempotency-Key 不能超过 128 字符")
     try:
-        task = repo.create_task(payload)
+        task = repo.create_task(payload, idempotency_key=idempotency_key or None)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        detail = str(exc)
+        if detail.startswith("IDEMPOTENCY_CONFLICT"):
+            raise HTTPException(status_code=409, detail=detail) from exc
+        raise HTTPException(status_code=404, detail=detail) from exc
     return APIResponse(data={"task_id": task.id, "status": status_value(task.status)})
 
 
@@ -514,6 +575,73 @@ def delete_task(task_id: str) -> APIResponse:
     if not deleted:
         raise HTTPException(status_code=404, detail="任务不存在")
     return APIResponse(data={"task_id": task_id, "deleted": True})
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+def cancel_task(task_id: str, payload: CancelTaskRequest) -> APIResponse:
+    """Cancel an active task. Repeating the same request is safe."""
+
+    try:
+        task = repo.cancel_task(task_id, payload.reason.strip(), Actor.WEB)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "不存在" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    return APIResponse(data={
+        "task_id": task.id,
+        "status": status_value(task.status),
+        "cancelled": status_value(task.status) == TaskStatus.CANCELLED.value,
+    })
+
+
+@app.post("/api/tasks/{task_id}/retry")
+def retry_task(
+    task_id: str,
+    payload: RetryTaskRequest,
+    request: Request,
+) -> APIResponse:
+    """Create a new task from a terminal task without mutating its history."""
+
+    original = repo.tasks.get(task_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if status_value(original.status) not in {
+        TaskStatus.DONE.value,
+        TaskStatus.FAILED.value,
+        TaskStatus.CANCELLED.value,
+    }:
+        raise HTTPException(status_code=409, detail="仅终态任务可以重试")
+    options = dict((original.request_params or {}).get("options") or {})
+    options.pop("diagnosis_step_id", None)
+    options.update({"source": "task_retry", "retry_of": original.id})
+    retry_payload = CreateTaskRequest(
+        name=payload.name or f"重试: {original.name}",
+        agent_id=original.agent_id,
+        target_pid=original.target_pid,
+        collector_type=original.collector_type,
+        sample_rate=original.sample_rate,
+        duration_sec=original.duration_sec,
+        options=options,
+    )
+    _validate_task_agent_capability(
+        retry_payload.agent_id,
+        retry_payload.collector_type,
+    )
+    idempotency_key = request.headers.get("idempotency-key", "").strip()
+    if len(idempotency_key) > 128:
+        raise HTTPException(status_code=400, detail="Idempotency-Key 不能超过 128 字符")
+    try:
+        retried = repo.create_task(retry_payload, idempotency_key=idempotency_key or None)
+        repo.record_task_retry(original.id, retried.id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 409 if detail.startswith("IDEMPOTENCY_CONFLICT") else 404
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    return APIResponse(data={
+        "task_id": retried.id,
+        "status": status_value(retried.status),
+        "retry_of": original.id,
+    })
 
 
 @app.get("/api/tasks/{task_id}/events")

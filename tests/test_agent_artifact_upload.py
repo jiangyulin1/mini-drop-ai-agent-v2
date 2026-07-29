@@ -1,4 +1,5 @@
 from unittest import mock
+import hashlib
 
 from agent.mini_drop_agent.artifact_upload import maybe_upload_artifacts
 from agent.mini_drop_agent.config import AgentConfig
@@ -18,8 +19,12 @@ def _config(upload=True):
 
 
 def test_upload_disabled_keeps_artifacts(tmp_path):
-    artifact = {"artifact_type": "raw", "local_path": str(tmp_path / "perf.data")}
-    assert maybe_upload_artifacts("task1", [artifact], _config(upload=False)) == [artifact]
+    path = tmp_path / "perf.data"
+    path.write_text("perf", encoding="utf-8")
+    artifact = {"artifact_type": "raw", "local_path": str(path)}
+    result = maybe_upload_artifacts("task1", [artifact], _config(upload=False))
+    assert result[0]["size_bytes"] == 4
+    assert result[0]["sha256"] == hashlib.sha256(b"perf").hexdigest()
 
 
 def test_upload_adds_bucket_and_object_key(tmp_path):
@@ -38,4 +43,5 @@ def test_upload_adds_bucket_and_object_key(tmp_path):
     assert uploaded[0]["bucket"] == "mini-drop"
     assert uploaded[0]["object_key"] == "tasks/task1/perf.data"
     assert uploaded[0]["size_bytes"] == 4
+    assert uploaded[0]["sha256"] == hashlib.sha256(b"perf").hexdigest()
     mock_client.return_value.fput_object.assert_called_once()

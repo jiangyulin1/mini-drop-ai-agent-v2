@@ -61,6 +61,7 @@ class TaskRecord:
     status_reason: str
     request_params: dict[str, Any]
     created_at: datetime
+    idempotency_key: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
@@ -213,9 +214,23 @@ class InMemoryRepository:
     # Task
     # ------------------------------------------------------------------
 
-    def create_task(self, payload: CreateTaskRequest) -> TaskRecord:
+    def create_task(
+        self,
+        payload: CreateTaskRequest,
+        idempotency_key: str | None = None,
+    ) -> TaskRecord:
         """创建任务，写入 PENDING 状态，加入对应 Agent IP 的队列。"""
         with self._lock:
+            normalized_key = (idempotency_key or "").strip() or None
+            if normalized_key:
+                existing = self.get_task_by_idempotency_key(normalized_key)
+                if existing is not None:
+                    if existing.request_params != payload.model_dump():
+                        raise ValueError(
+                            "IDEMPOTENCY_CONFLICT: key already used for another request"
+                        )
+                    return existing
+
             timestamp = now_utc()
             hex_suffix = uuid4().hex[:6]
             task_id = f"task_{timestamp.strftime('%Y%m%d_%H%M%S')}_{hex_suffix}"
@@ -232,6 +247,7 @@ class InMemoryRepository:
                 status_reason="Web 请求创建任务",
                 request_params=payload.model_dump(),
                 created_at=timestamp,
+                idempotency_key=normalized_key,
             )
             self.tasks[task_id] = task
 
@@ -263,6 +279,95 @@ class InMemoryRepository:
 
             return task
 
+    def get_task_by_idempotency_key(self, key: str) -> TaskRecord | None:
+        with self._lock:
+            return next(
+                (task for task in self.tasks.values() if task.idempotency_key == key),
+                None,
+            )
+
+    def cancel_task(
+        self,
+        task_id: str,
+        reason: str,
+        actor: Actor = Actor.WEB,
+    ) -> TaskRecord:
+        """Cancel an active task. Repeated cancellation is idempotent."""
+        with self._lock:
+            task = self.tasks.get(task_id)
+            if task is None:
+                raise ValueError(f"task does not exist: {task_id}")
+            if task.status == TaskStatus.CANCELLED:
+                return task
+            if task.status in {TaskStatus.DONE, TaskStatus.FAILED}:
+                raise ValueError(f"task is already terminal: {task.status.value}")
+            self.transition_task(
+                task_id,
+                TaskStatus.CANCELLED,
+                reason,
+                actor,
+                {"error_code": "TASK_CANCELLED", "retryable": True},
+            )
+            self._append_audit(
+                event_type="TASK_CANCELLED",
+                task_id=task_id,
+                message=reason,
+            )
+            return task
+
+    def record_task_retry(
+        self,
+        original_task_id: str,
+        retried_task_id: str,
+    ) -> None:
+        """Write one retry audit event even when the request is replayed."""
+        with self._lock:
+            if any(
+                log.event_type == "TASK_RETRIED"
+                and log.task_id == retried_task_id
+                for log in self.audit_logs
+            ):
+                return
+            self._append_audit(
+                event_type="TASK_RETRIED",
+                task_id=retried_task_id,
+                message=f"task {original_task_id} retried as {retried_task_id}",
+                metadata={"retry_of": original_task_id},
+            )
+
+    def recover_stale_tasks(self, timeout_sec: int = 900) -> list[str]:
+        """Fail active tasks that exceeded the recovery timeout."""
+        cutoff = now_utc() - timedelta(seconds=max(60, timeout_sec))
+        recovered: list[str] = []
+        with self._lock:
+            for task in self.tasks.values():
+                if task.status == TaskStatus.PENDING:
+                    stale_since = task.created_at
+                elif task.status in {
+                    TaskStatus.RUNNING,
+                    TaskStatus.UPLOADING,
+                    TaskStatus.ANALYZING,
+                }:
+                    stale_since = task.started_at
+                else:
+                    continue
+                if stale_since is None or stale_since >= cutoff:
+                    continue
+                self.transition_task(
+                    task.id,
+                    TaskStatus.FAILED,
+                    "TASK_EXECUTION_STALE: task exceeded recovery timeout",
+                    Actor.SERVER,
+                    {"error_code": "TASK_EXECUTION_STALE", "retryable": True},
+                )
+                self._append_audit(
+                    event_type="TASK_STALE_RECOVERED",
+                    task_id=task.id,
+                    message="task exceeded recovery timeout",
+                )
+                recovered.append(task.id)
+        return recovered
+
     def get_task_by_diagnosis_step_id(self, step_id: str) -> TaskRecord | None:
         with self._lock:
             return next((
@@ -292,7 +397,11 @@ class InMemoryRepository:
             task.status_reason = reason
             if to_status == TaskStatus.RUNNING and task.started_at is None:
                 task.started_at = now_utc()
-            if to_status in (TaskStatus.DONE, TaskStatus.FAILED):
+            if to_status in (
+                TaskStatus.DONE,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            ):
                 task.finished_at = now_utc()
             return task
 
@@ -319,7 +428,35 @@ class InMemoryRepository:
     def add_artifacts(self, task_id: str, artifacts: list[dict[str, Any]]) -> None:
         """追加采集产物元数据。"""
         with self._lock:
-            self.artifacts.setdefault(task_id, []).extend(artifacts)
+            stored = self.artifacts.setdefault(task_id, [])
+            for artifact in artifacts:
+                normalized = dict(artifact)
+                if normalized.get("cos_key") and not normalized.get("object_key"):
+                    normalized["object_key"] = normalized["cos_key"]
+                identity = (
+                    normalized.get("type"),
+                    normalized.get("object_key"),
+                    normalized.get("filename"),
+                    (normalized.get("metadata") or {}).get("window_index"),
+                )
+                existing = next(
+                    (
+                        item
+                        for item in stored
+                        if (
+                            item.get("type"),
+                            item.get("object_key") or item.get("cos_key"),
+                            item.get("filename"),
+                            (item.get("metadata") or {}).get("window_index"),
+                        )
+                        == identity
+                    ),
+                    None,
+                )
+                if existing is None:
+                    stored.append(normalized)
+                else:
+                    existing.update(normalized)
 
     def get_artifacts(self, task_id: str) -> list[dict[str, Any]]:
         """查询产物列表。"""

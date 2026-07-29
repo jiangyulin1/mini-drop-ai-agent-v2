@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
 from server.app.database import new_session
@@ -303,43 +304,191 @@ class SqlRepository:
             self._cache.pop("events", None)
             return True
 
-    def create_task(self, payload: CreateTaskRequest) -> TaskModel:
+    def create_task(
+        self,
+        payload: CreateTaskRequest,
+        idempotency_key: str | None = None,
+    ) -> TaskModel:
+        """Create a task, returning the original row for a repeated key.
+
+        The unique DB index closes the race across API replicas; the pre-check
+        provides a useful conflict error when a key is reused with a different
+        payload.
+        """
+
+        normalized_key = (idempotency_key or "").strip() or None
+        if normalized_key:
+            existing = self.get_task_by_idempotency_key(normalized_key)
+            if existing is not None:
+                self._assert_same_idempotent_payload(existing, payload)
+                return existing
+
+        try:
+            with self._write_session() as session:
+                ts = now_utc()
+                hex_suffix = uuid4().hex[:6]
+                task_id = f"task_{ts.strftime('%Y%m%d_%H%M%S')}_{hex_suffix}"
+                agent = session.get(AgentModel, payload.agent_id)
+                if agent is None:
+                    raise ValueError(f"Agent {payload.agent_id} 不存在")
+
+                task = TaskModel(
+                    id=task_id,
+                    name=payload.name,
+                    agent_id=payload.agent_id,
+                    target_pid=payload.target_pid,
+                    collector_type=payload.collector_type,
+                    sample_rate=payload.sample_rate,
+                    duration_sec=payload.duration_sec,
+                    status=TaskStatus.PENDING.value,
+                    status_reason="Web 请求创建任务",
+                    request_params=payload.model_dump(),
+                    idempotency_key=normalized_key,
+                    diagnosis_step_id=(payload.options or {}).get("diagnosis_step_id"),
+                    created_at=ts,
+                )
+                session.add(task)
+                session.flush()
+
+                self._write_event(
+                    session,
+                    task_id,
+                    None,
+                    TaskStatus.PENDING,
+                    "Web 请求创建任务",
+                    Actor.WEB,
+                    payload.model_dump(),
+                )
+                record_task_transition("NONE", TaskStatus.PENDING.value)
+                self._write_audit(
+                    session,
+                    "TASK_CREATED",
+                    task_id=task_id,
+                    message=f"任务 {task_id} 已创建",
+                    metadata={
+                        **payload.model_dump(),
+                        "idempotency_key_present": bool(normalized_key),
+                    },
+                )
+                return task
+        except IntegrityError:
+            if not normalized_key:
+                raise
+            existing = self.get_task_by_idempotency_key(normalized_key)
+            if existing is None:
+                raise
+            self._assert_same_idempotent_payload(existing, payload)
+            return existing
+
+    def get_task_by_idempotency_key(self, key: str) -> TaskModel | None:
+        with self._read_session() as session:
+            return session.query(TaskModel).filter(TaskModel.idempotency_key == key).first()
+
+    @staticmethod
+    def _assert_same_idempotent_payload(task: TaskModel, payload: CreateTaskRequest) -> None:
+        if (task.request_params or {}) != payload.model_dump():
+            raise ValueError("IDEMPOTENCY_CONFLICT: 同一幂等键不能用于不同任务参数")
+
+    def cancel_task(self, task_id: str, reason: str, actor: Actor = Actor.WEB) -> TaskModel:
+        """Cancel an active task. Repeated cancellation is safe."""
+
         with self._write_session() as session:
-            ts = now_utc()
-            hex_suffix = uuid4().hex[:6]
-            task_id = f"task_{ts.strftime('%Y%m%d_%H%M%S')}_{hex_suffix}"
-            agent = session.get(AgentModel, payload.agent_id)
-            if agent is None:
-                raise ValueError(f"Agent {payload.agent_id} 不存在")
-
-            task = TaskModel(
-                id=task_id,
-                name=payload.name,
-                agent_id=payload.agent_id,
-                target_pid=payload.target_pid,
-                collector_type=payload.collector_type,
-                sample_rate=payload.sample_rate,
-                duration_sec=payload.duration_sec,
-                status=TaskStatus.PENDING.value,
-                status_reason="Web 请求创建任务",
-                request_params=payload.model_dump(),
-                diagnosis_step_id=(payload.options or {}).get("diagnosis_step_id"),
-                created_at=ts,
+            task = session.get(TaskModel, task_id)
+            if task is None:
+                raise ValueError(f"任务 {task_id} 不存在")
+            current = TaskStatus(task.status)
+            if current == TaskStatus.CANCELLED:
+                return task
+            if current in {TaskStatus.DONE, TaskStatus.FAILED}:
+                raise ValueError(f"任务已处于终态 {current.value}，不能取消")
+            build_status_event(task_id, current, TaskStatus.CANCELLED, reason, actor)
+            self._transition_task_in_session(
+                session,
+                task_id,
+                TaskStatus.CANCELLED,
+                reason,
+                actor,
+                {"error_code": "TASK_CANCELLED", "retryable": True},
             )
-            session.add(task)
-            session.flush()
-
-            # 状态事件
-            self._write_event(session, task_id, None, TaskStatus.PENDING,
-                              "Web 请求创建任务", Actor.WEB, payload.model_dump())
-            record_task_transition("NONE", TaskStatus.PENDING.value)
-
-            # 审计日志
-            self._write_audit(session, "TASK_CREATED", task_id=task_id,
-                              message=f"任务 {task_id} 已创建",
-                              metadata=payload.model_dump())
-
+            self._write_audit(
+                session,
+                "TASK_CANCELLED",
+                task_id=task_id,
+                message=reason,
+            )
             return task
+
+    def record_task_retry(
+        self,
+        original_task_id: str,
+        retried_task_id: str,
+    ) -> None:
+        """Write one retry audit event even when the HTTP request is replayed."""
+
+        with self._write_session() as session:
+            existing = (
+                session.query(AuditLogModel)
+                .filter(
+                    AuditLogModel.event_type == "TASK_RETRIED",
+                    AuditLogModel.task_id == retried_task_id,
+                )
+                .first()
+            )
+            if existing is not None:
+                return
+            self._write_audit(
+                session,
+                "TASK_RETRIED",
+                task_id=retried_task_id,
+                message=f"任务 {original_task_id} 已重试为 {retried_task_id}",
+                metadata={"retry_of": original_task_id},
+            )
+
+    def recover_stale_tasks(self, timeout_sec: int = 900) -> list[str]:
+        """Fail non-terminal tasks that can no longer make progress."""
+
+        cutoff = now_utc() - timedelta(seconds=max(60, timeout_sec))
+        recovered: list[str] = []
+        with self._write_session() as session:
+            pending_tasks = (
+                session.query(TaskModel)
+                .filter(
+                    TaskModel.status == TaskStatus.PENDING.value,
+                    TaskModel.created_at < cutoff,
+                )
+                .all()
+            )
+            active_tasks = (
+                session.query(TaskModel)
+                .filter(
+                    TaskModel.status.in_([
+                        TaskStatus.RUNNING.value,
+                        TaskStatus.UPLOADING.value,
+                        TaskStatus.ANALYZING.value,
+                    ]),
+                    TaskModel.started_at.is_not(None),
+                    TaskModel.started_at < cutoff,
+                )
+                .all()
+            )
+            for task in [*pending_tasks, *active_tasks]:
+                reason = "TASK_EXECUTION_STALE: 任务超过恢复阈值且无终态结果"
+                self._transition_task_in_session(
+                    session,
+                    task.id,
+                    TaskStatus.FAILED,
+                    reason,
+                    Actor.SERVER,
+                    {"error_code": "TASK_EXECUTION_STALE", "retryable": True},
+                )
+                self._write_audit(
+                    session,
+                    "TASK_STALE_RECOVERED",
+                    task_id=task.id,
+                    message=reason,
+                )
+                recovered.append(task.id)
+        return recovered
 
     def get_task_by_diagnosis_step_id(self, step_id: str) -> TaskModel | None:
         session = new_session()
@@ -412,15 +561,40 @@ class SqlRepository:
         with self._write_session() as session:
             ts = now_utc()
             for art in artifacts:
+                artifact_type = art.get("artifact_type", "raw")
+                object_key = art.get("object_key", "")
+                filename = art.get("filename")
+                window_index = (art.get("metadata") or {}).get("window_index")
+                query = session.query(ArtifactModel).filter(
+                    ArtifactModel.task_id == task_id,
+                    ArtifactModel.artifact_type == artifact_type,
+                    ArtifactModel.object_key == object_key,
+                )
+                if filename is None:
+                    query = query.filter(ArtifactModel.filename.is_(None))
+                else:
+                    query = query.filter(ArtifactModel.filename == filename)
+                existing = query.first()
+                if existing is not None:
+                    existing_window = (existing.meta_json or {}).get("window_index")
+                    if existing_window == window_index:
+                        existing.bucket = art.get("bucket", existing.bucket or "mini-drop")
+                        existing.local_path = art.get("local_path") or existing.local_path
+                        existing.content_type = art.get("content_type", existing.content_type)
+                        existing.size_bytes = art.get("size_bytes", existing.size_bytes or 0)
+                        existing.sha256 = art.get("sha256") or existing.sha256
+                        existing.meta_json = art.get("metadata", existing.meta_json or {})
+                        continue
                 session.add(ArtifactModel(
                     task_id=task_id,
-                    artifact_type=art.get("artifact_type", "raw"),
+                    artifact_type=artifact_type,
                     bucket=art.get("bucket", "mini-drop"),
-                    object_key=art.get("object_key", ""),
-                    filename=art.get("filename"),
+                    object_key=object_key,
+                    filename=filename,
                     local_path=art.get("local_path"),
                     content_type=art.get("content_type", "application/octet-stream"),
                     size_bytes=art.get("size_bytes", 0),
+                    sha256=art.get("sha256"),
                     meta_json=art.get("metadata", {}),
                     created_at=ts,
                 ))
@@ -690,7 +864,7 @@ class SqlRepository:
         task.status_reason = reason
         if to_status == TaskStatus.RUNNING and task.started_at is None:
             task.started_at = now_utc()
-        if to_status in (TaskStatus.DONE, TaskStatus.FAILED):
+        if to_status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED):
             task.finished_at = now_utc()
 
         # 发布 SSE 事件

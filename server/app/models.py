@@ -64,6 +64,7 @@ class TaskModel(Base):
     status = Column(String(16), nullable=False)
     status_reason = Column(Text, default="")
     request_params = Column(JSON, default=dict)
+    idempotency_key = Column(String(128), nullable=True, unique=True, index=True)
     diagnosis_step_id = Column(String(128), nullable=True, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -83,6 +84,7 @@ class TaskModel(Base):
             "status": self.status,
             "status_reason": self.status_reason or "",
             "request_params": self.request_params or {},
+            "idempotency_key": self.idempotency_key,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -156,6 +158,7 @@ class ArtifactModel(Base):
     local_path = Column(String(512), nullable=True)
     content_type = Column(String(128), default="application/octet-stream")
     size_bytes = Column(Integer, default=0)
+    sha256 = Column(String(64), nullable=True)
     meta_json = Column("metadata", JSON, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -168,6 +171,7 @@ class ArtifactModel(Base):
             "local_path": self.local_path,
             "content_type": self.content_type,
             "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
             "metadata": self.meta_json or {},
         }
 

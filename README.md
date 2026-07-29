@@ -173,6 +173,9 @@ flowchart LR
 | MinIO API | 9000 | 对象存储 |
 | MinIO Console | 9001 | 管理面板 |
 
+端口冲突时可通过 `MINI_DROP_GRPC_PORT` 覆盖 Server gRPC 监听端口；Agent
+侧的连接地址需同步指向该端口。
+
 ### 架构决策
 
 **为什么 gRPC？** Server ↔ Agent 使用 gRPC，5 个 `.proto` 文件定义全部通信接口，参考 DeepFlow `message/` 模式。强类型契约编译期发现字段不匹配，二进制序列化比 JSON 小 3-5 倍。Web ↔ Server 保留 REST/JSON——浏览器原生支持，易于 debug 和 curl 测试。
@@ -372,9 +375,12 @@ micro-drop completion --shell bash
 ### 任务
 
 ```bash
-POST   /api/tasks                          # 创建采集任务
+POST   /api/tasks                          # 创建采集任务（支持 Idempotency-Key）
+GET    /api/task-kinds                     # TaskKind 元数据（表单/能力/参数边界）
 GET    /api/tasks?search=&sort_by=&sort_order=  # 列表（搜索+排序+分页）
 GET    /api/tasks/{id}                     # 详情
+POST   /api/tasks/{id}/cancel              # 幂等取消运行中的任务
+POST   /api/tasks/{id}/retry               # 从终态任务创建新的重试任务
 DELETE /api/tasks/{id}                     # 删除（仅终态 + 级联删除关联数据）
 GET    /api/tasks/{id}/events              # 状态迁移链
 GET    /api/tasks/{id}/artifacts           # 产物列表
@@ -382,6 +388,10 @@ GET    /api/tasks/{id}/artifacts/{type}/content  # 产物内容
 POST   /api/tasks/{id}/diagnose            # AI 诊断
 GET    /api/tasks/{id}/diagnoses           # 诊断历史
 ```
+
+Web 创建与重试任务时会自动生成 `Idempotency-Key`，避免双击或网络重放产生
+重复任务。Agent 会先将 `NotifyResult` 写入 `AGENT_RESULT_SPOOL_DIR`，收到
+Server 确认后才删除；Server 对重复结果和 Artifact 元数据执行幂等处理。
 
 ### 诊断 + Agent + NLP
 
@@ -551,6 +561,10 @@ Provider 账户/模型/对话、自然语言任务解析、集群诊断意图与
 ---
 
 ## 开发命令
+
+发布基线的完整质量门禁、数据库迁移、备份恢复和对象对账步骤见
+[`docs/release-baseline-runbook.md`](docs/release-baseline-runbook.md)；最近一次三节点
+验证结果见 [`docs/release_baseline_report.md`](docs/release_baseline_report.md)。
 
 ```bash
 # Makefile（Linux / macOS / Git Bash）

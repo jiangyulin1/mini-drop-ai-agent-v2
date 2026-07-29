@@ -89,3 +89,30 @@ export function collectorMeta(collectorType) {
     flamegraph: false,
   };
 }
+
+/** Convert server TaskKind metadata to the stable view model used by pages. */
+export function collectorMetaFromTaskKind(kind) {
+  if (!kind?.key) return null;
+  const fallback = collectorMeta(kind.key);
+  return {
+    ...fallback,
+    label: kind.display_name || fallback.label,
+    resultLabel: kind.result_label || fallback.resultLabel,
+    description: kind.description || fallback.description,
+    color: kind.presentation?.color || fallback.color,
+    flamegraph: kind.presentation?.flamegraph ?? fallback.flamegraph,
+    defaultDuration:
+      kind.defaults?.duration_sec ?? fallback.defaultDuration,
+    defaultSampleRate:
+      kind.defaults?.sample_rate ?? fallback.defaultSampleRate,
+    durationMin:
+      kind.parameter_schema?.duration_sec?.minimum ?? 1,
+    durationMax:
+      kind.parameter_schema?.duration_sec?.maximum ?? 120,
+    sampleRateMin:
+      kind.parameter_schema?.sample_rate?.minimum ?? 1,
+    sampleRateMax:
+      kind.parameter_schema?.sample_rate?.maximum ?? 999,
+    permissionRequirements: kind.permission_requirements || [],
+  };
+}

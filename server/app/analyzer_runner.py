@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -73,12 +74,21 @@ def _collect_analyzer_outputs(output_dir: Path) -> list[dict]:
             "local_path": str(path),
             "content_type": content_type,
             "size_bytes": path.stat().st_size,
+            "sha256": _sha256_file(path),
         })
     return artifacts
 
 
 def _artifact_root() -> Path:
     return Path(os.getenv("MINI_DROP_ARTIFACT_ROOT", "/tmp/mini-drop")).expanduser().resolve()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _resolve_under_root(local_path: str | None) -> Path | None:

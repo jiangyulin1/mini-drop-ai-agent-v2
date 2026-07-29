@@ -1,12 +1,25 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Button, Input, Layout, Menu, message, Space, Tag, Tooltip, Typography } from "antd";
+import {
+  Button,
+  ConfigProvider,
+  Drawer,
+  Grid,
+  Input,
+  Layout,
+  Menu,
+  message,
+  Space,
+  Tag,
+  Tooltip,
+  Typography,
+  theme as antdTheme,
+} from "antd";
 import {
   DashboardOutlined,
   AuditOutlined,
   ExperimentOutlined,
   SettingOutlined,
-  MenuFoldOutlined,
   MenuUnfoldOutlined,
   KeyOutlined,
   BulbOutlined,
@@ -15,11 +28,13 @@ import {
   WifiOutlined,
   RobotOutlined,
 } from "@ant-design/icons";
-import { getStoredApiKey, saveApiKey, createEventSource } from "../api/client";
+import { getStoredApiKey, saveApiKey } from "../api/client";
 import ErrorBoundary from "../components/ErrorBoundary";
+import useSSE from "../hooks/useSSE";
 import { COLORS, LAYOUT, SPACING, FONT_SIZES } from "../theme";
 
 const { Sider, Header, Content } = Layout;
+const { useBreakpoint } = Grid;
 
 const MENU_ITEMS = [
   { key: "/", icon: <DashboardOutlined />, label: "任务面板" },
@@ -56,8 +71,12 @@ const LIGHT_TOKENS = {
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const screens = useBreakpoint();
+  const isMobile = screens.md === false;
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [apiKey, setApiKey] = useState(getStoredApiKey() || "");
+  const [savingApiKey, setSavingApiKey] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
     try {
       return localStorage.getItem("mini-drop-theme") === "dark";
@@ -85,14 +104,7 @@ export default function AppLayout() {
     });
   }, []);
 
-  // ── SSE 事件流 ──────────────────────────────────────────
-
-  useEffect(() => {
-    const es = createEventSource();
-    es.onopen = () => setSseConnected(true);
-    es.onerror = () => setSseConnected(false);
-    return () => es.close();
-  }, []);
+  useSSE({ onConnectionChange: setSseConnected });
 
   // ── 路由激活 key ─────────────────────────────────────────
 
@@ -104,39 +116,21 @@ export default function AppLayout() {
   // ── 保存 API Key ─────────────────────────────────────────
 
   async function handleSaveKey() {
-    await saveApiKey(apiKey.trim());
-    message.success(
-      apiKey.trim()
-        ? "API Key 已保存 (HttpOnly Cookie + 降级)"
-        : "API Key 已清除"
-    );
+    const token = apiKey.trim();
+    setSavingApiKey(true);
+    try {
+      await saveApiKey(token);
+      message.success(token ? "API Key 已验证并保存" : "API Key 已清除");
+      window.dispatchEvent(new Event("mini-drop:auth-changed"));
+    } catch (error) {
+      message.error(`API Key 验证失败：${error.message}`);
+    } finally {
+      setSavingApiKey(false);
+    }
   }
 
-  return (
-    <Layout
-      style={{
-        minHeight: "100vh",
-        background: T.bgLayout,
-        transition: "background 0.3s ease",
-      }}
-    >
-      {/* ── 侧边栏 ─────────────────────────────────────────── */}
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={(v) => setCollapsed(v)}
-        breakpoint="lg"
-        collapsedWidth={64}
-        width={LAYOUT.siderWidth}
-        theme="dark"
-        style={{
-          overflow: "auto",
-          height: "100vh",
-          position: "sticky",
-          top: 0,
-          left: 0,
-        }}
-      >
+  const renderSidebarContent = (compact = false) => (
+    <div style={{ position: "relative", height: "100%" }}>
         {/* Logo */}
         <div
           style={{
@@ -145,17 +139,17 @@ export default function AppLayout() {
             alignItems: "center",
             justifyContent: "center",
             borderBottom: "1px solid rgba(255,255,255,0.12)",
-            gap: collapsed ? 0 : 8,
+            gap: compact ? 0 : 8,
           }}
         >
           <ApiOutlined
             style={{
-              fontSize: collapsed ? 20 : 18,
+              fontSize: compact ? 20 : 18,
               color: COLORS.primary,
               transition: "transform 0.3s",
             }}
           />
-          {!collapsed && (
+          {!compact && (
             <Typography.Text
               strong
               style={{
@@ -175,7 +169,10 @@ export default function AppLayout() {
           mode="inline"
           selectedKeys={[selectedKey]}
           items={MENU_ITEMS}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key }) => {
+            navigate(key);
+            setMobileMenuOpen(false);
+          }}
           style={{ marginTop: SPACING.sm }}
         />
 
@@ -209,20 +206,68 @@ export default function AppLayout() {
                 fontSize: 11,
               }}
             >
-              {collapsed ? "" : sseConnected ? "SSE 已连接" : "SSE 断开"}
+              {compact ? "" : sseConnected ? "SSE 已连接" : "SSE 断开"}
             </Tag>
           </Tooltip>
         </div>
-      </Sider>
+    </div>
+  );
 
-      {/* ── 主区域 ─────────────────────────────────────────── */}
-      <Layout>
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: darkMode ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        token: { colorPrimary: COLORS.primary, borderRadius: 8 },
+      }}
+    >
+      <Layout
+        style={{
+          minHeight: "100vh",
+          background: T.bgLayout,
+          transition: "background 0.3s ease",
+        }}
+      >
+        {!isMobile && (
+          <Sider
+            collapsible
+            collapsed={collapsed}
+            onCollapse={setCollapsed}
+            collapsedWidth={64}
+            width={LAYOUT.siderWidth}
+            theme="dark"
+            style={{
+              overflow: "auto",
+              height: "100vh",
+              position: "sticky",
+              top: 0,
+              left: 0,
+            }}
+          >
+            {renderSidebarContent(collapsed)}
+          </Sider>
+        )}
+
+        <Drawer
+          open={isMobile && mobileMenuOpen}
+          onClose={() => setMobileMenuOpen(false)}
+          placement="left"
+          width={240}
+          closable={false}
+          styles={{
+            body: { padding: 0, background: "#001529" },
+          }}
+        >
+          {renderSidebarContent(false)}
+        </Drawer>
+
+        {/* ── 主区域 ─────────────────────────────────────────── */}
+        <Layout style={{ minWidth: 0 }}>
         {/* 顶栏 */}
         <Header
           style={{
             height: LAYOUT.headerHeight,
             lineHeight: `${LAYOUT.headerHeight}px`,
-            padding: `0 ${SPACING.lg}px`,
+            padding: isMobile ? `0 ${SPACING.sm}px` : `0 ${SPACING.lg}px`,
             background: T.bgHeader,
             borderBottom: `1px solid ${T.borderColor}`,
             display: "flex",
@@ -234,7 +279,16 @@ export default function AppLayout() {
             transition: "background 0.3s ease, border-color 0.3s ease",
           }}
         >
-          <Space size="middle">
+          <Space size={isMobile ? "small" : "middle"}>
+            {isMobile && (
+              <Button
+                type="text"
+                icon={<MenuUnfoldOutlined />}
+                aria-label="打开导航菜单"
+                onClick={() => setMobileMenuOpen(true)}
+                style={{ color: T.textSecondary }}
+              />
+            )}
             <Typography.Text
               strong
               style={{
@@ -243,22 +297,25 @@ export default function AppLayout() {
                 color: T.textPrimary,
               }}
             >
-              Mini-Drop 性能诊断平台
+              {isMobile ? "Mini-Drop" : "Mini-Drop 性能诊断平台"}
             </Typography.Text>
-            <Tag
-              color={sseConnected ? "green" : "default"}
-              style={{ fontSize: 10, lineHeight: "16px" }}
-            >
-              {sseConnected ? "实时连接" : "轮询模式"}
-            </Tag>
+            {!isMobile && (
+              <Tag
+                color={sseConnected ? "green" : "default"}
+                style={{ fontSize: 10, lineHeight: "16px" }}
+              >
+                {sseConnected ? "实时连接" : "轮询模式"}
+              </Tag>
+            )}
           </Space>
 
-          <Space size="small" wrap style={{ flexShrink: 0 }}>
+          <Space size="small" style={{ flexShrink: 0 }}>
             {/* 暗色模式切换 */}
             <Tooltip title={darkMode ? "切换亮色模式" : "切换暗色模式"}>
               <Button
                 size="small"
                 type="text"
+                aria-label={darkMode ? "切换亮色模式" : "切换暗色模式"}
                 icon={
                   darkMode ? (
                     <BulbFilled style={{ color: COLORS.warning }} />
@@ -271,26 +328,47 @@ export default function AppLayout() {
               />
             </Tooltip>
 
-            <Input.Password
-              placeholder="Mini-Drop API Key（必填）"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onPressEnter={handleSaveKey}
-              size="small"
-              style={{ width: 200, maxWidth: "40vw" }}
-              prefix={<KeyOutlined style={{ color: T.textSecondary }} />}
-            />
-            <Button size="small" type="primary" onClick={handleSaveKey}>
-              保存
-            </Button>
+            {isMobile ? (
+              <Tooltip title="前往系统设置管理 API Key">
+                <Button
+                  size="small"
+                  type="text"
+                  aria-label="管理 API Key"
+                  icon={<KeyOutlined />}
+                  onClick={() => navigate("/settings")}
+                  style={{ color: T.textSecondary }}
+                />
+              </Tooltip>
+            ) : (
+              <>
+                <Input.Password
+                  placeholder="Mini-Drop API Key（必填）"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  onPressEnter={handleSaveKey}
+                  size="small"
+                  style={{ width: 200, maxWidth: "40vw" }}
+                  prefix={<KeyOutlined style={{ color: T.textSecondary }} />}
+                  disabled={savingApiKey}
+                />
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={savingApiKey}
+                  onClick={handleSaveKey}
+                >
+                  保存
+                </Button>
+              </>
+            )}
           </Space>
         </Header>
 
         {/* 内容 */}
         <Content
           style={{
-            margin: SPACING.lg,
-            padding: SPACING.xl,
+            margin: isMobile ? SPACING.sm : SPACING.lg,
+            padding: isMobile ? SPACING.md : SPACING.xl,
             background: T.bgContent,
             borderRadius: 8,
             minHeight: `calc(100vh - ${LAYOUT.headerHeight}px - ${SPACING.lg * 2}px)`,
@@ -303,6 +381,7 @@ export default function AppLayout() {
           </ErrorBoundary>
         </Content>
       </Layout>
-    </Layout>
+      </Layout>
+    </ConfigProvider>
   );
 }

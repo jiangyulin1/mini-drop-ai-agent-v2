@@ -20,10 +20,11 @@
 
 ```bash
 pip install grpcio grpcio-tools protobuf
-cd proto && bash compile.sh
+python scripts/compile_proto.py
 ```
 
 编译产物输出到 `server/app/generated/`，包含 `*_pb2.py` 和 `*_pb2_grpc.py`。
+Linux 环境仍可使用 `cd proto && bash compile.sh`。
 
 ## 兼容性约定
 

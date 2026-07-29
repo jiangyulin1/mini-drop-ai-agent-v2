@@ -4,9 +4,18 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from agent.mini_drop_agent.config import load_config
-from agent.mini_drop_agent.main import CAPABILITIES, COLLECTORS, _apply_cos_config, _run_collector
-from server.app.generated import common_pb2
+from agent.mini_drop_agent.config import AgentConfig, load_config
+from unittest import mock
+
+from agent.mini_drop_agent.main import (
+    CAPABILITIES,
+    COLLECTORS,
+    _apply_cos_config,
+    _detect_capabilities,
+    _heartbeat,
+    _run_collector,
+)
+from server.app.generated import common_pb2, healthcheck_pb2, hotmethod_pb2
 
 
 class TestAgentConfig:
@@ -115,6 +124,37 @@ class TestAgentCollectorDispatch:
         assert CAPABILITIES == sorted(COLLECTORS.keys())  # capacity list auto-expands with registered collectors
         assert set(CAPABILITIES) >= {"continuous_perf", "ebpf_io", "go_pprof", "java_async", "memory_smaps", "perf_cpu", "pyspy"}
 
+    def test_detect_capabilities_excludes_missing_external_tools(self):
+        with mock.patch("shutil.which", return_value=None), \
+             mock.patch(
+                 "agent.mini_drop_agent.collectors.pyspy.PySpyCollector._find_pyspy",
+                 return_value=None,
+             ), \
+             mock.patch(
+                 "agent.mini_drop_agent.collectors.java_async.JavaAsyncProfilerCollector._find_profiler",
+                 return_value=None,
+             ):
+            detected = _detect_capabilities()
+
+        assert detected == ["go_pprof", "memory_smaps", "sys_metrics"]
+
+    def test_detect_capabilities_includes_available_external_tools(self):
+        def which(name):
+            return f"/usr/bin/{name}" if name in {"perf", "bpftrace"} else None
+
+        with mock.patch("shutil.which", side_effect=which), \
+             mock.patch(
+                 "agent.mini_drop_agent.collectors.pyspy.PySpyCollector._find_pyspy",
+                 return_value="/venv/bin/py-spy",
+             ), \
+             mock.patch(
+                 "agent.mini_drop_agent.collectors.java_async.JavaAsyncProfilerCollector._find_profiler",
+                 return_value="/opt/async-profiler/profiler.sh",
+             ):
+            detected = _detect_capabilities()
+
+        assert detected == sorted(COLLECTORS)
+
     def test_unregistered_collector_reports_failure_without_artifact(self):
         ok, reason, artifacts = _run_collector({
             "id": "task_001",
@@ -123,3 +163,33 @@ class TestAgentCollectorDispatch:
         assert ok is False
         assert "未在此 Agent 构建中注册" in reason
         assert artifacts == []
+
+    def test_heartbeat_decodes_collector_options(self):
+        class Stub:
+            def Do(self, _request, timeout):
+                assert timeout == 5
+                return healthcheck_pb2.HealthCheckResponse(
+                    pending=True,
+                    task_desc=hotmethod_pb2.TaskDesc(
+                        task_id="task_options",
+                        profiler_type=2,
+                        options_json='{"port":6061,"pprof_endpoint":"/custom"}',
+                        sample_argv=hotmethod_pb2.RecordArgv(
+                            pid=42,
+                            hz=99,
+                            duration=5,
+                        ),
+                    ),
+                )
+
+        task = _heartbeat(
+            Stub(),
+            AgentConfig(
+                agent_id="agent-options",
+                server_grpc_addr="localhost:50051",
+                agent_ip_addr="127.0.0.1",
+            ),
+        )
+
+        assert task["request_params"]["options"]["port"] == 6061
+        assert task["request_params"]["options"]["pprof_endpoint"] == "/custom"

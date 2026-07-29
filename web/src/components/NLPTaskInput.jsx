@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -20,10 +20,11 @@ import {
   FireOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
-import { nlpParse, createTask, listAgents } from "../api/client";
+import { nlpParse, createTask, listAgents, listTaskKinds } from "../api/client";
 import {
   COLLECTOR_OPTIONS,
   collectorMeta,
+  collectorMetaFromTaskKind,
 } from "../utils/collectors";
 
 export default function NLPTaskInput({ onTaskCreated }) {
@@ -40,6 +41,19 @@ export default function NLPTaskInput({ onTaskCreated }) {
   const [quickDuration, setQuickDuration] = useState(
     collectorMeta("perf_cpu").defaultDuration,
   );
+  const [taskKindMeta, setTaskKindMeta] = useState({});
+  const submittingRef = useRef(false);
+
+  const metaFor = (collectorType) =>
+    taskKindMeta[collectorType] || collectorMeta(collectorType);
+
+  const collectorOptions = useMemo(() => {
+    const remote = Object.entries(taskKindMeta).map(([value, meta]) => ({
+      value,
+      label: `${meta.label} · ${meta.resultLabel}`,
+    }));
+    return remote.length > 0 ? remote : COLLECTOR_OPTIONS;
+  }, [taskKindMeta]);
 
   const onlineAgents = useMemo(
     () => agents.filter((agent) => agent.status === "ONLINE"),
@@ -74,16 +88,29 @@ export default function NLPTaskInput({ onTaskCreated }) {
 
   useEffect(() => {
     loadAgents();
+    listTaskKinds()
+      .then((items) => {
+        const normalized = Object.fromEntries(
+          (items || [])
+            .map((kind) => [kind.key, collectorMetaFromTaskKind(kind)])
+            .filter(([, meta]) => Boolean(meta)),
+        );
+        if (Object.keys(normalized).length > 0) setTaskKindMeta(normalized);
+      })
+      .catch(() => {
+        // Older Servers do not expose metadata; keep the built-in safe fallback.
+      });
   }, []);
 
   function changeQuickCollector(value) {
-    const meta = collectorMeta(value);
+    const meta = metaFor(value);
     setQuickCollector(value);
     setQuickDuration(meta.defaultDuration);
     setQuickAgentId(selectCapableAgent(value)?.id || "");
   }
 
   async function handleQuickCreate() {
+    if (submittingRef.current) return;
     if (!quickAgentId) {
       setError("请选择一个在线 Agent");
       return;
@@ -98,11 +125,12 @@ export default function NLPTaskInput({ onTaskCreated }) {
     }
     const agent = agents.find((item) => item.id === quickAgentId);
     if (!(agent?.capabilities || []).includes(quickCollector)) {
-      setError(`Agent ${quickAgentId} 不支持 ${collectorMeta(quickCollector).label}`);
+      setError(`Agent ${quickAgentId} 不支持 ${metaFor(quickCollector).label}`);
       return;
     }
 
-    const meta = collectorMeta(quickCollector);
+    const meta = metaFor(quickCollector);
+    submittingRef.current = true;
     setSubmitting(true);
     setError("");
     try {
@@ -120,6 +148,7 @@ export default function NLPTaskInput({ onTaskCreated }) {
     } catch (err) {
       setError(err.message);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -140,12 +169,14 @@ export default function NLPTaskInput({ onTaskCreated }) {
   }
 
   async function handleCreate() {
+    if (submittingRef.current) return;
     if (!result) return;
     const pid = result.selected_pid || result.candidate_pids?.[0]?.pid;
     if (!pid) {
       setError("请从候选列表中选择一个目标 PID");
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     setError("");
     try {
@@ -180,6 +211,7 @@ export default function NLPTaskInput({ onTaskCreated }) {
     } catch (err) {
       setError(err.message);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -206,17 +238,17 @@ export default function NLPTaskInput({ onTaskCreated }) {
             children: (
               <Space direction="vertical" size={12} style={{ width: "100%" }}>
                 <Alert
-                  type={collectorMeta(quickCollector).flamegraph ? "success" : "info"}
+                  type={metaFor(quickCollector).flamegraph ? "success" : "info"}
                   showIcon
-                  message={`完成后展示：${collectorMeta(quickCollector).resultLabel}`}
-                  description={collectorMeta(quickCollector).description}
+                  message={`完成后展示：${metaFor(quickCollector).resultLabel}`}
+                  description={metaFor(quickCollector).description}
                 />
                 <Row gutter={[12, 12]}>
                   <Col xs={24} lg={9}>
                     <Typography.Text type="secondary">采集预设</Typography.Text>
                     <Select
                       value={quickCollector}
-                      options={COLLECTOR_OPTIONS}
+                      options={collectorOptions}
                       onChange={changeQuickCollector}
                       style={{ width: "100%", marginTop: 4 }}
                     />
@@ -251,8 +283,8 @@ export default function NLPTaskInput({ onTaskCreated }) {
                   <Col xs={12} md={6} lg={4}>
                     <Typography.Text type="secondary">采样时长（秒）</Typography.Text>
                     <InputNumber
-                      min={1}
-                      max={300}
+                      min={metaFor(quickCollector).durationMin || 1}
+                      max={metaFor(quickCollector).durationMax || 120}
                       value={quickDuration}
                       onChange={setQuickDuration}
                       style={{ width: "100%", marginTop: 4 }}
@@ -299,12 +331,12 @@ export default function NLPTaskInput({ onTaskCreated }) {
                   >
                     <Descriptions column={2} size="small">
                       <Descriptions.Item label="采集器">
-                        <Tag color={collectorMeta(result.collector_type).color}>
-                          {collectorMeta(result.collector_type).label}
+                        <Tag color={metaFor(result.collector_type).color}>
+                          {metaFor(result.collector_type).label}
                         </Tag>
                       </Descriptions.Item>
                       <Descriptions.Item label="预期结果">
-                        {collectorMeta(result.collector_type).resultLabel}
+                        {metaFor(result.collector_type).resultLabel}
                       </Descriptions.Item>
                       <Descriptions.Item label="进程">{result.process_name}</Descriptions.Item>
                       <Descriptions.Item label="采样时长">{result.duration_sec}s</Descriptions.Item>

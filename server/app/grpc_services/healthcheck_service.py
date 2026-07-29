@@ -1,5 +1,6 @@
 """HealthCheck gRPC 服务：1 Hz 心跳 + 任务下发。"""
 
+import json
 from typing import Any
 
 from server.app.generated import healthcheck_pb2, healthcheck_pb2_grpc, hotmethod_pb2
@@ -43,6 +44,15 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
         task_desc.sample_argv.callgraph = task.request_params.get("options", {}).get("callgraph", "fp")
         task_desc.sample_argv.event = task.request_params.get("options", {}).get("event", "cpu-cycles")
         task_desc.sample_argv.subprocess = task.request_params.get("options", {}).get("subprocess", False)
+        options = task.request_params.get("options", {})
+        if isinstance(options, dict):
+            options_json = json.dumps(
+                options,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if len(options_json.encode("utf-8")) <= 8192:
+                task_desc.options_json = options_json
         return response
 
     @staticmethod

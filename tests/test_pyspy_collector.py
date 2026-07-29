@@ -1,6 +1,7 @@
 """py-spy 采集器单元测试。"""
 
 import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -40,6 +41,27 @@ class TestPySpyAvailability:
             result = collector.collect(task)
         assert result.ok is False
         assert "不存在" in result.reason
+
+    def test_finds_pyspy_next_to_agent_interpreter(self, collector, tmp_path):
+        executable = tmp_path / ("py-spy.exe" if sys.platform == "win32" else "py-spy")
+        executable.write_text("")
+        agent_python = tmp_path / ("python.exe" if sys.platform == "win32" else "python")
+
+        with mock.patch("shutil.which", return_value=None), \
+             mock.patch("sys.executable", str(agent_python)):
+            assert collector._find_pyspy() == str(executable)
+
+    def test_keeps_virtualenv_path_when_python_is_a_symlink(
+        self, collector, tmp_path
+    ):
+        bin_dir = tmp_path / "venv" / "bin"
+        bin_dir.mkdir(parents=True)
+        pyspy = bin_dir / ("py-spy.exe" if sys.platform == "win32" else "py-spy")
+        pyspy.write_text("")
+
+        with mock.patch("shutil.which", return_value=None), \
+             mock.patch("sys.executable", str(bin_dir / "python")):
+            assert collector._find_pyspy() == str(pyspy)
 
 
 class TestPySpyExecution:

@@ -29,6 +29,7 @@ class EventBus:
         self._lock = threading.Lock()
         self._subscribers: list[weakref.ref] = []
         self._history: list[dict[str, Any]] = []
+        self._event_seq = 0
 
     def _dead_collect(self) -> None:
         """清理已被 GC 回收的订阅者（调用前需持有 _lock）。"""
@@ -36,12 +37,17 @@ class EventBus:
 
     def publish(self, event_type: str, data: dict[str, Any]) -> None:
         """发布事件。通知所有订阅者并记录历史。"""
-        event = {
-            "event": event_type,
-            "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+        timestamp = datetime.now(timezone.utc).isoformat()
         with self._lock:
+            # A wall clock can return the same value for adjacent events on
+            # Windows. A sequence is the reliable in-process SSE cursor.
+            self._event_seq += 1
+            event = {
+                "id": str(self._event_seq),
+                "event": event_type,
+                "data": data,
+                "timestamp": timestamp,
+            }
             self._history.append(event)
             if len(self._history) > MAX_HISTORY:
                 self._history = self._history[-MAX_HISTORY:]
@@ -82,10 +88,16 @@ class EventBus:
             self._subscribers = [r for r in self._subscribers if r() is not q]
 
     def get_history(self, since: str | None = None) -> list[dict[str, Any]]:
-        """获取历史事件（可选地：仅返回 since 时间戳之后的事件）。"""
+        """获取历史事件（可选地：仅返回 SSE 游标之后的事件）。
+
+        ISO 时间戳仍作为兼容格式接受，便于旧版 Web 客户端平滑升级。
+        """
         with self._lock:
             if since is None:
                 return list(self._history)
+            for index, event in enumerate(self._history):
+                if event["id"] == since:
+                    return list(self._history[index + 1 :])
             return [e for e in self._history if e["timestamp"] > since]
 
 

@@ -19,6 +19,8 @@ def test_event_bus_supports_cross_thread_publish_and_blocking_read():
 
     assert event["event"] == "task_changed"
     assert event["data"]["task_id"] == "task_1"
+    assert event["id"] == "1"
+    assert event["timestamp"]
 
 
 def test_event_bus_unsubscribe_stops_delivery():
@@ -33,3 +35,14 @@ def test_event_bus_unsubscribe_stops_delivery():
     except queue.Empty:
         return
     raise AssertionError("unsubscribed queue should not receive events")
+
+
+def test_event_bus_history_resumes_after_event_cursor():
+    bus = EventBus()
+    bus.publish("task_changed", {"task_id": "task_1"})
+    first = bus.get_history()[0]
+    bus.publish("task_changed", {"task_id": "task_2"})
+
+    resumed = bus.get_history(first["id"])
+
+    assert [event["data"]["task_id"] for event in resumed] == ["task_2"]

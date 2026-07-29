@@ -68,9 +68,9 @@ class TestContinuousExecution:
 
         with mock.patch("shutil.which", return_value="/usr/bin/perf"), \
              mock.patch.object(collector, "_pid_exists", return_value=True), \
-             mock.patch("subprocess.Popen", return_value=mock_proc), \
+             mock.patch("subprocess.Popen", return_value=mock_proc) as popen_mock, \
              mock.patch("os.setpgrp", create=True), \
-             mock.patch("time.sleep"):
+             mock.patch("time.sleep") as sleep_mock:
             result = collector.collect(task_)
 
         assert result.ok is True
@@ -79,6 +79,9 @@ class TestContinuousExecution:
         assert has_window
         assert os.path.isfile(summary["local_path"])
         assert summary["size_bytes"] > 0
+        sleep_mock.assert_not_called()
+        command = popen_mock.call_args_list[0].args[0]
+        assert command[-2:] == ["sleep", "1"]
 
     def test_zero_ok_windows_returns_failure(self, collector, task, tmp_path):
         """所有窗口都失败 → 返回 False。"""

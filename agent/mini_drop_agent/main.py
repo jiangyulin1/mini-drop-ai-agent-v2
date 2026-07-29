@@ -16,6 +16,7 @@ import server.app._env  # noqa: F401 — 自动加载 .env
 import json
 import os
 import queue
+import shutil
 import signal
 import socket
 import threading
@@ -39,6 +40,7 @@ from agent.mini_drop_agent.connection import GrpcConnection
 from agent.mini_drop_agent.config import AgentConfig, load_config
 from agent.mini_drop_agent.logging_utils import log_event
 from agent.mini_drop_agent.metrics import ProcessStatsSampler
+from agent.mini_drop_agent.result_spool import ResultSpool
 from server.app.generated import (
     healthcheck_pb2,
     healthcheck_pb2_grpc,
@@ -62,6 +64,21 @@ COLLECTORS = {
 }
 
 CAPABILITIES = sorted(COLLECTORS.keys())
+
+
+def _detect_capabilities() -> list[str]:
+    """Report only collectors that this Agent can execute locally."""
+
+    available = {"go_pprof", "memory_smaps", "sys_metrics"}
+    if shutil.which("perf"):
+        available.update({"perf_cpu", "continuous_perf"})
+    if shutil.which("bpftrace"):
+        available.add("ebpf_io")
+    if PySpyCollector._find_pyspy():
+        available.add("pyspy")
+    if JavaAsyncProfilerCollector._find_profiler():
+        available.add("java_async")
+    return sorted(available & set(COLLECTORS))
 
 
 # ── 任务执行 ───────────────────────────────────────────────────────
@@ -118,7 +135,7 @@ def _register(stub: init_pb2_grpc.InitAgentStub, config: AgentConfig) -> None:
             ip_addr=config.agent_ip_addr,
             version="0.1.0",
             os_info=_os_info(),
-            capabilities=CAPABILITIES,
+            capabilities=_detect_capabilities(),
         ),
         timeout=5,
     )
@@ -169,6 +186,19 @@ def _heartbeat(
             collector_type = _TASK_TYPE_COLLECTOR[task_type]
         else:
             collector_type = _profiler_to_collector(resp.task_desc.profiler_type)
+        options: dict[str, Any] = {}
+        if resp.task_desc.options_json:
+            try:
+                decoded_options = json.loads(resp.task_desc.options_json)
+                if isinstance(decoded_options, dict):
+                    options = decoded_options
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if resp.task_desc.sample_argv.callgraph:
+            options["callgraph"] = resp.task_desc.sample_argv.callgraph
+        if resp.task_desc.sample_argv.event:
+            options["event"] = resp.task_desc.sample_argv.event
+        options["subprocess"] = resp.task_desc.sample_argv.subprocess
         return {
             "id": resp.task_desc.task_id,
             "collector_type": collector_type,
@@ -176,10 +206,7 @@ def _heartbeat(
             "sample_rate": resp.task_desc.sample_argv.hz,
             "duration_sec": resp.task_desc.sample_argv.duration,
             "request_params": {
-                "options": {
-                    "callgraph": resp.task_desc.sample_argv.callgraph,
-                    "event": resp.task_desc.sample_argv.event,
-                },
+                "options": options,
             },
         }
     return None
@@ -216,6 +243,7 @@ def _notify_result(
                 error_message="",
                 artifact_type="raw",
                 artifact_metadata_json=json.dumps(artifacts),
+                result_message=reason,
             ),
             timeout=10,
         )
@@ -227,6 +255,41 @@ def _notify_result(
             ),
             timeout=10,
         )
+
+
+def _drain_result_spool(conn: GrpcConnection, spool: ResultSpool) -> int:
+    """Replay durable results until the first unavailable-server failure."""
+
+    acknowledged = 0
+    for envelope in spool.pending():
+        try:
+            conn.call_with_retry(
+                lambda envelope=envelope: _notify_result(
+                    hotmethod_pb2_grpc.HotmethodStub(conn.channel),
+                    envelope["task_id"],
+                    envelope["ok"],
+                    envelope["reason"],
+                    envelope["artifacts"],
+                )
+            )
+        except grpc.RpcError as exc:
+            log_event(
+                "warning",
+                "result_spool_replay_deferred",
+                task_id=envelope["task_id"],
+                code=exc.code(),
+                details=exc.details(),
+            )
+            break
+        spool.acknowledge(envelope["task_id"])
+        acknowledged += 1
+        log_event(
+            "info",
+            "result_spool_acknowledged",
+            task_id=envelope["task_id"],
+            artifact_count=len(envelope["artifacts"]),
+        )
+    return acknowledged
 
 
 # ── 主循环 ─────────────────────────────────────────────────────────
@@ -289,6 +352,7 @@ def main() -> None:
 
     # 初始化注册 + 拉取配置（带重试）
     config = _init_register_with_retry(conn, config)
+    result_spool = ResultSpool(config.result_spool_dir)
 
     work_queue = queue.Queue(maxsize=1)
     result_queue = queue.Queue()
@@ -308,31 +372,31 @@ def main() -> None:
             pass
         else:
             try:
-                conn.call_with_retry(
-                    lambda: _notify_result(
-                        hotmethod_pb2_grpc.HotmethodStub(conn.channel),
-                        finished_task["id"],
-                        ok,
-                        reason,
-                        artifacts,
-                    )
+                result_spool.save(
+                    finished_task["id"],
+                    ok,
+                    reason,
+                    artifacts,
                 )
-                if ok:
-                    log_event("info", "task_completed", task_id=finished_task["id"], artifact_count=len(artifacts))
-                else:
-                    log_event("error", "task_failed", task_id=finished_task["id"], reason=reason)
-            except grpc.RpcError as exc:
+                log_event(
+                    "info",
+                    "result_spooled",
+                    task_id=finished_task["id"],
+                    artifact_count=len(artifacts),
+                )
+            except (OSError, ValueError, TypeError) as exc:
                 log_event(
                     "error",
-                    "notify_result_failed",
+                    "result_spool_write_failed",
                     task_id=finished_task["id"],
-                    code=exc.code(),
-                    details=exc.details(),
+                    error=str(exc),
                 )
             finally:
                 if active_task and active_task.get("id") == finished_task.get("id"):
                     active_task = None
                 result_queue.task_done()
+
+        _drain_result_spool(conn, result_spool)
 
         try:
             task = conn.call_with_retry(

@@ -65,6 +65,7 @@ class TestEBPFExecution:
             result = collector.collect(task)
 
         assert result.ok is True
+        assert "10 个样本" in result.reason
         assert result.artifacts[0]["artifact_type"] == "ebpf_metrics"
         cmd = popen_mock.call_args.args[0]
         assert cmd == [

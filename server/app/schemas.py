@@ -120,3 +120,15 @@ class RCAFeedbackRequest(BaseModel):
     feedback_label: Literal["correct", "wrong", "partial", "unknown"]
     corrected_cause_id: Optional[str] = None
     feedback_note: Optional[str] = None
+
+
+class CancelTaskRequest(BaseModel):
+    """Cancel an active task. Cancellation is idempotent."""
+
+    reason: str = Field(default="用户取消任务", min_length=1, max_length=500)
+
+
+class RetryTaskRequest(BaseModel):
+    """Create a new task using an existing terminal task as its template."""
+
+    name: Optional[str] = Field(default=None, max_length=256)

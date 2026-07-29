@@ -8,6 +8,7 @@ import {
   Descriptions,
   Empty,
   message,
+  Modal,
   Progress,
   Row,
   Select,
@@ -28,10 +29,11 @@ import {
   FileTextOutlined,
   RedoOutlined,
   ReloadOutlined,
+  StopOutlined,
 } from "@ant-design/icons";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  createTask,
+  cancelTask,
   downloadTaskArtifact,
   getDiagnosis,
   getTask,
@@ -39,6 +41,7 @@ import {
   getTaskArtifacts,
   getTaskEvents,
   listTaskDiagnoses,
+  retryTask,
   submitDiagnosisFeedback,
   triggerDiagnose,
 } from "../api/client";
@@ -72,6 +75,7 @@ export default function TaskResult() {
   const [selectedContinuousIndex, setSelectedContinuousIndex] = useState(null);
   const [downloadingArtifact, setDownloadingArtifact] = useState("");
   const [recreating, setRecreating] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   // ── 数据加载 ──────────────────────────────────────────
 
@@ -276,20 +280,8 @@ export default function TaskResult() {
       onOk: async () => {
         setRecreating(true);
         try {
-          const safeOptions = { ...(task.request_params?.options || {}) };
-          delete safeOptions.diagnosis_step_id;
-          const response = await createTask({
+          const response = await retryTask(task.id, {
             name: `重采集: ${task.name || taskCollector.label}`,
-            agent_id: task.agent_id,
-            target_pid: task.target_pid,
-            collector_type: task.collector_type,
-            sample_rate: task.sample_rate,
-            duration_sec: task.duration_sec,
-            options: {
-              ...safeOptions,
-              source: "web_recollect",
-              rerun_of: task.id,
-            },
           });
           message.success("新任务已创建");
           navigate(`/task/${response.task_id}`);
@@ -297,6 +289,29 @@ export default function TaskResult() {
           message.error(`重新采集失败：${err.message}`);
         } finally {
           setRecreating(false);
+        }
+      },
+    });
+  }
+
+  function cancelCurrentTask() {
+    if (!task || !isActive) return;
+    Modal.confirm({
+      title: "确认取消当前任务？",
+      content: "任务会立即进入 CANCELLED 终态；Agent 的迟到结果将被安全忽略。",
+      okText: "确认取消",
+      okType: "danger",
+      cancelText: "继续等待",
+      onOk: async () => {
+        setCancelling(true);
+        try {
+          await cancelTask(task.id);
+          message.success("任务已取消");
+          await loadAll();
+        } catch (err) {
+          message.error(`取消失败：${err.message}`);
+        } finally {
+          setCancelling(false);
         }
       },
     });
@@ -399,6 +414,16 @@ export default function TaskResult() {
         </Space>
         <Space>
           {isActive && <Tag color="blue">自动刷新中（任务运行中）</Tag>}
+          {isActive && (
+            <Button
+              danger
+              icon={<StopOutlined />}
+              loading={cancelling}
+              onClick={cancelCurrentTask}
+            >
+              取消任务
+            </Button>
+          )}
           {task && (
             <Button
               icon={<RedoOutlined />}
@@ -439,16 +464,30 @@ export default function TaskResult() {
             </Descriptions>
           </Card>
           <Alert
-            type={task.status === "FAILED" ? "error" : taskCollector.flamegraph ? "success" : "info"}
+            type={
+              task.status === "FAILED"
+                ? "error"
+                : task.status === "CANCELLED"
+                ? "warning"
+                : taskCollector.flamegraph
+                ? "success"
+                : "info"
+            }
             showIcon
-            message={`预期可视化：${taskCollector.resultLabel}`}
+            message={
+              task.status === "CANCELLED"
+                ? "任务已取消"
+                : `预期可视化：${taskCollector.resultLabel}`
+            }
             description={
               task.status === "FAILED"
                 ? `任务失败原因：${task.status_reason || "未提供失败原因"}`
+                : task.status === "CANCELLED"
+                ? task.status_reason || "任务已由用户取消，迟到结果不会覆盖此状态。"
                 : `${taskCollector.description}${task.status_reason ? ` 当前状态：${task.status_reason}` : ""}`
             }
             action={
-              task.status === "FAILED" ? (
+              ["FAILED", "CANCELLED"].includes(task.status) ? (
                 <Button size="small" icon={<RedoOutlined />} onClick={recreateTask}>
                   重新采集
                 </Button>
@@ -469,6 +508,8 @@ export default function TaskResult() {
                     ? "green"
                     : event.to_status === "FAILED"
                     ? "red"
+                    : event.to_status === "CANCELLED"
+                    ? "orange"
                     : "blue",
                   children: (
                     <Space direction="vertical" size={0}>

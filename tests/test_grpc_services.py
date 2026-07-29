@@ -235,6 +235,33 @@ class TestHealthCheck:
         refreshed = grpc_fix.repo.tasks[task.id]
         assert refreshed.status == TaskStatus.RUNNING
 
+    def test_heartbeat_preserves_collector_options(self, grpc_fix: GrpcFixture):
+        self._register(grpc_fix)
+        grpc_fix.repo.create_task(
+            CreateTaskRequest(
+                name="pprof-options",
+                agent_id=self.AGENT_ID,
+                target_pid=1234,
+                collector_type="go_pprof",
+                options={
+                    "port": 6061,
+                    "pprof_endpoint": "/debug/pprof/profile",
+                },
+            )
+        )
+
+        resp = grpc_fix.hc_stub.Do(
+            healthcheck_pb2.HealthCheckRequest(
+                agent_id=self.AGENT_ID,
+                ip_addr=self.IP,
+            )
+        )
+
+        assert json.loads(resp.task_desc.options_json) == {
+            "port": 6061,
+            "pprof_endpoint": "/debug/pprof/profile",
+        }
+
     def test_busy_heartbeat_does_not_pull_task(self, grpc_fix: GrpcFixture):
         self._register(grpc_fix)
         task = grpc_fix.repo.create_task(
@@ -391,6 +418,41 @@ class TestHotmethodNotifyResult:
         assert TaskStatus.ANALYZING in events
         assert TaskStatus.DONE in events
 
+    def test_notify_result_replay_is_idempotent(self, grpc_fix: GrpcFixture):
+        task_id = self._create_and_start_task(grpc_fix)
+        request = hotmethod_pb2.TaskResult(
+            task_id=task_id,
+            error_message="",
+            artifact_metadata_json=(
+                '[{"artifact_type":"top_json","filename":"top.json",'
+                '"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]'
+            ),
+        )
+
+        grpc_fix.hotmethod_stub.NotifyResult(request)
+        event_count = len([event for event in grpc_fix.repo.events if event.task_id == task_id])
+        grpc_fix.hotmethod_stub.NotifyResult(request)
+
+        assert grpc_fix.repo.tasks[task_id].status == TaskStatus.DONE
+        assert len([event for event in grpc_fix.repo.events if event.task_id == task_id]) == event_count
+        artifacts = grpc_fix.repo.artifacts.get(task_id, [])
+        assert len(artifacts) == 1
+        assert artifacts[0]["sha256"] == "a" * 64
+
+    def test_late_result_after_cancel_is_acknowledged_and_ignored(self, grpc_fix: GrpcFixture):
+        task_id = self._create_and_start_task(grpc_fix)
+        grpc_fix.repo.cancel_task(task_id, "operator cancelled")
+
+        grpc_fix.hotmethod_stub.NotifyResult(
+            hotmethod_pb2.TaskResult(
+                task_id=task_id,
+                artifact_metadata_json='[{"artifact_type":"top_json","filename":"late.json"}]',
+            )
+        )
+
+        assert grpc_fix.repo.tasks[task_id].status == TaskStatus.CANCELLED
+        assert grpc_fix.repo.artifacts.get(task_id, []) == []
+
     def test_notify_ebpf_metrics_uses_ebpf_done_reason(self, grpc_fix: GrpcFixture):
         task_id = self._create_and_start_task(grpc_fix)
         grpc_fix.hotmethod_stub.NotifyResult(
@@ -406,6 +468,23 @@ class TestHotmethodNotifyResult:
         task = grpc_fix.repo.tasks[task_id]
         assert task.status == TaskStatus.DONE
         assert task.status_reason == "eBPF IO 延迟分布已生成"
+
+    def test_notify_success_preserves_collector_result_message(self, grpc_fix: GrpcFixture):
+        task_id = self._create_and_start_task(grpc_fix)
+        grpc_fix.hotmethod_stub.NotifyResult(
+            hotmethod_pb2.TaskResult(
+                task_id=task_id,
+                result_message="eBPF IO 延迟采集完成，共 128 个样本",
+                artifact_metadata_json=(
+                    '[{"artifact_type":"ebpf_metrics","filename":"ebpf_metrics.json"}]'
+                ),
+            )
+        )
+        task = grpc_fix.repo.tasks[task_id]
+        assert task.status == TaskStatus.DONE
+        assert task.status_reason == (
+            "eBPF IO 延迟分布已生成；eBPF IO 延迟采集完成，共 128 个样本"
+        )
 
     def test_notify_failure_transitions_to_failed(self, grpc_fix: GrpcFixture):
         task_id = self._create_and_start_task(grpc_fix)

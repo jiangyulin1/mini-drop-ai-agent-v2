@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 
 from agent.mini_drop_agent.config import AgentConfig
 
 
 def maybe_upload_artifacts(task_id: str, artifacts: list[dict], config: AgentConfig) -> list[dict]:
+    enriched = [_with_integrity(artifact) for artifact in artifacts]
     if not config.upload_artifacts:
-        return artifacts
+        return enriched
     client = _minio_client(config)
     result: list[dict] = []
-    for artifact in artifacts:
+    for artifact in enriched:
         result.append(_upload_one(client, task_id, artifact, config))
     return result
 
@@ -62,4 +64,18 @@ def _upload_one(client, task_id: str, artifact: dict, config: AgentConfig) -> di
     item["bucket"] = config.minio_bucket
     item["object_key"] = object_key
     item["size_bytes"] = os.path.getsize(local_path)
+    return item
+
+
+def _with_integrity(artifact: dict) -> dict:
+    item = dict(artifact)
+    local_path = item.get("local_path")
+    if not local_path or not os.path.isfile(local_path):
+        return item
+    digest = hashlib.sha256()
+    with open(local_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    item["size_bytes"] = os.path.getsize(local_path)
+    item["sha256"] = digest.hexdigest()
     return item

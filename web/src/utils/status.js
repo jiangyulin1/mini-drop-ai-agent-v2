@@ -14,6 +14,7 @@
 export function statusColor(status) {
   if (status === "DONE" || status === "ONLINE") return "green";
   if (status === "FAILED" || status === "OFFLINE") return "red";
+  if (status === "CANCELLED") return "orange";
   if (
     status === "RUNNING" ||
     status === "ANALYZING" ||

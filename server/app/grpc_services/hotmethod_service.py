@@ -1,13 +1,15 @@
 """Hotmethod gRPC 服务：接收 Agent 采集结果。"""
 
 import json
+import re
 from typing import Any
 
+import grpc
 from google.protobuf.empty_pb2 import Empty
 
 from server.app.analyzer_runner import analyze_raw_perf_artifacts
 from server.app.generated import hotmethod_pb2_grpc
-from server.app.state_machine import Actor, TaskStatus
+from server.app.state_machine import Actor, TERMINAL_STATES, TaskStatus
 
 MAX_ARTIFACTS_PER_TASK = 32
 MAX_ARTIFACT_FIELD_LENGTH = 512
@@ -22,6 +24,16 @@ class HotmethodService(hotmethod_pb2_grpc.HotmethodServicer):
 
     def NotifyResult(self, request, context) -> Empty:
         task_id = request.task_id
+        task = self._repo.tasks.get(task_id)
+        if task is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, "任务不存在")
+        current = TaskStatus(task.status)
+
+        # Agent may resend after losing the gRPC acknowledgement. A terminal
+        # task already contains the authoritative result, so acknowledge the
+        # replay without writing duplicate events or artifacts.
+        if current in TERMINAL_STATES:
+            return Empty()
 
         if request.error_message:
             reason = _safe_text(request.error_message, max_length=MAX_ERROR_MESSAGE_LENGTH) or "Agent reported collection failure"
@@ -32,11 +44,20 @@ class HotmethodService(hotmethod_pb2_grpc.HotmethodServicer):
             )
             return Empty()
 
-        # 采集成功：先迁移到 UPLOADING，写入产物元数据
-        self._repo.transition_task(
-            task_id, TaskStatus.UPLOADING,
-            "采集完成，准备上传产物", Actor.AGENT,
+        if current == TaskStatus.PENDING:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "任务尚未下发，不能上报结果")
+
+        success_message = _safe_text(
+            getattr(request, "result_message", ""),
+            max_length=MAX_ERROR_MESSAGE_LENGTH,
         )
+
+        if current == TaskStatus.RUNNING:
+            self._repo.transition_task(
+                task_id, TaskStatus.UPLOADING,
+                success_message or "采集完成，准备上传产物", Actor.AGENT,
+            )
+            current = TaskStatus.UPLOADING
 
         # 解析 artifact 元数据
         artifacts: list[dict] = []
@@ -52,20 +73,27 @@ class HotmethodService(hotmethod_pb2_grpc.HotmethodServicer):
         if artifacts:
             self._repo.add_artifacts(task_id, artifacts)
 
-        # 产物写入后迁移到 ANALYZING；如果 Agent 已同步产出分析结果，MVP 闭环直接完成任务。
-        self._repo.transition_task(
-            task_id, TaskStatus.ANALYZING,
-            "产物已记录，等待分析", Actor.SERVER,
-        )
+        if current == TaskStatus.UPLOADING:
+            self._repo.transition_task(
+                task_id, TaskStatus.ANALYZING,
+                "产物已记录，等待分析", Actor.SERVER,
+            )
+            current = TaskStatus.ANALYZING
         if not _has_analysis_result(artifacts):
             generated_artifacts = analyze_raw_perf_artifacts(task_id, artifacts)
             if generated_artifacts:
                 self._repo.add_artifacts(task_id, generated_artifacts)
                 artifacts.extend(generated_artifacts)
         if _has_analysis_result(artifacts):
+            analysis_reason = _analysis_done_reason(artifacts)
+            final_reason = (
+                f"{analysis_reason}；{success_message}"
+                if success_message and success_message != analysis_reason
+                else analysis_reason
+            )
             self._repo.transition_task(
                 task_id, TaskStatus.DONE,
-                _analysis_done_reason(artifacts), Actor.ANALYZER,
+                final_reason, Actor.ANALYZER,
             )
 
         return Empty()
@@ -125,6 +153,12 @@ def _sanitize_artifacts(raw_artifacts) -> list[dict]:
             value = _safe_text(item.get(key))
             if value:
                 artifact[key] = value
+        if not artifact.get("object_key") and artifact.get("cos_key"):
+            artifact["object_key"] = artifact["cos_key"]
+
+        sha256 = _safe_text(item.get("sha256"), max_length=64).lower()
+        if re.fullmatch(r"[0-9a-f]{64}", sha256):
+            artifact["sha256"] = sha256
 
         try:
             size_bytes = int(item.get("size_bytes", 0) or 0)

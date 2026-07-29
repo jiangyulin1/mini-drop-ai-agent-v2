@@ -1,5 +1,112 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createEventSource } from "../api/client";
+
+const subscribers = new Set();
+let sharedEventSource = null;
+let reconnectTimer = null;
+let retryCount = 0;
+let lastEventId = "";
+let sharedConnected = false;
+let authListenerAttached = false;
+const maxRetryDelay = 30000;
+
+function notifyConnection(connected) {
+  sharedConnected = connected;
+  subscribers.forEach((subscriber) => subscriber.onConnectionChange?.(connected));
+}
+
+function dispatchEvent(eventType, event) {
+  if (event.lastEventId) lastEventId = event.lastEventId;
+  try {
+    const raw = JSON.parse(event.data);
+    const data = raw.data || raw;
+    if (eventType === "task_changed") {
+      subscribers.forEach((subscriber) => subscriber.onTaskChanged?.(data));
+    } else if (eventType === "agent_status") {
+      subscribers.forEach((subscriber) => subscriber.onAgentStatus?.(data));
+    } else if (eventType === "diagnosis_complete") {
+      subscribers.forEach((subscriber) => subscriber.onDiagnosisComplete?.(data));
+    }
+  } catch {
+    // Ignore malformed events and keep the stream alive.
+  }
+}
+
+function closeSharedEventSource() {
+  sharedEventSource?.close();
+  sharedEventSource = null;
+}
+
+function connectSharedEventSource() {
+  if (sharedEventSource || subscribers.size === 0) return;
+
+  const eventSource = createEventSource(lastEventId);
+  sharedEventSource = eventSource;
+
+  eventSource.onopen = () => {
+    retryCount = 0;
+    notifyConnection(true);
+  };
+  eventSource.addEventListener("task_changed", (event) => dispatchEvent("task_changed", event));
+  eventSource.addEventListener("agent_status", (event) => dispatchEvent("agent_status", event));
+  eventSource.addEventListener(
+    "diagnosis_complete",
+    (event) => dispatchEvent("diagnosis_complete", event),
+  );
+  eventSource.onmessage = (event) => {
+    if (event.lastEventId) lastEventId = event.lastEventId;
+    try {
+      const raw = JSON.parse(event.data);
+      const eventType = raw.event || raw.type;
+      if (eventType) dispatchEvent(eventType, event);
+    } catch {
+      // Ignore malformed compatibility events.
+    }
+  };
+  eventSource.onerror = () => {
+    if (sharedEventSource !== eventSource) return;
+    closeSharedEventSource();
+    notifyConnection(false);
+    if (subscribers.size === 0) return;
+    const delay = Math.min(1000 * (2 ** retryCount), maxRetryDelay);
+    retryCount += 1;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectSharedEventSource, delay);
+  };
+}
+
+function subscribe(handlers) {
+  subscribers.add(handlers);
+  if (!authListenerAttached) {
+    window.addEventListener("mini-drop:auth-changed", reconnectSharedEventSource);
+    authListenerAttached = true;
+  }
+  handlers.onConnectionChange?.(sharedConnected);
+  clearTimeout(reconnectTimer);
+  connectSharedEventSource();
+
+  return () => {
+    subscribers.delete(handlers);
+    if (subscribers.size === 0) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      retryCount = 0;
+      closeSharedEventSource();
+      sharedConnected = false;
+      window.removeEventListener("mini-drop:auth-changed", reconnectSharedEventSource);
+      authListenerAttached = false;
+    }
+  };
+}
+
+function reconnectSharedEventSource() {
+  retryCount = 0;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  closeSharedEventSource();
+  notifyConnection(false);
+  connectSharedEventSource();
+}
 
 /**
  * Server-Sent Events 实时事件 Hook。
@@ -25,91 +132,27 @@ export default function useSSE({
   onDiagnosisComplete,
   onConnectionChange,
 } = {}) {
-  const [connected, setConnected] = useState(false);
-  const reconnectTimer = useRef(null);
-  const retryCount = useRef(0);
-  const maxRetryDelay = 30000;
+  const [connected, setConnected] = useState(sharedConnected);
 
   const handlersRef = useRef({ onTaskChanged, onAgentStatus, onDiagnosisComplete, onConnectionChange });
   handlersRef.current = { onTaskChanged, onAgentStatus, onDiagnosisComplete, onConnectionChange };
 
-  const connect = useCallback(() => {
-    const es = createEventSource();
-
-    es.onopen = () => {
-      setConnected(true);
-      retryCount.current = 0;
-      handlersRef.current.onConnectionChange?.(true);
+  useEffect(() => {
+    const subscriber = {
+      onTaskChanged: (data) => handlersRef.current.onTaskChanged?.(data),
+      onAgentStatus: (data) => handlersRef.current.onAgentStatus?.(data),
+      onDiagnosisComplete: (data) => handlersRef.current.onDiagnosisComplete?.(data),
+      onConnectionChange: (value) => {
+        setConnected(value);
+        handlersRef.current.onConnectionChange?.(value);
+      },
     };
-
-    es.addEventListener("task_changed", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handlersRef.current.onTaskChanged?.(data);
-      } catch {
-        // 忽略解析错误
-      }
-    });
-
-    es.addEventListener("agent_status", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handlersRef.current.onAgentStatus?.(data);
-      } catch {
-        // 忽略
-      }
-    });
-
-    es.addEventListener("diagnosis_complete", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handlersRef.current.onDiagnosisComplete?.(data);
-      } catch {
-        // 忽略
-      }
-    });
-
-    // 默认 message 事件作为兼容
-    es.onmessage = (e) => {
-      try {
-        const raw = JSON.parse(e.data);
-        const eventType = raw.event || raw.type;
-        const data = raw.data || raw;
-        if (eventType === "task_changed") handlersRef.current.onTaskChanged?.(data);
-        else if (eventType === "agent_status") handlersRef.current.onAgentStatus?.(data);
-        else if (eventType === "diagnosis_complete") handlersRef.current.onDiagnosisComplete?.(data);
-      } catch {
-        // 忽略
-      }
-    };
-
-    es.onerror = () => {
-      setConnected(false);
-      handlersRef.current.onConnectionChange?.(false);
-      es.close();
-
-      // 指数退避重连
-      const delay = Math.min(1000 * Math.pow(2, retryCount.current), maxRetryDelay);
-      retryCount.current += 1;
-      reconnectTimer.current = setTimeout(connect, delay);
-    };
-
-    return es;
+    return subscribe(subscriber);
   }, []);
 
-  useEffect(() => {
-    const es = connect();
-    return () => {
-      es.close();
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-    };
-  }, [connect]);
-
   const reconnect = useCallback(() => {
-    retryCount.current = 0;
-    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-    connect();
-  }, [connect]);
+    reconnectSharedEventSource();
+  }, []);
 
   return { connected, reconnect };
 }

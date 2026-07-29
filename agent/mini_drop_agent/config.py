@@ -36,6 +36,7 @@ class AgentConfig:
     minio_access_key: str = ""
     minio_secret_key: str = ""
     minio_bucket: str = "mini-drop"
+    result_spool_dir: str = "/tmp/mini-drop-agent-results"
 
 
 def load_config() -> AgentConfig:
@@ -51,6 +52,10 @@ def load_config() -> AgentConfig:
         minio_access_key=os.getenv("MINIO_ACCESS_KEY", ""),
         minio_secret_key=os.getenv("MINIO_SECRET_KEY", ""),
         minio_bucket=os.getenv("MINIO_BUCKET", "mini-drop"),
+        result_spool_dir=os.getenv(
+            "AGENT_RESULT_SPOOL_DIR",
+            "/tmp/mini-drop-agent-results",
+        ),
     )
 
 

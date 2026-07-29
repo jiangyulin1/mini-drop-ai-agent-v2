@@ -90,9 +90,10 @@ class EBPFCollector:
 
         # 解析 histogram 输出
         histogram = self._parse_histogram(output_file)
+        total_samples = sum(histogram.values())
         metrics = {
             "io_latency_us": histogram,
-            "total_samples": sum(v for v in histogram.values()),
+            "total_samples": total_samples,
         }
 
         metrics_path = os.path.join(output_dir, "ebpf_metrics.json")
@@ -101,7 +102,11 @@ class EBPFCollector:
 
         return CollectorResult(
             ok=True,
-            reason="bpftrace IO 延迟采集完成",
+            reason=(
+                f"bpftrace IO 延迟采集完成，共 {total_samples} 个样本"
+                if total_samples
+                else "bpftrace IO 延迟采集完成，窗口内没有观察到块 I/O 样本"
+            ),
             artifacts=[
                 {
                     "artifact_type": "ebpf_metrics",

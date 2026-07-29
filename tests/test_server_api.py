@@ -89,6 +89,41 @@ class TestHealthz:
         assert resp.json()["data"]["status"] == "PASSED"
 
 
+class TestTaskKinds:
+    def test_task_kinds_expose_form_metadata(self, client: TestClient):
+        resp = client.get("/api/task-kinds")
+
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["schema_version"] == "1.0"
+        assert len(data["items"]) == 8
+        perf = next(item for item in data["items"] if item["key"] == "perf_cpu")
+        assert perf["defaults"]["sample_rate"] == 99
+        assert perf["parameter_schema"]["duration_sec"]["maximum"] == 120
+        assert perf["presentation"]["flamegraph"] is True
+
+    def test_task_kinds_filter_by_agent_capability(self, client: TestClient):
+        repo.register_agent(
+            "limited-agent",
+            "limited-host",
+            "10.0.0.20",
+            capabilities=["sys_metrics", "memory_smaps"],
+        )
+
+        resp = client.get("/api/task-kinds", params={"agent_id": "limited-agent"})
+
+        assert resp.status_code == 200
+        assert {item["key"] for item in resp.json()["data"]["items"]} == {
+            "sys_metrics",
+            "memory_smaps",
+        }
+
+    def test_task_kinds_reject_unknown_agent(self, client: TestClient):
+        resp = client.get("/api/task-kinds", params={"agent_id": "missing"})
+
+        assert resp.status_code == 404
+
+
 class TestStartupMinio:
     def test_bucket_init_retries_transient_failure(self, monkeypatch):
         calls = {"count": 0}
@@ -246,6 +281,117 @@ class TestCreateTask:
             "target_pid": 1, "collector_type": "perf_cpu",
         })
         assert resp.status_code == 404
+
+    def test_rejects_collector_not_supported_by_agent(self, client: TestClient):
+        repo.register_agent(
+            "limited-agent",
+            "limited-host",
+            "10.0.0.20",
+            capabilities=["sys_metrics"],
+        )
+
+        resp = client.post("/api/tasks", json={
+            "name": "unsupported", "agent_id": "limited-agent",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        })
+
+        assert resp.status_code == 409
+        assert "不支持采集器" in resp.json()["detail"]
+
+    def test_idempotency_key_replays_original_task(self, client: TestClient):
+        payload = {
+            "name": "idempotent", "agent_id": "a1",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        }
+        headers = {"Idempotency-Key": "web-operation-001"}
+
+        first = client.post("/api/tasks", json=payload, headers=headers)
+        replay = client.post("/api/tasks", json=payload, headers=headers)
+
+        assert first.status_code == 200
+        assert replay.status_code == 200
+        assert first.json()["data"]["task_id"] == replay.json()["data"]["task_id"]
+        assert client.get("/api/tasks").json()["data"]["total"] == 1
+
+    def test_idempotency_key_rejects_different_payload(self, client: TestClient):
+        headers = {"Idempotency-Key": "web-operation-conflict"}
+        first = {
+            "name": "first", "agent_id": "a1",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        }
+        second = {**first, "target_pid": 2}
+        assert client.post("/api/tasks", json=first, headers=headers).status_code == 200
+
+        conflict = client.post("/api/tasks", json=second, headers=headers)
+
+        assert conflict.status_code == 409
+
+
+class TestTaskControl:
+    def _create(self, client: TestClient) -> str:
+        response = client.post("/api/tasks", json={
+            "name": "control", "agent_id": "a1",
+            "target_pid": 12, "collector_type": "perf_cpu",
+        })
+        return response.json()["data"]["task_id"]
+
+    def test_cancel_pending_task_is_idempotent(self, client: TestClient):
+        task_id = self._create(client)
+
+        first = client.post(
+            f"/api/tasks/{task_id}/cancel",
+            json={"reason": "operator cancelled"},
+        )
+        replay = client.post(
+            f"/api/tasks/{task_id}/cancel",
+            json={"reason": "operator cancelled"},
+        )
+
+        assert first.status_code == 200
+        assert replay.status_code == 200
+        assert first.json()["data"]["status"] == "CANCELLED"
+        events = client.get(f"/api/tasks/{task_id}/events").json()["data"]
+        assert [event["to_status"] for event in events].count("CANCELLED") == 1
+
+    def test_retry_creates_new_pending_task(self, client: TestClient):
+        task_id = self._create(client)
+        client.post(f"/api/tasks/{task_id}/cancel", json={"reason": "retry test"})
+
+        retried = client.post(
+            f"/api/tasks/{task_id}/retry",
+            json={},
+            headers={"Idempotency-Key": "retry-operation-001"},
+        )
+        replay = client.post(
+            f"/api/tasks/{task_id}/retry",
+            json={},
+            headers={"Idempotency-Key": "retry-operation-001"},
+        )
+
+        assert retried.status_code == 200
+        assert retried.json()["data"]["task_id"] != task_id
+        assert retried.json()["data"]["status"] == "PENDING"
+        assert replay.json()["data"]["task_id"] == retried.json()["data"]["task_id"]
+        retried_id = retried.json()["data"]["task_id"]
+        audit_data = client.get("/api/audit-logs").json()["data"]
+        audit_logs = (
+            audit_data if isinstance(audit_data, list) else audit_data.get("items", [])
+        )
+        retry_logs = [
+            log
+            for log in audit_logs
+            if log["event_type"] == "TASK_RETRIED"
+            and log["task_id"] == retried_id
+        ]
+        assert len(retry_logs) == 1
+        assert retry_logs[0]["metadata"]["retry_of"] == task_id
+
+    def test_retry_rejects_active_task(self, client: TestClient):
+        task_id = self._create(client)
+
+        response = client.post(f"/api/tasks/{task_id}/retry", json={})
+
+        assert response.status_code == 409
 
 
 class TestTaskListAndDetail:

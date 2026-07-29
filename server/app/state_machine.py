@@ -4,7 +4,8 @@
 状态流转：
     PENDING  → RUNNING   → UPLOADING  → ANALYZING  → DONE
        │          │            │             │
-       └──────────┴────────────┴─────────────┘→ FAILED
+       ├──────────┴────────────┴─────────────┘→ FAILED
+       └──────────┴────────────┴─────────────┘→ CANCELLED
 
 每次状态迁移必须提供 reason，且写入 task_status_events 表。
 """
@@ -27,6 +28,7 @@ class TaskStatus(str, Enum):
     ANALYZING = "ANALYZING"
     DONE = "DONE"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 @unique
@@ -44,16 +46,21 @@ class Actor(str, Enum):
 # None 表示初始状态（任务创建时的 first transition）。
 ALLOWED_TRANSITIONS: dict[TaskStatus | None, set[TaskStatus]] = {
     None: {TaskStatus.PENDING},
-    TaskStatus.PENDING: {TaskStatus.RUNNING, TaskStatus.FAILED},
-    TaskStatus.RUNNING: {TaskStatus.UPLOADING, TaskStatus.FAILED},
-    TaskStatus.UPLOADING: {TaskStatus.ANALYZING, TaskStatus.FAILED},
-    TaskStatus.ANALYZING: {TaskStatus.DONE, TaskStatus.FAILED},
+    TaskStatus.PENDING: {TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.RUNNING: {TaskStatus.UPLOADING, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.UPLOADING: {TaskStatus.ANALYZING, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.ANALYZING: {TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED},
     TaskStatus.DONE: set(),
     TaskStatus.FAILED: set(),
+    TaskStatus.CANCELLED: set(),
 }
 
 # 终态集合：进入这些状态后不再允许任何迁移。
-TERMINAL_STATES: frozenset[TaskStatus] = frozenset({TaskStatus.DONE, TaskStatus.FAILED})
+TERMINAL_STATES: frozenset[TaskStatus] = frozenset({
+    TaskStatus.DONE,
+    TaskStatus.FAILED,
+    TaskStatus.CANCELLED,
+})
 
 
 @dataclass(frozen=True)

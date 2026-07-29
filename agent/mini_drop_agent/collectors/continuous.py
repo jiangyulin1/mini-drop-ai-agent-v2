@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import json
+import math
 import shutil
 import signal
 import subprocess
@@ -56,8 +57,7 @@ class ContinuousCollector:
 
         windows: list[_Window] = []
         total_timeout = task.duration_sec  # 总持续秒数，取任务指定的 duration
-        window_count = max(1, total_timeout // self.WINDOW_INTERVAL_SEC)
-        window_duration = min(self.WINDOW_DURATION_SEC, self.WINDOW_INTERVAL_SEC - 5)
+        window_count = max(1, math.ceil(total_timeout / self.WINDOW_INTERVAL_SEC))
 
         deadline = time.time() + total_timeout
 
@@ -70,6 +70,12 @@ class ContinuousCollector:
             perf_data = os.path.join(window_dir, "perf.data")
 
             start = time.time()
+            remaining_budget = max(1, int(deadline - start))
+            window_duration = min(
+                self.WINDOW_DURATION_SEC,
+                self.WINDOW_INTERVAL_SEC - 5,
+                remaining_budget,
+            )
 
             cmd = [
                 perf_path, "record",
@@ -137,8 +143,14 @@ class ContinuousCollector:
                 windows.append(_Window(index=i, start_ts=start, end_ts=time.time(),
                                        output_dir=window_dir, ok=False, reason=str(exc)))
 
-            # 到达下一个窗口起点再继续
-            remaining = (start + self.WINDOW_INTERVAL_SEC) - time.time()
+            # The final window must return immediately. Sleeping to a
+            # non-existent next window made short tasks last a full interval.
+            if i + 1 >= window_count:
+                continue
+            remaining = min(
+                start + self.WINDOW_INTERVAL_SEC,
+                deadline,
+            ) - time.time()
             if remaining > 0:
                 time.sleep(remaining)
 
