@@ -30,7 +30,11 @@ class TestPySpyAvailability:
     """py-spy 可用性检查。"""
 
     def test_pyspy_not_installed(self, collector, task):
-        with mock.patch("shutil.which", return_value=None):
+        with mock.patch("shutil.which", return_value=None), \
+             mock.patch(
+                 "agent.mini_drop_agent.collectors.pyspy.Path.is_file",
+                 return_value=False,
+             ):
             result = collector.collect(task)
         assert result.ok is False
         assert "py-spy" in result.reason
