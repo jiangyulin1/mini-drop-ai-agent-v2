@@ -225,15 +225,31 @@
 
   {
     "candidate_id": "python_userland_hotspot",
-    "description": "Python 用户态函数热点，与 perf 系统级热点一致，根因在应用层",
+    "description": "Python 用户态热点函数占比较高，候选原因位于应用代码路径",
     "match_type": "collector_or_suggestion",
-    "params": { "collector_type": "pyspy", "suggestion_keyword": "python" },
+    "params": { "collector_type": "pyspy", "suggestion_keyword": "python", "require_top_functions": true },
     "rule_score": 0.72,
     "evidence_refs": ["top_functions", "tool_results.get_flamegraph_top", "suggestions"]
   },
 
   {"_comment": "══════ 失败/异常 ══════"},
 
+  {
+    "candidate_id": "artifact_storage_unreachable",
+    "description": "Agent 已执行采集，但证据上传到对象存储时失败，优先检查跨主机网络、防火墙、MinIO 端口或凭据",
+    "match_type": "failure_contains",
+    "params": {
+      "status": "FAILED",
+      "keywords": ["artifact upload failed", "minio", "s3", "证据上传", "对象存储"]
+    },
+    "rule_score": 0.98,
+    "evidence_refs": [
+      "failure_events",
+      "task_metadata.status",
+      "tool_results.inspect_task_events",
+      "tool_results.check_agent_health"
+    ]
+  },
   {
     "candidate_id": "agent_overhead",
     "description": "采集 Agent 自身资源开销过高，可能影响目标进程性能",

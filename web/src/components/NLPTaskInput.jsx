@@ -135,7 +135,7 @@ export default function NLPTaskInput({ onTaskCreated }) {
     setError("");
     try {
       const taskResp = await createTask({
-        name: `${meta.label}: PID ${quickPid}`,
+        name: `${meta.label} · ${quickAgentId} · PID ${quickPid}`,
         agent_id: quickAgentId,
         target_pid: quickPid,
         collector_type: quickCollector,
@@ -196,7 +196,7 @@ export default function NLPTaskInput({ onTaskCreated }) {
         return;
       }
       const taskResp = await createTask({
-        name: `NLP: ${result.process_name}`,
+        name: `${metaFor(result.collector_type).label} · ${result.process_name} · PID ${pid}`,
         agent_id: agent.id,
         target_pid: pid,
         collector_type: result.collector_type,

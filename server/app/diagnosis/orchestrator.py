@@ -518,9 +518,20 @@ class DiagnosisOrchestrator:
                 for probe in self.store.list_probes(diagnosis_id):
                     if probe["status"] == "WAITING_APPROVAL":
                         self.store.update_probe(probe["step_id"], status="SKIPPED")
+                latest = (
+                    (self.store.get_session(diagnosis_id) or {}).get("conclusion_versions", [])
+                    or [{}]
+                )[-1]
+                failure_is_the_diagnosed_signal = (
+                    latest.get("cluster_assessment", {}).get("classification")
+                    == "single_instance_storage_path_failure"
+                )
                 final_status = (
                     DiagnosisStatus.PARTIAL_COMPLETED
-                    if any(status_value(task.status) == "FAILED" for task in terminal_tasks)
+                    if (
+                        any(status_value(task.status) == "FAILED" for task in terminal_tasks)
+                        and not failure_is_the_diagnosed_signal
+                    )
                     else DiagnosisStatus.COMPLETED
                 )
                 self._transition(diagnosis_id, DiagnosisStatus.CONCLUDING, "conclusion_generated")
@@ -807,14 +818,8 @@ class DiagnosisOrchestrator:
                 ))
             if status == "FAILED":
                 failed_targets.append(f"{task.agent_id}:{task.target_pid}")
-            if not structured:
-                missing.append(f"{task.id}:structured_artifact")
-                continue
 
             values = {kind: value for kind, value, _ in structured}
-            task_observations.append(
-                self._build_task_observation(diagnosis_id, task, values, evidence_ids)
-            )
             task_events = [self.repo.as_dict(event) for event in self.repo.events if event.task_id == task.id]
             evidence = collect_evidence(
                 task_id=task.id,
@@ -843,6 +848,17 @@ class DiagnosisOrchestrator:
                     },
                     "sort_score": candidate.final_confidence,
                 })
+            if structured:
+                task_observations.append(
+                    self._build_task_observation(diagnosis_id, task, values, evidence_ids)
+                )
+            elif status == "FAILED":
+                task_observations.append(
+                    self._build_failed_task_observation(diagnosis_id, task, evidence_ids)
+                )
+                missing.append(f"{task.id}:structured_artifact")
+            else:
+                missing.append(f"{task.id}:structured_artifact")
 
         evidence_items = self.store.list_evidence(diagnosis_id)
         evidence_ids = [item["evidence_id"] for item in evidence_items]
@@ -894,6 +910,29 @@ class DiagnosisOrchestrator:
             input_refs=[item["finding_id"] for item in findings] + evidence_ids,
         )
         cluster_assessment = self._build_cluster_assessment(diagnosis_id, task_observations)
+        if cluster_assessment["classification"] == "single_instance_storage_path_failure":
+            for candidate in deduped:
+                if candidate["candidate_id"] != "artifact_storage_unreachable":
+                    continue
+                candidate["evidence_refs"] = list(cluster_assessment["evidence_refs"])
+                candidate["confidence_level"] = "高"
+                candidate["score_components"]["baseline_support"] = "high"
+                candidate["score_components"]["source_independence"] = "high"
+                candidate["supporting_claims"] = [
+                    {
+                        "statement": candidate["description"],
+                        "evidence_refs": list(cluster_assessment["root_location"]["evidence_refs"]),
+                        "strength": "strong",
+                    },
+                    {
+                        "statement": "健康 Worker 同期上传成功，排除对象存储整体不可用。",
+                        "evidence_refs": [
+                            ref for ref in cluster_assessment["evidence_refs"]
+                            if ref not in cluster_assessment["root_location"]["evidence_refs"]
+                        ],
+                        "strength": "strong",
+                    },
+                ]
         cluster_item = cluster_finding(cluster_assessment)
         findings.append(cluster_item)
         self.store.update_pipeline_node(
@@ -997,11 +1036,39 @@ class DiagnosisOrchestrator:
             "task_id": task.id,
             "collector_type": task.collector_type,
             "target": target,
+            "collection_status": status_value(task.status),
+            "status_reason": task.status_reason or "",
+            "failure_kind": (
+                _task_failure_kind(task.status_reason)
+                if status_value(task.status) == "FAILED"
+                else None
+            ),
             "summary": summary,
             "facts": _normalized_facts(values, summary),
             "fact_domains": normalize_sys_metrics(values.get("sys_metrics")) if values.get("sys_metrics") else {},
             "top_function": {"name": top_name, "percent": top_percent},
             "pressure": pressure,
+            "evidence_refs": evidence_refs,
+        }
+
+    def _build_failed_task_observation(
+        self,
+        diagnosis_id: str,
+        task,
+        evidence_refs: list[str],
+    ) -> dict[str, Any]:
+        return {
+            "task_id": task.id,
+            "collector_type": task.collector_type,
+            "target": self._target_for_task(diagnosis_id, task),
+            "collection_status": status_value(task.status),
+            "status_reason": task.status_reason or "",
+            "failure_kind": _task_failure_kind(task.status_reason),
+            "summary": {},
+            "facts": {},
+            "fact_domains": {},
+            "top_function": {"name": "", "percent": 0.0},
+            "pressure": {},
             "evidence_refs": evidence_refs,
         }
 
@@ -1078,6 +1145,7 @@ class DiagnosisOrchestrator:
         """由已验证领域分类生成可执行、可复核的分层建议。"""
 
         domain = assessment.get("domain_cause", {}).get("type", "unknown")
+        subtype = assessment.get("domain_cause", {}).get("subtype", "unknown")
         location = assessment.get("root_location", {}).get("type", "unknown")
         refs = list(dict.fromkeys(assessment.get("evidence_refs", [])))
         optimization = {
@@ -1109,6 +1177,12 @@ class DiagnosisOrchestrator:
             "补充区分性证据",
             "当前领域尚不可判断；先完成缺失探针并重新校验证据覆盖率，不应直接修改生产配置。",
         ))
+        if subtype == "agent_to_object_storage_connectivity":
+            optimization = (
+                "检查故障 Worker 的对象存储上传路径",
+                "对比两个 Worker 到 MinIO/S3 endpoint 的 TCP 连通性，并检查源地址定向防火墙、"
+                "路由、TLS、bucket 与访问凭据；健康 Worker 已形成对象存储整体可用的反证。",
+            )
         target_hint = assessment.get("root_location", {}).get("target_ref") or "候选实例"
         return [
             {
@@ -1896,6 +1970,19 @@ class DiagnosisOrchestrator:
         allowed = {item.strip() for item in os.getenv("MINI_DROP_ALLOWED_SERVICES", "").split(",") if item.strip()}
         if allowed and service_id not in allowed:
             raise PermissionError(f"当前身份无权诊断服务 {service_id}")
+
+
+def _task_failure_kind(reason: str | None) -> str | None:
+    text = str(reason or "").lower()
+    if (
+        "artifact upload failed" in text
+        or ("minio" in text and ("failed" in text or "refused" in text))
+        or ("s3" in text and ("failed" in text or "refused" in text))
+        or "证据上传失败" in text
+        or "对象存储" in text
+    ):
+        return "artifact_upload_failed"
+    return "task_failed" if text else None
 
 
 def _quality(value: float) -> str:

@@ -1,11 +1,15 @@
 """AI 集群诊断会话、探针审批、预算和证据链测试。"""
 
+import io
+import json
+import zipfile
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
 
+from server.app import storage
 from server.app.database import init_db, reset_engine
 from server.app.diagnosis import orchestrator as orchestrator_module
 from server.app.diagnosis.orchestrator import _pressure_flags
@@ -120,6 +124,63 @@ def test_zero_probe_budget_ends_explicitly(client: TestClient):
     data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
     assert data["status"] == "BUDGET_EXHAUSTED"
     assert data["child_task_ids"] == []
+
+
+def test_structured_evidence_download_contains_observation(client: TestClient):
+    created = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    diagnosis_id = created["diagnosis_id"]
+    for task_id in created["child_task_ids"]:
+        _finish_sys_metrics_task(task_id, _normal_summary())
+
+    detail = client.get(f"/api/v1/diagnoses/{diagnosis_id}").json()["data"]
+    evidence = next(
+        item for item in detail["evidence"]
+        if item["source_type"] == "derived_artifact"
+    )
+
+    download = client.get(
+        f"/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence['evidence_id']}/download"
+    )
+
+    assert download.status_code == 200
+    assert len(download.content) > 100
+    assert download.json()["evidence_id"] == evidence["evidence_id"]
+    assert download.json()["observed_value"]["summary"]["avg_cpu_user_pct"] == 18.0
+    assert "attachment;" in download.headers["content-disposition"]
+
+
+def test_evidence_bundle_contains_manifest_and_available_artifact(
+    client: TestClient,
+    monkeypatch,
+):
+    created = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    diagnosis_id = created["diagnosis_id"]
+    for task_id in created["child_task_ids"]:
+        _finish_sys_metrics_task(task_id, _normal_summary())
+    detail = client.get(f"/api/v1/diagnoses/{diagnosis_id}").json()["data"]
+    evidence = next(
+        item for item in detail["evidence"]
+        if item["source_type"] == "derived_artifact"
+    )
+    assert evidence["artifact_links"]
+    raw_content = b'{"sample_count":10,"summary":{"avg_cpu_user_pct":18.0}}'
+    monkeypatch.setattr(storage, "object_size", lambda bucket, key: len(raw_content))
+    monkeypatch.setattr(storage, "read_object_bytes", lambda bucket, key: raw_content)
+
+    download = client.get(
+        f"/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence['evidence_id']}/bundle"
+    )
+
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+        names = archive.namelist()
+        assert "evidence.json" in names
+        assert "manifest.json" in names
+        assert any(name.startswith("artifacts/") for name in names)
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["included_artifact_count"] == 1
+        assert manifest["artifacts"][0]["availability"] == "available"
 
 
 def test_pure_ebpf_latency_produces_io_finding():
@@ -425,6 +486,19 @@ def _finish_sys_metrics_task(task_id: str, summary: dict):
     repo.transition_task(task_id, TaskStatus.DONE, "analysis complete", Actor.ANALYZER)
 
 
+def _fail_artifact_upload_task(task_id: str):
+    repo.transition_task(task_id, TaskStatus.RUNNING, "agent accepted", Actor.SERVER)
+    repo.transition_task(
+        task_id,
+        TaskStatus.FAILED,
+        (
+            "artifact upload failed: HTTPConnectionPool(host='10.0.0.10', port=9000): "
+            "Failed to establish a new connection: [Errno 111] Connection refused"
+        ),
+        Actor.AGENT,
+    )
+
+
 def _normal_summary() -> dict:
     return {
         "avg_cpu_user_pct": 18.0,
@@ -455,6 +529,59 @@ def test_stable_rss_and_fd_near_observed_max_are_not_pressure():
     flags = orchestrator_module._pressure_flags(summary, {})
     assert flags["memory"] is False
     assert flags["fd"] is False
+
+
+def test_cluster_assessment_uses_healthy_peer_to_localize_storage_path_failure():
+    scope = {
+        "target_service": "service-a",
+        "instances": [
+            {"service_id": "service-a", "instance_id": "service-a-1"},
+            {"service_id": "service-a", "instance_id": "service-a-2"},
+        ],
+        "same_host_instance_ids": [],
+        "downstream_service_ids": [],
+    }
+    observations = [
+        {
+            "target": {
+                "service_id": "service-a", "instance_id": "service-a-1",
+                "host_id": "host-1", "agent_id": "a1", "pid": 1,
+            },
+            "collector_type": "sys_metrics",
+            "collection_status": "DONE",
+            "failure_kind": None,
+            "facts": {},
+            "pressure": {},
+            "evidence_refs": ["ev-healthy"],
+        },
+        {
+            "target": {
+                "service_id": "service-a", "instance_id": "service-a-2",
+                "host_id": "host-2", "agent_id": "a2", "pid": 1,
+            },
+            "collector_type": "sys_metrics",
+            "collection_status": "FAILED",
+            "failure_kind": "artifact_upload_failed",
+            "facts": {},
+            "pressure": {},
+            "evidence_refs": ["ev-failed"],
+        },
+    ]
+
+    assessment = assess_cluster(scope, observations)
+
+    assert assessment["classification"] == "single_instance_storage_path_failure"
+    assert assessment["confidence_level"] == "高"
+    assert assessment["root_location"] == {
+        "type": "self",
+        "target_ref": "service-a-2",
+        "evidence_refs": ["ev-failed"],
+    }
+    assert assessment["domain_cause"]["type"] == "network"
+    assert assessment["domain_cause"]["subtype"] == "agent_to_object_storage_connectivity"
+    assert {item["instance_id"] for item in assessment["compared_targets"]} == {
+        "service-a-1", "service-a-2",
+    }
 
 
 def _sys_metric_probe_by_instance(data: dict) -> dict:
@@ -681,6 +808,54 @@ class TestDiagnosisSessionAPI:
         assert probes
         assert all("command" not in probe for probe in probes)
         assert {probe["risk_level"] for probe in probes}.issubset({"R0", "R1", "R2", "R3"})
+
+    def test_dual_worker_storage_path_failure_is_localized_by_peer_comparison(
+        self,
+        client: TestClient,
+    ):
+        repo.register_agent(
+            "a2", "host-2", "10.0.0.2",
+            capabilities=["sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps"],
+        )
+        payload = _payload(
+            "同一服务的两个 Worker 协同运行，但部分节点采集结果缺失，请做跨节点对比",
+        )
+        payload["context"]["instances"].append({
+            "service_id": "service-a",
+            "instance_id": "service-a-2",
+            "host_id": "host-2",
+            "agent_id": "a2",
+            "pid": 4321,
+            "environment": "production",
+        })
+
+        data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+        probes = _sys_metric_probe_by_instance(data)
+        assert set(probes) == {"service-a-1", "service-a-2"}
+
+        _finish_sys_metrics_task(probes["service-a-1"]["task_id"], _normal_summary())
+        _fail_artifact_upload_task(probes["service-a-2"]["task_id"])
+
+        detail = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+        conclusion = detail["latest_conclusion"]
+        assessment = conclusion["cluster_assessment"]
+
+        assert detail["status"] == "COMPLETED"
+        assert assessment["classification"] == "single_instance_storage_path_failure"
+        assert assessment["confidence_level"] == "高"
+        assert assessment["root_location"]["target_ref"] == "service-a-2"
+        assert assessment["domain_cause"] == {
+            "type": "network",
+            "subtype": "agent_to_object_storage_connectivity",
+            "evidence_refs": assessment["root_location"]["evidence_refs"],
+        }
+        assert len(assessment["compared_targets"]) == 2
+        top_candidate = conclusion["root_cause_candidates"][0]
+        assert top_candidate["candidate_id"] == "artifact_storage_unreachable"
+        assert top_candidate["confidence_level"] == "高"
+        assert len(top_candidate["evidence_refs"]) == 3
+        assert "部分目标采集失败" in conclusion["limitations"]
+        assert conclusion["verification"]["status"] == "passed"
 
     def test_same_host_noisy_neighbor_assessment_uses_multiple_agents(self, client: TestClient):
         repo.register_agent(

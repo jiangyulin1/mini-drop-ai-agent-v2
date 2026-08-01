@@ -18,6 +18,9 @@ _CORE_CONSTRAINTS = """
 4. confidence 值必须在 0.0 到 1.0 之间。
 5. 必须输出合法 JSON，不要输出 markdown 代码块标记，直接输出 JSON。
 6. 候选原因列表中的 candidate_id 必须存在于你输出的 ranked_causes 中。
+7. status=not_applicable 表示该工具不属于当前采集器，不能描述为关键数据缺失。
+8. status=optional_missing 表示未配置可选增强证据，不能据此判定当前任务失败。
+9. “任务成功”与“证据足以归因”是两个不同结论；摘要必须先说明本任务实际获得的产物。
 """
 
 # ── 输出 Schema ──

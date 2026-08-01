@@ -243,6 +243,32 @@ class TestCreateTask:
         logs = log_data if isinstance(log_data, list) else log_data.get("items", [])
         assert any(log["event_type"] == "TASK_CREATED" for log in logs)
 
+    def test_create_task_replaces_unreadable_name(self, client: TestClient):
+        resp = client.post("/api/tasks", json={
+            "name": "?? Go pprof ??",
+            "agent_id": "a1",
+            "target_pid": 7344,
+            "collector_type": "go_pprof",
+        })
+
+        assert resp.status_code == 200
+        task_id = resp.json()["data"]["task_id"]
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        assert detail["name"] == "Go CPU 剖析 · a1 · PID 7344"
+
+    def test_create_task_preserves_readable_name(self, client: TestClient):
+        resp = client.post("/api/tasks", json={
+            "name": "订单服务 CPU 基线采集",
+            "agent_id": "a1",
+            "target_pid": 42,
+            "collector_type": "perf_cpu",
+        })
+
+        assert resp.status_code == 200
+        task_id = resp.json()["data"]["task_id"]
+        detail = client.get(f"/api/tasks/{task_id}").json()["data"]
+        assert detail["name"] == "订单服务 CPU 基线采集"
+
     def test_rejects_zero_duration(self, client: TestClient):
         resp = client.post("/api/tasks", json={
             "name": "bad", "agent_id": "a1",
@@ -483,6 +509,65 @@ class TestTaskArtifacts:
         assert len(arts) == 1
         assert arts[0]["artifact_type"] == "raw"
 
+    def test_artifact_list_reports_live_availability(self, client: TestClient, monkeypatch):
+        resp = client.post("/api/tasks", json={
+            "name": "art-availability", "agent_id": "a1",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        })
+        task_id = resp.json()["data"]["task_id"]
+        repo.add_artifacts(task_id, [{
+            "artifact_type": "raw",
+            "bucket": "mini-drop",
+            "object_key": f"tasks/{task_id}/perf.data",
+            "filename": "perf.data",
+            "size_bytes": 12,
+        }])
+        monkeypatch.setattr(store, "object_size", lambda bucket, key: 12)
+
+        artifact = client.get(f"/api/tasks/{task_id}/artifacts").json()["data"][0]
+
+        assert artifact["artifact_id"].startswith("art_")
+        assert artifact["task_id"] == task_id
+        assert artifact["availability"] == "available"
+        assert artifact["actual_size_bytes"] == 12
+        assert artifact["integrity_status"] == "not_checked"
+
+    def test_storage_reconciliation_exposes_missing_and_mismatch(
+        self,
+        client: TestClient,
+        monkeypatch,
+    ):
+        resp = client.post("/api/tasks", json={
+            "name": "art-reconcile", "agent_id": "a1",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        })
+        task_id = resp.json()["data"]["task_id"]
+        repo.add_artifacts(task_id, [
+            {
+                "artifact_type": "raw",
+                "bucket": "mini-drop",
+                "object_key": f"tasks/{task_id}/missing.data",
+                "size_bytes": 10,
+            },
+            {
+                "artifact_type": "top_json",
+                "bucket": "mini-drop",
+                "object_key": f"tasks/{task_id}/mismatch.json",
+                "size_bytes": 10,
+            },
+        ])
+        monkeypatch.setattr(
+            store,
+            "object_size",
+            lambda bucket, key: None if key.endswith("missing.data") else 4,
+        )
+
+        data = client.get("/api/storage/reconciliation").json()["data"]
+
+        assert data["summary"]["scanned"] == 2
+        assert data["summary"]["missing"] == 1
+        assert data["summary"]["integrity_mismatch"] == 1
+
     def test_artifact_content_reads_local_json(self, client: TestClient, tmp_path, monkeypatch):
         monkeypatch.setenv("MINI_DROP_ARTIFACT_ROOT", str(tmp_path))
         top_path = tmp_path / "top.json"
@@ -583,12 +668,33 @@ class TestTaskArtifacts:
             "content_type": "application/octet-stream",
         }])
         monkeypatch.setattr(store, "stream_object", lambda bucket, key: iter([b"part-1", b"part-2"]))
+        monkeypatch.setattr(store, "object_size", lambda bucket, key: len(b"part-1part-2"))
 
         download = client.get(f"/api/tasks/{task_id}/artifacts/raw/download")
 
         assert download.status_code == 200
         assert download.content == b"part-1part-2"
         assert "perf%20data.bin" in download.headers["content-disposition"]
+
+    def test_artifact_download_rejects_missing_object(self, client: TestClient, monkeypatch):
+        resp = client.post("/api/tasks", json={
+            "name": "missing-object", "agent_id": "a1",
+            "target_pid": 1, "collector_type": "perf_cpu",
+        })
+        task_id = resp.json()["data"]["task_id"]
+        repo.add_artifacts(task_id, [{
+            "artifact_type": "top_json",
+            "filename": "top.json",
+            "bucket": "mini-drop",
+            "object_key": f"tasks/{task_id}/top.json",
+            "content_type": "application/json",
+        }])
+        monkeypatch.setattr(store, "object_size", lambda bucket, key: None)
+
+        download = client.get(f"/api/tasks/{task_id}/artifacts/top_json/download")
+
+        assert download.status_code == 404
+        assert "结构化证据 JSON" in download.json()["detail"]
 
     def test_artifact_download_reads_local_file(self, client: TestClient, tmp_path, monkeypatch):
         monkeypatch.setenv("MINI_DROP_ARTIFACT_ROOT", str(tmp_path))
@@ -701,6 +807,14 @@ class TestDiagnose:
         )
         assert feedback.status_code == 200
         assert feedback.json()["data"]["feedback_saved"] is True
+
+        aggregate = client.get("/api/diagnoses", params={"limit": 100}).json()["data"]
+        assert aggregate["total"] == 1
+        assert aggregate["items"][0]["id"] == diag["diagnosis_id"]
+        assert aggregate["items"][0]["run"]["task_id"] == task_id
+        assert aggregate["items"][0]["report"]["diagnosis_id"] == diag["diagnosis_id"]
+        assert "ranked_causes" in aggregate["items"][0]["report"]
+        assert aggregate["items"][0]["feedback"]["feedback_label"] == "partial"
 
     def test_diagnose_404_for_nonexistent(self, client: TestClient):
         resp = client.post("/api/tasks/nope/diagnose")

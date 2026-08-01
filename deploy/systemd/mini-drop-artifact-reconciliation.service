@@ -1,0 +1,9 @@
+[Unit]
+Description=Mini-Drop Artifact Metadata and Storage Reconciliation
+After=mini-drop-server.service
+
+[Service]
+Type=oneshot
+User=control
+Group=control
+ExecStart=/usr/bin/bash /home/control/mini-drop-active/deploy/scripts/check-artifact-storage.sh

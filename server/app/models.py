@@ -164,6 +164,7 @@ class ArtifactModel(Base):
 
     def to_dict(self) -> dict:
         return {
+            "id": self.id,
             "artifact_type": self.artifact_type,
             "bucket": self.bucket,
             "object_key": self.object_key,
@@ -173,6 +174,7 @@ class ArtifactModel(Base):
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
             "metadata": self.meta_json or {},
+            "created_at": self.created_at,
         }
 
 

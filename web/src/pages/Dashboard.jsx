@@ -46,6 +46,7 @@ import usePolling from "../hooks/usePolling";
 import useSSE from "../hooks/useSSE";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
 import { collectorMeta } from "../utils/collectors";
+import { taskDisplayInfo, taskDisplayName } from "../utils/taskNames";
 
 // ── 通知列表（最近 5 条 toast 通知）──────────────────────
 
@@ -173,7 +174,7 @@ export default function Dashboard() {
       content: (
         <div>
           <p>将删除以下任务及其火焰图、事件、诊断结果：</p>
-          <p><strong>{task.name || task.id}</strong></p>
+          <p><strong>{taskDisplayName(task)}</strong></p>
           <p style={{ color: "#999", fontSize: 12 }}>
             PID: {task.target_pid} · {task.collector_type} · {new Date(task.created_at).toLocaleString()}
           </p>
@@ -189,7 +190,7 @@ export default function Dashboard() {
         try {
           setDeleting(task.id);
           await deleteTask(task.id);
-          notification.success({ message: "删除成功", description: `任务 ${task.name || task.id} 已删除`, placement: "bottomRight", duration: 3 });
+          notification.success({ message: "删除成功", description: `任务 ${taskDisplayName(task)} 已删除`, placement: "bottomRight", duration: 3 });
           refresh();
         } catch (err) {
           notification.error({ message: "删除失败", description: err.message, placement: "bottomRight", duration: 5 });
@@ -269,9 +270,14 @@ export default function Dashboard() {
         title: "任务",
         dataIndex: "name",
         ellipsis: true,
-        render: (value, record) => (
-          <Link to={`/task/${record.id}`}>{value || record.id}</Link>
-        ),
+        render: (_, record) => {
+          const name = taskDisplayInfo(record);
+          return (
+            <Link to={`/task/${record.id}`} title={name.normalized ? `原始名称：${name.originalName}` : name.displayName}>
+              {name.displayName}
+            </Link>
+          );
+        },
       },
       {
         title: "Agent",
@@ -500,7 +506,7 @@ export default function Dashboard() {
                         <EyeOutlined style={{ color: COLORS.primary }} />
                       </Space>
                       <Typography.Text strong ellipsis>
-                        {task.name || task.id}
+                        {taskDisplayName(task)}
                       </Typography.Text>
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                         PID {task.target_pid} · {meta.resultLabel}
@@ -665,7 +671,7 @@ export default function Dashboard() {
               )}
               {recentDone.length > 0 && (
                 <Tag icon={<ExperimentOutlined />} color="purple">
-                  最近完成: {recentDone.map((t) => t.name || t.id?.slice(0, 6)).join(", ")}
+                  最近完成: {recentDone.map((task) => taskDisplayName(task)).join(", ")}
                 </Tag>
               )}
             </Space>

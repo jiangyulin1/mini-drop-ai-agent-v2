@@ -58,6 +58,8 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
             "pressure": {name: False for name in obs.get("pressure", {})},
             "evidence_refs": [],
             "collector_types": [],
+            "collection_statuses": [],
+            "failure_kinds": [],
             "observation_count": 0,
         })
         for name, flagged in obs.get("pressure", {}).items():
@@ -65,6 +67,13 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         item["evidence_refs"] = list(dict.fromkeys(item["evidence_refs"] + obs.get("evidence_refs", [])))
         if obs.get("collector_type") not in item["collector_types"]:
             item["collector_types"].append(obs.get("collector_type"))
+        if (
+            obs.get("collection_status")
+            and obs.get("collection_status") not in item["collection_statuses"]
+        ):
+            item["collection_statuses"].append(obs.get("collection_status"))
+        if obs.get("failure_kind") and obs.get("failure_kind") not in item["failure_kinds"]:
+            item["failure_kinds"].append(obs.get("failure_kind"))
         item["observation_count"] += 1
 
     classification = "insufficient_evidence"
@@ -81,8 +90,54 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         any(obs.get("pressure", {}).get("io_wait") for obs in target_obs)
         and any(obs.get("pressure", {}).get("io_wait") for obs in same_host_obs)
     )
+    target_instance_count = sum(
+        1 for item in scope.get("instances", [])
+        if item.get("service_id") == target_service
+    )
+    upload_failed_obs = [
+        obs for obs in target_obs
+        if obs.get("failure_kind") == "artifact_upload_failed"
+    ]
+    healthy_target_obs = [
+        obs for obs in target_obs
+        if obs.get("collection_status") == "DONE"
+        and obs.get("failure_kind") != "artifact_upload_failed"
+    ]
+    has_distinct_healthy_peer = any(
+        healthy.get("target", {}).get("instance_id")
+        != failed.get("target", {}).get("instance_id")
+        for failed in upload_failed_obs
+        for healthy in healthy_target_obs
+    )
 
-    if shared_iowait:
+    if target_instance_count >= 2 and upload_failed_obs and has_distinct_healthy_peer:
+        classification = "single_instance_storage_path_failure"
+        confidence_level = "高"
+        failed_target = upload_failed_obs[0].get("target", {})
+        summary = (
+            f"同一服务的双 Worker 对照采集显示："
+            f"{failed_target.get('instance_id') or failed_target.get('agent_id')} 在证据上传阶段失败，"
+            "另一实例使用同一对象存储成功，优先定位为故障 Worker 到对象存储的定向网络、"
+            "防火墙或 endpoint 链路问题，而不是对象存储整体不可用。"
+        )
+        confidence_factors = {
+            "scope_coverage": "high",
+            "source_independence": "high",
+            "discriminating_evidence": "high",
+        }
+        ruled_out.extend([
+            {
+                "hypothesis": "shared_storage_outage",
+                "reason": "健康 Worker 在同一时间窗成功产生并上传了结构化证据。",
+                "evidence_refs": all_refs,
+            },
+            {
+                "hypothesis": "agent_offline",
+                "reason": "故障 Worker 已领取并执行任务，失败发生在产物上传阶段。",
+                "evidence_refs": _unique_refs(upload_failed_obs),
+            },
+        ])
+    elif shared_iowait:
         classification = "host_resource_contention"
         confidence_level = "高" if len(all_refs) >= 4 else "中"
         summary = "目标实例和同宿主实例同时表现出 I/O 等待，倾向于宿主机或共享块设备争抢。"
@@ -124,6 +179,7 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         "same_host_noisy_neighbor": "same_host",
         "downstream_dependency": "downstream",
         "self_code_or_process_pressure": "self",
+        "single_instance_storage_path_failure": "self",
     }.get(classification, "unknown")
     selected = {
         "same_host": same_host_obs,
@@ -131,6 +187,8 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         "self": target_obs,
         "shared_resource": target_obs + same_host_obs,
     }.get(location_type, [])
+    if classification == "single_instance_storage_path_failure":
+        selected = upload_failed_obs
     selected_refs = _unique_refs(selected)
     target_ref = None
     if selected:
@@ -157,6 +215,7 @@ def cluster_finding(assessment: dict[str, Any]) -> dict[str, Any]:
         "same_host_noisy_neighbor": ["distributed.same_host_noisy_neighbor"],
         "downstream_dependency": ["distributed.downstream_pressure"],
         "self_code_or_process_pressure": ["linux.cpu.process_pressure"],
+        "single_instance_storage_path_failure": ["linux.network.retransmit"],
     }
     domain_knowledge = {
         "cpu": ["linux.cpu.process_pressure"],
@@ -331,6 +390,8 @@ def _unique_refs(observations: list[dict[str, Any]]) -> list[str]:
 
 
 def _domain_cause(observations: list[dict[str, Any]]) -> tuple[str, str]:
+    if any(obs.get("failure_kind") == "artifact_upload_failed" for obs in observations):
+        return "network", "agent_to_object_storage_connectivity"
     facts = [_facts(obs) for obs in observations]
     if any(_num(item.get("mysql_lock_wait_count")) > 0 or _num(item.get("mysql_lock_wait_seconds")) > 0 for item in facts):
         return "database", "mysql_lock_wait"

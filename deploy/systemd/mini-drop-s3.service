@@ -1,0 +1,19 @@
+[Unit]
+Description=Mini-Drop Persistent S3-compatible Storage (MinIO)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=control
+Group=control
+EnvironmentFile=/home/control/mini-drop-active/deploy/env/control-native.env
+ExecStart=/home/control/mini-drop-bin/start-minio.sh
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

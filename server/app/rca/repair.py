@@ -49,6 +49,24 @@ def build_repair_plan(task_id: str, report: DiagnosisReport, evidence: EvidenceI
             description="热点函数疑似计算密集，建议人工审查算法复杂度、缓存策略或循环边界。",
         ))
 
+    if cause_id == "python_userland_hotspot" or (
+        cause_id.startswith("cpu_hotspot") and collector_type == "pyspy"
+    ):
+        top_name = (
+            evidence.top_functions[0].get("name", "最高占比 Python 函数")
+            if evidence.top_functions
+            else "最高占比 Python 函数"
+        )
+        actions.append(RepairAction(
+            action_id=f"action_{uuid4().hex[:8]}",
+            action_type="code_change_suggestion",
+            risk_level=MANUAL_ONLY,
+            description=(
+                f"优先审查热点 {top_name} 的算法复杂度、重复序列化、循环边界和缓存策略；"
+                "修改后使用相同 py-spy 参数重新采样对比。"
+            ),
+        ))
+
     if cause_id == "io_wait_high":
         actions.append(RepairAction(
             action_id=f"action_{uuid4().hex[:8]}",
@@ -81,12 +99,30 @@ def build_repair_plan(task_id: str, report: DiagnosisReport, evidence: EvidenceI
             command="sudo sysctl kernel.perf_event_paranoid=1",
         ))
 
+    if cause_id == "artifact_storage_unreachable":
+        actions.append(RepairAction(
+            action_id=f"action_{uuid4().hex[:8]}",
+            action_type="storage_connectivity_check",
+            risk_level=MANUAL_ONLY,
+            description=(
+                "Agent 已完成本地采集，但证据上传失败。建议依次检查 Agent 到 MinIO/S3 "
+                "endpoint 的 TCP 连通性、防火墙规则、TLS 配置、bucket 和访问凭据；"
+                "恢复链路后使用原参数重新采集。"
+            ),
+        ))
+
     if not actions:
+        evidence_hint = {
+            "pyspy": "延长或重复 py-spy 采样，并在相同负载下补充历史基线",
+            "perf_cpu": "延长 CPU Profile 采样，并在相同负载下补充历史基线",
+            "ebpf_io": "重复 eBPF I/O 延迟采集，并结合磁盘队列和历史基线",
+            "sys_metrics": "延长系统指标窗口，并根据异常领域选择 CPU Profile 或 eBPF I/O",
+        }.get(collector_type, "补充与当前症状直接相关的采集结果和历史基线")
         actions.append(RepairAction(
             action_id=f"action_{uuid4().hex[:8]}",
             action_type="collect_more_evidence",
             risk_level=MANUAL_ONLY,
-            description="当前证据不足，建议补充 baseline、火焰图 TopN 或 eBPF 延迟数据后重试。",
+            description=f"当前证据不足，建议{evidence_hint}后重试；无需补采与症状无关的采集器。",
         ))
 
     risk_order = {SAFE_AUTO: 0, CONFIRM_REQUIRED: 1, MANUAL_ONLY: 2}

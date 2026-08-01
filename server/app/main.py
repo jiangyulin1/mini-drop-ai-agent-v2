@@ -11,16 +11,19 @@ from __future__ import annotations
 import server.app._env  # noqa: F401 — 自动加载 .env
 
 import json as _json_mod
+import hashlib
+import io
 import os
 import secrets
 import time
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path as _Path
 from urllib.parse import quote as _url_quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 import asyncio
 import json as _json
@@ -28,10 +31,16 @@ import queue as _queue
 from typing import Optional
 
 from server.app.common_utils import status_value
+from server.app.artifact_service import (
+    evidence_artifact_links,
+    inspect_artifact,
+    read_artifact_bytes,
+)
 from server.app.ai_provider import get_ai_settings
 from server.app.ai_validation import AIValidationBusy, run_ai_validation_suite
 from server.app.database import init_db, new_session
 from server.app.event_bus import BUS, notify_diagnosis_complete
+from server.app.flamegraph_parser import extract_top_functions_from_svg
 from server.app.prometheus_metrics import record_diagnosis, record_http_request, REGISTRY
 from server.app.grpc_server import serve_in_background
 from server.app.logging_utils import log_event
@@ -55,6 +64,7 @@ from server.app.schemas import (
 from server.app.sql_repository import SqlRepository
 from server.app.state_machine import Actor, TaskStatus
 from server.app.task_kinds import list_task_kinds
+from server.app.task_names import normalize_task_name
 from server.app import storage as store
 
 repo = SqlRepository()
@@ -504,6 +514,14 @@ def create_task(payload: CreateTaskRequest, request: Request) -> APIResponse:
         raise HTTPException(status_code=400, detail="sample_rate 必须为正整数")
     if payload.sample_rate > MAX_SAMPLE_RATE:
         raise HTTPException(status_code=400, detail=f"sample_rate 不能超过 {MAX_SAMPLE_RATE}")
+    normalized_name = normalize_task_name(
+        payload.name,
+        collector_type=payload.collector_type,
+        agent_id=payload.agent_id,
+        target_pid=payload.target_pid,
+    )
+    if normalized_name != payload.name:
+        payload = payload.model_copy(update={"name": normalized_name})
     idempotency_key = request.headers.get("idempotency-key", "").strip()
     if len(idempotency_key) > 128:
         raise HTTPException(status_code=400, detail="Idempotency-Key 不能超过 128 字符")
@@ -653,10 +671,18 @@ def get_task_events(task_id: str) -> APIResponse:
 
 
 @app.get("/api/tasks/{task_id}/artifacts")
-def get_task_artifacts(task_id: str) -> APIResponse:
+def get_task_artifacts(task_id: str, verify: bool = True) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return APIResponse(data=repo.artifacts.get(task_id, []))
+    return APIResponse(data=[
+        inspect_artifact(
+            task_id,
+            artifact,
+            check_availability=verify,
+            verify_hash=False,
+        )
+        for artifact in repo.artifacts.get(task_id, [])
+    ])
 
 
 @app.get("/api/tasks/{task_id}/artifacts/{artifact_type}/content")
@@ -701,13 +727,23 @@ def download_task_artifact(task_id: str, artifact_type: str, index: Optional[int
         media_type = artifact.get("content_type") or "application/octet-stream"
         path = _resolve_artifact_path_or_none(artifact.get("local_path"))
         if path is not None:
+            expected_size = artifact.get("size_bytes") or 0
+            if expected_size and path.stat().st_size != expected_size:
+                raise HTTPException(status_code=409, detail="产物完整性检查失败：文件大小与登记值不一致")
             return FileResponse(path, media_type=media_type, filename=filename)
 
         bucket = artifact.get("bucket") or os.getenv("MINIO_BUCKET", "mini-drop")
         key = _validate_presign_request(bucket, artifact.get("object_key", ""))
+        stored_size = store.object_size(bucket, key)
+        if stored_size is None:
+            raise HTTPException(status_code=404, detail="产物文件已不存在，请下载结构化证据 JSON")
+        expected_size = artifact.get("size_bytes") or 0
+        if expected_size and stored_size != expected_size:
+            raise HTTPException(status_code=409, detail="产物完整性检查失败：对象大小与登记值不一致")
         headers = {
             "Content-Disposition": f"attachment; filename*=UTF-8''{_url_quote(filename)}",
             "X-Content-Type-Options": "nosniff",
+            "Content-Length": str(stored_size),
         }
         return StreamingResponse(
             store.stream_object(bucket, key),
@@ -736,7 +772,7 @@ def diagnose_task(task_id: str) -> APIResponse:
 
     # 收集已有 artifacts 中的结构化数据
     artifacts = repo.artifacts.get(task_id, [])
-    top_functions = _extract_artifact_json(artifacts, "top_json")
+    top_functions = _extract_top_functions(artifacts)
     ebpf_metrics = _extract_artifact_json(artifacts, "ebpf_metrics")
     sys_metrics = _extract_artifact_json(artifacts, "sys_metrics")
 
@@ -831,6 +867,21 @@ def list_task_diagnoses(task_id: str) -> APIResponse:
     return APIResponse(data=repo.list_diagnoses_for_task(task_id))
 
 
+@app.get("/api/diagnoses")
+def list_diagnosis_history(limit: int = 500, offset: int = 0) -> APIResponse:
+    """Return legacy RCA history without one browser request per task."""
+
+    limit = min(max(limit, 1), 1000)
+    offset = max(offset, 0)
+    items, total = repo.list_diagnosis_history(limit=limit, offset=offset)
+    return APIResponse(data={
+        "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    })
+
+
 @app.get("/api/diagnoses/{diagnosis_id}")
 def get_diagnosis(diagnosis_id: str) -> APIResponse:
     item = repo.get_diagnosis(diagnosis_id)
@@ -889,7 +940,176 @@ def get_diagnosis_session(diagnosis_id: str) -> APIResponse:
     data = diagnosis_orchestrator.get(diagnosis_id, advance=True)
     if data is None:
         raise HTTPException(status_code=404, detail="诊断会话不存在")
+    artifacts_by_task = repo.artifacts
+    data = {
+        **data,
+        "evidence": [
+            {
+                **item,
+                "artifact_links": evidence_artifact_links(
+                    item,
+                    artifacts_by_task,
+                    verify=False,
+                ),
+            }
+            for item in data.get("evidence", [])
+        ],
+    }
     return APIResponse(data=data)
+
+
+def _find_diagnosis_evidence(diagnosis_id: str, evidence_id: str) -> dict:
+    evidence = next(
+        (
+            item
+            for item in diagnosis_orchestrator.store.list_evidence(diagnosis_id)
+            if item.get("evidence_id") == evidence_id
+        ),
+        None,
+    )
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="诊断证据不存在")
+    return evidence
+
+
+@app.get("/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence_id}/download")
+def download_diagnosis_evidence(diagnosis_id: str, evidence_id: str) -> Response:
+    """Download the persisted structured evidence even if its raw artifact expired."""
+
+    evidence = _find_diagnosis_evidence(diagnosis_id, evidence_id)
+    content = _json_mod.dumps(
+        evidence,
+        ensure_ascii=False,
+        indent=2,
+        default=str,
+    ).encode("utf-8")
+    filename = _safe_download_filename(f"evidence-{evidence_id}.json")
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{_url_quote(filename)}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence_id}/bundle")
+def download_diagnosis_evidence_bundle(diagnosis_id: str, evidence_id: str) -> Response:
+    """Build a self-describing ZIP containing evidence, manifest, and available files."""
+
+    evidence = _find_diagnosis_evidence(diagnosis_id, evidence_id)
+    artifact_links = evidence_artifact_links(evidence, repo.artifacts, verify=False)
+    manifest = {
+        "schema_version": "1.0",
+        "diagnosis_id": diagnosis_id,
+        "evidence_id": evidence_id,
+        "artifact_count": len(artifact_links),
+        "included_artifact_count": 0,
+        "artifacts": [],
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "evidence.json",
+            _json_mod.dumps(evidence, ensure_ascii=False, indent=2, default=str),
+        )
+        for artifact in artifact_links:
+            inspected = inspect_artifact(
+                artifact["task_id"],
+                artifact,
+                check_availability=True,
+                verify_hash=False,
+            )
+            record = {
+                key: inspected.get(key)
+                for key in (
+                    "artifact_id",
+                    "task_id",
+                    "artifact_type",
+                    "filename",
+                    "object_key",
+                    "content_type",
+                    "size_bytes",
+                    "sha256",
+                    "actual_size_bytes",
+                    "availability",
+                    "availability_reason",
+                    "retention_state",
+                    "expires_at",
+                    "integrity_status",
+                )
+            }
+            if inspected["availability"] == "available":
+                try:
+                    content = read_artifact_bytes(inspected)
+                    actual_hash = hashlib.sha256(content).hexdigest()
+                    record["actual_sha256"] = actual_hash
+                    expected_hash = inspected.get("sha256")
+                    record["integrity_status"] = (
+                        "verified"
+                        if expected_hash and actual_hash == expected_hash
+                        else "mismatch"
+                        if expected_hash
+                        else "hash_unavailable"
+                    )
+                    safe_name = _safe_download_filename(
+                        inspected.get("filename")
+                        or inspected.get("object_key")
+                        or f"{inspected['artifact_type']}.bin"
+                    )
+                    archive.writestr(
+                        f"artifacts/{inspected['artifact_id']}/{safe_name}",
+                        content,
+                    )
+                    manifest["included_artifact_count"] += 1
+                except (FileNotFoundError, OSError, ValueError):
+                    record["availability"] = "missing"
+                    record["availability_reason"] = "打包时文件不可读"
+            manifest["artifacts"].append(record)
+        archive.writestr(
+            "manifest.json",
+            _json_mod.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+        )
+    filename = _safe_download_filename(f"evidence-{evidence_id}-bundle.zip")
+    return Response(
+        content=output.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{_url_quote(filename)}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/api/storage/reconciliation")
+def reconcile_artifact_storage(limit: int = 1000, verify_hash: bool = False) -> APIResponse:
+    """Compare artifact metadata with the files currently present in storage."""
+
+    limit = min(max(limit, 1), 5000)
+    items: list[dict] = []
+    for task_id, artifacts in repo.artifacts.items():
+        for artifact in artifacts:
+            if len(items) >= limit:
+                break
+            items.append(inspect_artifact(
+                task_id,
+                artifact,
+                check_availability=True,
+                verify_hash=verify_hash,
+            ))
+        if len(items) >= limit:
+            break
+    summary = {
+        "scanned": len(items),
+        "available": sum(item["availability"] == "available" for item in items),
+        "missing": sum(item["availability"] == "missing" for item in items),
+        "unavailable": sum(item["availability"] == "unavailable" for item in items),
+        "integrity_mismatch": sum(item["integrity_status"] == "mismatch" for item in items),
+        "retention_expired": sum(item["retention_state"] == "expired" for item in items),
+        "verify_hash": verify_hash,
+    }
+    return APIResponse(data={"summary": summary, "items": items})
 
 
 @app.post("/api/v1/diagnoses/{diagnosis_id}/approvals")
@@ -908,7 +1128,7 @@ def list_probe_definitions() -> APIResponse:
     return APIResponse(data=[probe.model_dump(mode="json") for probe in list_registered_probes()])
 
 
-def _extract_artifact_json(artifacts: list[dict], artifact_type: str) -> dict | None:
+def _extract_artifact_json(artifacts: list[dict], artifact_type: str):
     """从 artifacts 列表中提取指定类型的 JSON 数据。"""
     for art in artifacts:
         if art.get("artifact_type") == artifact_type:
@@ -938,6 +1158,31 @@ def _extract_artifact_json(artifacts: list[dict], artifact_type: str) -> dict | 
                 )
                 return None
     return None
+
+
+def _extract_top_functions(artifacts: list[dict]) -> list[dict]:
+    """Read TopN JSON, or derive it from an available flamegraph SVG."""
+
+    top_functions = _extract_artifact_json(artifacts, "top_json")
+    if isinstance(top_functions, list) and top_functions:
+        return top_functions
+
+    for artifact in artifacts:
+        if artifact.get("artifact_type") != "flamegraph_svg":
+            continue
+        try:
+            svg_text = read_artifact_bytes(artifact).decode("utf-8", errors="replace")
+            derived = extract_top_functions_from_svg(svg_text)
+            if derived:
+                return derived
+        except Exception as exc:
+            log_event(
+                "warning",
+                "flamegraph_svg_top_parse_failed",
+                artifact_type="flamegraph_svg",
+                error=type(exc).__name__,
+            )
+    return []
 
 
 def _artifact_root() -> _Path:
@@ -1039,7 +1284,7 @@ def nlp_summarize_task(body: dict) -> APIResponse:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     artifacts = repo.artifacts.get(task_id, [])
-    top_functions = _extract_artifact_json(artifacts, "top_json") or []
+    top_functions = _extract_top_functions(artifacts)
     ebpf_metrics = _extract_artifact_json(artifacts, "ebpf_metrics")
     suggestions = []
 

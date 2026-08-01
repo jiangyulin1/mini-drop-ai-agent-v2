@@ -15,6 +15,7 @@ from server.app.rca.evidence import collect_evidence, evidence_to_json
 from server.app.rca.llm_client import _extract_json, _validate_and_parse, _ref_exists, _collect_evidence_paths
 from server.app.rca.models import CandidateCause, CauseEntry, DiagnosisReport, EvidenceInput, FeedbackPrior
 from server.app.rca.prompt import build_system_prompt, build_user_message
+from server.app.rca.repair import build_repair_plan
 from server.app.rca.report import run_diagnosis, run_diagnosis_context
 from server.app.rca.tools import run_rca_tools
 
@@ -123,6 +124,22 @@ class TestCandidateGeneration:
                               failure_events=["目标 PID 不存在"])
         candidates = generate_candidates(ev)
         assert any(c.candidate_id == "target_pid_invalid" for c in candidates)
+
+    def test_artifact_upload_failure_matched(self):
+        task = _StubTask()
+        task.status = "FAILED"
+        ev = collect_evidence(
+            task_id="t1",
+            task_record=task,
+            failure_events=[
+                "artifact upload failed: connection refused for 192.168.10.10:9000"
+            ],
+        )
+
+        candidates = generate_candidates(ev)
+
+        assert candidates[0].candidate_id == "artifact_storage_unreachable"
+        assert candidates[0].rule_score == pytest.approx(0.98)
 
     def test_feedback_prior_adjusts_score(self):
         task = _StubTask()
@@ -376,6 +393,51 @@ class TestToolAndRepairFlow:
         flame_tool = next(item for item in tools if item.tool_name == "get_flamegraph_top")
         assert flame_tool.status == "success"
         assert flame_tool.evidence_ref == "tool_results.get_flamegraph_top"
+        ebpf_tool = next(item for item in tools if item.tool_name == "get_ebpf_latency_summary")
+        assert ebpf_tool.status == "not_applicable"
+        baseline_tool = next(item for item in tools if item.tool_name == "compare_baseline")
+        assert baseline_tool.status == "optional_missing"
+
+    def test_pyspy_collector_without_topn_is_not_reported_as_hotspot(self):
+        evidence = EvidenceInput(
+            task_metadata={
+                "collector_type": "pyspy",
+                "duration_sec": 25,
+                "status": "DONE",
+            },
+        )
+
+        candidates = generate_candidates(evidence)
+
+        assert [item.candidate_id for item in candidates] == ["insufficient_data"]
+
+    def test_storage_failure_repair_is_manual_and_specific(self):
+        report = DiagnosisReport(
+            summary="对象存储上传失败",
+            ranked_causes=[
+                CauseEntry(
+                    cause_id="artifact_storage_unreachable",
+                    confidence=0.92,
+                    claim="Agent 到对象存储的链路不可达",
+                    evidence_refs=["failure_events"],
+                )
+            ],
+            facts=["Agent 在线", "任务上传阶段失败"],
+        )
+        evidence = EvidenceInput(
+            task_metadata={
+                "collector_type": "sys_metrics",
+                "agent_id": "linux-worker-2",
+                "target_pid": 1,
+            },
+            failure_events=["artifact upload failed"],
+        )
+
+        plan = build_repair_plan("task_storage_failure", report, evidence)
+
+        assert plan.risk_level == "manual_only"
+        assert plan.actions[0].action_type == "storage_connectivity_check"
+        assert "MinIO/S3" in plan.actions[0].description
 
     def test_context_builds_and_executes_safe_followup(self):
         stub_repo = _StubRepo()

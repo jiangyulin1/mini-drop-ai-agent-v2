@@ -28,6 +28,7 @@ import ErrorAlert from "../components/ErrorAlert";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
 import usePolling from "../hooks/usePolling";
 import echarts from "../lib/echarts";
+import { taskDisplayName } from "../utils/taskNames";
 
 export default function AgentDetail() {
   const { agentId } = useParams();
@@ -156,6 +157,7 @@ export default function AgentDetail() {
     return agentTasks.filter(
       (t) =>
         (t.name || "").toLowerCase().includes(q) ||
+        taskDisplayName(t).toLowerCase().includes(q) ||
         (t.id || "").toLowerCase().includes(q) ||
         (t.collector_type || "").toLowerCase().includes(q)
     );
@@ -166,12 +168,13 @@ export default function AgentDetail() {
       title: "任务",
       dataIndex: "name",
       ellipsis: true,
-      render: (value, record) => (
+      render: (_, record) => (
         <Typography.Link
           onClick={() => navigate(`/task/${record.id}`)}
           style={{ cursor: "pointer" }}
+          title={record.name}
         >
-          {value || record.id}
+          {taskDisplayName(record)}
         </Typography.Link>
       ),
     },

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createEventSource } from "../api/client";
+import {
+  createEventSource,
+  ensureEventSourceAuthCookie,
+} from "../api/client";
 
 const subscribers = new Set();
 let sharedEventSource = null;
@@ -8,6 +11,7 @@ let retryCount = 0;
 let lastEventId = "";
 let sharedConnected = false;
 let authListenerAttached = false;
+let connecting = false;
 const maxRetryDelay = 30000;
 
 function notifyConnection(connected) {
@@ -37,7 +41,11 @@ function closeSharedEventSource() {
   sharedEventSource = null;
 }
 
-function connectSharedEventSource() {
+async function connectSharedEventSource() {
+  if (sharedEventSource || subscribers.size === 0 || connecting) return;
+  connecting = true;
+  await ensureEventSourceAuthCookie();
+  connecting = false;
   if (sharedEventSource || subscribers.size === 0) return;
 
   const eventSource = createEventSource(lastEventId);
@@ -71,7 +79,9 @@ function connectSharedEventSource() {
     const delay = Math.min(1000 * (2 ** retryCount), maxRetryDelay);
     retryCount += 1;
     clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectSharedEventSource, delay);
+    reconnectTimer = setTimeout(() => {
+      void connectSharedEventSource();
+    }, delay);
   };
 }
 
@@ -83,7 +93,7 @@ function subscribe(handlers) {
   }
   handlers.onConnectionChange?.(sharedConnected);
   clearTimeout(reconnectTimer);
-  connectSharedEventSource();
+  void connectSharedEventSource();
 
   return () => {
     subscribers.delete(handlers);
@@ -105,7 +115,7 @@ function reconnectSharedEventSource() {
   reconnectTimer = null;
   closeSharedEventSource();
   notifyConnection(false);
-  connectSharedEventSource();
+  void connectSharedEventSource();
 }
 
 /**

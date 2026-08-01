@@ -768,6 +768,64 @@ class SqlRepository:
             )
             return [run.to_dict() for run in runs]
 
+    def list_diagnosis_history(
+        self,
+        *,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return legacy RCA history in one query-oriented API response."""
+
+        with self._read_session() as session:
+            total = session.query(DiagnosisRunModel).count()
+            runs = (
+                session.query(DiagnosisRunModel)
+                .order_by(DiagnosisRunModel.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            diagnosis_ids = [run.id for run in runs]
+            if not diagnosis_ids:
+                return [], total
+
+            reports: dict[str, DiagnosisReportModel] = {}
+            for report in (
+                session.query(DiagnosisReportModel)
+                .filter(DiagnosisReportModel.diagnosis_id.in_(diagnosis_ids))
+                .order_by(DiagnosisReportModel.created_at.desc())
+                .all()
+            ):
+                reports.setdefault(report.diagnosis_id, report)
+
+            feedback: dict[str, RCAFeedbackModel] = {}
+            for item in (
+                session.query(RCAFeedbackModel)
+                .filter(RCAFeedbackModel.diagnosis_id.in_(diagnosis_ids))
+                .order_by(RCAFeedbackModel.created_at.desc())
+                .all()
+            ):
+                feedback.setdefault(item.diagnosis_id, item)
+
+            items = []
+            for run in runs:
+                report = reports.get(run.id)
+                feedback_item = feedback.get(run.id)
+                items.append({
+                    "id": run.id,
+                    "created_at": run.created_at,
+                    "run": run.to_dict(),
+                    "report": report.to_dict() if report else None,
+                    "feedback": {
+                        "feedback_label": feedback_item.feedback_label,
+                        "predicted_cause_id": feedback_item.predicted_cause_id,
+                        "corrected_cause_id": feedback_item.corrected_cause_id,
+                        "feedback_note": feedback_item.feedback_note,
+                        "created_at": feedback_item.created_at,
+                    } if feedback_item else None,
+                })
+            return items, total
+
     def get_feedback_priors(self) -> dict[str, FeedbackPrior]:
         with self._read_session() as session:
             priors: dict[str, FeedbackPrior] = {}

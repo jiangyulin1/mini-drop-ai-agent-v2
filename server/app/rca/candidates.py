@@ -138,6 +138,8 @@ def _match_ebpf_latency_present(evidence: EvidenceInput, _params: dict[str, Any]
 
 
 def _match_collector_or_suggestion(evidence: EvidenceInput, params: dict[str, Any]) -> bool:
+    if params.get("require_top_functions") and not evidence.top_functions:
+        return False
     collector_type = params.get("collector_type", "")
     if evidence.task_metadata.get("collector_type") == collector_type:
         return True
@@ -147,7 +149,7 @@ def _match_collector_or_suggestion(evidence: EvidenceInput, params: dict[str, An
 
 def _match_agent_cpu_overhead(evidence: EvidenceInput, params: dict[str, Any]) -> bool:
     threshold = float(params.get("min_cpu_percent", 10))
-    return float(evidence.agent_stats.get("max_cpu_percent", 0)) > threshold
+    return float((evidence.agent_stats or {}).get("max_cpu_percent", 0)) > threshold
 
 
 def _match_failure_contains(evidence: EvidenceInput, params: dict[str, Any]) -> bool:

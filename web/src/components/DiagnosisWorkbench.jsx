@@ -5,7 +5,6 @@ import {
   Card,
   Col,
   Descriptions,
-  Drawer,
   Empty,
   Progress,
   Row,
@@ -28,6 +27,7 @@ import {
   StepForwardOutlined,
 } from "@ant-design/icons";
 import { getDiagnosisSession } from "../api/client";
+import EvidenceReference, { EvidenceDetailDrawer } from "./EvidenceReference";
 import styles from "./DiagnosisWorkbench.module.css";
 
 const NODE_LABELS = {
@@ -71,6 +71,15 @@ const HYPOTHESIS_STATUS = {
   RULED_OUT: { color: "red", label: "已排除" },
   INCONCLUSIVE: { color: "gold", label: "证据不足" },
   UNTESTED: { color: "default", label: "待验证" },
+};
+
+const PIPELINE_STATUS_LABELS = {
+  PENDING: "待执行",
+  RUNNING: "执行中",
+  WAITING: "等待中",
+  COMPLETED: "已完成",
+  SKIPPED: "已跳过",
+  FAILED: "失败",
 };
 
 function formatTime(value) {
@@ -123,6 +132,10 @@ function ReplayView({ detail }) {
   const hypotheses = detail.hypothesis_graph?.hypotheses || [];
   const probes = detail.probes || [];
   const evidence = detail.evidence || [];
+  const evidenceMap = useMemo(
+    () => new Map(evidence.map((item) => [item.evidence_id, item])),
+    [evidence],
+  );
   const conclusion = detail.latest_conclusion;
 
   useEffect(() => {
@@ -197,7 +210,7 @@ function ReplayView({ detail }) {
       <Card
         className={styles.stageCard}
         title={<Space><FileSearchOutlined />当前步骤：{NODE_LABELS[current.node_name] || current.node_name}</Space>}
-        extra={<Tag color={current.status === "FAILED" ? "red" : "blue"}>{current.status}</Tag>}
+        extra={<Tag color={current.status === "FAILED" ? "red" : "blue"} title={current.status}>{PIPELINE_STATUS_LABELS[current.status] || current.status}</Tag>}
       >
         <Alert
           type="info"
@@ -213,14 +226,22 @@ function ReplayView({ detail }) {
           <Descriptions.Item label="输入引用" span={3}>
             <Space wrap>
               {(current.input_refs || []).length
-                ? current.input_refs.map((ref) => <Tag key={ref} title={ref}>{compactRef(ref)}</Tag>)
+                ? current.input_refs.map((ref) => (
+                  evidenceMap.has(ref)
+                    ? <EvidenceReference key={ref} evidence={evidenceMap.get(ref)} label={compactRef(ref)} />
+                    : <Tag key={ref} title={ref}>{compactRef(ref)}</Tag>
+                ))
                 : "无"}
             </Space>
           </Descriptions.Item>
           <Descriptions.Item label="输出引用" span={3}>
             <Space wrap>
               {(current.output_refs || []).length
-                ? current.output_refs.map((ref) => <Tag color="blue" key={ref} title={ref}>{compactRef(ref)}</Tag>)
+                ? current.output_refs.map((ref) => (
+                  evidenceMap.has(ref)
+                    ? <EvidenceReference key={ref} evidence={evidenceMap.get(ref)} label={compactRef(ref)} />
+                    : <Tag color="blue" key={ref} title={ref}>{compactRef(ref)}</Tag>
+                ))
                 : "无"}
             </Space>
           </Descriptions.Item>
@@ -369,7 +390,25 @@ function EvidenceChain({ detail, compact = false }) {
           dataSource={compact ? evidence.slice(0, 6) : evidence}
           onRow={(record) => ({ onClick: () => setSelected(record), style: { cursor: "pointer" } })}
           columns={[
-            { title: "证据", dataIndex: "evidence_id", width: 190, render: (value) => <Typography.Text title={value}>{compactRef(value)}</Typography.Text> },
+            {
+              title: "证据",
+              dataIndex: "evidence_id",
+              width: 210,
+              render: (value, record) => (
+                <Button
+                  type="link"
+                  size="small"
+                  title={value}
+                  style={{ height: "auto", padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelected(record);
+                  }}
+                >
+                  {compactRef(value)}
+                </Button>
+              ),
+            },
             { title: "目标", dataIndex: "target", width: 150, render: (value) => value?.instance_id || value?.host_id || value?.agent_id || "-" },
             { title: "时间窗", dataIndex: "event_time_range", width: 210, render: (value) => `${formatTime(value?.start)} → ${formatTime(value?.end)}` },
             { title: "质量", width: 180, render: (_, record) => evidenceQuality(record) },
@@ -389,25 +428,15 @@ function EvidenceChain({ detail, compact = false }) {
           ]}
         />
       </Card>
-      <Drawer
-        width={720}
+      <EvidenceDetailDrawer
         open={Boolean(selected)}
-        title="证据详情"
+        evidence={selected}
         onClose={() => setSelected(null)}
-      >
-        {selected && (
-          <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label="Evidence ID"><Typography.Text copyable>{selected.evidence_id}</Typography.Text></Descriptions.Item>
-            <Descriptions.Item label="来源">{selected.source_system} / {selected.source_type}</Descriptions.Item>
-            <Descriptions.Item label="目标"><pre className={styles.jsonBlock}>{JSON.stringify(selected.target || {}, null, 2)}</pre></Descriptions.Item>
-            <Descriptions.Item label="事件时间">{formatTime(selected.event_time_range?.start)} → {formatTime(selected.event_time_range?.end)}</Descriptions.Item>
-            <Descriptions.Item label="探针">{selected.query_or_probe}</Descriptions.Item>
-            <Descriptions.Item label="数据质量"><pre className={styles.jsonBlock}>{JSON.stringify(selected.data_quality || {}, null, 2)}</pre></Descriptions.Item>
-            <Descriptions.Item label="观测值"><pre className={styles.jsonBlock}>{JSON.stringify(selected.observed_value || {}, null, 2)}</pre></Descriptions.Item>
-            <Descriptions.Item label="完整性 Hash"><Typography.Text copyable>{selected.integrity_hash}</Typography.Text></Descriptions.Item>
-          </Descriptions>
-        )}
-      </Drawer>
+        relations={(relationMap.get(selected?.evidence_id) || []).map((edge) => ({
+          ...edge,
+          target: hypothesisMap.get(edge.target)?.type || edge.target,
+        }))}
+      />
     </>
   );
 }
@@ -457,6 +486,7 @@ function EvidenceGraph({ detail }) {
   const hypotheses = (detail.hypothesis_graph?.hypotheses || []).slice(0, 5);
   const graphEdges = detail.hypothesis_graph?.edges || [];
   const conclusion = detail.latest_conclusion;
+  const [selectedEvidence, setSelectedEvidence] = useState(null);
   const targetMap = new Map();
   evidence.forEach((item) => {
     const targetId = item.target?.instance_id || item.target?.host_id || item.target?.agent_id;
@@ -516,20 +546,21 @@ function EvidenceGraph({ detail }) {
   );
 
   return (
-    <Card
-      size="small"
-      title="全局因果证据图"
-      extra={<Typography.Text type="secondary">目标 → 证据 → 假设 → 已校验结论</Typography.Text>}
-    >
-      <Space wrap style={{ marginBottom: 10 }}>
-        <Tag color="blue">同一目标/采集域</Tag>
-        <Tag color="green">支持</Tag>
-        <Tag color="red">反驳</Tag>
-        <Tag>待判定</Tag>
-        {(detail.evidence || []).length > evidence.length && <Tag color="gold">仅显示前 {evidence.length} 条证据</Tag>}
-      </Space>
-      <div className={styles.graphViewport}>
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="诊断因果证据图">
+    <>
+      <Card
+        size="small"
+        title="全局因果证据图"
+        extra={<Typography.Text type="secondary">点击证据节点读取观测与下载文件</Typography.Text>}
+      >
+        <Space wrap style={{ marginBottom: 10 }}>
+          <Tag color="blue">同一目标/采集域</Tag>
+          <Tag color="green">支持</Tag>
+          <Tag color="red">反驳</Tag>
+          <Tag>待判定</Tag>
+          {(detail.evidence || []).length > evidence.length && <Tag color="gold">仅显示前 {evidence.length} 条证据</Tag>}
+        </Space>
+        <div className={styles.graphViewport}>
+          <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="诊断因果证据图">
           <text x={columns.target} y="28" className={styles.graphHeading}>诊断目标</text>
           <text x={columns.evidence} y="28" className={styles.graphHeading}>结构化证据</text>
           <text x={columns.hypothesis} y="28" className={styles.graphHeading}>候选假设</text>
@@ -568,7 +599,17 @@ function EvidenceGraph({ detail }) {
             </g>
           ))}
           {evidenceNodes.map((item) => (
-            <g key={item.id} transform={`translate(${item.x}, ${item.y - 25})`}>
+            <g
+              key={item.id}
+              transform={`translate(${item.x}, ${item.y - 25})`}
+              role="button"
+              tabIndex="0"
+              style={{ cursor: "pointer" }}
+              onClick={() => setSelectedEvidence(item)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") setSelectedEvidence(item);
+              }}
+            >
               <title>{`${item.id}\n${item.label}`}</title>
               <rect width={nodeWidth.evidence} height="50" rx="8" className={styles.evidenceNode} />
               <text x="12" y="22" className={styles.graphText}>{compactLabel(item.label, 24)}</text>
@@ -585,7 +626,7 @@ function EvidenceGraph({ detail }) {
                 className={item.status === "SUPPORTED" ? styles.supportedNode : item.status === "RULED_OUT" ? styles.ruledOutNode : styles.hypothesisNode}
               />
               <text x="12" y="22" className={styles.graphText}>{compactLabel(item.label, 24)}</text>
-              <text x="12" y="39" className={styles.graphSubtext}>{item.status} · {item.evidence_score ?? 0}/100</text>
+              <text x="12" y="39" className={styles.graphSubtext}>{HYPOTHESIS_STATUS[item.status]?.label || item.status} · {item.evidence_score ?? 0}/100</text>
             </g>
           ))}
           {conclusionNode && (
@@ -596,9 +637,21 @@ function EvidenceGraph({ detail }) {
               <text x="12" y="44" className={styles.graphSubtext}>{compactLabel(conclusionNode.label, 17)}</text>
             </g>
           )}
-        </svg>
-      </div>
-    </Card>
+          </svg>
+        </div>
+      </Card>
+      <EvidenceDetailDrawer
+        evidence={selectedEvidence}
+        open={Boolean(selectedEvidence)}
+        onClose={() => setSelectedEvidence(null)}
+        relations={graphEdges
+          .filter((edge) => edge.source === selectedEvidence?.evidence_id)
+          .map((edge) => ({
+            ...edge,
+            target: hypothesisById.get(edge.target)?.label || edge.target,
+          }))}
+      />
+    </>
   );
 }
 
@@ -723,7 +776,7 @@ function ComparisonView({ detail, sessions }) {
 }
 
 export default function DiagnosisWorkbench({ detail, sessions = [] }) {
-  const [mode, setMode] = useState("演示回放");
+  const [mode, setMode] = useState("过程复盘");
   const evidence = detail.evidence || [];
   const coverage = detail.coverage || [];
   const completedCoverage = coverage.filter((item) => item.status === "COMPLETED").length;
@@ -735,12 +788,19 @@ export default function DiagnosisWorkbench({ detail, sessions = [] }) {
   return (
     <Card
       className={styles.workbench}
-      title="AI 诊断工作台"
+      title={(
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>诊断依据</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+            展示证据、假设与策略对比，不负责推进任务状态
+          </Typography.Text>
+        </Space>
+      )}
       extra={(
         <Segmented
           value={mode}
           onChange={setMode}
-          options={["演示回放", "假设与证据", "路径对比"]}
+          options={["过程复盘", "证据与假设", "策略对比"]}
         />
       )}
     >
@@ -751,8 +811,8 @@ export default function DiagnosisWorkbench({ detail, sessions = [] }) {
         <Col xs={12} md={6}><Statistic title="结论版本" value={(detail.conclusion_versions || []).length} /></Col>
       </Row>
 
-      {mode === "演示回放" && <ReplayView detail={detail} />}
-      {mode === "假设与证据" && (
+      {mode === "过程复盘" && <ReplayView detail={detail} />}
+      {mode === "证据与假设" && (
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <EvidenceGraph detail={detail} />
           <HypothesisBoard hypotheses={detail.hypothesis_graph?.hypotheses || []} />
@@ -760,7 +820,7 @@ export default function DiagnosisWorkbench({ detail, sessions = [] }) {
           <OracleEvaluation evaluation={detail.latest_conclusion?.evaluation} />
         </Space>
       )}
-      {mode === "路径对比" && <ComparisonView detail={detail} sessions={sessions} />}
+      {mode === "策略对比" && <ComparisonView detail={detail} sessions={sessions} />}
     </Card>
   );
 }

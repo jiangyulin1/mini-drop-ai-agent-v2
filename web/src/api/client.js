@@ -176,8 +176,8 @@ export function getTaskEvents(taskId) {
   return api.get(`/tasks/${taskId}/events`);
 }
 
-export function getTaskArtifacts(taskId) {
-  return api.get(`/tasks/${taskId}/artifacts`);
+export function getTaskArtifacts(taskId, params = {}) {
+  return api.get(`/tasks/${taskId}/artifacts`, { params });
 }
 
 export function getTaskArtifactContent(taskId, artifactType, params = {}) {
@@ -204,12 +204,54 @@ export async function downloadTaskArtifact(taskId, artifactType, params = {}) {
   return { blob: response.data, filename };
 }
 
+export async function downloadDiagnosisEvidence(diagnosisId, evidenceId) {
+  const token = getStoredApiKey();
+  const response = await axios.get(
+    `/api/v1/diagnoses/${encodeURIComponent(diagnosisId)}/evidence/${encodeURIComponent(evidenceId)}/download`,
+    {
+      responseType: "blob",
+      withCredentials: true,
+      headers: token ? { "X-API-Key": token } : {},
+    },
+  );
+  const disposition = response.headers["content-disposition"] || "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  let filename = `evidence-${evidenceId}.json`;
+  if (encoded) {
+    try { filename = decodeURIComponent(encoded); } catch { filename = encoded; }
+  }
+  return { blob: response.data, filename };
+}
+
+export async function downloadDiagnosisEvidenceBundle(diagnosisId, evidenceId) {
+  const token = getStoredApiKey();
+  const response = await axios.get(
+    `/api/v1/diagnoses/${encodeURIComponent(diagnosisId)}/evidence/${encodeURIComponent(evidenceId)}/bundle`,
+    {
+      responseType: "blob",
+      withCredentials: true,
+      headers: token ? { "X-API-Key": token } : {},
+    },
+  );
+  const disposition = response.headers["content-disposition"] || "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  let filename = `evidence-${evidenceId}-bundle.zip`;
+  if (encoded) {
+    try { filename = decodeURIComponent(encoded); } catch { filename = encoded; }
+  }
+  return { blob: response.data, filename };
+}
+
 export function triggerDiagnose(taskId) {
   return api.post(`/tasks/${taskId}/diagnose`);
 }
 
 export function listTaskDiagnoses(taskId) {
   return api.get(`/tasks/${taskId}/diagnoses`);
+}
+
+export function listDiagnoses(params = {}) {
+  return api.get("/diagnoses", { params }).then(itemsOf);
 }
 
 export function getDiagnosis(diagnosisId) {
@@ -282,6 +324,20 @@ export function getCurrentUser() {
 export function createEventSource(since = "") {
   const params = since ? `?since=${encodeURIComponent(since)}` : "";
   return new EventSource(`/api/events/stream${params}`);
+}
+
+/**
+ * Native EventSource cannot attach X-API-Key headers. Before opening the
+ * stream, migrate a legacy localStorage token into the HttpOnly auth cookie.
+ */
+export async function ensureEventSourceAuthCookie() {
+  const token = getStoredApiKey();
+  if (!token) return;
+  try {
+    await setCookieApiKey(token);
+  } catch {
+    console.warn("SSE 认证 Cookie 写入失败，将使用轮询兜底");
+  }
 }
 
 // ── Prometheus 指标 ───────────────────────────────────────────────

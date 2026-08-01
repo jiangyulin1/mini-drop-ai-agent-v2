@@ -21,10 +21,11 @@ import {
   FilterOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
-import { listTasks, listTaskDiagnoses } from "../api/client";
+import { listDiagnoses, listTasks } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import StatusTag from "../components/StatusTag";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
+import { taskDisplayName } from "../utils/taskNames";
 
 const CONFIDENCE_COLORS = {
   high: COLORS.success,     // ≥ 0.7
@@ -47,7 +48,6 @@ function confidenceLabel(v) {
 export default function DiagnosisHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [allTasks, setAllTasks] = useState([]);
   const [diagnoses, setDiagnoses] = useState([]);
   const [search, setSearch] = useState("");
   const [filterConfidence, setFilterConfidence] = useState("all");
@@ -57,30 +57,25 @@ export default function DiagnosisHistory() {
     setError("");
     setLoading(true);
     try {
-      const tasks = await listTasks();
-      setAllTasks(tasks || []);
-
-      // 拉取所有任务的诊断（限制最近 50 个任务以控制请求数）
-      const recent = (tasks || []).slice(0, 50);
-      const results = await Promise.allSettled(
-        recent.map((t) => listTaskDiagnoses(t.id))
+      const [tasks, history] = await Promise.all([
+        listTasks(),
+        listDiagnoses({ limit: 500 }),
+      ]);
+      const taskNames = new Map(
+        (tasks || []).map((task) => [task.id, taskDisplayName(task)]),
       );
-
-      const all = [];
-      results.forEach((r, i) => {
-        if (r.status === "fulfilled" && Array.isArray(r.value)) {
-          r.value.forEach((d) => {
-            // listTaskDiagnoses returns flat keys, getDiagnosis nests under .run
-            const item = d.run ? d : { ...d, run: { task_id: d.task_id, status: d.status, model_name: d.model_name, created_at: d.created_at, summary: d.summary } };
-            all.push({ ...item, _task_name: recent[i]?.name || recent[i]?.id });
-          });
-        }
-      });
+      const all = (history || []).map((item) => ({
+        ...item,
+        _task_name:
+          taskNames.get(item.run?.task_id)
+          || item.run?.task_id
+          || "-",
+      }));
 
       all.sort(
         (a, b) =>
-          new Date(b.created_at || 0).getTime() -
-          new Date(a.created_at || 0).getTime()
+          new Date(b.run?.created_at || b.created_at || 0).getTime() -
+          new Date(a.run?.created_at || a.created_at || 0).getTime()
       );
       setDiagnoses(all);
     } catch (err) {

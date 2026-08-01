@@ -91,6 +91,23 @@ def read_object_bytes(bucket: str, object_key: str) -> bytes:
         response.release_conn()
 
 
+def object_size(bucket: str, object_key: str) -> int | None:
+    """Return the stored object size, or ``None`` when the object is gone."""
+
+    if not bucket:
+        raise ValueError("bucket must not be empty")
+    if not object_key:
+        raise ValueError("object_key must not be empty")
+    try:
+        stat = _client().stat_object(bucket, object_key)
+    except Exception as exc:
+        code = getattr(exc, "code", "")
+        if code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket", "XMinioInvalidObjectName"}:
+            return None
+        raise
+    return int(stat.size)
+
+
 def stream_object(bucket: str, object_key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
     """流式读取对象，并在客户端中断或读取完成后释放 MinIO 连接。"""
     if not bucket:

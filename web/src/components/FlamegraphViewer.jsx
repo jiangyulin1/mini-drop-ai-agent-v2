@@ -85,7 +85,7 @@ function normalizeFlamegraphPayload(payload) {
  * - 搜索高亮
  * - 重置缩放
  *
- * @param {{ taskId: string, artifactType?: string, artifactIndex?: number, height?: number }} props
+ * @param {{ taskId?: string, artifactType?: string, artifactIndex?: number, height?: number, data?: object }} props
  * @param {React.Ref} ref — 暴露 search(text) 方法供 TopNChart 联动
  */
 const FlamegraphViewer = forwardRef(function FlamegraphViewer({
@@ -93,6 +93,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
   artifactType = "flamegraph_json",
   artifactIndex = null,
   height = FG.defaultHeight,
+  data = null,
 }, ref) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
@@ -160,7 +161,9 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
     setDetailsText("");
     try {
       const params = artifactIndex === null || artifactIndex === undefined ? {} : { index: artifactIndex };
-      const tree = normalizeFlamegraphPayload(await getTaskArtifactContent(taskId, artifactType, params));
+      const tree = data || normalizeFlamegraphPayload(
+        await getTaskArtifactContent(taskId, artifactType, params),
+      );
       if (hasRenderableFlamegraph(tree)) {
         dataRef.current = tree;
         setHasData(true);
@@ -177,7 +180,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
     } finally {
       setLoading(false);
     }
-  }, [taskId, artifactType, artifactIndex]);
+  }, [taskId, artifactType, artifactIndex, data]);
 
   useEffect(() => {
     load();
@@ -221,7 +224,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
       })
       .onClick((d) => {
         currentNodeRef.current = d;
-        setZoomLabel(nodeName(d));
+        setZoomLabel(d?.parent ? nodeName(d) : "root");
       })
   ), [height]);
 
@@ -418,7 +421,7 @@ const FlamegraphViewer = forwardRef(function FlamegraphViewer({
           const datum = frame?.__data__;
           if (datum) {
             currentNodeRef.current = datum;
-            setZoomLabel(nodeName(datum));
+            setZoomLabel(datum.parent ? nodeName(datum) : "root");
           }
         }}
         onContextMenu={(event) => {

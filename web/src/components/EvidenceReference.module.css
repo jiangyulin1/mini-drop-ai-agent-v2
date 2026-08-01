@@ -1,0 +1,32 @@
+.referenceButton {
+  height: auto;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.jsonBlock {
+  max-height: 320px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: #262626;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f6f8fa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+}
+
+.fileNameButton {
+  height: auto;
+  max-width: 430px;
+  padding: 0;
+  text-align: left;
+  white-space: normal;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

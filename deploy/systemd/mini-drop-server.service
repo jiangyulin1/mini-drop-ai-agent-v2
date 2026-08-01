@@ -1,0 +1,21 @@
+[Unit]
+Description=Mini-Drop Control Server
+After=network-online.target mini-drop-s3.service
+Wants=network-online.target
+Requires=mini-drop-s3.service
+
+[Service]
+Type=simple
+User=control
+Group=control
+WorkingDirectory=/home/control/mini-drop-active
+EnvironmentFile=/home/control/mini-drop-active/deploy/env/control-native.env
+ExecStart=/home/control/mini-drop-active/.venv/bin/python -m server.app.main
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillMode=mixed
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
