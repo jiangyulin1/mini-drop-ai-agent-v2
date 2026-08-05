@@ -63,6 +63,16 @@ class TaskModel(Base):
     duration_sec = Column(Integer, default=15)
     status = Column(String(16), nullable=False)
     status_reason = Column(Text, default="")
+    # ``status`` remains the backwards-compatible aggregate state exposed by
+    # the original API.  Collection and analysis are persisted separately so
+    # a successful capture is not lost when a later analyzer attempt fails.
+    collection_status = Column(String(16), nullable=False, default="PENDING")
+    analysis_status = Column(String(16), nullable=False, default="WAITING")
+    current_attempt_id = Column(String(128), nullable=True, index=True)
+    row_version = Column(Integer, nullable=False, default=0)
+    collection_deadline_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    request_id = Column(String(64), nullable=True, index=True)
+    traceparent = Column(String(64), nullable=True)
     request_params = Column(JSON, default=dict)
     idempotency_key = Column(String(128), nullable=True, unique=True, index=True)
     diagnosis_step_id = Column(String(128), nullable=True, unique=True, index=True)
@@ -83,11 +93,68 @@ class TaskModel(Base):
             "duration_sec": self.duration_sec,
             "status": self.status,
             "status_reason": self.status_reason or "",
+            "collection_status": self.collection_status,
+            "analysis_status": self.analysis_status,
+            "current_attempt_id": self.current_attempt_id,
+            "row_version": self.row_version,
+            "collection_deadline_at": self.collection_deadline_at,
+            "request_id": self.request_id,
+            "traceparent": self.traceparent,
             "request_params": self.request_params or {},
             "idempotency_key": self.idempotency_key,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+        }
+
+
+class TaskAttemptModel(Base):
+    """One durable execution attempt for a Task.
+
+    Results are keyed by attempt id so an Agent can replay a completed result
+    after a network failure without overwriting evidence from an earlier run.
+    """
+
+    __tablename__ = "task_attempts"
+    __table_args__ = (
+        UniqueConstraint("task_id", "attempt_no", name="uq_task_attempt_number"),
+    )
+
+    id = Column(String(128), primary_key=True)
+    task_id = Column(String(128), ForeignKey("tasks.id"), nullable=False, index=True)
+    attempt_no = Column(Integer, nullable=False)
+    agent_id = Column(String(128), ForeignKey("agents.id"), nullable=False, index=True)
+    status = Column(String(24), nullable=False, default="DELIVERED")
+    runner_version = Column(String(64), nullable=True)
+    exit_code = Column(Integer, nullable=True)
+    error_code = Column(String(128), nullable=True)
+    error_message = Column(Text, nullable=True)
+    result_message = Column(Text, nullable=True)
+    resource_usage_json = Column(JSON, default=dict)
+    artifact_ids_json = Column(JSON, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "attempt_id": self.id,
+            "task_id": self.task_id,
+            "attempt_no": self.attempt_no,
+            "agent_id": self.agent_id,
+            "status": self.status,
+            "runner_version": self.runner_version,
+            "exit_code": self.exit_code,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "result_message": self.result_message,
+            "resource_usage": self.resource_usage_json or {},
+            "artifact_ids": self.artifact_ids_json or [],
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "updated_at": self.updated_at,
         }
 
 
@@ -151,6 +218,8 @@ class ArtifactModel(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_id = Column(String(128), ForeignKey("tasks.id"), nullable=False, index=True)
+    attempt_id = Column(String(128), ForeignKey("task_attempts.id"), nullable=True, index=True)
+    identity_key = Column(String(64), nullable=True, unique=True, index=True)
     artifact_type = Column(String(32), nullable=False)
     bucket = Column(String(64), default="mini-drop")
     object_key = Column(String(512), nullable=False)
@@ -165,6 +234,7 @@ class ArtifactModel(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "attempt_id": self.attempt_id,
             "artifact_type": self.artifact_type,
             "bucket": self.bucket,
             "object_key": self.object_key,
@@ -175,6 +245,86 @@ class ArtifactModel(Base):
             "sha256": self.sha256,
             "metadata": self.meta_json or {},
             "created_at": self.created_at,
+        }
+
+
+class AnalysisJobModel(Base):
+    """Lease-based asynchronous analysis work item."""
+
+    __tablename__ = "analysis_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id", "attempt_id", "pipeline",
+            name="uq_analysis_job_task_attempt_pipeline",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    task_id = Column(String(128), ForeignKey("tasks.id"), nullable=False, index=True)
+    attempt_id = Column(String(128), ForeignKey("task_attempts.id"), nullable=False, index=True)
+    pipeline = Column(String(64), nullable=False)
+    status = Column(String(24), nullable=False, default="PENDING", index=True)
+    priority = Column(Integer, nullable=False, default=0)
+    lease_owner = Column(String(128), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    max_retries = Column(Integer, nullable=False, default=3)
+    analyzer_version = Column(String(64), nullable=True)
+    input_artifact_ids_json = Column(JSON, default=list)
+    output_artifact_ids_json = Column(JSON, default=list)
+    error_code = Column(String(128), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "analysis_job_id": self.id,
+            "task_id": self.task_id,
+            "attempt_id": self.attempt_id,
+            "pipeline": self.pipeline,
+            "status": self.status,
+            "priority": self.priority,
+            "lease_owner": self.lease_owner,
+            "lease_expires_at": self.lease_expires_at,
+            "retry_count": self.retry_count,
+            "max_retries": self.max_retries,
+            "analyzer_version": self.analyzer_version,
+            "input_artifact_ids": self.input_artifact_ids_json or [],
+            "output_artifact_ids": self.output_artifact_ids_json or [],
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class AnalyzerWorkerModel(Base):
+    """Readiness heartbeat for an independently deployed Analyzer process."""
+
+    __tablename__ = "analyzer_workers"
+
+    id = Column(String(128), primary_key=True)
+    version = Column(String(64), nullable=False)
+    status = Column(String(24), nullable=False)
+    current_job_id = Column(String(128), nullable=True, index=True)
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "worker_id": self.id,
+            "version": self.version,
+            "status": self.status,
+            "current_job_id": self.current_job_id,
+            "last_heartbeat_at": self.last_heartbeat_at,
+            "started_at": self.started_at,
+            "updated_at": self.updated_at,
         }
 
 

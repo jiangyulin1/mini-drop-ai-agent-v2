@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+from mini_drop_observability.tracing import start_span
 from server.app.generated import healthcheck_pb2, healthcheck_pb2_grpc, hotmethod_pb2
 
 
@@ -18,6 +19,14 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
             self._repo.record_agent_metrics(request.agent_id, _metrics_from_request(request))
         response = healthcheck_pb2.HealthCheckResponse()
         response.status = healthcheck_pb2.HealthCheckResponse.SERVING
+
+        active_task_id = getattr(request, "active_task_id", "")
+        active_attempt_id = getattr(request, "active_attempt_id", "")
+        if active_task_id and hasattr(self._repo, "should_cancel_attempt"):
+            cancel, reason = self._repo.should_cancel_attempt(active_task_id, active_attempt_id)
+            response.cancel_active_task = cancel
+            if cancel:
+                response.cancel_reason = reason
 
         if getattr(request, "busy", False):
             if hasattr(self._repo, "heartbeat_only"):
@@ -35,6 +44,9 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
         response.pending = True
         task_desc = response.task_desc
         task_desc.task_id = task.id
+        task_desc.attempt_id = getattr(task, "current_attempt_id", "") or ""
+        task_desc.request_id = getattr(task, "request_id", "") or ""
+        task_desc.traceparent = getattr(task, "traceparent", "") or ""
         task_desc.task_type = 0  # 通用任务
         task_desc.profiler_type = self._profiler_type(task.collector_type)
         task_desc.timeout_sec = task.duration_sec + 30  # 留 30 秒余量
@@ -42,7 +54,8 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
         task_desc.sample_argv.duration = task.duration_sec
         task_desc.sample_argv.pid = task.target_pid
         task_desc.sample_argv.callgraph = task.request_params.get("options", {}).get("callgraph", "fp")
-        task_desc.sample_argv.event = task.request_params.get("options", {}).get("event", "cpu-cycles")
+        default_event = "cpu" if task.collector_type == "java_async" else "cpu-cycles"
+        task_desc.sample_argv.event = task.request_params.get("options", {}).get("event", default_event)
         task_desc.sample_argv.subprocess = task.request_params.get("options", {}).get("subprocess", False)
         options = task.request_params.get("options", {})
         if isinstance(options, dict):
@@ -53,7 +66,17 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
             )
             if len(options_json.encode("utf-8")) <= 8192:
                 task_desc.options_json = options_json
-        return response
+        with start_span(
+            "mini_drop.task.dispatch",
+            traceparent=task_desc.traceparent,
+            kind="producer",
+            attributes={
+                "mini_drop.task.id": task.id,
+                "mini_drop.attempt.id": task_desc.attempt_id,
+                "mini_drop.agent.id": request.agent_id,
+            },
+        ):
+            return response
 
     @staticmethod
     def _profiler_type(collector_type: str) -> int:

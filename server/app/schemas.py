@@ -81,6 +81,12 @@ class TaskView(BaseModel):
     duration_sec: int
     status: str  # TaskStatus.value
     status_reason: str
+    collection_status: str = "PENDING"
+    analysis_status: str = "WAITING"
+    current_attempt_id: Optional[str] = None
+    row_version: int = 0
+    collection_deadline_at: Optional[datetime] = None
+    request_id: Optional[str] = None
     request_params: dict[str, Any]
     created_at: datetime
     started_at: Optional[datetime] = None

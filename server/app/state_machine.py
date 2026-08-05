@@ -32,6 +32,30 @@ class TaskStatus(str, Enum):
 
 
 @unique
+class CollectionStatus(str, Enum):
+    """Durable state of the Agent-side collection phase."""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    UPLOADING = "UPLOADING"
+    COLLECTED = "COLLECTED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+@unique
+class AnalysisStatus(str, Enum):
+    """Durable state of the asynchronous analysis phase."""
+
+    WAITING = "WAITING"
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+@unique
 class Actor(str, Enum):
     """触发状态迁移的角色。用于审计追踪。"""
 
