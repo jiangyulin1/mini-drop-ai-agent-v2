@@ -7,6 +7,8 @@ from datetime import timedelta
 from collections.abc import Iterator
 from typing import Any
 
+import urllib3
+
 from server.app.common_utils import env_bool
 
 MAX_PRESIGN_EXPIRES_SEC = 7 * 24 * 60 * 60
@@ -21,12 +23,25 @@ def _client(endpoint: str | None = None, secure: bool | None = None) -> Any:
     endpoint, inferred_secure = _normalize_endpoint(
         endpoint or os.getenv("MINIO_ENDPOINT", "minio:9000")
     )
+    try:
+        connect_timeout = float(os.getenv("MINIO_CONNECT_TIMEOUT_SEC", "1.0"))
+        read_timeout = float(os.getenv("MINIO_READ_TIMEOUT_SEC", "5.0"))
+    except ValueError:
+        connect_timeout, read_timeout = 1.0, 5.0
+    http_client = urllib3.PoolManager(
+        timeout=urllib3.Timeout(
+            connect=max(0.1, connect_timeout),
+            read=max(0.1, read_timeout),
+        ),
+        retries=urllib3.Retry(total=0, connect=0, read=0, redirect=0),
+    )
     return Minio(
         endpoint=endpoint,
         access_key=os.getenv("MINIO_ACCESS_KEY", ""),
         secret_key=os.getenv("MINIO_SECRET_KEY", ""),
         secure=inferred_secure if secure is None else secure,
         region=os.getenv("MINIO_REGION", "us-east-1"),
+        http_client=http_client,
     )
 
 
@@ -106,6 +121,21 @@ def object_size(bucket: str, object_key: str) -> int | None:
             return None
         raise
     return int(stat.size)
+
+
+def remove_object(bucket: str, object_key: str) -> None:
+    """删除对象。对象不存在视为成功（幂等清理）。"""
+    if not bucket:
+        raise ValueError("bucket must not be empty")
+    if not object_key:
+        raise ValueError("object_key must not be empty")
+    try:
+        _client().remove_object(bucket, object_key)
+    except Exception as exc:
+        code = getattr(exc, "code", "")
+        if code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket", "XMinioInvalidObjectName"}:
+            return
+        raise
 
 
 def stream_object(bucket: str, object_key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:

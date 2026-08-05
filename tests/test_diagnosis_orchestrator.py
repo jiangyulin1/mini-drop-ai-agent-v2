@@ -975,3 +975,135 @@ class TestDiagnosisSessionAPI:
         assert any(item["hypothesis"] == "same_host_noisy_neighbor" for item in assessment["ruled_out"])
         evidence_ids = {item["evidence_id"] for item in detail["evidence"]}
         assert set(assessment["evidence_refs"]).issubset(evidence_ids)
+
+
+# ── 状态机收敛修复回归测试（2026-08-05 审计） ────────────────
+
+
+def _force_deadline(diagnosis_id: str, *, past: bool = True) -> None:
+    """直接改写会话 deadline_at，模拟 deadline 已过（store.update_session 不允许改此字段）。"""
+    from server.app.database import new_session
+    from server.app.models import DiagnosisSessionModel
+
+    session = new_session()
+    try:
+        model = session.get(DiagnosisSessionModel, diagnosis_id)
+        assert model is not None
+        model.deadline_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+            if past
+            else datetime.now(timezone.utc) + timedelta(minutes=5)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
+def test_scope_confirmation_converges_after_deadline(client: TestClient):
+    """NEEDS_SCOPE_CONFIRMATION 在 deadline 后必须收敛，而不是每轮扫描抛非法迁移。"""
+    payload = _payload()
+    payload["context"]["instances"][0]["service_id"] = "service-b"
+    payload["context"]["instances"][0]["instance_id"] = "service-b-1"
+    data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    assert data["status"] == "NEEDS_SCOPE_CONFIRMATION"
+
+    _force_deadline(data["diagnosis_id"], past=True)
+    detail = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+    assert detail["status"] == "INSUFFICIENT_EVIDENCE"
+
+    # 收敛后重复 GET 稳定，不再抛异常
+    again = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}")
+    assert again.status_code == 200
+    assert again.json()["data"]["status"] == "INSUFFICIENT_EVIDENCE"
+
+
+def test_waiting_approval_converges_after_deadline(client: TestClient):
+    """WAITING_APPROVAL 超 deadline 必须收敛（此前会抛非法迁移并永久卡死）。"""
+    data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    task_id = data["child_task_ids"][0]
+    repo.transition_task(task_id, TaskStatus.RUNNING, "agent accepted", Actor.SERVER)
+    repo.transition_task(task_id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+    repo.transition_task(task_id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+    repo.transition_task(task_id, TaskStatus.DONE, "no structured output", Actor.ANALYZER)
+    waiting = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+    assert waiting["status"] == "WAITING_APPROVAL"
+
+    _force_deadline(data["diagnosis_id"], past=True)
+    detail = client.get(f"/api/v1/diagnoses/{data['diagnosis_id']}").json()["data"]
+    assert detail["status"] == "INSUFFICIENT_EVIDENCE"
+    assert all(
+        probe["status"] in {"TIMED_OUT", "COMPLETED", "FAILED", "REJECTED", "SKIPPED", "UNAVAILABLE"}
+        for probe in detail["probes"]
+    )
+
+
+def test_cancel_diagnosis_session(client: TestClient):
+    """取消 API: 非终态收敛到 USER_CANCELED，且取消活跃子任务。"""
+    data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    assert data["status"] == "COLLECTING"
+    task_id = data["child_task_ids"][0]
+
+    resp = client.post(
+        f"/api/v1/diagnoses/{data['diagnosis_id']}/cancel",
+        json={"reason": "operator abort"},
+    )
+    assert resp.status_code == 200
+    detail = resp.json()["data"]
+    assert detail["status"] == "USER_CANCELED"
+
+    from server.app.common_utils import status_value
+    task = repo.tasks.get(task_id)
+    assert task is not None
+    assert status_value(task.status) == "CANCELLED"
+
+    # 终态幂等：重复取消不报错、状态不变
+    again = client.post(f"/api/v1/diagnoses/{data['diagnosis_id']}/cancel", json={})
+    assert again.status_code == 200
+    assert again.json()["data"]["status"] == "USER_CANCELED"
+
+
+def test_cancel_scope_confirmation_session(client: TestClient):
+    """NEEDS_SCOPE_CONFIRMATION 会话可被用户取消（此前无任何出口）。"""
+    payload = _payload()
+    payload["context"]["instances"][0]["service_id"] = "service-b"
+    data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    assert data["status"] == "NEEDS_SCOPE_CONFIRMATION"
+
+    resp = client.post(f"/api/v1/diagnoses/{data['diagnosis_id']}/cancel", json={})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "USER_CANCELED"
+
+
+def test_concluding_session_converges_after_interrupted_submit(client: TestClient):
+    """CONCLUDING->COMPLETED 双事务提交中断后，重试 GET 幂等补提交终态。"""
+    data = client.post("/api/v1/diagnoses", json=_payload()).json()["data"]
+    diag_id = data["diagnosis_id"]
+    conclusion = {
+        "version": 1,
+        "generated_at": "2026-08-05T00:00:00+00:00",
+        "summary": "测试结论",
+        "confidence_level": "高",
+        "cluster_assessment": {
+            "classification": "cpu_hotspot", "confidence": 0.9, "confidence_level": "高",
+            "summary": "", "evidence_refs": [], "compared_targets": [], "ruled_out": [],
+        },
+        "root_location": {"type": "unknown", "target_ref": None, "evidence_refs": []},
+        "domain_cause": {"type": "unknown", "subtype": "unknown", "evidence_refs": []},
+        "findings": [],
+        "root_cause_candidates": [],
+        "ruled_out": [],
+        "knowledge_refs": [],
+        "actions": [],
+        "diagnostic_commands": [],
+        "recommendations": [],
+        "limitations": [],
+        "coverage": {"task_count": 0, "evidence_count": 0},
+    }
+    diagnosis_orchestrator.store.update_session(
+        diag_id, status="CONCLUDING", conclusion_versions=[conclusion],
+    )
+
+    detail = client.get(f"/api/v1/diagnoses/{diag_id}").json()["data"]
+    assert detail["status"] == "COMPLETED"
+    # 不重复追加结论版本
+    assert len(detail["conclusion_versions"]) == 1

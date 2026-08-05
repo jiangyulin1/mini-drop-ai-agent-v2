@@ -378,3 +378,84 @@ class TestRCAPersistence:
         priors = repo.get_feedback_priors()
         assert priors["cpu_hotspot_recursive"].positive_count == 1
         assert priors["cpu_hotspot_recursive"].weight_delta > 0
+
+
+def test_delete_task_cascades_diagnosis_children(repo: SqlRepository):
+    """审计 1.6: delete_task 必须清理 diagnosis 子表，PG 外键下不抛 IntegrityError。"""
+    from server.app.database import new_session
+    from server.app.models import (
+        DiagnosisRunModel, DiagnosisReportModel,
+        DiagnosisToolResultModel, RepairPlanModel, RCAFeedbackModel,
+        TaskModel,
+    )
+
+    repo.register_agent("agent-1", "host-1", "10.0.0.1")
+    payload = CreateTaskRequest(
+        name="cascade-test", agent_id="agent-1", target_pid=1234,
+        collector_type="perf_cpu", sample_rate=99, duration_sec=15,
+    )
+    task = repo.create_task(payload)
+    task_id = task.id
+    from server.app.state_machine import now_utc as _now
+
+    with new_session() as session:
+        run = DiagnosisRunModel(id="diag_1", task_id=task_id, model_name="deepseek-chat", status="DONE", created_at=_now())
+        session.add(run)
+        session.flush()
+        session.add(DiagnosisToolResultModel(
+            diagnosis_id="diag_1", tool_name="sys_metrics", status="ok",
+            evidence_ref="x", input_json={}, output_json={}, created_at=_now(),
+        ))
+        session.add(DiagnosisReportModel(
+            id="report_1", diagnosis_id="diag_1", report_json={},
+            ranked_causes_json=[], confidence=0, created_at=_now(),
+        ))
+        session.add(RepairPlanModel(
+            id="repair_1", diagnosis_id="diag_1", cause_id="cpu_hotspot",
+            risk_level="safe_auto", actions_json=[], executed_actions_json=[],
+            status="planned", created_at=_now(),
+        ))
+        session.add(RCAFeedbackModel(
+            diagnosis_id="diag_1", task_id=task_id, predicted_cause_id="cpu_hotspot",
+            feedback_label="correct", created_at=_now(),
+        ))
+        session.commit()
+
+    assert repo.delete_task(task_id) is True
+    with new_session() as session:
+        assert session.get(TaskModel, task_id) is None
+        assert session.get(DiagnosisRunModel, "diag_1") is None
+        assert session.query(DiagnosisToolResultModel).filter_by(diagnosis_id="diag_1").count() == 0
+        assert session.query(DiagnosisReportModel).filter_by(diagnosis_id="diag_1").count() == 0
+        assert session.query(RepairPlanModel).filter_by(diagnosis_id="diag_1").count() == 0
+        assert session.query(RCAFeedbackModel).filter_by(diagnosis_id="diag_1").count() == 0
+
+
+def test_double_recover_stale_is_idempotent(repo: SqlRepository):
+    """审计 2.27: 双副本扫描器重复 recover 同一任务，只写一条事件、row_version 只 +1。"""
+    from server.app.database import new_session
+    from server.app.models import TaskModel
+
+    repo.register_agent("agent-1", "host-1", "10.0.0.1")
+    payload = CreateTaskRequest(
+        name="idem-test", agent_id="agent-1", target_pid=1234,
+        collector_type="perf_cpu", sample_rate=99, duration_sec=15,
+    )
+    task = repo.create_task(payload)
+    repo.transition_task(task.id, TaskStatus.RUNNING, "first", Actor.SERVER)
+    with new_session() as session:
+        model = session.get(TaskModel, task.id)
+        model.started_at = now_utc() - timedelta(hours=2)
+        session.commit()
+    events_before = len([e for e in repo.events if e.task_id == task.id])
+    row_before = repo.tasks[task.id].row_version
+
+    recovered = repo.recover_stale_tasks(timeout_sec=60)
+    assert task.id in recovered
+    repo.recover_stale_tasks(timeout_sec=60)  # 第二个副本再扫一次
+
+    final = repo.tasks[task.id]
+    events_final = len([e for e in repo.events if e.task_id == task.id])
+    assert final.status == "FAILED"
+    assert events_final == events_before + 1  # 只有第一次 recover 写了事件
+    assert final.row_version == row_before + 1

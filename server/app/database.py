@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import threading
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -55,6 +55,14 @@ def _get_engine() -> Engine:
             connect_args=connect_args,
             **engine_kwargs,
         )
+        if "sqlite" in url:
+            # 启用外键约束，使 SQLite 测试环境与 PostgreSQL 生产行为对齐
+            # （delete_task 级联、引用完整性在测试中真实生效）。
+            @event.listens_for(_engine, "connect")
+            def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.close()
         return _engine
 
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import server.app._env  # noqa: F401 — 自动加载 .env
 
-import json as _json_mod
 import hashlib
 import io
 import os
@@ -25,6 +24,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
+from mini_drop_observability.tracing import (
+    configure_tracing,
+    shutdown_tracing,
+    start_span,
+    trace_id_from_current,
+    traceparent_from_current,
+)
 import asyncio
 import json as _json
 import queue as _queue
@@ -67,8 +73,38 @@ from server.app.task_kinds import list_task_kinds
 from server.app.task_names import normalize_task_name
 from server.app import storage as store
 
+configure_tracing("mini-drop-server")
 repo = SqlRepository()
 diagnosis_orchestrator = DiagnosisOrchestrator(repo)
+
+
+def _warn_on_insecure_defaults() -> None:
+    """生产安全默认值检测：监听非回环地址但认证关闭时给出醒目告警。
+
+    默认配置（认证关闭）适合开发/内网演示；暴露到不可信网络前必须设置
+    MINI_DROP_API_AUTH_ENABLED=1 + MINI_DROP_API_KEY，以及
+    MINI_DROP_GRPC_AUTH_ENABLED=1 + MINI_DROP_GRPC_TOKEN。
+    """
+    host = os.getenv("SERVER_HOST", "0.0.0.0")
+    api_auth = os.getenv("MINI_DROP_API_AUTH_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    grpc_auth = os.getenv("MINI_DROP_GRPC_AUTH_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    if host not in {"127.0.0.1", "localhost"} and not (api_auth and grpc_auth):
+        log_event(
+            "warning",
+            "insecure_default_config",
+            bind_host=host,
+            http_auth=api_auth,
+            grpc_auth=grpc_auth,
+            message=(
+                "Server 监听非回环地址但 HTTP/gRPC 认证未全部开启。"
+                "生产环境请设置 MINI_DROP_API_AUTH_ENABLED=1 + MINI_DROP_API_KEY "
+                "和 MINI_DROP_GRPC_AUTH_ENABLED=1 + MINI_DROP_GRPC_TOKEN，"
+                "或绑定 SERVER_HOST=127.0.0.1。"
+            ),
+        )
+
+
+_warn_on_insecure_defaults()
 
 
 @asynccontextmanager
@@ -91,6 +127,7 @@ async def _lifespan(_app: FastAPI):
         except asyncio.CancelledError:
             pass
         _grpc.stop(grace=None).wait(timeout=5)
+        shutdown_tracing()
 
 
 async def _offline_sweeper() -> None:
@@ -98,12 +135,18 @@ async def _offline_sweeper() -> None:
     stale_task_timeout_sec = int(os.getenv("TASK_STALE_TIMEOUT_SEC", "900"))
     interval_sec = max(1, min(timeout_sec // 2, 15))
     while True:
-        repo.mark_offline_agents(timeout_sec=timeout_sec)
-        repo.recover_stale_tasks(timeout_sec=stale_task_timeout_sec)
-        if hasattr(repo, "persist_agent_metric_snapshots"):
-            repo.persist_agent_metric_snapshots()
-        diagnosis_orchestrator.advance_active()
+        # 同步阻塞调用（DB 读写 + MinIO 对象读取 + JSON 解析）必须移出
+        # 事件循环，否则单 worker 下会阻塞全部 HTTP 请求（含 SSE）。
+        await asyncio.to_thread(_run_offline_sweep_pass, timeout_sec, stale_task_timeout_sec)
         await asyncio.sleep(interval_sec)
+
+
+def _run_offline_sweep_pass(timeout_sec: int, stale_task_timeout_sec: int) -> None:
+    repo.mark_offline_agents(timeout_sec=timeout_sec)
+    repo.recover_stale_tasks(timeout_sec=stale_task_timeout_sec)
+    if hasattr(repo, "persist_agent_metric_snapshots"):
+        repo.persist_agent_metric_snapshots()
+    diagnosis_orchestrator.advance_active()
 
 
 def _ensure_minio_bucket_with_retry(bucket: str) -> None:
@@ -149,10 +192,24 @@ app.add_middleware(
 async def _request_id(request: Request, call_next):
     import uuid
     rid = request.headers.get("x-request-id", uuid.uuid4().hex[:12])
-    request.state.request_id = rid
-    response = await call_next(request)
-    response.headers["x-request-id"] = rid
-    return response
+    with start_span(
+        f"{request.method} {request.url.path}",
+        traceparent=request.headers.get("traceparent"),
+        kind="server",
+        attributes={
+            "http.request.method": request.method,
+            "url.path": request.url.path,
+            "mini_drop.request.id": rid,
+        },
+    ):
+        request.state.request_id = rid
+        request.state.traceparent = traceparent_from_current()
+        response = await call_next(request)
+        response.headers["x-request-id"] = rid
+        trace_id = trace_id_from_current()
+        if trace_id:
+            response.headers["x-trace-id"] = trace_id
+        return response
 
 
 @app.middleware("http")
@@ -213,6 +270,12 @@ def _task_view(record) -> TaskView:
         duration_sec=record.duration_sec,
         status=status_value(record.status),
         status_reason=record.status_reason,
+        collection_status=getattr(record, "collection_status", None) or status_value(record.status),
+        analysis_status=getattr(record, "analysis_status", None) or "WAITING",
+        current_attempt_id=getattr(record, "current_attempt_id", None),
+        row_version=int(getattr(record, "row_version", 0) or 0),
+        collection_deadline_at=getattr(record, "collection_deadline_at", None),
+        request_id=getattr(record, "request_id", None),
         request_params=record.request_params,
         created_at=record.created_at,
         started_at=record.started_at,
@@ -224,7 +287,10 @@ def _requires_api_auth(request: Request) -> bool:
     if os.getenv("MINI_DROP_API_AUTH_ENABLED", "0").strip().lower() not in {"1", "true", "yes", "on"}:
         return False
     path = request.url.path
-    return path.startswith("/api/") and path not in {"/api/healthz", "/api/metrics", "/api/auth/set-cookie", "/api/auth/clear-cookie"}
+    return path.startswith("/api/") and path not in {
+        "/api/healthz", "/api/livez", "/api/readyz", "/api/metrics",
+        "/api/auth/set-cookie", "/api/auth/clear-cookie",
+    }
 
 
 def _extract_api_token(request: Request) -> str | None:
@@ -311,7 +377,7 @@ def prometheus_metrics() -> Any:
 
 
 @app.get("/api/healthz")
-def healthz() -> APIResponse:
+def healthz(core_only: bool = False) -> APIResponse:
     """健康检查端点：验证服务自身及关键依赖（数据库、对象存储）的状态。
 
     Kubernetes liveness/readiness probe 可通过此端点区分：
@@ -340,13 +406,54 @@ def healthz() -> APIResponse:
     except Exception as exc:
         checks["storage"] = {"status": "unavailable", "error": str(exc)[:200]}
 
-    all_ok = all(c["status"] == "ok" for c in checks.values())
+    analyzer_required = os.getenv("MINI_DROP_REQUIRE_ANALYZER", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    try:
+        analyzer = repo.analysis_health(
+            timeout_sec=int(os.getenv("MINI_DROP_ANALYZER_OFFLINE_TIMEOUT_SEC", "30")),
+        )
+        if not analyzer_required and analyzer["workers_online"] == 0:
+            analyzer["status"] = "disabled"
+        checks["analyzer"] = analyzer
+    except Exception as exc:
+        checks["analyzer"] = {
+            "status": "unavailable" if analyzer_required else "disabled",
+            "error": str(exc)[:200],
+        }
+
+    effective_checks = {
+        key: value for key, value in checks.items()
+        if not (core_only and key == "analyzer")
+    }
+    all_ok = all(c["status"] in {"ok", "disabled"} for c in effective_checks.values())
     return APIResponse(data={
         "service": "mini-drop-server",
         "version": "0.1.0",
         "healthy": all_ok,
         "checks": checks,
     })
+
+
+@app.get("/api/livez")
+def livez() -> APIResponse:
+    """Process liveness probe; dependency failures must not trigger restarts."""
+
+    return APIResponse(data={
+        "service": "mini-drop-server",
+        "version": "0.1.0",
+        "alive": True,
+    })
+
+
+@app.get("/api/readyz")
+def readyz(response: Response) -> APIResponse:
+    """Dependency-aware readiness probe with a conventional 503 failure."""
+
+    report = healthz(core_only=False)
+    if not report.data["healthy"]:
+        response.status_code = 503
+    return report
 
 
 @app.get("/api/ai-config")
@@ -526,7 +633,12 @@ def create_task(payload: CreateTaskRequest, request: Request) -> APIResponse:
     if len(idempotency_key) > 128:
         raise HTTPException(status_code=400, detail="Idempotency-Key 不能超过 128 字符")
     try:
-        task = repo.create_task(payload, idempotency_key=idempotency_key or None)
+        task = repo.create_task(
+            payload,
+            idempotency_key=idempotency_key or None,
+            request_id=getattr(request.state, "request_id", "") or None,
+            traceparent=getattr(request.state, "traceparent", "") or None,
+        )
     except ValueError as exc:
         detail = str(exc)
         if detail.startswith("IDEMPOTENCY_CONFLICT"):
@@ -574,6 +686,20 @@ def get_task(task_id: str) -> APIResponse:
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return APIResponse(data=_task_view(task).model_dump())
+
+
+@app.get("/api/tasks/{task_id}/attempts")
+def get_task_attempts(task_id: str) -> APIResponse:
+    if task_id not in repo.tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return APIResponse(data=repo.list_task_attempts(task_id))
+
+
+@app.get("/api/tasks/{task_id}/analysis-jobs")
+def get_task_analysis_jobs(task_id: str) -> APIResponse:
+    if task_id not in repo.tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return APIResponse(data=repo.list_task_analysis_jobs(task_id))
 
 
 @app.delete("/api/tasks/{task_id}")
@@ -649,7 +775,12 @@ def retry_task(
     if len(idempotency_key) > 128:
         raise HTTPException(status_code=400, detail="Idempotency-Key 不能超过 128 字符")
     try:
-        retried = repo.create_task(retry_payload, idempotency_key=idempotency_key or None)
+        retried = repo.create_task(
+            retry_payload,
+            idempotency_key=idempotency_key or None,
+            request_id=getattr(request.state, "request_id", "") or None,
+            traceparent=getattr(request.state, "traceparent", "") or None,
+        )
         repo.record_task_retry(original.id, retried.id)
     except ValueError as exc:
         detail = str(exc)
@@ -699,12 +830,12 @@ def get_task_artifact_content(task_id: str, artifact_type: str, index: Optional[
         if path is None and artifact.get("object_key"):
             text = _read_artifact_object_text(artifact)
             if artifact_type.endswith("_json") or artifact.get("content_type") == "application/json":
-                return APIResponse(data=_json_mod.loads(text))
+                return APIResponse(data=_json.loads(text))
             return APIResponse(data={"text": text})
         if path is None:
             raise HTTPException(status_code=404, detail="本地产物不存在")
         if artifact_type.endswith("_json") or artifact.get("content_type") == "application/json":
-            return APIResponse(data=_json_mod.loads(path.read_text(encoding="utf-8")))
+            return APIResponse(data=_json.loads(path.read_text(encoding="utf-8")))
         return APIResponse(data={"text": path.read_text(encoding="utf-8", errors="replace")})
     raise HTTPException(status_code=404, detail="产物不存在")
 
@@ -977,7 +1108,7 @@ def download_diagnosis_evidence(diagnosis_id: str, evidence_id: str) -> Response
     """Download the persisted structured evidence even if its raw artifact expired."""
 
     evidence = _find_diagnosis_evidence(diagnosis_id, evidence_id)
-    content = _json_mod.dumps(
+    content = _json.dumps(
         evidence,
         ensure_ascii=False,
         indent=2,
@@ -1012,7 +1143,7 @@ def download_diagnosis_evidence_bundle(diagnosis_id: str, evidence_id: str) -> R
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
             "evidence.json",
-            _json_mod.dumps(evidence, ensure_ascii=False, indent=2, default=str),
+            _json.dumps(evidence, ensure_ascii=False, indent=2, default=str),
         )
         for artifact in artifact_links:
             inspected = inspect_artifact(
@@ -1069,7 +1200,7 @@ def download_diagnosis_evidence_bundle(diagnosis_id: str, evidence_id: str) -> R
             manifest["artifacts"].append(record)
         archive.writestr(
             "manifest.json",
-            _json_mod.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+            _json.dumps(manifest, ensure_ascii=False, indent=2, default=str),
         )
     filename = _safe_download_filename(f"evidence-{evidence_id}-bundle.zip")
     return Response(
@@ -1112,6 +1243,19 @@ def reconcile_artifact_storage(limit: int = 1000, verify_hash: bool = False) -> 
     return APIResponse(data={"summary": summary, "items": items})
 
 
+@app.post("/api/v1/diagnoses/{diagnosis_id}/cancel")
+def cancel_diagnosis_session(diagnosis_id: str, body: Optional[dict] = None) -> APIResponse:
+    """取消诊断会话：终态幂等；非终态收敛到 USER_CANCELED 并取消活跃子任务。"""
+    reason = ((body or {}).get("reason") or "").strip() or "用户取消诊断"
+    try:
+        data = diagnosis_orchestrator.cancel(diagnosis_id, reason)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "不存在" in message else 409
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    return APIResponse(data=data)
+
+
 @app.post("/api/v1/diagnoses/{diagnosis_id}/approvals")
 def approve_diagnosis_probe(diagnosis_id: str, payload: ApprovalRequest) -> APIResponse:
     try:
@@ -1136,9 +1280,9 @@ def _extract_artifact_json(artifacts: list[dict], artifact_type: str):
             try:
                 path = _resolve_artifact_path_or_none(local_path)
                 if path is not None:
-                    return _json_mod.loads(path.read_text(encoding="utf-8"))
+                    return _json.loads(path.read_text(encoding="utf-8"))
                 if art.get("object_key"):
-                    return _json_mod.loads(_read_artifact_object_text(art))
+                    return _json.loads(_read_artifact_object_text(art))
             except HTTPException as exc:
                 log_event(
                     "warning",

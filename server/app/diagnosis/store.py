@@ -75,6 +75,10 @@ class DiagnosisStore:
                 updated_at=now,
             )
             session.add(model)
+            # 先 flush 父行再插入子行：无 relationship 的模型 SQLAlchemy
+            # 不做拓扑排序，同事务内子行先 INSERT 会在外键检查时失败
+            # （SQLite PRAGMA foreign_keys=ON 与 PostgreSQL 均立即检查）。
+            session.flush()
             session.add(DiagnosisEventModel(
                 diagnosis_id=model.id,
                 event_type="diagnosis_created",
@@ -371,6 +375,35 @@ class DiagnosisStore:
                     "row_version": model.row_version + 1,
                     "updated_at": now,
                 }, synchronize_session=False)
+            )
+            session.commit()
+            return changed == 1
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def renew_lease(self, diagnosis_id: str, owner: str, ttl_seconds: int = 30) -> bool:
+        """续租：只延长 lease_until，不 bump row_version。
+
+        诊断推进期间（_advance_locked）内部的 update/transition 全部依赖
+        row_version CAS；若续租也 bump version 会让后续 CAS 全部失败。
+        仅当仍是同一 owner 时续租，租约丢失后自然失效。
+        """
+        now = utcnow()
+        session = new_session()
+        try:
+            changed = (
+                session.query(DiagnosisSessionModel)
+                .filter(
+                    DiagnosisSessionModel.id == diagnosis_id,
+                    DiagnosisSessionModel.lease_owner == owner,
+                )
+                .update(
+                    {"lease_until": now + timedelta(seconds=ttl_seconds)},
+                    synchronize_session=False,
+                )
             )
             session.commit()
             return changed == 1

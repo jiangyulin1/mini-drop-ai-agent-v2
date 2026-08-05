@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import threading
+import weakref
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ from server.app.rca.calibrator import calibrate
 from server.app.rca.candidates import generate_candidates
 from server.app.rca.evidence import collect_evidence
 from server.app.schemas import CreateTaskRequest, MAX_SAMPLE_RATE, MAX_TASK_DURATION_SEC, MIN_SAMPLE_RATE
+from server.app.state_machine import Actor
 
 
 PLANNER_VERSION = "diagnosis-orchestrator-v1"
@@ -52,28 +54,39 @@ STRUCTURED_ARTIFACT_TYPES = {
 }
 ALLOWED_DIAGNOSIS_TRANSITIONS = {
     "CREATED": {"UNDERSTANDING", "USER_CANCELED", "FAILED"},
-    "UNDERSTANDING": {"PLANNING", "NEEDS_SCOPE_CONFIRMATION", "TOPOLOGY_UNAVAILABLE", "FAILED"},
-    "PLANNING": {"ANALYZING_EXISTING_DATA", "BUDGET_EXHAUSTED", "FAILED"},
-    "ANALYZING_EXISTING_DATA": {"ANALYZING", "COLLECTING", "WAITING_APPROVAL", "INSUFFICIENT_EVIDENCE", "BUDGET_EXHAUSTED", "FAILED"},
-    "COLLECTING": {"ANALYZING", "WAITING_APPROVAL", "NEED_MORE_EVIDENCE", "BUDGET_EXHAUSTED", "FAILED"},
-    "ANALYZING": {"CONCLUDING", "WAITING_APPROVAL", "COLLECTING", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "FAILED"},
-    "WAITING_APPROVAL": {"COLLECTING", "NEED_MORE_EVIDENCE", "BUDGET_EXHAUSTED", "USER_CANCELED", "FAILED"},
-    "NEED_MORE_EVIDENCE": {"ANALYZING", "COLLECTING", "WAITING_APPROVAL", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "FAILED"},
+    "UNDERSTANDING": {"PLANNING", "NEEDS_SCOPE_CONFIRMATION", "TOPOLOGY_UNAVAILABLE", "USER_CANCELED", "FAILED"},
+    "NEEDS_SCOPE_CONFIRMATION": {"INSUFFICIENT_EVIDENCE", "USER_CANCELED", "FAILED"},
+    "PLANNING": {"ANALYZING_EXISTING_DATA", "BUDGET_EXHAUSTED", "USER_CANCELED", "FAILED"},
+    "ANALYZING_EXISTING_DATA": {"ANALYZING", "COLLECTING", "WAITING_APPROVAL", "INSUFFICIENT_EVIDENCE", "BUDGET_EXHAUSTED", "USER_CANCELED", "FAILED"},
+    "COLLECTING": {"ANALYZING", "WAITING_APPROVAL", "NEED_MORE_EVIDENCE", "BUDGET_EXHAUSTED", "USER_CANCELED", "FAILED"},
+    "ANALYZING": {"CONCLUDING", "WAITING_APPROVAL", "COLLECTING", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "USER_CANCELED", "FAILED"},
+    "WAITING_APPROVAL": {"COLLECTING", "NEED_MORE_EVIDENCE", "BUDGET_EXHAUSTED", "INSUFFICIENT_EVIDENCE", "USER_CANCELED", "FAILED"},
+    "NEED_MORE_EVIDENCE": {"ANALYZING", "COLLECTING", "WAITING_APPROVAL", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "USER_CANCELED", "FAILED"},
     "CONCLUDING": {"COMPLETED", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "FAILED"},
 }
 
 
 class DiagnosisOrchestrator:
+    _LEASE_TTL_SECONDS = 30
+
     def __init__(self, task_repository, store: DiagnosisStore | None = None):
         self.repo = task_repository
         self.store = store or DiagnosisStore()
         self.owner_prefix = f"{socket.gethostname()}:{os.getpid()}"
-        self._operation_locks: dict[str, threading.Lock] = {}
-        self._operation_locks_guard = threading.Lock()
+        # 弱引用字典：锁被活动的推进线程持有（强引用），会话不再被推进后
+        # 锁自动回收，避免长运行进程的锁对象无限增长。
+        self._operation_locks: weakref.WeakValueDictionary[str, threading.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     def _operation_lock(self, diagnosis_id: str) -> threading.Lock:
-        with self._operation_locks_guard:
-            return self._operation_locks.setdefault(diagnosis_id, threading.Lock())
+        lock = self._operation_locks.get(diagnosis_id)
+        if lock is None:
+            lock = threading.Lock()
+            existing = self._operation_locks.setdefault(diagnosis_id, lock)
+            if existing is not lock:
+                return existing
+        return lock
 
     def _complete_node(
         self,
@@ -292,11 +305,35 @@ class DiagnosisOrchestrator:
             owner = f"{self.owner_prefix}:{threading.get_ident()}:{uuid4().hex}"
             if not self.store.acquire_lease(diagnosis_id, owner):
                 return self.store.get_detail(diagnosis_id)
+            stop = self._start_lease_renewal(diagnosis_id, owner)
             try:
                 self._advance_locked(diagnosis_id)
             finally:
+                stop.set()
                 self.store.release_lease(diagnosis_id, owner)
             return self.store.get_detail(diagnosis_id)
+
+    def _start_lease_renewal(self, diagnosis_id: str, owner: str) -> threading.Event:
+        """后台续租：_advance_locked 含逐任务读 MinIO + 验证，慢存储下可能
+        超过 30s 租约 TTL。续租只延长 lease_until（renew_lease 不 bump
+        row_version），不会干扰会话内部的 CAS 操作。"""
+        stop = threading.Event()
+        interval = max(1.0, self._LEASE_TTL_SECONDS * 0.4)
+
+        def _renew() -> None:
+            while not stop.wait(interval):
+                try:
+                    self.store.renew_lease(diagnosis_id, owner, self._LEASE_TTL_SECONDS)
+                except Exception:
+                    pass  # 续租失败不打断主流程；release/transition 兜底
+
+        thread = threading.Thread(
+            target=_renew,
+            name=f"diag-lease-{diagnosis_id[:12]}",
+            daemon=True,
+        )
+        thread.start()
+        return stop
 
     def advance_active(self, limit: int = 100) -> None:
         """由后台扫描器调用，使恢复不依赖用户 GET 请求。"""
@@ -315,9 +352,11 @@ class DiagnosisOrchestrator:
             owner = f"{self.owner_prefix}:{threading.get_ident()}:{uuid4().hex}"
             if not self.store.acquire_lease(diagnosis_id, owner):
                 raise ValueError("诊断正在由另一个操作推进，请重试")
+            stop = self._start_lease_renewal(diagnosis_id, owner)
             try:
                 return self._approve_locked(diagnosis_id, request)
             finally:
+                stop.set()
                 self.store.release_lease(diagnosis_id, owner)
 
     def _approve_locked(self, diagnosis_id: str, request: ApprovalRequest) -> dict[str, Any]:
@@ -419,6 +458,51 @@ class DiagnosisOrchestrator:
         )
         return self.store.get_detail(diagnosis_id) or {}
 
+    def cancel(self, diagnosis_id: str, reason: str = "用户取消诊断") -> dict[str, Any]:
+        """取消诊断会话：终态幂等，非终态迁移到 USER_CANCELED 并取消子任务。"""
+        with self._operation_lock(diagnosis_id):
+            owner = f"{self.owner_prefix}:{threading.get_ident()}:{uuid4().hex}"
+            if not self.store.acquire_lease(diagnosis_id, owner):
+                raise ValueError("诊断正在由另一个操作推进，请重试")
+            stop = self._start_lease_renewal(diagnosis_id, owner)
+            try:
+                return self._cancel_locked(diagnosis_id, reason)
+            finally:
+                stop.set()
+                self.store.release_lease(diagnosis_id, owner)
+
+    def _cancel_locked(self, diagnosis_id: str, reason: str) -> dict[str, Any]:
+        session = self.store.get_session(diagnosis_id)
+        if session is None:
+            raise ValueError("诊断不存在")
+        if session["status"] in TERMINAL_DIAGNOSIS_STATUSES:
+            return self.store.get_detail(diagnosis_id) or {}
+
+        # 取消仍活跃的子任务（尽力而为：任务可能已被 Agent 取走执行）。
+        for task_id in session.get("child_task_ids", []):
+            task = self.repo.tasks.get(task_id)
+            if task is None:
+                continue
+            if status_value(task.status) in ACTIVE_TASK_STATUSES:
+                try:
+                    self.repo.cancel_task(task_id, reason, Actor.WEB)
+                except Exception:
+                    # 取消失败（任务恰好完成/取消）不阻断诊断会话收敛。
+                    pass
+
+        # 未决探针置 SKIPPED，避免 WAITING_APPROVAL 探针在取消后残留。
+        for probe in self.store.list_probes(diagnosis_id):
+            if probe["status"] in {"WAITING_APPROVAL", "SCHEDULED", "RUNNING"}:
+                self.store.update_probe(probe["step_id"], status="SKIPPED")
+
+        self._transition(
+            diagnosis_id,
+            DiagnosisStatus.USER_CANCELED,
+            "diagnosis_cancelled",
+            {"reason": reason},
+        )
+        return self.store.get_detail(diagnosis_id) or {}
+
     def _advance_locked(self, diagnosis_id: str) -> None:
         session = self.store.get_session(diagnosis_id)
         if session is None or session["status"] in TERMINAL_DIAGNOSIS_STATUSES:
@@ -432,8 +516,27 @@ class DiagnosisOrchestrator:
                     if probe["status"] not in {"COMPLETED", "FAILED", "TIMED_OUT", "REJECTED", "UNAVAILABLE", "SKIPPED"}:
                         self.store.update_probe(probe["step_id"], status="TIMED_OUT", error_code="DIAGNOSIS_DEADLINE")
                 self._ensure_insufficient_conclusion(diagnosis_id, [])
-                self._transition(diagnosis_id, DiagnosisStatus.INSUFFICIENT_EVIDENCE, "diagnosis_deadline_reached")
+                # Deadline 必须按当前状态选择合法终态，否则 NEEDS_SCOPE_CONFIRMATION /
+                # WAITING_APPROVAL 等状态会抛非法迁移并永久卡死。
+                self._transition(
+                    diagnosis_id,
+                    self._deadline_terminal_for(session["status"]),
+                    "diagnosis_deadline_reached",
+                )
                 return
+
+        # CONCLUDING 的上一次 CONCLUDING -> COMPLETED 双事务提交可能被中断
+        # （进程崩溃 / DB 抖动），停在此状态。必须幂等补提交终态，而不是
+        # 尝试 CONCLUDING -> ANALYZING 这类非法迁移。
+        if session["status"] == DiagnosisStatus.CONCLUDING.value:
+            child_ids = list(session.get("child_task_ids", []))
+            terminal_tasks = [
+                task for task in (self.repo.tasks.get(task_id) for task_id in child_ids)
+                if task is not None and status_value(task.status) in TERMINAL_TASK_STATUSES
+            ]
+            self._conclude_after_interrupt(diagnosis_id, terminal_tasks)
+            return
+
         probes = self.store.list_probes(diagnosis_id)
         child_ids = list(session.get("child_task_ids", []))
 
@@ -574,6 +677,51 @@ class DiagnosisOrchestrator:
                 DiagnosisStatus.INSUFFICIENT_EVIDENCE,
                 "diagnosis_completed",
             )
+
+    @staticmethod
+    def _deadline_terminal_for(status: str) -> DiagnosisStatus:
+        """deadline 到达时按当前状态选择合法终态，避免非法迁移导致会话卡死。"""
+        allowed = ALLOWED_DIAGNOSIS_TRANSITIONS.get(status, set())
+        for candidate in (
+            DiagnosisStatus.INSUFFICIENT_EVIDENCE,
+            DiagnosisStatus.BUDGET_EXHAUSTED,
+            DiagnosisStatus.FAILED,
+        ):
+            if candidate.value in allowed:
+                return candidate
+        return DiagnosisStatus.FAILED
+
+    def _conclude_after_interrupt(self, diagnosis_id: str, tasks: list[Any]) -> None:
+        """CONCLUDING -> COMPLETED 双事务提交被中断后的幂等收敛。
+
+        不重新运行 _analyze_tasks（避免重复追加结论版本），而是基于已持久化的
+        最新结论补提交终态；若结论从未写入（第一次分析本身中断），降级为
+        INSUFFICIENT_EVIDENCE 并生成对应结论。
+        """
+        session = self.store.get_session(diagnosis_id) or {}
+        versions = session.get("conclusion_versions") or []
+        latest = versions[-1] if versions else None
+        if latest is None:
+            self._ensure_insufficient_conclusion(diagnosis_id, tasks)
+            self._transition(
+                diagnosis_id,
+                DiagnosisStatus.INSUFFICIENT_EVIDENCE,
+                "diagnosis_completed",
+            )
+            return
+        failure_is_the_diagnosed_signal = (
+            latest.get("cluster_assessment", {}).get("classification")
+            == "single_instance_storage_path_failure"
+        )
+        final_status = (
+            DiagnosisStatus.PARTIAL_COMPLETED
+            if (
+                any(status_value(task.status) == "FAILED" for task in tasks)
+                and not failure_is_the_diagnosed_signal
+            )
+            else DiagnosisStatus.COMPLETED
+        )
+        self._transition(diagnosis_id, final_status, "diagnosis_completed")
 
     def _plan_adaptive_r2(self, diagnosis_id: str, tasks: list[Any]) -> bool:
         session = self.store.get_session(diagnosis_id) or {}
@@ -1993,16 +2141,6 @@ def _quality(value: float) -> str:
     return "low"
 
 
-def _confidence_label(value: float) -> str:
-    if value >= 0.75:
-        return "高"
-    if value >= 0.5:
-        return "中"
-    if value > 0:
-        return "低"
-    return "不可判断"
-
-
 def _sys_summary(value: Any) -> dict[str, Any]:
     if isinstance(value, dict) and isinstance(value.get("summary"), dict):
         return value["summary"]
@@ -2093,25 +2231,6 @@ def _has_ebpf_latency(value: Any) -> bool:
     return False
 
 
-def _has_self_hotspot(observation: dict[str, Any]) -> bool:
-    top = observation.get("top_function", {})
-    return bool(top.get("name")) and _num(top.get("percent")) >= 35
-
-
-def _has_pressure(observation: dict[str, Any]) -> bool:
-    pressure = observation.get("pressure", {})
-    return any(bool(value) for value in pressure.values())
-
-
-def _unique_refs(observations) -> list[str]:
-    refs: list[str] = []
-    for obs in observations:
-        for ref in obs.get("evidence_refs", []):
-            if ref not in refs:
-                refs.append(ref)
-    return refs
-
-
 def _num(value: Any) -> float:
     try:
         return float(value or 0.0)
@@ -2143,7 +2262,10 @@ def _minimize(value: Any, depth: int = 0) -> Any:
         result = {}
         for key, item in list(value.items())[:50]:
             key_text = str(key)[:128]
-            if any(token in key_text.lower() for token in ("token", "secret", "password", "cookie", "authorization")):
+            if any(token in key_text.lower() for token in (
+                "token", "secret", "password", "cookie", "authorization",
+                "api_key", "apikey", "access_key", "accesskey", "credential",
+            )):
                 result[key_text] = "[REDACTED]"
             else:
                 result[key_text] = _minimize(item, depth + 1)

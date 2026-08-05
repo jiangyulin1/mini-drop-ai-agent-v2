@@ -5,6 +5,7 @@
 """
 
 import json
+import os
 import threading
 import time
 import socket
@@ -53,6 +54,8 @@ class GrpcFixture:
     def __init__(self, metadata=None):
         self.port = _free_port()
         self.repo = InMemoryRepository()
+        # Control 服务生产默认不暴露（审计 1.5），测试显式启用。
+        os.environ["MINI_DROP_GRPC_ENABLE_CONTROL"] = "1"
         self.server = serve(self.repo, port=self.port)
         channel = grpc.insecure_channel(f"localhost:{self.port}")
         self.channel = grpc.intercept_channel(channel, _MetadataClientInterceptor(metadata)) if metadata else channel
