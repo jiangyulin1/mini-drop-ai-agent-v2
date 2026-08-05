@@ -4,6 +4,7 @@
 测试通过 mock subprocess.Popen 覆盖各执行分支。
 """
 
+import os
 import subprocess
 from unittest import mock
 
@@ -156,7 +157,8 @@ class TestPerfExecution:
             {"artifact_type": "top_json", "filename": "top.json"},
         ]
 
-        with mock.patch("shutil.which", return_value="/usr/bin/perf"), \
+        with mock.patch.dict(os.environ, {"MINI_DROP_AGENT_INLINE_ANALYSIS": "1"}), \
+             mock.patch("shutil.which", return_value="/usr/bin/perf"), \
              mock.patch.object(collector, "_check_perf_paranoid", return_value=True), \
              mock.patch.object(collector, "_pid_exists", return_value=True), \
              mock.patch("subprocess.Popen", return_value=mock_proc), \
@@ -166,6 +168,25 @@ class TestPerfExecution:
 
         artifact_types = {item["artifact_type"] for item in result.artifacts}
         assert {"raw", "flamegraph_json", "top_json"} <= artifact_types
+
+    def test_perf_defers_analysis_to_worker_by_default(self, collector: PerfCollector, task: CollectorTask, tmp_path):
+        collector.OUTPUT_BASE = str(tmp_path)
+        perf_data = tmp_path / task.id / "perf.data"
+        perf_data.parent.mkdir(parents=True, exist_ok=True)
+        perf_data.write_text("perf data")
+        mock_proc = _mock_popen_complete()
+
+        with mock.patch.dict(os.environ, {}, clear=False), \
+             mock.patch("shutil.which", return_value="/usr/bin/perf"), \
+             mock.patch.object(collector, "_check_perf_paranoid", return_value=True), \
+             mock.patch.object(collector, "_pid_exists", return_value=True), \
+             mock.patch("subprocess.Popen", return_value=mock_proc), \
+             mock.patch.object(collector, "_analyze_perf_data") as analyze:
+            os.environ.pop("MINI_DROP_AGENT_INLINE_ANALYSIS", None)
+            result = collector.collect(task)
+
+        assert [item["artifact_type"] for item in result.artifacts] == ["raw"]
+        analyze.assert_not_called()
 
     def test_perf_nonzero_exit_returns_failure(self, collector: PerfCollector, task: CollectorTask, tmp_path):
         collector.OUTPUT_BASE = str(tmp_path)
@@ -182,7 +203,8 @@ class TestPerfExecution:
         assert result.ok is False
         assert "perf record 执行失败" in result.reason
 
-    def test_perf_timeout_kills_process_group(self, collector: PerfCollector, task: CollectorTask, tmp_path):
+    def test_perf_timeout_terminates_process(self, collector: PerfCollector, task: CollectorTask, tmp_path):
+        """审计 1.10: 超时只终止 perf 本身（不再 killpg，避免误杀 worker 组）。"""
         collector.OUTPUT_BASE = str(tmp_path)
 
         mock_proc = _mock_popen_complete(
@@ -194,14 +216,13 @@ class TestPerfExecution:
              mock.patch.object(collector, "_check_perf_paranoid", return_value=True), \
              mock.patch.object(collector, "_pid_exists", return_value=True), \
              mock.patch("subprocess.Popen", return_value=mock_proc), \
-             mock.patch("os.setpgrp", create=True), \
-             mock.patch("os.getpgid", create=True, return_value=9999), \
              mock.patch("os.killpg", create=True) as mock_kill:
             result = collector.collect(task)
 
         assert result.ok is False
         assert "超时" in result.reason
-        mock_kill.assert_called()
+        mock_proc.terminate.assert_called()
+        mock_kill.assert_not_called()
 
 
 class TestPidCheck:

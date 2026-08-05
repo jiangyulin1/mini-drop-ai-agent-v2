@@ -79,7 +79,9 @@ class PerfCollector:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=hasattr(os, "setsid"),
+                # 不创建独立会话：子进程必须留在 worker 进程组内，这样 Agent
+                # 取消任务时 killpg(worker.pid) 才能覆盖 perf，避免取消后
+                # 残留孤儿 perf 继续采样并写 perf.data。
             )
             stdout, stderr = proc.communicate(timeout=timeout)
 
@@ -107,8 +109,19 @@ class PerfCollector:
                     "size_bytes": size,
                 }
             ]
-            analysis_artifacts, analysis_reason = self._analyze_perf_data(task.id, perf_data, output_dir)
-            artifacts.extend(analysis_artifacts)
+            analysis_artifacts: list[dict] = []
+            analysis_reason = ""
+            # Compatibility escape hatch for old single-process deployments.
+            # Durable Drop deployments leave analysis to the lease-based
+            # Analyzer Worker so collection and analysis have independent
+            # failure/recovery semantics.
+            if os.getenv("MINI_DROP_AGENT_INLINE_ANALYSIS", "0").strip().lower() in {
+                "1", "true", "yes", "on",
+            }:
+                analysis_artifacts, analysis_reason = self._analyze_perf_data(
+                    task.id, perf_data, output_dir,
+                )
+                artifacts.extend(analysis_artifacts)
             reason = "perf record 采集完成"
             if analysis_artifacts:
                 reason += "，Analyzer 已生成火焰图与 TopN"
@@ -121,13 +134,16 @@ class PerfCollector:
             )
 
         except subprocess.TimeoutExpired:
-            # 超时 → kill 进程组 → 清理管道防止 fd 泄露
+            # 超时 → 终止 perf 本身 → 清理管道防止 fd 泄露。
+            # 注意：perf record 是单进程工具（不 spawn 子进程），且它留在
+            # worker 进程组内（见下方 Popen 注释），所以只杀 proc 即可；
+            # killpg(os.getpgid(proc.pid)) 会误杀整个 worker 进程组。
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.terminate()
                 proc.wait(timeout=5)
             except Exception:
                 try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.kill()
                     proc.wait()
                 except Exception:
                     pass

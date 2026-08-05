@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import time
+from typing import Any
 
 from agent.mini_drop_agent.collectors.base import CollectorResult, CollectorTask
 
@@ -31,16 +32,26 @@ class PprofCollector:
     OUTPUT_BASE = "/tmp/mini-drop"
     DEFAULT_PORT = 6060
     DEFAULT_ENDPOINT = "/debug/pprof/profile"
+    # pprof 响应体上限：Go profile 正常为几百 KB ~ 几十 MB；超过此值
+    # 视为异常响应（恶意服务/内存损坏），防止 Agent OOM 或磁盘写满。
+    MAX_RESPONSE_BYTES = 512 * 1024 * 1024
 
     def collect(self, task: CollectorTask) -> CollectorResult:
         port = task.options.get("port", self.DEFAULT_PORT)
         endpoint = task.options.get("pprof_endpoint", self.DEFAULT_ENDPOINT)
 
-        # 输入校验
+        # 输入校验：endpoint 限定在 pprof 常规路径内，避免被驱动为任意
+        # localhost 服务代理（SSRF 原语）。
         if not isinstance(port, int) or port < 1 or port > 65535:
             return CollectorResult(ok=False, reason=f"无效的端口: {port}")
         if not isinstance(endpoint, str) or not endpoint.startswith("/"):
             return CollectorResult(ok=False, reason=f"无效的 endpoint: {endpoint}，必须以 / 开头")
+        if endpoint not in {
+            "/debug/pprof/profile", "/debug/pprof/heap", "/debug/pprof/goroutine",
+            "/debug/pprof/block", "/debug/pprof/mutex", "/debug/pprof/allocs",
+            "/debug/pprof/threadcreate",
+        }:
+            return CollectorResult(ok=False, reason=f"无效的 endpoint: {endpoint}，只允许标准 pprof 路径")
 
         timeout = task.duration_sec + 30
 
@@ -61,8 +72,26 @@ class PprofCollector:
                 url += f"?seconds={task.duration_sec}"
 
             req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = resp.read()
+            # 禁用重定向：pprof 端点不应重定向，且 urllib 默认跟随重定向
+            # 可能被诱导跳转到任意内网地址。
+            with urllib.request.urlopen(
+                req, timeout=timeout,
+                context=self._no_redirect_opener(),
+            ) as resp:
+                chunks = []
+                total = 0
+                while True:
+                    chunk = resp.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > self.MAX_RESPONSE_BYTES:
+                        return CollectorResult(
+                            ok=False,
+                            reason=f"pprof 响应超过 {self.MAX_RESPONSE_BYTES} 字节上限，已中止",
+                        )
+                    chunks.append(chunk)
+                data = b"".join(chunks)
 
             if not data:
                 return CollectorResult(
@@ -117,6 +146,18 @@ class PprofCollector:
         )
 
     # ── 内部方法 ────────────────────────────────────────────────
+
+    @staticmethod
+    def _no_redirect_opener() -> Any:
+        """返回拒绝一切 HTTP 重定向的 opener（防 SSRF 跳转）。"""
+        import urllib.request
+
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *args, **kwargs):  # noqa: ARG002
+                return None
+
+        opener = urllib.request.build_opener(_NoRedirect)
+        return opener
 
     @staticmethod
     def _pprof_to_svg(raw_path: str, output_path: str, timeout: int = 60) -> bool:

@@ -1,7 +1,7 @@
 """Java async-profiler 采集器。
 
 通过 async-profiler（https://github.com/async-profiler/async-profiler）
-对 JVM 进程进行 CPU/Alloc/Lock 采样，产出 HTML 火焰图。
+对 JVM 进程进行 CPU/Alloc/Lock 采样，产出 HTML 火焰图或 JFR。
 
 前置条件：
   1. 目标机器安装 async-profiler，设置 ASYNC_PROFILER_HOME 环境变量
@@ -9,7 +9,7 @@
   3. Agent 和 JVM 进程在同一台机器上
 
 执行流程：
-  1. 检查 profiler.sh 是否可用
+  1. 检查 asprof（或旧版 profiler.sh）是否可用
   2. 验证目标 PID 存在且为 Java 进程
   3. 在独立进程组中执行 profiler.sh
   4. 超时时 kill 进程组
@@ -22,7 +22,7 @@ import os
 import shutil
 import signal
 import subprocess
-import sys
+from pathlib import Path
 
 from agent.mini_drop_agent.collectors.base import CollectorResult, CollectorTask
 
@@ -33,6 +33,7 @@ class JavaAsyncProfilerCollector:
     OUTPUT_BASE = "/tmp/mini-drop"
     # 支持的 event 类型
     VALID_EVENTS = frozenset({"cpu", "alloc", "lock", "wall", "itimer", "ctimer"})
+    VALID_OUTPUT_FORMATS = frozenset({"html", "jfr", "both"})
 
     def collect(self, task: CollectorTask) -> CollectorResult:
         profiler_path = self._find_profiler()
@@ -57,6 +58,13 @@ class JavaAsyncProfilerCollector:
 
         output_dir = os.path.join(self.OUTPUT_BASE, task.id)
         os.makedirs(output_dir, exist_ok=True)
+        try:
+            self._prepare_output_dir(output_dir, task.target_pid)
+        except OSError as exc:
+            return CollectorResult(
+                ok=False,
+                reason=f"无法为目标 JVM 准备 async-profiler 输出目录: {exc}",
+            )
 
         event = task.options.get("event", "cpu")
         if event not in self.VALID_EVENTS:
@@ -65,25 +73,41 @@ class JavaAsyncProfilerCollector:
                 reason=f"不支持的 event 类型: {event}，支持: {', '.join(sorted(self.VALID_EVENTS))}",
             )
 
-        output_file = os.path.join(output_dir, "java_flamegraph.html")
+        output_format = str(task.options.get("output_format", "html")).lower()
+        if output_format not in self.VALID_OUTPUT_FORMATS:
+            return CollectorResult(
+                ok=False,
+                reason=(
+                    f"不支持的 output_format: {output_format}，支持: "
+                    f"{', '.join(sorted(self.VALID_OUTPUT_FORMATS))}"
+                ),
+            )
+
+        html_file = os.path.join(output_dir, "java_flamegraph.html")
+        jfr_file = os.path.join(output_dir, "java_profile.jfr")
+        primary_file = jfr_file if output_format in {"jfr", "both"} else html_file
         duration = task.duration_sec
 
         cmd = [
-            sys.executable, profiler_path,
+            profiler_path,
             "-d", str(duration),
             "-e", event,
-            "-f", output_file,
+            "-f", primary_file,
             str(task.target_pid),
         ]
+        if output_format in {"jfr", "both"}:
+            cmd[1:1] = ["-o", "jfr"]
 
         timeout = duration + 60
+        proc: subprocess.Popen | None = None
 
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=hasattr(os, "setsid"),
+                # 不创建独立会话：留在 worker 进程组内，取消时 killpg(worker)
+                # 才能终止 profiler.sh 及其子进程，避免孤儿 jattach 残留。
             )
             stdout, stderr = proc.communicate(timeout=timeout)
 
@@ -95,45 +119,57 @@ class JavaAsyncProfilerCollector:
                 )
 
             # async-profiler 可能在 PID 退出前返回，确认产物存在
-            if not os.path.isfile(output_file) or os.path.getsize(output_file) == 0:
+            if not os.path.isfile(primary_file) or os.path.getsize(primary_file) == 0:
                 return CollectorResult(
                     ok=False,
-                    reason="async-profiler 未产出火焰图文件，目标进程可能在采集期间退出",
+                    reason="async-profiler 未产出有效文件，目标进程可能在采集期间退出",
                 )
 
-            size = os.path.getsize(output_file)
+            artifacts = []
+            if output_format in {"jfr", "both"}:
+                artifacts.append(self._artifact(
+                    "java_profile_jfr", "java_profile.jfr", jfr_file,
+                    "application/octet-stream",
+                ))
+
+            converted = False
+            if output_format == "both":
+                converter = self._find_converter(profiler_path)
+                if converter:
+                    conversion = subprocess.run(
+                        [converter, jfr_file, html_file],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=60,
+                        check=False,
+                    )
+                    converted = (
+                        conversion.returncode == 0
+                        and os.path.isfile(html_file)
+                        and os.path.getsize(html_file) > 0
+                    )
+                if converted:
+                    artifacts.append(self._artifact(
+                        "java_flamegraph_html", "java_flamegraph.html", html_file,
+                        "text/html",
+                    ))
+            elif output_format == "html":
+                artifacts.append(self._artifact(
+                    "java_flamegraph_html", "java_flamegraph.html", html_file,
+                    "text/html",
+                ))
+
+            suffix = ""
+            if output_format == "both" and not converted:
+                suffix = "；未找到可用 jfrconv，仅保留 JFR"
             return CollectorResult(
                 ok=True,
-                reason=f"async-profiler {event} 采样完成",
-                artifacts=[{
-                    "artifact_type": "java_flamegraph_html",
-                    "filename": "java_flamegraph.html",
-                    "local_path": output_file,
-                    "content_type": "text/html",
-                    "size_bytes": size,
-                }],
+                reason=f"async-profiler {event} 采样完成{suffix}",
+                artifacts=artifacts,
             )
 
         except subprocess.TimeoutExpired:
-            try:
-                if hasattr(os, "killpg"):
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                else:
-                    proc.terminate()
-                proc.wait(timeout=5)
-            except Exception:
-                try:
-                    if hasattr(os, "killpg"):
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    else:
-                        proc.kill()
-                    proc.wait()
-                except Exception:
-                    pass
-            try:
-                proc.communicate(timeout=5)
-            except Exception:
-                pass
+            self._terminate(proc)
             return CollectorResult(
                 ok=False,
                 reason=f"async-profiler 超时 (>{timeout}s)，已强制终止",
@@ -141,10 +177,7 @@ class JavaAsyncProfilerCollector:
 
         except Exception as exc:
             # 清理管道，防止 fd 泄露
-            try:
-                proc.communicate(timeout=5)
-            except Exception:
-                pass
+            self._terminate(proc)
             return CollectorResult(
                 ok=False,
                 reason=f"async-profiler 异常: {exc}",
@@ -170,21 +203,27 @@ class JavaAsyncProfilerCollector:
 
     @staticmethod
     def _find_profiler() -> str | None:
-        """查找 async-profiler 的 profiler.sh 路径。"""
+        """优先查找 async-profiler 3.x+ 的 asprof，兼容旧版 profiler.sh。"""
         # 方式 1: 环境变量
         home = os.getenv("ASYNC_PROFILER_HOME", "").strip()
         if home:
-            candidate = os.path.join(home, "profiler.sh")
-            if os.path.isfile(candidate):
-                return candidate
+            for relative in ("bin/asprof", "asprof", "profiler.sh"):
+                candidate = os.path.join(home, relative)
+                if os.path.isfile(candidate):
+                    return os.path.normpath(candidate)
 
         # 方式 2: PATH 搜索
-        which = shutil.which("profiler.sh")
-        if which:
-            return which
+        for executable in ("asprof", "profiler.sh"):
+            which = shutil.which(executable)
+            if which:
+                return which
 
         # 方式 3: 常见安装路径
         for path in [
+            "/opt/async-profiler/bin/asprof",
+            "/usr/local/async-profiler/bin/asprof",
+            "/opt/async-profiler/asprof",
+            "/usr/local/async-profiler/asprof",
             "/opt/async-profiler/profiler.sh",
             "/usr/local/async-profiler/profiler.sh",
         ]:
@@ -192,3 +231,71 @@ class JavaAsyncProfilerCollector:
                 return path
 
         return None
+
+    @staticmethod
+    def _find_converter(profiler_path: str) -> str | None:
+        """查找 async-profiler 4.x 随包提供的 jfrconv。"""
+        profiler = Path(profiler_path)
+        candidates = [
+            profiler.with_name("jfrconv"),
+            profiler.parent / "bin" / "jfrconv",
+            profiler.parent.parent / "bin" / "jfrconv",
+        ]
+        home = os.getenv("ASYNC_PROFILER_HOME", "").strip()
+        if home:
+            candidates.insert(0, Path(home) / "bin" / "jfrconv")
+        which = shutil.which("jfrconv")
+        if which:
+            candidates.insert(0, Path(which))
+        return next((str(path) for path in candidates if path.is_file()), None)
+
+    @staticmethod
+    def _prepare_output_dir(output_dir: str, pid: int) -> None:
+        """Let the attached JVM create profiler output when Agent runs as root.
+
+        async-profiler opens the output from inside the target JVM.  A root Agent
+        therefore cannot leave a newly-created 0755 directory owned by root when
+        the JVM belongs to another user.
+        """
+
+        if not hasattr(os, "geteuid") or os.geteuid() != 0:
+            return
+        target = os.stat(f"/proc/{pid}")
+        # The JVM must be able to traverse the Agent-owned artifact root.  Do
+        # not grant read/list permission; each task directory remains isolated.
+        os.chmod(os.path.dirname(output_dir), 0o711)
+        os.chown(output_dir, target.st_uid, target.st_gid)
+        os.chmod(output_dir, 0o750)
+
+    @staticmethod
+    def _artifact(
+        artifact_type: str,
+        filename: str,
+        local_path: str,
+        content_type: str,
+    ) -> dict:
+        return {
+            "artifact_type": artifact_type,
+            "filename": filename,
+            "local_path": local_path,
+            "content_type": content_type,
+            "size_bytes": os.path.getsize(local_path),
+        }
+
+    @staticmethod
+    def _terminate(proc: subprocess.Popen | None) -> None:
+        if proc is None or proc.poll() is not None:
+            return
+        # 只终止 proc 本身。profiler.sh 与其子进程留在 worker 进程组内
+        # （见 Popen 注释），killpg(os.getpgid(proc.pid)) 会误杀 worker 组；
+        # 超时场景下杀 profiler.sh 后，其短暂存活的 jattach 子进程会在
+        # 数秒内自行退出。
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass

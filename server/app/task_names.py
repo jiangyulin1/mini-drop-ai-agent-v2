@@ -7,6 +7,9 @@ import re
 
 _UNREADABLE_MARKERS = ("�", "锟斤拷", "烫烫烫")
 _QUESTION_RUN = re.compile(r"[?？]{2,}")
+# 控制字符与表格分隔符：任务名会流入 markdown 表格、日志和 SSE 事件，
+# 需剥离避免表格注入/日志伪造。
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f|\t\r\n]+")
 
 _COLLECTOR_LABELS = {
     "perf_cpu": "CPU 火焰图采集",
@@ -40,7 +43,7 @@ def normalize_task_name(
 ) -> str:
     """Keep readable names and derive a stable, descriptive fallback otherwise."""
 
-    stripped = (name or "").strip()
+    stripped = _CONTROL_CHARS.sub(" ", (name or "").strip())
     if not is_unreadable_task_name(stripped):
         return stripped
 

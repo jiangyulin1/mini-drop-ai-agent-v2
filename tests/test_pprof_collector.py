@@ -60,7 +60,9 @@ class TestPprofCollector:
         mock_resp = mock.MagicMock()
         mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = mock.MagicMock(return_value=False)
-        mock_resp.read.return_value = pprof_data
+        # 真实 HTTP 响应读到最后返回 b""；side_effect 模拟流式结束，
+        # 否则无限返回非空 chunk 会让采集器的读循环永不终止。
+        mock_resp.read.side_effect = [pprof_data, b""]
 
         with mock.patch("urllib.request.urlopen", return_value=mock_resp), \
              mock.patch.object(PprofCollector, "_pprof_to_svg", return_value=False):
@@ -78,7 +80,7 @@ class TestPprofCollector:
         mock_resp = mock.MagicMock()
         mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = mock.MagicMock(return_value=False)
-        mock_resp.read.return_value = b"pprof data"
+        mock_resp.read.side_effect = [b"pprof data", b""]
 
         with mock.patch("urllib.request.urlopen", return_value=mock_resp), \
              mock.patch.object(PprofCollector, "_pprof_to_svg", return_value=False):

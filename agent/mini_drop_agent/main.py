@@ -14,18 +14,20 @@ from __future__ import annotations
 import server.app._env  # noqa: F401 — 自动加载 .env
 
 import json
+import multiprocessing
 import os
 import queue
+import re
 import shutil
 import signal
 import socket
-import threading
 import time
 from dataclasses import replace
 from typing import Any
 
 import grpc
 
+from mini_drop_observability.tracing import configure_tracing, shutdown_tracing, start_span
 from agent.mini_drop_agent.collectors.base import CollectorTask
 from agent.mini_drop_agent.collectors.continuous import ContinuousCollector
 from agent.mini_drop_agent.collectors.ebpf import EBPFCollector
@@ -84,7 +86,11 @@ def _detect_capabilities() -> list[str]:
 # ── 任务执行 ───────────────────────────────────────────────────────
 
 
-def _run_collector(task_payload: dict[str, Any], config: AgentConfig | None = None) -> tuple[bool, str, list[dict[str, Any]]]:
+def _run_collector(
+    task_payload: dict[str, Any],
+    config: AgentConfig | None = None,
+    agent_main_pid: int = 0,
+) -> tuple[bool, str, list[dict[str, Any]]]:
     """执行采集任务：构造 CollectorTask 后分发到注册的采集器。
 
     如果 collector_type 不在 COLLECTORS 中，明确上报失败。
@@ -96,10 +102,17 @@ def _run_collector(task_payload: dict[str, Any], config: AgentConfig | None = No
         return False, f"collector {collector_type} 未在此 Agent 构建中注册", []
 
     # 安全裁剪：防止服务器下发恶意参数
+    task_id = task_payload.get("id", "")
+    if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", task_id or ""):
+        return False, f"非法 task_id: {task_id!r}", []
+
     target_pid = task_payload.get("target_pid", 0)
     if not isinstance(target_pid, int) or target_pid <= 0:
         return False, f"无效的 target_pid: {target_pid}", []
-    if target_pid == os.getpid():
+    # 自剖析守卫：本函数运行在 collector worker 子进程中，os.getpid() 是
+    # worker 的 PID 而非 Agent 主进程 PID。agent_main_pid 在 spawn 前由
+    # 主进程注入，两者都拒绝，守卫才真正生效。
+    if target_pid == os.getpid() or (agent_main_pid and target_pid == agent_main_pid):
         return False, "拒绝自剖析请求 (target_pid 与 Agent 自身 PID 相同)", []
 
     sample_rate = max(1, min(task_payload.get("sample_rate", 99), 10000))
@@ -113,14 +126,49 @@ def _run_collector(task_payload: dict[str, Any], config: AgentConfig | None = No
         duration_sec=duration_sec,
         options=task_payload.get("request_params", {}).get("options", {}),
     )
-    result = collector.collect(collector_task)
-    artifacts = result.artifacts
-    if result.ok and config is not None:
-        try:
-            artifacts = maybe_upload_artifacts(task_payload["id"], result.artifacts, config)
-        except Exception as exc:
-            return False, f"artifact upload failed: {exc}", result.artifacts
-    return result.ok, result.reason, artifacts
+    with start_span(
+        "mini_drop.collector.run",
+        traceparent=task_payload.get("traceparent"),
+        kind="consumer",
+        attributes={
+            "mini_drop.task.id": task_payload.get("id", ""),
+            "mini_drop.attempt.id": task_payload.get("attempt_id", ""),
+            "mini_drop.collector.type": collector_type,
+            "process.pid": target_pid,
+        },
+    ):
+        result = collector.collect(collector_task)
+        artifacts = result.artifacts
+        if result.ok and config is not None:
+            try:
+                artifacts = maybe_upload_artifacts(
+                    task_payload["id"],
+                    result.artifacts,
+                    config,
+                    attempt_id=task_payload.get("attempt_id", ""),
+                )
+            except Exception as exc:
+                return False, f"artifact upload failed: {exc}", result.artifacts
+        return result.ok, result.reason, artifacts
+
+
+def _collector_error_code(ok: bool, reason: str, *, cancelled: bool = False) -> str:
+    """Map human-readable collector failures to a stable wire error code."""
+
+    if ok:
+        return ""
+    if cancelled:
+        return "TASK_CANCELLED"
+    normalized = (reason or "").lower()
+    if "target_pid" in normalized or "self-analysis" in normalized or "自剖析" in normalized:
+        return "INVALID_TARGET_PID"
+    if "not registered" in normalized or "未在" in normalized or "unavailable" in normalized:
+        return "COLLECTOR_UNAVAILABLE"
+    if "artifact upload failed" in normalized:
+        return "ARTIFACT_UPLOAD_FAILED"
+    if "worker crashed" in normalized:
+        return "COLLECTOR_WORKER_CRASHED"
+    return "COLLECTOR_FAILED"
 
 
 # ── gRPC 客户端 ───────────────────────────────────────────────────
@@ -163,6 +211,7 @@ def _heartbeat(
     config: AgentConfig,
     sampler: ProcessStatsSampler | None = None,
     busy: bool = False,
+    active_task: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """通过 gRPC HealthCheck.Do 发送心跳，返回待执行任务或 None。"""
     request = healthcheck_pb2.HealthCheckRequest(
@@ -171,6 +220,8 @@ def _heartbeat(
         ip_addr=config.agent_ip_addr,
         agent_version="0.1.0",
         busy=busy,
+        active_task_id=(active_task or {}).get("id", ""),
+        active_attempt_id=(active_task or {}).get("attempt_id", ""),
     )
     if sampler is not None:
         _fill_pid_stats(request.self_pstats, sampler.sample_self())
@@ -179,6 +230,11 @@ def _heartbeat(
         request,
         timeout=5,
     )
+    if getattr(resp, "cancel_active_task", False):
+        return {
+            "directive": "cancel",
+            "reason": getattr(resp, "cancel_reason", "") or "Server requested cancellation",
+        }
     if resp.pending and resp.task_desc.task_id:
         task_type = resp.task_desc.task_type
         # task_type 优先路由（如 MemCheck → memory_smaps）
@@ -201,6 +257,9 @@ def _heartbeat(
         options["subprocess"] = resp.task_desc.sample_argv.subprocess
         return {
             "id": resp.task_desc.task_id,
+            "attempt_id": getattr(resp.task_desc, "attempt_id", ""),
+            "request_id": getattr(resp.task_desc, "request_id", ""),
+            "traceparent": getattr(resp.task_desc, "traceparent", ""),
             "collector_type": collector_type,
             "target_pid": resp.task_desc.sample_argv.pid,
             "sample_rate": resp.task_desc.sample_argv.hz,
@@ -212,14 +271,17 @@ def _heartbeat(
     return None
 
 
-def _collector_worker(work_queue, result_queue, config: AgentConfig) -> None:
+def _collector_worker(work_queue, result_queue, config: AgentConfig, agent_main_pid: int = 0) -> None:
     """Run collectors away from the heartbeat loop."""
+    configure_tracing("mini-drop-agent-collector")
+    if hasattr(os, "setsid"):
+        os.setsid()
     while True:
         task = work_queue.get()
         try:
             if task is None:
                 return
-            ok, reason, artifacts = _run_collector(task, config)
+            ok, reason, artifacts = _run_collector(task, config, agent_main_pid)
             result_queue.put((task, ok, reason, artifacts))
         except Exception as exc:
             if task is not None:
@@ -234,16 +296,32 @@ def _notify_result(
     ok: bool,
     reason: str,
     artifacts: list[dict],
+    *,
+    attempt_id: str = "",
+    cancelled: bool = False,
+    exit_code: int = 0,
+    error_code: str = "",
+    request_id: str = "",
+    traceparent: str = "",
+    resource_usage: dict[str, Any] | None = None,
 ) -> None:
     """通过 gRPC Hotmethod.NotifyResult 上报采集结果。"""
     if ok:
         stub.NotifyResult(
             hotmethod_pb2.TaskResult(
                 task_id=task_id,
+                attempt_id=attempt_id,
                 error_message="",
                 artifact_type="raw",
                 artifact_metadata_json=json.dumps(artifacts),
                 result_message=reason,
+                runner_version="0.1.0",
+                cancelled=cancelled,
+                exit_code=exit_code,
+                error_code=error_code,
+                request_id=request_id,
+                traceparent=traceparent,
+                resource_usage_json=json.dumps(resource_usage or {}, separators=(",", ":")),
             ),
             timeout=10,
         )
@@ -251,7 +329,15 @@ def _notify_result(
         stub.NotifyResult(
             hotmethod_pb2.TaskResult(
                 task_id=task_id,
+                attempt_id=attempt_id,
                 error_message=reason,
+                runner_version="0.1.0",
+                cancelled=cancelled,
+                exit_code=exit_code,
+                error_code=error_code or _collector_error_code(False, reason, cancelled=cancelled),
+                request_id=request_id,
+                traceparent=traceparent,
+                resource_usage_json=json.dumps(resource_usage or {}, separators=(",", ":")),
             ),
             timeout=10,
         )
@@ -270,6 +356,13 @@ def _drain_result_spool(conn: GrpcConnection, spool: ResultSpool) -> int:
                     envelope["ok"],
                     envelope["reason"],
                     envelope["artifacts"],
+                    attempt_id=envelope.get("attempt_id", ""),
+                    cancelled=envelope.get("cancelled", False),
+                    exit_code=envelope.get("exit_code", 0),
+                    error_code=envelope.get("error_code", ""),
+                    request_id=envelope.get("request_id", ""),
+                    traceparent=envelope.get("traceparent", ""),
+                    resource_usage=envelope.get("resource_usage", {}),
                 )
             )
         except grpc.RpcError as exc:
@@ -281,7 +374,7 @@ def _drain_result_spool(conn: GrpcConnection, spool: ResultSpool) -> int:
                 details=exc.details(),
             )
             break
-        spool.acknowledge(envelope["task_id"])
+        spool.acknowledge(envelope["task_id"], envelope.get("attempt_id", ""))
         acknowledged += 1
         log_event(
             "info",
@@ -343,6 +436,7 @@ def _init_register_with_retry(conn, config: AgentConfig, max_retries: int = 5, b
 
 def main() -> None:
     global _should_exit
+    configure_tracing("mini-drop-agent")
     config = load_config()
     conn = GrpcConnection(config.server_grpc_addr, auth_token=config.grpc_auth_token)
     sampler = ProcessStatsSampler()
@@ -354,47 +448,85 @@ def main() -> None:
     config = _init_register_with_retry(conn, config)
     result_spool = ResultSpool(config.result_spool_dir)
 
-    work_queue = queue.Queue(maxsize=1)
-    result_queue = queue.Queue()
-    worker = threading.Thread(
-        target=_collector_worker,
-        args=(work_queue, result_queue, config),
-        name="collector-worker",
-        daemon=True,
-    )
-    worker.start()
+    mp_context = multiprocessing.get_context("spawn")
+    work_queue, result_queue, worker = _start_collector_process(mp_context, config)
     active_task: dict[str, Any] | None = None
 
+    def spool_finished(
+        spool: ResultSpool,
+        finished: dict[str, Any],
+        ok: bool,
+        reason: str,
+        artifacts: list[dict[str, Any]],
+    ) -> None:
+        """将完成的采集结果写入 spool、清 active_task、回执队列。"""
+        nonlocal active_task
+        try:
+            spool.save(
+                finished["id"],
+                ok,
+                reason,
+                artifacts,
+                attempt_id=finished.get("attempt_id", ""),
+                error_code=_collector_error_code(ok, reason),
+                request_id=finished.get("request_id", ""),
+                traceparent=finished.get("traceparent", ""),
+            )
+            log_event(
+                "info",
+                "result_spooled",
+                task_id=finished["id"],
+                artifact_count=len(artifacts),
+                request_id=finished.get("request_id", ""),
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            log_event(
+                "error",
+                "result_spool_write_failed",
+                task_id=finished["id"],
+                error=str(exc),
+            )
+        finally:
+            if active_task and active_task.get("id") == finished.get("id"):
+                active_task = None
+            result_queue.task_done()
+
     while not _should_exit:
+        # worker 看门狗：worker 被 OOM-kill / 意外信号退出时，检测并重启。
+        # 必须放在 result_queue 读取之前——worker 死亡后旧队列读取会抛
+        # EOFError，且不重启的话心跳恒 busy、后续任务全部被丢弃。
+        if not worker.is_alive():
+            log_event("error", "collector_worker_died")
+            if active_task is not None:
+                dead = active_task
+                try:
+                    result_spool.save(
+                        dead["id"],
+                        False,
+                        "collector worker crashed unexpectedly",
+                        [],
+                        attempt_id=dead.get("attempt_id", ""),
+                        error_code="COLLECTOR_WORKER_CRASHED",
+                        request_id=dead.get("request_id", ""),
+                        traceparent=dead.get("traceparent", ""),
+                    )
+                except (OSError, ValueError, TypeError) as exc:
+                    log_event(
+                        "error",
+                        "result_spool_write_failed",
+                        task_id=dead["id"],
+                        error=str(exc),
+                    )
+                active_task = None
+            work_queue, result_queue, worker = _start_collector_process(mp_context, config)
+            continue
+
         try:
             finished_task, ok, reason, artifacts = result_queue.get_nowait()
         except queue.Empty:
             pass
         else:
-            try:
-                result_spool.save(
-                    finished_task["id"],
-                    ok,
-                    reason,
-                    artifacts,
-                )
-                log_event(
-                    "info",
-                    "result_spooled",
-                    task_id=finished_task["id"],
-                    artifact_count=len(artifacts),
-                )
-            except (OSError, ValueError, TypeError) as exc:
-                log_event(
-                    "error",
-                    "result_spool_write_failed",
-                    task_id=finished_task["id"],
-                    error=str(exc),
-                )
-            finally:
-                if active_task and active_task.get("id") == finished_task.get("id"):
-                    active_task = None
-                result_queue.task_done()
+            spool_finished(result_spool, finished_task, ok, reason, artifacts)
 
         _drain_result_spool(conn, result_spool)
 
@@ -405,6 +537,7 @@ def main() -> None:
                     config,
                     sampler,
                     busy=active_task is not None,
+                    active_task=active_task,
                 )
             )
         except grpc.RpcError as exc:
@@ -413,6 +546,43 @@ def main() -> None:
             continue
 
         if task is None:
+            time.sleep(config.heartbeat_interval_sec)
+            continue
+
+        if task.get("directive") == "cancel":
+            if active_task is not None:
+                # 取消竞态修复：采集可能已完成但结果尚未被主循环取走，
+                # 此时直接杀 worker 会丢掉已采集产物。先排空结果队列：
+                # 若结果已就绪则按成功结果处理，否则才走取消路径。
+                drained = None
+                try:
+                    drained = result_queue.get_nowait()
+                except (queue.Empty, EOFError):
+                    pass
+                if drained is not None and drained[0].get("id") == active_task.get("id"):
+                    finished_task, ok, reason, artifacts = drained
+                    spool_finished(result_spool, finished_task, ok, reason, artifacts)
+                    _terminate_collector_process(worker)
+                    work_queue, result_queue, worker = _start_collector_process(mp_context, config)
+                    time.sleep(config.heartbeat_interval_sec)
+                    continue
+
+                cancelled_task = active_task
+                _terminate_collector_process(worker)
+                result_spool.save(
+                    cancelled_task["id"],
+                    False,
+                    task.get("reason") or "Server requested cancellation",
+                    [],
+                    attempt_id=cancelled_task.get("attempt_id", ""),
+                    cancelled=True,
+                    exit_code=-15,
+                    error_code="TASK_CANCELLED",
+                    request_id=cancelled_task.get("request_id", ""),
+                    traceparent=cancelled_task.get("traceparent", ""),
+                )
+                active_task = None
+                work_queue, result_queue, worker = _start_collector_process(mp_context, config)
             time.sleep(config.heartbeat_interval_sec)
             continue
 
@@ -438,9 +608,53 @@ def main() -> None:
 
         time.sleep(config.heartbeat_interval_sec)
 
-    work_queue.put(None)
-    worker.join(timeout=5)
+    if worker.is_alive():
+        work_queue.put(None)
+        worker.join(timeout=5)
+    if worker.is_alive():
+        _terminate_collector_process(worker)
     conn.close()
+    shutdown_tracing()
+
+
+def _start_collector_process(mp_context, config: AgentConfig):
+    work_queue = mp_context.JoinableQueue(maxsize=1)
+    result_queue = mp_context.JoinableQueue()
+    # agent_main_pid 在主进程内取 os.getpid() 并注入 worker：
+    # 自剖析守卫需要对比"Agent 主进程 PID"（见 _run_collector）。
+    worker = mp_context.Process(
+        target=_collector_worker,
+        args=(work_queue, result_queue, config, os.getpid()),
+        name="collector-worker",
+        daemon=True,
+    )
+    worker.start()
+    return work_queue, result_queue, worker
+
+
+def _terminate_collector_process(worker, grace_sec: float = 3.0) -> None:
+    """Terminate the worker and its external Runner process group."""
+
+    if not worker.is_alive():
+        worker.join(timeout=0.1)
+        return
+    if os.name == "posix" and hasattr(os, "killpg"):
+        try:
+            os.killpg(worker.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    else:
+        worker.terminate()
+    worker.join(timeout=grace_sec)
+    if worker.is_alive():
+        if os.name == "posix" and hasattr(os, "killpg"):
+            try:
+                os.killpg(worker.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            worker.kill()
+        worker.join(timeout=1)
 
 
 # ── 辅助 ───────────────────────────────────────────────────────────

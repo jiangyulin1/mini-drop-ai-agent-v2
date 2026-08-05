@@ -58,10 +58,28 @@ def _add_port(server: grpc.Server, address: str) -> int:
 
 
 def _build_server() -> grpc.Server:
+    options = [
+        # 显式消息大小限制：默认 4MiB 接收上限对 perf 产物元数据偏紧，
+        # 但也不能无限放——设 64MiB 上限防止恶意 Agent 拖垮线程池。
+        ("grpc.max_receive_message_length", 64 * 1024 * 1024),
+        ("grpc.max_send_message_length", 64 * 1024 * 1024),
+    ]
     return grpc.server(
         futures.ThreadPoolExecutor(max_workers=10),
         interceptors=[GrpcAuthInterceptor()],
+        options=options,
     )
+
+
+def _register_control_service(server: grpc.Server, repo: Any) -> None:
+    """注册 Control 服务（Server 内部管理用）。
+
+    Control 服务不校验入参且按注释仅供内部/测试使用，不应暴露在面向
+    Agent 的公开端口上。仅当显式设置 MINI_DROP_GRPC_ENABLE_CONTROL=1
+    （测试/调试）时注册，生产默认不暴露。
+    """
+    if _env_bool("MINI_DROP_GRPC_ENABLE_CONTROL", default=False):
+        control_pb2_grpc.add_ControlServicer_to_server(ControlService(repo), server)
 
 
 def serve(repo: Any, port: int = 50051) -> grpc.Server:
@@ -75,7 +93,7 @@ def serve(repo: Any, port: int = 50051) -> grpc.Server:
     init_pb2_grpc.add_InitAgentServicer_to_server(InitAgentService(repo), server)
     healthcheck_pb2_grpc.add_HealthCheckServicer_to_server(HealthCheckService(repo), server)
     hotmethod_pb2_grpc.add_HotmethodServicer_to_server(HotmethodService(repo), server)
-    control_pb2_grpc.add_ControlServicer_to_server(ControlService(repo), server)
+    _register_control_service(server, repo)
 
     _add_port(server, f"0.0.0.0:{port}")
     server.start()
@@ -90,7 +108,7 @@ def serve_in_background(repo: Any, port: int = 50051) -> grpc.Server:
     init_pb2_grpc.add_InitAgentServicer_to_server(InitAgentService(repo), grpc_server)
     healthcheck_pb2_grpc.add_HealthCheckServicer_to_server(HealthCheckService(repo), grpc_server)
     hotmethod_pb2_grpc.add_HotmethodServicer_to_server(HotmethodService(repo), grpc_server)
-    control_pb2_grpc.add_ControlServicer_to_server(ControlService(repo), grpc_server)
+    _register_control_service(grpc_server, repo)
 
     _add_port(grpc_server, f"0.0.0.0:{port}")
     grpc_server.start()

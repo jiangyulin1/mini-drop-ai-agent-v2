@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     p_storage_prune.add_argument("--task-id", default="", help="only prune specified task ID prefix")
     p_storage_prune.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
-    p_agent_exec = sub.add_parser("agent-exec", help="execute a diagnostic/repair command on agent host (via task)")
+    p_agent_exec = sub.add_parser("agent-exec", help="查看修复计划中的某个动作（不执行任何操作）")
     p_agent_exec.add_argument("--url", default="http://localhost:8191")
     p_agent_exec.add_argument("--diagnosis-id", required=True)
     p_agent_exec.add_argument("--action-index", type=int, default=0, help="which repair action to execute")
@@ -279,21 +279,28 @@ def _cmd_export_summary(args) -> int:
 
 
 def _cmd_watch_task(args) -> int:
+    """轮询任务到终态。终态集与退出码约定与 _watch_until_terminal 一致：
+    {DONE, FAILED, CANCELLED}，DONE→0，其余终态→1，超时→124。"""
     import requests
     deadline = time.time() + args.timeout
     last = None
     while time.time() <= deadline:
-        resp = requests.get(
-            f"{args.url.rstrip('/')}/api/tasks/{args.task_id}",
-            headers=_api_headers(args.api_key_env), timeout=5,
-        )
-        resp.raise_for_status()
+        try:
+            resp = requests.get(
+                f"{args.url.rstrip('/')}/api/tasks/{args.task_id}",
+                headers=_api_headers(args.api_key_env), timeout=5,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            _print_json({"task_id": args.task_id, "error": str(exc)})
+            time.sleep(args.interval)
+            continue
         data = resp.json()["data"]
         last = data
         status = data.get("status")
         print(json.dumps(data, ensure_ascii=False, default=str))
-        if status in {"DONE", "FAILED"}:
-            return 0 if status == "DONE" else 2
+        if status in {"DONE", "FAILED", "CANCELLED"}:
+            return 0 if status == "DONE" else 1
         time.sleep(args.interval)
     _print_json({"status": "TIMEOUT", "last": last})
     return 124
@@ -565,7 +572,7 @@ def _cmd_status(args) -> int:
             }, ensure_ascii=False, indent=2))
         except Exception as exc:
             print(json.dumps({"error": f"agents query failed: {exc}"}))
-            return 0
+            return 1
 
     # 获取任务列表
     if args.tasks:
@@ -582,7 +589,7 @@ def _cmd_status(args) -> int:
             }, ensure_ascii=False, indent=2))
         except Exception as exc:
             print(json.dumps({"error": f"tasks query failed: {exc}"}))
-            return 0
+            return 1
 
     # 缺省：总体概览
     if not args.agents and not args.tasks:
@@ -609,7 +616,9 @@ def _cmd_status(args) -> int:
                 "tasks_failed": failed,
             }, ensure_ascii=False, indent=2))
         except Exception as exc:
-            print(json.dumps({"server": "healthy", "error": str(exc)}))
+            # 子查询失败不能谎报 healthy：CI/脚本会误判成功
+            print(json.dumps({"server": "unhealthy", "error": str(exc)}))
+            return 1
     return 0
 
 
@@ -624,8 +633,8 @@ def _cmd_perf_top(args) -> int:
         print("error: perf not installed")
         return 1
 
-    # 采集
-    perf_data = f"/tmp/mini-drop-cli-perf-{args.pid}.data"
+    # 采集（临时文件含本进程 PID，避免并发调用互相覆盖/误删）
+    perf_data = f"/tmp/mini-drop-cli-perf-{args.pid}-{os.getpid()}.data"
     try:
         proc = subprocess.run(
             [perf, "record", "-F", "99", "-g", "-p", str(args.pid),
@@ -685,8 +694,13 @@ def _cmd_version(args) -> int:
         grpc_ver = _grpc.__version__
     except ImportError:
         grpc_ver = "N/A"
+    try:
+        from importlib.metadata import version as _pkg_version
+        version = _pkg_version("micro-drop")
+    except Exception:
+        version = "0.1.0"
     print(json.dumps({
-        "version": "0.2.0",
+        "version": version,
         "python": _sys.version.split()[0],
         "collectors": _KEYWORDS["collectors"],
         "grpc": grpc_ver,
@@ -1003,7 +1017,12 @@ def _cmd_storage_prune(args) -> int:
 
 
 def _cmd_agent_exec(args) -> int:
-    """通过诊断 ID 执行修复计划中的某个操作。"""
+    """查看修复计划中的某个操作。
+
+    注意：本命令只读取并展示动作详情，不会执行任何操作。safe_auto 动作由
+    Server 在诊断时自动执行；confirm_required / manual_only 动作必须由
+    运维人工确认后在目标机器上手动执行。
+    """
     import urllib.request
     import urllib.error
 
@@ -1036,9 +1055,11 @@ def _cmd_agent_exec(args) -> int:
             "result": action.get("result"),
             "payload": action.get("payload"),
             "command": action.get("command"),
+            "executed": False,
             "hint": (
-                "safe_auto actions are auto-executed by the Server. "
-                "confirm_required / manual_only actions require manual review."
+                "本命令仅展示动作详情，不执行任何操作。safe_auto 动作由 "
+                "Server 在诊断时自动执行；confirm_required / manual_only "
+                "动作需人工确认后在目标机器上手动执行。"
             ),
         })
         return 0

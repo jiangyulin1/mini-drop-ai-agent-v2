@@ -35,7 +35,7 @@ def calibrate(
     calibrated: list[CalibratedCause] = []
     for c in candidates:
         rule_score = c.rule_score
-        evidence_quality = _score_evidence_quality(c, evidence)
+        evidence_quality = _score_evidence_quality(evidence)
         baseline_support = _score_baseline_support(c, evidence)
         cross_collector = _score_cross_collector_agreement(c, evidence)
         feedback_prior = _score_feedback_prior(c, priors)
@@ -94,7 +94,7 @@ def interpret_confidence(confidence: float) -> str:
 # ── 评分函数 ──
 
 
-def _score_evidence_quality(c: CandidateCause, ev: EvidenceInput) -> float:
+def _score_evidence_quality(ev: EvidenceInput) -> float:
     """证据质量评分：数据越完整，分越高。"""
     score = 0.5  # 基础分
     if ev.top_functions:

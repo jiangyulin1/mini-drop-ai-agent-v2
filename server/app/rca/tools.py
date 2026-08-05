@@ -90,10 +90,11 @@ def _get_ebpf_latency_summary(
     collector_type: str = "",
 ) -> ToolResult:
     histogram = ebpf_metrics.get("io_latency_us", {}) if ebpf_metrics else {}
-    total = sum(int(v) for v in histogram.values()) if isinstance(histogram, dict) else 0
+    # 产物 JSON 的数值可能为 "N/A"/None，直接 int() 会让诊断端点 500
+    total = sum(_to_int_safe(v) for v in histogram.values()) if isinstance(histogram, dict) else 0
     max_bucket = None
     if isinstance(histogram, dict) and histogram:
-        max_bucket = max(histogram.items(), key=lambda item: int(item[1]))[0]
+        max_bucket = max(histogram.items(), key=lambda item: _to_int_safe(item[1]))[0]
     output = {
         "total_samples": total,
         "dominant_bucket": max_bucket,
@@ -169,3 +170,11 @@ def _check_agent_health(agent_record, task_record) -> ToolResult:
         input={"agent_id": output["agent_id"]},
         output=output,
     )
+
+
+def _to_int_safe(value) -> int:
+    """产物 JSON 里的数值可能为 "N/A"/None/字符串，转换为 0 而非抛异常。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

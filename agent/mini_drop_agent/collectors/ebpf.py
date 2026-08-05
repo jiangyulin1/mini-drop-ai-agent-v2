@@ -52,7 +52,8 @@ class EBPFCollector:
                 [bpftrace, "-o", output_file, script_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=hasattr(os, "setsid"),
+                # 不创建独立会话：留在 worker 进程组内，取消时 killpg(worker)
+                # 才能终止 bpftrace，避免孤儿探针残留。
             )
             try:
                 proc.wait(timeout=task.duration_sec)

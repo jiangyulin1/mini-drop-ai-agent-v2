@@ -90,17 +90,18 @@ class ContinuousCollector:
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    start_new_session=hasattr(os, "setsid"),
+                    # 不创建独立会话：留在 worker 进程组内，取消时 killpg(worker)
+                    # 才能终止 perf，避免孤儿 perf 残留。
                 )
                 try:
                     proc.communicate(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                        proc.terminate()
                         proc.wait(timeout=5)
                     except Exception:
                         try:
-                            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                            proc.kill()
                             proc.wait()
                         except Exception:
                             pass

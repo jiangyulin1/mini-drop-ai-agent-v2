@@ -48,10 +48,11 @@ def diagnose(
     ]
 
     last_error = ""
+    allowed_cause_ids = _candidate_ids(candidates_json)
     for attempt in range(1 + MAX_RETRIES):
         try:
             raw = _call_deepseek(messages, model_name)
-            report, issues = _validate_and_parse(raw, evidence)
+            report, issues = _validate_and_parse(raw, evidence, allowed_cause_ids)
             if not issues:
                 return ValidatedReport(
                     task_id=task_id,
@@ -129,7 +130,9 @@ def _call_deepseek(messages: list[dict], model: str) -> str:
     )
 
     if resp.status_code != 200:
-        raise RuntimeError(f"DeepSeek API 返回 {resp.status_code}: {resp.text[:300]}")
+        # 错误体不回显：提供商网关可能在错误响应里回显请求内容或凭证，
+        # 该异常会拼入 DiagnosisReport.summary 并持久化/展示。
+        raise RuntimeError(f"DeepSeek API 返回 HTTP {resp.status_code}")
 
     body = resp.json()
     content = body["choices"][0]["message"]["content"]
@@ -137,7 +140,11 @@ def _call_deepseek(messages: list[dict], model: str) -> str:
 
 
 
-def _validate_and_parse(raw: str, evidence: EvidenceInput) -> tuple[DiagnosisReport | None, list[str]]:
+def _validate_and_parse(
+    raw: str,
+    evidence: EvidenceInput,
+    allowed_cause_ids: set[str] | None = None,
+) -> tuple[DiagnosisReport | None, list[str]]:
     """校验 LLM 输出并解析为 DiagnosisReport。
 
     校验规则：
@@ -146,6 +153,8 @@ def _validate_and_parse(raw: str, evidence: EvidenceInput) -> tuple[DiagnosisRep
       3. 每条 cause 的 evidence_refs 必须引用 evidence 中存在的字段
       4. confidence 在 [0, 1]
       5. ranked_causes 不空（除非 not_enough_evidence=True）
+      6. cause_id 必须命中候选原因列表（防模型幻觉/注入输出任意 cause_id，
+         驱动 repair.py 的自动建任务动作）
     """
     issues: list[str] = []
 
@@ -172,7 +181,15 @@ def _validate_and_parse(raw: str, evidence: EvidenceInput) -> tuple[DiagnosisRep
             if not _ref_exists(ref, valid_paths):
                 issues.append(f"ranked_causes[{i}].evidence_refs 中的 '{ref}' 不在证据路径中")
 
-    # 步骤 4：边界校验
+    # 步骤 4：cause_id 白名单——候选原因列表之外的原因 ID 拒绝接受
+    if allowed_cause_ids is not None:
+        for i, cause in enumerate(report.ranked_causes):
+            if cause.cause_id not in allowed_cause_ids:
+                issues.append(
+                    f"ranked_causes[{i}].cause_id '{cause.cause_id}' 不在候选原因列表中"
+                )
+
+    # 步骤 5：边界校验
     if report.not_enough_evidence and not report.ranked_causes:
         pass  # 证据不足 + 无候选 = 合理
     elif not report.ranked_causes and not report.not_enough_evidence:
@@ -182,6 +199,22 @@ def _validate_and_parse(raw: str, evidence: EvidenceInput) -> tuple[DiagnosisRep
         return None, issues
 
     return report, []
+
+
+def _candidate_ids(candidates_json: str) -> set[str]:
+    """从候选原因 JSON 中提取 cause_id 集合；解析失败返回 None（不启用白名单）。"""
+    try:
+        items = json.loads(candidates_json)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+    if not isinstance(items, list):
+        return set()
+    ids = {
+        item.get("candidate_id", "")
+        for item in items
+        if isinstance(item, dict) and item.get("candidate_id")
+    }
+    return ids
 
 
 def _extract_json(raw: str) -> str | None:

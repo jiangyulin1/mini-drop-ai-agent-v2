@@ -67,7 +67,9 @@ def build_repair_plan(task_id: str, report: DiagnosisReport, evidence: EvidenceI
             ),
         ))
 
-    if cause_id == "io_wait_high":
+    if cause_id == "io_wait_high" and agent_id and target_pid:
+        # 与 cpu_hotspot 分支一致的守卫：缺 agent_id/target_pid 时不自动
+        # 建采集任务（避免 target_pid 落到 1 对 PID 1 发起采集）。
         actions.append(RepairAction(
             action_id=f"action_{uuid4().hex[:8]}",
             action_type="create_followup_task",
@@ -76,7 +78,7 @@ def build_repair_plan(task_id: str, report: DiagnosisReport, evidence: EvidenceI
             payload={
                 "name": f"followup_ebpf_{task_id}",
                 "agent_id": agent_id,
-                "target_pid": target_pid or 1,
+                "target_pid": target_pid,
                 "collector_type": "ebpf_io",
                 "sample_rate": 99,
                 "duration_sec": max(int(evidence.task_metadata.get("duration_sec", 15)), 15),

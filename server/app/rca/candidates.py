@@ -27,7 +27,14 @@ def generate_candidates(
     candidates: list[CandidateCause] = []
     priors = feedback_priors or {}
 
-    for rule in load_rules():
+    try:
+        rules = load_rules()
+    except ValueError:
+        # rules.json 损坏时降级到内置规则，而不是让 diagnose 端点直接 500
+        logger.error("RCA rules.json 加载失败，降级到内置默认规则")
+        rules = _builtin_rules()
+
+    for rule in rules:
         try:
             matched = _match_rule(rule, evidence)
         except Exception as exc:
