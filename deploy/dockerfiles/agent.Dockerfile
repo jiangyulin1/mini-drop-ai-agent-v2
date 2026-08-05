@@ -19,6 +19,7 @@ COPY pyproject.toml README.md ./
 COPY server/ ./server/
 COPY agent/ ./agent/
 COPY analyzer/ ./analyzer/
+COPY mini_drop_observability/ ./mini_drop_observability/
 RUN pip install --no-cache-dir -e . "grpcio-tools>=1.80,<1.81"
 
 COPY proto/ ./proto/

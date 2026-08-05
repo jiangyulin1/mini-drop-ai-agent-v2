@@ -32,7 +32,10 @@ message TaskDesc {
   CosConfig cos_config   = 8;  // 对象存储上传凭证（本次任务专用，覆盖全局配置）
   string script_content  = 9;  // 仅 ScriptExec 类任务使用，存放脚本内容
   string options_json    = 10; // 经 Server 校验的采集器扩展参数（最大 8 KiB）
-  reserved 11 to 19;            // 预留给未来采集器参数
+  string attempt_id      = 11; // 本次执行尝试 ID；重放结果必须保持不变
+  string request_id      = 12; // 创建任务的 HTTP request id，用于跨进程追踪
+  string traceparent     = 13; // W3C trace context；Agent 创建异步采集 span
+  reserved 14 to 19;            // 预留给未来采集器参数
 }
 
 
@@ -61,4 +64,12 @@ message TaskResult {
   string artifact_type               = 7;  // raw / folded / flamegraph_svg / top_json / ebpf_metrics
   string artifact_metadata_json      = 8;  // JSON 序列化的元数据，含 bucket/object_key/content_type/size_bytes
   string result_message              = 9;  // 成功结果摘要，例如采样数量；失败信息仍使用 error_message
+  string attempt_id                  = 10; // 与 TaskDesc.attempt_id 一致
+  string runner_version              = 11; // Agent/Runner 版本
+  bool cancelled                     = 12; // Server 请求取消后 Agent 的最终确认
+  int32 exit_code                    = 13; // 外部采集进程退出码（未知时为 0）
+  string resource_usage_json         = 14; // 受限 JSON 资源摘要
+  string error_code                  = 15; // 稳定的机器可读错误码；成功时为空
+  string request_id                  = 16; // 与 TaskDesc.request_id 一致
+  string traceparent                 = 17; // 与 TaskDesc.traceparent 一致
 }

@@ -24,6 +24,19 @@ services:
       - mini_drop_artifacts:/tmp/mini-drop
       - mini_drop_sqlite:/data
 
+  analyzer:
+    environment:
+      DATABASE_URL: ""
+      SQLITE_PATH: /data/mini_drop.db
+      MINI_DROP_ARTIFACT_ROOT: /tmp/mini-drop
+      MINI_DROP_ANALYZER_UPLOAD: "0"
+    depends_on: !override
+      server:
+        condition: service_healthy
+    volumes:
+      - mini_drop_artifacts:/tmp/mini-drop
+      - mini_drop_sqlite:/data
+
   agent:
     environment:
       AGENT_GRPC_ADDR: server:50051

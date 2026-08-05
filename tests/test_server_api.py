@@ -28,6 +28,7 @@ def _reset_repo(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("MINI_DROP_API_AUTH_ENABLED", raising=False)
     monkeypatch.delenv("MINI_DROP_API_KEY", raising=False)
+    monkeypatch.setattr(store, "ensure_bucket", lambda _bucket: None)
     REGISTRY.clear()
     reset_engine()
     init_db()
@@ -58,6 +59,31 @@ class TestHealthz:
         body = resp.json()
         assert body["code"] == 0
         assert body["data"]["service"] == "mini-drop-server"
+
+    def test_healthz_requires_live_analyzer_when_enabled(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_REQUIRE_ANALYZER", "1")
+        missing = client.get("/api/healthz").json()["data"]
+        assert missing["healthy"] is False
+        assert missing["checks"]["analyzer"]["status"] == "unavailable"
+
+        repo.heartbeat_analyzer("analyzer-test")
+        ready = client.get("/api/healthz").json()["data"]
+        assert ready["healthy"] is True
+        assert ready["checks"]["analyzer"]["workers_online"] == 1
+
+    def test_core_health_ignores_analyzer_bootstrap_dependency(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_REQUIRE_ANALYZER", "1")
+        body = client.get("/api/healthz?core_only=true").json()["data"]
+        assert body["healthy"] is True
+
+    def test_liveness_and_readiness_are_separate(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_REQUIRE_ANALYZER", "1")
+        live = client.get("/api/livez")
+        ready = client.get("/api/readyz")
+        assert live.status_code == 200
+        assert live.json()["data"]["alive"] is True
+        assert ready.status_code == 503
+        assert ready.json()["data"]["healthy"] is False
 
     def test_me_returns_demo_user(self, client: TestClient):
         resp = client.get("/api/me")
@@ -206,7 +232,7 @@ class TestCreateTask:
     """任务创建端点。"""
 
     def test_create_task_records_pending_status(self, client: TestClient):
-        resp = client.post("/api/tasks", json={
+        resp = client.post("/api/tasks", headers={"X-Request-ID": "trace-create-1"}, json={
             "name": "demo cpu profile",
             "agent_id": "agent_local_demo",
             "target_pid": 1234,
@@ -218,10 +244,12 @@ class TestCreateTask:
         body = resp.json()
         task_id = body["data"]["task_id"]
         assert body["data"]["status"] == "PENDING"
+        assert resp.headers["x-request-id"] == "trace-create-1"
 
         # 通过详情端点确认
         detail = client.get(f"/api/tasks/{task_id}")
         assert detail.json()["data"]["status"] == "PENDING"
+        assert detail.json()["data"]["request_id"] == "trace-create-1"
 
     def test_create_task_writes_status_event(self, client: TestClient):
         resp = client.post("/api/tasks", json={
@@ -452,6 +480,25 @@ class TestTaskListAndDetail:
         assert detail["collector_type"] == "pyspy"
         assert detail["sample_rate"] == 11
         assert detail["duration_sec"] == 5
+        assert detail["collection_status"] == "PENDING"
+        assert detail["analysis_status"] == "WAITING"
+
+    def test_attempt_and_analysis_job_endpoints(self, client: TestClient):
+        resp = client.post("/api/tasks", json={
+            "name": "attempt-test", "agent_id": "a1",
+            "target_pid": 777, "collector_type": "perf_cpu",
+        })
+        task_id = resp.json()["data"]["task_id"]
+        repo.heartbeat("a1", "10.0.0.11")
+
+        attempts = client.get(f"/api/tasks/{task_id}/attempts")
+        assert attempts.status_code == 200
+        assert len(attempts.json()["data"]) == 1
+        assert attempts.json()["data"][0]["status"] == "RUNNING"
+
+        jobs = client.get(f"/api/tasks/{task_id}/analysis-jobs")
+        assert jobs.status_code == 200
+        assert jobs.json()["data"] == []
 
     def test_nonexistent_task_returns_404(self, client: TestClient):
         resp = client.get("/api/tasks/nonexistent")

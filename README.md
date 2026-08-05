@@ -62,6 +62,7 @@ pip install -e ".[dev]"
 python dev.py proto       # 编译 gRPC stub
 python dev.py server      # 终端 1：FastAPI :8191 + gRPC :50051
 python dev.py agent       # 终端 2：Agent 注册并心跳
+python dev.py analyzer-worker  # 终端 3：独立分析 Worker
 python dev.py test        # 运行测试
 ```
 
@@ -75,7 +76,7 @@ python dev.py test        # 运行测试
   - Analyzer 将 perf.data 转为 D3 交互式火焰图 + ECharts TopN 热点排行。
   - 5 层智能归因引擎，LLM 辅助推理但受 Schema 硬约束，每条 claim 可追溯到原始证据。
   - 自然语言采集——用户输入"mysqld CPU 飙高"，系统自动匹配进程、选采集器、定参数。
-- **运行形态**：React SPA 前端 + FastAPI 后端 + gRPC Agent 采集端 + PostgreSQL 持久化 + MinIO 对象存储。
+- **运行形态**：React SPA 前端 + FastAPI/gRPC 控制面 + gRPC Agent 采集端 + 独立 Analyzer Worker + PostgreSQL 持久化 + MinIO 对象存储。
 
 ## 关键设计亮点
 
@@ -85,7 +86,9 @@ python dev.py test        # 运行测试
 - **工具驱动的 AI 归因**：LLM 不直接输出自由文本。5 层管线——证据采集 → 候选生成 → 五维置信度校准 → LLM 推理（Few-Shot + Schema 硬约束 + 自修复）→ 修复计划。`rules.json` 外部化，不开 IDE 即可扩展诊断场景。
 - **证据驱动诊断流水线 v2**：12 个可持久化节点、结构化 Action、CPU/IO/内存/网络/MySQL/JVM 确定性 Finding、静态 Knowledge 引用和报告 Verifier；完整设计见 [`docs/diagnosis_pipeline_v2.md`](docs/diagnosis_pipeline_v2.md)。
 - **自然语言采集**：用户描述意图 → LLM function calling 解析 → `/proc` PID 匹配 → 参数 clamp 安全范围 → 自动创建任务。
-- **白名单状态机**：`PENDING → RUNNING → UPLOADING → ANALYZING → DONE/FAILED`，每次迁移必写 `reason + actor` 到审计表，不允许跳状态，DONE/FAILED 终态不可回滚。
+- **可恢复执行流水线**：Task 保留兼容聚合状态，同时持久化 `collection_status` 与 `analysis_status`；每次下发创建唯一 `TaskAttempt`，采集成功后投递带租约的 `AnalysisJob`，结果重放不会重复写入。
+- **真实运行中取消**：Server 将取消指令通过心跳下发，Agent 终止采集进程组、持久化取消结果并安全重放；排队超时、Agent 失联和 Analyzer 租约过期均有确定性恢复路径。
+- **输入完整性门禁**：Analyzer 执行前校验制品可用性、登记大小与 SHA-256，并限制最大输入；只有仍持有租约的 Worker 才能提交结果。
 - **AI 开关分层降级**：`none` / `nlp-only` / `rca-only` / `full` 四级可切换，不配 API Key 时火焰图等核心功能不受影响，AI 自动降级为纯规则引擎。
 - **eBPF 零侵入观测**：bpftrace 内核探针实时采集块设备 IO 延迟分布，不改代码、不重启服务。Web 端 ECharts histogram 绿→红渐变着色 + P50/P95/P99 分位估算。
 - **交互式火焰图 + TopN 联动**：D3 火焰图支持缩放、搜索、hover 详情；点击 TopN 柱状图的函数名，火焰图自动高亮对应栈帧。
@@ -184,7 +187,7 @@ flowchart LR
 
 **采集器统一接口。** 所有采集器实现 `Collector(Protocol)` 协议，Server 不绑定具体工具。新增采集器只需实现 `collect(task) → CollectorResult`。
 
-**Analyzer 火焰图管线。** Agent 本地执行 `perf script → stackcollapse-perf.pl → flamegraph.pl` 流水线，产出 d3-flame-graph 所需的 `{name, value, children}` JSON 树（深度 >50 层截断），同时产出 SVG 降级备用。
+**Analyzer 火焰图管线。** Agent 只负责采集并登记原始制品；独立 Analyzer Worker 通过数据库租约领取 `AnalysisJob`，校验制品大小与 hash 后执行 `perf script → stackcollapse-perf.pl → flamegraph.pl`，产出 JSON、TopN 与 SVG。Worker 崩溃可重领，失去租约的旧 Worker 不能提交。
 
 **MINIO_PUBLIC_ENDPOINT 设计。** Docker 内部 MinIO 使用 `minio:9000`。Agent 通过 gRPC `FetchConfig` 获取 MinIO 地址时，Server 优先下发 `MINIO_PUBLIC_ENDPOINT`（外部可达地址），确保分体部署时 VM Agent 能直传产物到 Windows MinIO。浏览器预签名 URL 同理使用外部地址。
 
@@ -196,7 +199,7 @@ flowchart LR
 
 ### 1) 端到端采集全链路
 
-用户创建采集任务 → Server 写入 PostgreSQL 并置 `PENDING` → Agent 心跳拉取任务 → Agent 执行 perf/eBPF 采集 → 产物写入本地 `/tmp/mini-drop/{task_id}/` → Analyzer 将 `perf.data` 转为 `flamegraph.json` / `top.json` / `flamegraph.svg` → Agent 通知 Server（`NotifyResult` gRPC）→ Server 置 `UPLOADING` → Agent 上传产物到 MinIO → Server 置 `ANALYZING` → 规则引擎生成建议 → Server 置 `DONE`。
+用户创建采集任务 → Server 写入 PostgreSQL 并置 `PENDING` → Agent 心跳领取唯一 `TaskAttempt` → Agent 执行 perf/eBPF 采集并上传到 attempt 专属对象前缀 → Agent 将结果写入本地 spool 后调用 `NotifyResult` → Server 幂等登记制品并置 `collection_status=COLLECTED` → Server 创建唯一 `AnalysisJob` → 独立 Analyzer Worker 领取租约、校验输入、生成 `flamegraph.json` / `top.json` / `flamegraph.svg` → Worker 原子提交结果 → Server 置 `analysis_status=SUCCEEDED` 与聚合状态 `DONE`。
 
 全程每一步迁移写入 `task_status_events` 表（`from_status → to_status, reason, actor`）。
 
@@ -648,9 +651,9 @@ mini-drop/
 
 ## 关键决策与取舍
 
-### 为什么 Analyzer 跑在 Agent 侧而非 Server 侧？
+### 为什么 Analyzer 是独立 Worker 而非 Agent 内联步骤？
 
-Agent 本地执行 `perf script → stackcollapse → flamegraph` 流水线。火焰图 JSON 树通常只有几 KB 到几十 KB，比原始 `perf.data`（数百 KB 到数 MB）小得多。上传 JSON 而非原始数据到 MinIO，节省带宽和存储。
+采集是否成功与分析是否成功必须分别可见。Agent 先完成原始证据采集，Analyzer 再通过持久化租约异步处理；这样 Agent/Server 重启不会丢任务，分析崩溃可以有界重试，多 Worker 也不会覆盖彼此的有效提交。代价是原始 `perf.data` 需要上传，但换来了可恢复性、可审计性和统一分析版本。
 
 ### 为什么 D3 火焰图而不是 ECharts 热力图？
 

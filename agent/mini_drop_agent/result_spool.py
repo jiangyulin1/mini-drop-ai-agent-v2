@@ -25,13 +25,28 @@ class ResultSpool:
         ok: bool,
         reason: str,
         artifacts: list[dict[str, Any]],
+        *,
+        attempt_id: str = "",
+        cancelled: bool = False,
+        exit_code: int = 0,
+        error_code: str = "",
+        request_id: str = "",
+        traceparent: str = "",
+        resource_usage: dict[str, Any] | None = None,
     ) -> Path:
-        path = self._path(task_id)
+        path = self._path(task_id, attempt_id)
         temp = path.with_suffix(".json.tmp")
         payload = {
-            "schema_version": 1,
+            "schema_version": 3,
             "task_id": task_id,
+            "attempt_id": attempt_id,
             "ok": bool(ok),
+            "cancelled": bool(cancelled),
+            "exit_code": int(exit_code),
+            "error_code": str(error_code or ""),
+            "request_id": str(request_id or "")[:64],
+            "traceparent": str(traceparent or "")[:64],
+            "resource_usage": resource_usage or {},
             "reason": str(reason or ""),
             "artifacts": artifacts,
         }
@@ -48,7 +63,7 @@ class ResultSpool:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 if (
-                    payload.get("schema_version") != 1
+                    payload.get("schema_version") not in {1, 2, 3}
                     or not payload.get("task_id")
                     or not isinstance(payload.get("artifacts"), list)
                 ):
@@ -62,14 +77,15 @@ class ResultSpool:
                     pass
         return result
 
-    def acknowledge(self, task_id: str) -> None:
+    def acknowledge(self, task_id: str, attempt_id: str = "") -> None:
         try:
-            self._path(task_id).unlink()
+            self._path(task_id, attempt_id).unlink()
         except FileNotFoundError:
             pass
 
-    def _path(self, task_id: str) -> Path:
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(task_id))[:128]
+    def _path(self, task_id: str, attempt_id: str = "") -> Path:
+        identity = f"{task_id}--{attempt_id}" if attempt_id else str(task_id)
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", identity)[:220]
         if not safe:
             raise ValueError("task_id cannot be empty")
         return self.root / f"{safe}.json"

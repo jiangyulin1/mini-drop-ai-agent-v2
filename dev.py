@@ -42,6 +42,11 @@ def cmd_agent():
     subprocess.check_call([sys.executable, "-m", "agent.mini_drop_agent.main"], cwd=ROOT)
 
 
+def cmd_analyzer_worker():
+    """启动持久化 AnalysisJob Worker。"""
+    subprocess.check_call([sys.executable, "-m", "analyzer.mini_drop_analyzer.worker"], cwd=ROOT)
+
+
 def cmd_test():
     """运行 pytest，透传额外参数。"""
     args = sys.argv[2:]  # 跳过 dev.py test
@@ -73,6 +78,7 @@ COMMANDS = {
     "proto":   cmd_proto,
     "server":  cmd_server,
     "agent":   cmd_agent,
+    "analyzer-worker": cmd_analyzer_worker,
     "test":    cmd_test,
     "lint":    cmd_lint,
     "demo":    cmd_demo,

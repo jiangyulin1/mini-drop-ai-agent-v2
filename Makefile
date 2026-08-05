@@ -1,6 +1,6 @@
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,$(if $(wildcard .venv/Scripts/python.exe),.venv/Scripts/python.exe,python))
 
-.PHONY: server agent analyzer test eval coverage lint fmt demo proto deploy deploy-down
+.PHONY: server agent analyzer analyzer-worker test eval coverage lint fmt demo proto deploy deploy-down
 
 proto:
 	cd proto && bash compile.sh
@@ -15,6 +15,9 @@ analyzer:
 	$(PYTHON) -m analyzer.mini_drop_analyzer.hotmethod_analyzer \
 		--task-id demo_task \
 		--config analyzer/config.example.toml
+
+analyzer-worker:
+	$(PYTHON) -m analyzer.mini_drop_analyzer.worker
 
 test:
 	$(PYTHON) -m pytest tests -v

@@ -39,6 +39,7 @@ def test_init_db_adds_v2_columns_to_legacy_database(monkeypatch, tmp_path):
     init_db()
     inspector = inspect(engine)
     assert "diagnosis_step_id" in {item["name"] for item in inspector.get_columns("tasks")}
+    assert "traceparent" in {item["name"] for item in inspector.get_columns("tasks")}
     assert {"row_version", "deadline_at"}.issubset(
         item["name"] for item in inspector.get_columns("diagnosis_sessions")
     )
@@ -50,7 +51,7 @@ def test_init_db_adds_v2_columns_to_legacy_database(monkeypatch, tmp_path):
     }
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0002_release"
+            "0004_task_trace_context"
         )
     reset_engine()
 
@@ -68,6 +69,6 @@ def test_init_db_creates_fresh_schema_at_head(monkeypatch, tmp_path):
     )
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0002_release"
+            "0004_task_trace_context"
         )
     reset_engine()

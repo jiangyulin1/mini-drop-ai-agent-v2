@@ -8,14 +8,20 @@ import os
 from agent.mini_drop_agent.config import AgentConfig
 
 
-def maybe_upload_artifacts(task_id: str, artifacts: list[dict], config: AgentConfig) -> list[dict]:
+def maybe_upload_artifacts(
+    task_id: str,
+    artifacts: list[dict],
+    config: AgentConfig,
+    *,
+    attempt_id: str = "",
+) -> list[dict]:
     enriched = [_with_integrity(artifact) for artifact in artifacts]
     if not config.upload_artifacts:
         return enriched
     client = _minio_client(config)
     result: list[dict] = []
     for artifact in enriched:
-        result.append(_upload_one(client, task_id, artifact, config))
+        result.append(_upload_one(client, task_id, attempt_id, artifact, config))
     return result
 
 
@@ -46,14 +52,23 @@ def _normalize_endpoint(endpoint: str) -> tuple[str, bool]:
     return endpoint, False
 
 
-def _upload_one(client, task_id: str, artifact: dict, config: AgentConfig) -> dict:
+def _upload_one(
+    client,
+    task_id: str,
+    attempt_id: str,
+    artifact: dict,
+    config: AgentConfig,
+) -> dict:
     item = dict(artifact)
     local_path = item.get("local_path")
     if not local_path or not os.path.isfile(local_path):
         return item
 
     filename = item.get("filename") or os.path.basename(local_path)
-    object_key = item.get("object_key") or f"tasks/{task_id}/{filename}"
+    default_prefix = f"tasks/{task_id}"
+    if attempt_id:
+        default_prefix += f"/attempts/{attempt_id}"
+    object_key = item.get("object_key") or f"{default_prefix}/{filename}"
     content_type = item.get("content_type") or "application/octet-stream"
     client.fput_object(
         bucket_name=config.minio_bucket,

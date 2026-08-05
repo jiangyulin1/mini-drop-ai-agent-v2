@@ -13,10 +13,12 @@ RUN useradd --create-home --shell /bin/bash mini-drop
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY server/ ./server/
 COPY agent/ ./agent/
 COPY analyzer/ ./analyzer/
+COPY mini_drop_observability/ ./mini_drop_observability/
+COPY migrations/ ./migrations/
 
 RUN pip install --no-cache-dir -e . "grpcio-tools>=1.80,<1.81"
 

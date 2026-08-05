@@ -38,10 +38,12 @@ def test_upload_adds_bucket_and_object_key(tmp_path):
     }
 
     with mock.patch("agent.mini_drop_agent.artifact_upload._minio_client") as mock_client:
-        uploaded = maybe_upload_artifacts("task1", [artifact], _config())
+        uploaded = maybe_upload_artifacts(
+            "task1", [artifact], _config(), attempt_id="attempt1",
+        )
 
     assert uploaded[0]["bucket"] == "mini-drop"
-    assert uploaded[0]["object_key"] == "tasks/task1/perf.data"
+    assert uploaded[0]["object_key"] == "tasks/task1/attempts/attempt1/perf.data"
     assert uploaded[0]["size_bytes"] == 4
     assert uploaded[0]["sha256"] == hashlib.sha256(b"perf").hexdigest()
     mock_client.return_value.fput_object.assert_called_once()

@@ -14,9 +14,18 @@ web_link="/var/www/mini-drop-active"
 [[ -f "${server_release}/server/app/main.py" ]]
 [[ -x "${server_release}/.venv/bin/python" ]]
 [[ -f "${server_release}/deploy/env/control-native.env" ]]
+[[ -f "${server_release}/deploy/systemd/mini-drop-analyzer.service" ]]
 [[ -f "${web_release}/index.html" ]]
 [[ ! -e "${server_link}" || -L "${server_link}" ]]
 [[ ! -e "${web_link}" || -L "${web_link}" ]]
+
+# Validate access as the actual Nginx worker user.  A readable file below a
+# non-traversable parent (for example /home/control with mode 0750) still
+# produces an Nginx 500 after the symlink switch.
+nginx_user="${MINI_DROP_NGINX_USER:-www-data}"
+if id "${nginx_user}" >/dev/null 2>&1; then
+  runuser -u "${nginx_user}" -- test -r "${web_release}/index.html"
+fi
 
 "${server_release}/.venv/bin/python" -m compileall -q "${server_release}/server"
 (
@@ -27,6 +36,12 @@ web_link="/var/www/mini-drop-active"
 previous_server="$(readlink -f "${server_link}" 2>/dev/null || true)"
 previous_web="$(readlink -f "${web_link}" 2>/dev/null || true)"
 
+install -m 0644 \
+  "${server_release}/deploy/systemd/mini-drop-analyzer.service" \
+  /etc/systemd/system/mini-drop-analyzer.service
+systemctl daemon-reload
+systemctl enable mini-drop-analyzer.service >/dev/null
+
 rollback() {
   if [[ -n "${previous_server}" && -d "${previous_server}" ]]; then
     ln -sfn "${previous_server}" "${server_link}"
@@ -35,6 +50,7 @@ rollback() {
     ln -sfn "${previous_web}" "${web_link}"
   fi
   systemctl restart mini-drop-server.service || true
+  systemctl restart mini-drop-analyzer.service || true
   nginx -s reload || true
 }
 trap rollback ERR
@@ -42,6 +58,7 @@ trap rollback ERR
 ln -sfn "${server_release}" "${server_link}"
 ln -sfn "${web_release}" "${web_link}"
 systemctl restart mini-drop-server.service
+systemctl restart mini-drop-analyzer.service
 nginx -t
 nginx -s reload
 

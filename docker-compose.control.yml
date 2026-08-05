@@ -65,7 +65,13 @@ services:
       MINI_DROP_GRPC_CERT_FILE: /certs/server.crt
       MINI_DROP_GRPC_KEY_FILE: /certs/server.key
       MINI_DROP_GRPC_DISTRIBUTE_MINIO_CREDENTIALS: "0"
+      MINI_DROP_REQUIRE_ANALYZER: "1"
       MINI_DROP_ALLOWED_SERVICES: ${MINI_DROP_ALLOWED_SERVICES:-}
+      MINI_DROP_TRACING_ENABLED: ${MINI_DROP_TRACING_ENABLED:-0}
+      MINI_DROP_TRACE_EXPORTER: ${MINI_DROP_TRACE_EXPORTER:-otlp}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-1}
+      MINI_DROP_ENVIRONMENT: ${MINI_DROP_ENVIRONMENT:-vm}
       MINI_DROP_AI_ENABLED: ${MINI_DROP_AI_ENABLED:-off}
       MINI_DROP_AI_PROVIDER: ${MINI_DROP_AI_PROVIDER:-deepseek}
       MINI_DROP_AI_BASE_URL: ${MINI_DROP_AI_BASE_URL:-https://api.deepseek.com}
@@ -83,11 +89,36 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8191/api/healthz >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8191/api/healthz?core_only=true' >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 15s
+    restart: unless-stopped
+
+  analyzer:
+    build:
+      context: .
+      dockerfile: deploy/dockerfiles/server.Dockerfile
+    command: ["python", "-m", "analyzer.mini_drop_analyzer.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mini_drop}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mini_drop}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
+      MINI_DROP_GRPC_SECURE: "0"
+      MINI_DROP_ANALYZER_UPLOAD: "1"
+      MINI_DROP_TRACING_ENABLED: ${MINI_DROP_TRACING_ENABLED:-0}
+      MINI_DROP_TRACE_EXPORTER: ${MINI_DROP_TRACE_EXPORTER:-otlp}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-1}
+      MINI_DROP_ENVIRONMENT: ${MINI_DROP_ENVIRONMENT:-vm}
+    depends_on:
+      server:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     restart: unless-stopped
 
   web:

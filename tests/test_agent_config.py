@@ -172,6 +172,7 @@ class TestAgentCollectorDispatch:
                     pending=True,
                     task_desc=hotmethod_pb2.TaskDesc(
                         task_id="task_options",
+                        request_id="trace-options",
                         profiler_type=2,
                         options_json='{"port":6061,"pprof_endpoint":"/custom"}',
                         sample_argv=hotmethod_pb2.RecordArgv(
@@ -192,4 +193,29 @@ class TestAgentCollectorDispatch:
         )
 
         assert task["request_params"]["options"]["port"] == 6061
+        assert task["request_id"] == "trace-options"
         assert task["request_params"]["options"]["pprof_endpoint"] == "/custom"
+
+    def test_heartbeat_returns_cancel_directive_for_active_attempt(self):
+        class Stub:
+            def Do(self, request, timeout):
+                assert timeout == 5
+                assert request.active_task_id == "task-active"
+                assert request.active_attempt_id == "attempt-active"
+                return healthcheck_pb2.HealthCheckResponse(
+                    cancel_active_task=True,
+                    cancel_reason="operator cancelled",
+                )
+
+        directive = _heartbeat(
+            Stub(),
+            AgentConfig(
+                agent_id="agent-options",
+                server_grpc_addr="localhost:50051",
+                agent_ip_addr="127.0.0.1",
+            ),
+            busy=True,
+            active_task={"id": "task-active", "attempt_id": "attempt-active"},
+        )
+
+        assert directive == {"directive": "cancel", "reason": "operator cancelled"}

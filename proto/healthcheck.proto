@@ -29,6 +29,8 @@ message HealthCheckRequest {
   PidStats self_pstats     = 5;  // Agent 自身资源开销
   PidStats children_pstats = 6;  // 采集器子进程聚合开销
   bool busy                = 7;  // Agent 正在执行任务时只心跳，不拉取新任务
+  string active_task_id    = 8;  // 当前执行任务，用于取消和重启对账
+  string active_attempt_id = 9;  // 当前执行尝试
 }
 
 
@@ -42,4 +44,6 @@ message HealthCheckResponse {
   ServingStatus status  = 1;
   bool pending          = 2;         // true 表示有任务待执行
   TaskDesc task_desc    = 3;         // 待执行任务详情，仅在 pending=true 时有意义
+  bool cancel_active_task = 4;       // true 时 Agent 必须终止当前 Runner
+  string cancel_reason    = 5;       // 可审计的取消原因
 }
