@@ -37,6 +37,8 @@ import {
   downloadTaskArtifact,
   getDiagnosis,
   getTask,
+  getTaskAnalysisJobs,
+  getTaskAttempts,
   getTaskArtifactContent,
   getTaskArtifacts,
   getTaskEvents,
@@ -48,6 +50,7 @@ import {
 import FlamegraphViewer from "../components/FlamegraphViewer";
 import TopNChart from "../components/TopNChart";
 import EBPFHistogram from "../components/EBPFHistogram";
+import SandboxedArtifactFrame from "../components/SandboxedArtifactFrame";
 import StatusTag from "../components/StatusTag";
 import ErrorAlert from "../components/ErrorAlert";
 import usePolling from "../hooks/usePolling";
@@ -55,6 +58,11 @@ import echarts from "../lib/echarts";
 import { isTaskActive } from "../utils/status";
 import { taskDisplayInfo, taskDisplayName } from "../utils/taskNames";
 import { collectorMeta } from "../utils/collectors";
+import {
+  isArtifactAvailable,
+  prepareAsyncProfilerHtml,
+  unavailableVisualArtifacts,
+} from "../utils/artifacts";
 import {
   extractFlamegraphTreeFromSvg,
   extractTopFunctionsFromSvg,
@@ -82,6 +90,8 @@ export default function TaskResult() {
   const [task, setTask] = useState(null);
   const [events, setEvents] = useState([]);
   const [artifacts, setArtifacts] = useState([]);
+  const [attempts, setAttempts] = useState([]);
+  const [analysisJobs, setAnalysisJobs] = useState([]);
   const [diagnoses, setDiagnoses] = useState([]);
   const [diagnosis, setDiagnosis] = useState(null);
   const [diagnosing, setDiagnosing] = useState(false);
@@ -108,12 +118,15 @@ export default function TaskResult() {
         getTaskEvents(taskId),
         getTaskArtifacts(taskId),
         listTaskDiagnoses(taskId),
+        getTaskAttempts(taskId),
+        getTaskAnalysisJobs(taskId),
       ]);
-      const [taskResp, eventResp, artifactResp, diagnosisList] = results.map(
+      const [taskResp, eventResp, artifactResp, diagnosisList, attemptList, jobList] = results.map(
         (r) => (r.status === "fulfilled" ? r.value : null)
       );
-      const failedNames = ["task", "events", "artifacts", "diagnoses"].filter((_, i) => results[i].status === "rejected");
-      if (failedNames.length > 0 && failedNames.length < 4) {
+      const failedNames = ["task", "events", "artifacts", "diagnoses", "attempts", "analysis-jobs"]
+        .filter((_, i) => results[i].status === "rejected");
+      if (failedNames.length > 0 && failedNames.length < results.length) {
         console.warn("部分数据加载失败:", failedNames.join(", "));
       }
       if (!taskResp) {
@@ -124,9 +137,11 @@ export default function TaskResult() {
       setTask(taskResp);
       setEvents(eventResp || []);
       setArtifacts(artifactResp || []);
+      setAttempts(attemptList || []);
+      setAnalysisJobs(jobList || []);
 
       // 内联加载分析产物
-      const resp = artifactResp || [];
+      const resp = (artifactResp || []).filter(isArtifactAvailable);
       setAnalysisLoading(true);
       const hasTop = resp.some((item) => item.artifact_type === "top_json");
       const hasFlameJson = resp.some((item) => item.artifact_type === "flamegraph_json");
@@ -241,22 +256,26 @@ export default function TaskResult() {
   const repairPlan = diagnosis?.repair_plan;
   const toolResults = diagnosis?.tool_results || [];
   const topCause = rankedCauses[0];
-  const topArtifact = artifacts.find((item) => item.artifact_type === "top_json");
+  const availableArtifacts = artifacts.filter(isArtifactAvailable);
+  const unavailableVisuals = unavailableVisualArtifacts(artifacts);
+  const topArtifact = availableArtifacts.find((item) => item.artifact_type === "top_json");
   const flameArtifact = artifacts.find(
     (item) =>
-      item.artifact_type === "flamegraph_svg" ||
-      item.artifact_type === "flamegraph_json" ||
-      item.artifact_type === "java_flamegraph_html"
+      isArtifactAvailable(item) && (
+        item.artifact_type === "flamegraph_svg" ||
+        item.artifact_type === "flamegraph_json" ||
+        item.artifact_type === "java_flamegraph_html"
+      )
   );
-  const javaHtmlArtifact = artifacts.find((item) => item.artifact_type === "java_flamegraph_html");
-  const memoryArtifact = artifacts.find((item) => item.artifact_type === "memory_json");
-  const pprofArtifact = artifacts.find((item) => item.artifact_type === "pprof_raw");
-  const sysMetricsArtifact = artifacts.find((item) => item.artifact_type === "sys_metrics");
-  const ebpfArtifact = artifacts.find((item) => item.artifact_type === "ebpf_metrics");
-  const suggestionArtifact = artifacts.find(
+  const javaHtmlArtifact = availableArtifacts.find((item) => item.artifact_type === "java_flamegraph_html");
+  const memoryArtifact = availableArtifacts.find((item) => item.artifact_type === "memory_json");
+  const pprofArtifact = availableArtifacts.find((item) => item.artifact_type === "pprof_raw");
+  const sysMetricsArtifact = availableArtifacts.find((item) => item.artifact_type === "sys_metrics");
+  const ebpfArtifact = availableArtifacts.find((item) => item.artifact_type === "ebpf_metrics");
+  const suggestionArtifact = availableArtifacts.find(
     (item) => item.artifact_type === "suggestions_md"
   );
-  const continuousSummary = artifacts.find(
+  const continuousSummary = availableArtifacts.find(
     (item) => item.artifact_type === "continuous_summary"
   );
   const continuousWindowArtifacts = artifacts.filter(
@@ -270,11 +289,13 @@ export default function TaskResult() {
             window_index: item.metadata?.window_index ?? index,
             start_ts: item.metadata?.start_ts,
             end_ts: item.metadata?.end_ts,
-            ok: item.metadata?.ok ?? true,
-            reason: item.metadata?.reason || item.filename || item.object_key || "",
+            ok: isArtifactAvailable(item) && (item.metadata?.ok ?? true),
+            reason: isArtifactAvailable(item)
+              ? item.metadata?.reason || item.filename || item.object_key || ""
+              : item.availability_reason || "产物不可用",
           }))
           .sort((a, b) => a.window_index - b.window_index);
-  const continuousFlameArtifacts = artifacts.filter(
+  const continuousFlameArtifacts = availableArtifacts.filter(
     (item) => item.artifact_type === "continuous_flamegraph_json"
   );
   const hasFlameOrTop = Boolean(flameArtifact || topArtifact);
@@ -415,6 +436,11 @@ export default function TaskResult() {
           raw: "default",
           continuous_window: "cyan",
           continuous_summary: "cyan",
+          continuous_flamegraph_json: "cyan",
+          continuous_flamegraph_svg: "cyan",
+          continuous_top_json: "cyan",
+          sys_metrics: "purple",
+          java_profile_jfr: "magenta",
         };
         return <Tag color={colors[value] || "default"}>{value}</Tag>;
       },
@@ -433,6 +459,18 @@ export default function TaskResult() {
       render: (v) => (v ? `${(v / 1024).toFixed(1)} KB` : "-"),
     },
     {
+      title: "可用性",
+      width: 120,
+      render: (_, record) => {
+        const available = isArtifactAvailable(record);
+        const label = available ? "可用" : "文件缺失";
+        const tag = <Tag color={available ? "green" : "red"}>{label}</Tag>;
+        return record.availability_reason
+          ? <Tooltip title={record.availability_reason}>{tag}</Tooltip>
+          : tag;
+      },
+    },
+    {
       title: "操作",
       width: 100,
       render: (_, record) => {
@@ -443,6 +481,8 @@ export default function TaskResult() {
             size="small"
             icon={<DownloadOutlined />}
             loading={downloadingArtifact === key}
+            disabled={!isArtifactAvailable(record)}
+            title={!isArtifactAvailable(record) ? record.availability_reason || "产物文件不可用" : undefined}
             onClick={() => downloadArtifact(record)}
           >
             下载
@@ -532,6 +572,12 @@ export default function TaskResult() {
               <Descriptions.Item label="状态">
                 <StatusTag status={task.status} />
               </Descriptions.Item>
+              <Descriptions.Item label="采集状态">
+                <Tag>{task.collection_status || task.status}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="分析状态">
+                <Tag>{task.analysis_status || "WAITING"}</Tag>
+              </Descriptions.Item>
               <Descriptions.Item label="名称">
                 <Space direction="vertical" size={0}>
                   <Typography.Text>{taskDisplayName(task)}</Typography.Text>
@@ -551,6 +597,39 @@ export default function TaskResult() {
               <Descriptions.Item label="采样时长">{task.duration_sec}s</Descriptions.Item>
             </Descriptions>
           </Card>
+          {(attempts.length > 0 || analysisJobs.length > 0) && (
+            <Card title="执行与分析记录" size="small">
+              <Table
+                size="small"
+                pagination={false}
+                rowKey={(row) => row.attempt_id}
+                dataSource={attempts}
+                columns={[
+                  { title: "尝试", dataIndex: "attempt_no", width: 72 },
+                  { title: "Attempt ID", dataIndex: "attempt_id", ellipsis: true },
+                  { title: "Agent", dataIndex: "agent_id", ellipsis: true },
+                  { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+                  { title: "结果", dataIndex: "result_message", ellipsis: true },
+                ]}
+              />
+              {analysisJobs.length > 0 && (
+                <Table
+                  style={{ marginTop: SPACING.md }}
+                  size="small"
+                  pagination={false}
+                  rowKey={(row) => row.analysis_job_id}
+                  dataSource={analysisJobs}
+                  columns={[
+                    { title: "分析流水线", dataIndex: "pipeline" },
+                    { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+                    { title: "重试", dataIndex: "retry_count", width: 72 },
+                    { title: "Worker", dataIndex: "lease_owner", ellipsis: true },
+                    { title: "错误", dataIndex: "error_message", ellipsis: true },
+                  ]}
+                />
+              )}
+            </Card>
+          )}
           <Alert
             type={
               task.status === "FAILED"
@@ -645,6 +724,21 @@ export default function TaskResult() {
         }
         size="small"
       >
+        {unavailableVisuals.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="部分可视化产物不可用"
+            description={unavailableVisuals.map((item) => (
+              <div key={`${item.artifact_type}:${item.metadata?.window_index ?? ""}`}>
+                {item.artifact_type}
+                {item.metadata?.window_index !== undefined ? `（窗口 ${item.metadata.window_index}）` : ""}
+                ：{item.availability_reason || "产物文件不存在"}
+              </div>
+            ))}
+          />
+        )}
         {hasPrimaryAnalysis ? (
           hasFlameOrTop ? (
             <Row gutter={SPACING.lg}>
@@ -675,10 +769,8 @@ export default function TaskResult() {
                       message="交互式 SVG 火焰图"
                       description="点击帧可逐层放大；使用图内 Search 搜索函数，Reset Zoom 返回全局视图。脚本运行在无同源权限的隔离沙箱中。"
                     />
-                    <iframe
-                      srcDoc={analysis.svg}
-                      sandbox=""
-                      referrerPolicy="no-referrer"
+                    <SandboxedArtifactFrame
+                      html={analysis.svg}
                       title="火焰图"
                       style={{
                         width: "100%",
@@ -850,13 +942,6 @@ export default function TaskResult() {
           </div>
         )}
       </Card>
-
-      {/* Java 火焰图 HTML */}
-      {javaHtmlArtifact && (
-        <Card title="Java 火焰图" size="small">
-          <JavaFlameViewer taskId={taskId} artifact={javaHtmlArtifact} />
-        </Card>
-      )}
 
       {/* eBPF IO 延迟分布 */}
       {ebpfArtifact && hasFlameOrTop && (
@@ -1310,7 +1395,7 @@ function JavaFlameViewer({ taskId, artifact }) {
     (async () => {
       try {
         const data = await getTaskArtifactContent(taskId, "java_flamegraph_html");
-        if (!cancelled) setHtml(data?.text || "");
+        if (!cancelled) setHtml(prepareAsyncProfilerHtml(data));
       } catch {
         if (!cancelled) setHtml("");
       } finally {
@@ -1324,9 +1409,8 @@ function JavaFlameViewer({ taskId, artifact }) {
   if (!html) return <Empty description="无法加载 Java 火焰图" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
 
   return (
-    <iframe
-      srcDoc={html}
-      sandbox=""
+    <SandboxedArtifactFrame
+      html={html}
       title="Java 火焰图"
       style={{ width: "100%", height: 420, border: "none", borderRadius: 6 }}
     />

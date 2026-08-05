@@ -176,6 +176,14 @@ export function getTaskEvents(taskId) {
   return api.get(`/tasks/${taskId}/events`);
 }
 
+export function getTaskAttempts(taskId) {
+  return api.get(`/tasks/${taskId}/attempts`);
+}
+
+export function getTaskAnalysisJobs(taskId) {
+  return api.get(`/tasks/${taskId}/analysis-jobs`);
+}
+
 export function getTaskArtifacts(taskId, params = {}) {
   return api.get(`/tasks/${taskId}/artifacts`, { params });
 }

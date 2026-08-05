@@ -18,8 +18,15 @@ import {
   getTaskArtifacts,
 } from "../api/client";
 import { collectorMeta } from "../utils/collectors";
+import {
+  artifactText,
+  isArtifactAvailable,
+  prepareAsyncProfilerHtml,
+  unavailableVisualArtifacts,
+} from "../utils/artifacts";
 import EBPFHistogram from "./EBPFHistogram";
 import FlamegraphViewer from "./FlamegraphViewer";
+import SandboxedArtifactFrame from "./SandboxedArtifactFrame";
 import TopNChart from "./TopNChart";
 
 function artifactIndex(artifact) {
@@ -55,7 +62,8 @@ export default function TaskVisualizationPreview({ taskId }) {
         setTask(taskData);
         setArtifacts(artifactItems || []);
 
-        const types = new Set((artifactItems || []).map((item) => item.artifact_type));
+        const availableItems = (artifactItems || []).filter(isArtifactAvailable);
+        const types = new Set(availableItems.map((item) => item.artifact_type));
         const contentJobs = [];
         if (types.has("top_json")) {
           contentJobs.push(
@@ -72,7 +80,15 @@ export default function TaskVisualizationPreview({ taskId }) {
         if (documentType) {
           contentJobs.push(
             getTaskArtifactContent(taskId, documentType)
-              .then((value) => { if (!cancelled) setEmbeddedDocument(typeof value === "string" ? value : ""); })
+              .then((value) => {
+                if (!cancelled) {
+                  setEmbeddedDocument(
+                    documentType === "java_flamegraph_html"
+                      ? prepareAsyncProfilerHtml(value)
+                      : artifactText(value),
+                  );
+                }
+              })
               .catch(() => { if (!cancelled) setEmbeddedDocument(""); }),
           );
         }
@@ -105,10 +121,13 @@ export default function TaskVisualizationPreview({ taskId }) {
   }
 
   const meta = collectorMeta(task?.collector_type);
-  const flameArtifact = artifacts.find((item) => item.artifact_type === "flamegraph_json");
-  const continuousArtifact = artifacts.find(
-    (item) => item.artifact_type === "continuous_flamegraph_json",
+  const flameArtifact = artifacts.find(
+    (item) => item.artifact_type === "flamegraph_json" && isArtifactAvailable(item),
   );
+  const continuousArtifact = artifacts.find(
+    (item) => item.artifact_type === "continuous_flamegraph_json" && isArtifactAvailable(item),
+  );
+  const unavailableVisuals = unavailableVisualArtifacts(artifacts);
   const hasInlineVisualization = Boolean(
     flameArtifact || continuousArtifact || embeddedDocument || top.length || ebpfData,
   );
@@ -143,9 +162,8 @@ export default function TaskVisualizationPreview({ taskId }) {
               />
             )}
             {!flameArtifact && !continuousArtifact && embeddedDocument && (
-              <iframe
-                srcDoc={embeddedDocument}
-                sandbox=""
+              <SandboxedArtifactFrame
+                html={embeddedDocument}
                 title={`${meta.label}预览`}
                 style={{
                   width: "100%",
@@ -167,7 +185,18 @@ export default function TaskVisualizationPreview({ taskId }) {
 
       {ebpfData && <EBPFHistogram data={ebpfData} height={320} />}
 
-      {!hasInlineVisualization && (
+      {!hasInlineVisualization && unavailableVisuals.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message="可视化产物文件不可用"
+          description={unavailableVisuals
+            .map((item) => `${item.artifact_type}：${item.availability_reason || "文件不存在"}`)
+            .join("；")}
+        />
+      )}
+
+      {!hasInlineVisualization && unavailableVisuals.length === 0 && (
         <Empty
           description={
             task?.status === "DONE"
