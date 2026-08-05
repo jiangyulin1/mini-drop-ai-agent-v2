@@ -1,0 +1,64 @@
+{
+  "scenario_id": "kernel_cpu_overhead",
+  "query": "edge-proxy CPU system 占比异常，区分进程热点和内核路径开销",
+  "scope": {
+    "target_service": "edge-proxy",
+    "same_host_instance_ids": [],
+    "downstream_service_ids": [],
+    "instances": [
+      {
+        "service_id": "edge-proxy",
+        "instance_id": "edge-proxy-1",
+        "host_id": "host-edge",
+        "agent_id": "agent-edge",
+        "pid": 24001
+      }
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-edge-cpu",
+      "collector_type": "sys_metrics",
+      "target": {
+        "service_id": "edge-proxy",
+        "instance_id": "edge-proxy-1",
+        "host_id": "host-edge",
+        "agent_id": "agent-edge",
+        "pid": 24001
+      },
+      "facts": {
+        "avg_cpu_user_pct": 44,
+        "avg_cpu_sys_pct": 39,
+        "process_cpu_core_usage": 0.3
+      },
+      "top_function": {
+        "name": "",
+        "percent": 0
+      },
+      "pressure": {
+        "cpu": true,
+        "io_wait": false,
+        "memory": false,
+        "network": false
+      },
+      "evidence_refs": [
+        "ev-edge-host-cpu",
+        "ev-edge-process-share"
+      ]
+    }
+  ],
+  "expected": {
+    "classification": "self_code_or_process_pressure",
+    "finding_types": [
+      "host_cpu_pressure",
+      "kernel_overhead"
+    ],
+    "knowledge_refs": [
+      "linux.cpu.kernel_overhead"
+    ],
+    "action_collectors": [
+      "sys_metrics",
+      "perf_cpu"
+    ]
+  }
+}

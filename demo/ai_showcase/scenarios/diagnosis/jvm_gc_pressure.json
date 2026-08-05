@@ -1,0 +1,67 @@
+{
+  "scenario_id": "jvm_gc_pressure",
+  "query": "checkout-jvm 的延迟升高，GC pause P95 明显异常，请定位运行时压力",
+  "scope": {
+    "target_service": "checkout-jvm",
+    "same_host_instance_ids": [],
+    "downstream_service_ids": [],
+    "instances": [
+      {
+        "service_id": "checkout-jvm",
+        "instance_id": "checkout-jvm-1",
+        "host_id": "host-jvm",
+        "agent_id": "agent-jvm",
+        "pid": 21001
+      }
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-jvm-gc",
+      "collector_type": "jvm_metrics",
+      "target": {
+        "service_id": "checkout-jvm",
+        "instance_id": "checkout-jvm-1",
+        "host_id": "host-jvm",
+        "agent_id": "agent-jvm",
+        "pid": 21001
+      },
+      "facts": {
+        "jvm_gc_pause_p95_ms": 860,
+        "jvm_gc_time_pct": 24.5,
+        "vmrss_mb": 3200,
+        "vmrss_mb_max": 3380,
+        "vmrss_trend": "growing"
+      },
+      "top_function": {
+        "name": "",
+        "percent": 0
+      },
+      "pressure": {
+        "cpu": false,
+        "io_wait": false,
+        "memory": true,
+        "network": false
+      },
+      "evidence_refs": [
+        "ev-jvm-gc-pause",
+        "ev-jvm-heap-pressure"
+      ]
+    }
+  ],
+  "expected": {
+    "classification": "self_code_or_process_pressure",
+    "finding_types": [
+      "jvm_gc_pressure",
+      "rss_growth"
+    ],
+    "knowledge_refs": [
+      "jvm.gc.pressure",
+      "linux.memory.process_growth"
+    ],
+    "action_collectors": [
+      "sys_metrics",
+      "perf_cpu"
+    ]
+  }
+}

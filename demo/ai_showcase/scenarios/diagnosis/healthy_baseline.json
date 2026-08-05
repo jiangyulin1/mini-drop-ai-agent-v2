@@ -1,0 +1,66 @@
+{
+  "scenario_id": "healthy_baseline",
+  "query": "确认 catalog 当前是否存在可归因的性能异常",
+  "scope": {
+    "target_service": "catalog",
+    "same_host_instance_ids": [],
+    "downstream_service_ids": [],
+    "instances": [
+      {
+        "service_id": "catalog",
+        "instance_id": "catalog-1",
+        "host_id": "host-catalog",
+        "agent_id": "agent-catalog",
+        "pid": 23001
+      }
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-catalog-baseline",
+      "collector_type": "sys_metrics",
+      "target": {
+        "service_id": "catalog",
+        "instance_id": "catalog-1",
+        "host_id": "host-catalog",
+        "agent_id": "agent-catalog",
+        "pid": 23001
+      },
+      "facts": {
+        "avg_cpu_user_pct": 12,
+        "avg_cpu_sys_pct": 3,
+        "avg_cpu_iowait_pct": 0.8,
+        "vmrss_mb": 320,
+        "vmrss_mb_max": 355,
+        "vmrss_trend": "stable",
+        "tcp_retransmit_pct": 0.1,
+        "network_latency_p95_ms": 19
+      },
+      "top_function": {
+        "name": "",
+        "percent": 0
+      },
+      "pressure": {
+        "cpu": false,
+        "io_wait": false,
+        "memory": false,
+        "network": false
+      },
+      "evidence_refs": [
+        "ev-catalog-baseline"
+      ]
+    }
+  ],
+  "expected": {
+    "classification": "insufficient_evidence",
+    "finding_types": [
+      "insufficient_evidence"
+    ],
+    "knowledge_refs": [],
+    "action_collectors": [
+      "sys_metrics",
+      "perf_cpu",
+      "ebpf_io"
+    ]
+  }
+}

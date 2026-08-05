@@ -1,0 +1,45 @@
+{
+  "title": "Mini-Drop 教师演示",
+  "minimum_online_agents": 2,
+  "tasks": [
+    {
+      "title": "系统指标与任务证据链",
+      "task_id": "task_20260730_035620_603d19",
+      "collector": "sys_metrics",
+      "expected_artifacts": ["sys_metrics"],
+      "talking_point": "展示任务生命周期、系统指标曲线、真实产物及证据下载。"
+    },
+    {
+      "title": "内存趋势分析",
+      "task_id": "task_20260730_035620_13b667",
+      "collector": "memory_smaps",
+      "expected_artifacts": ["memory_json"],
+      "talking_point": "展示 RSS/PSS/USS 等进程内存指标及趋势判断。"
+    },
+    {
+      "title": "Python 火焰图与智能归因",
+      "task_id": "task_20260730_035620_b06fb0",
+      "collector": "pyspy",
+      "expected_artifacts": ["flamegraph_svg"],
+      "diagnosis": {
+        "required": true,
+        "expected_status": "DONE",
+        "expected_tool_statuses": {
+          "get_flamegraph_top": "success",
+          "get_ebpf_latency_summary": "not_applicable",
+          "compare_baseline": "optional_missing",
+          "inspect_task_events": "success",
+          "check_agent_health": "success"
+        }
+      },
+      "talking_point": "展示 SVG 火焰图、TopN 联动、证据支持度和可追溯的智能归因。"
+    },
+    {
+      "title": "eBPF I/O 延迟",
+      "task_id": "task_20260730_035620_7073b7",
+      "collector": "ebpf_io",
+      "expected_artifacts": ["ebpf_metrics", "ebpf_raw"],
+      "talking_point": "展示内核态 I/O 延迟分布及原始采样证据。"
+    }
+  ]
+}

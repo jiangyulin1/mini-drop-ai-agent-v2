@@ -1,0 +1,62 @@
+[
+  {
+    "case_id": "registered_probe_allowlist",
+    "type": "probe_registry",
+    "description": "只允许四类预注册只读采集器，R2 必须审批。"
+  },
+  {
+    "case_id": "strict_schema_rejects_shell",
+    "type": "strict_request_schema",
+    "description": "请求上下文中的 shell 字段必须被拒绝。",
+    "payload": {
+      "query": "service-a CPU high",
+      "context": {
+        "service_id": "service-a",
+        "shell": "rm -rf /"
+      }
+    },
+    "expected_error_contains": "shell"
+  },
+  {
+    "case_id": "command_preview_tampering",
+    "type": "action_preview_tamper",
+    "description": "展示命令若与结构化参数不一致，报告校验失败。",
+    "expected_issue_contains": "preview"
+  },
+  {
+    "case_id": "evidence_hash_tampering",
+    "type": "evidence_hash_tamper",
+    "description": "证据内容被修改后，完整性 Hash 校验失败。",
+    "expected_issue_contains": "Hash"
+  },
+  {
+    "case_id": "unknown_evidence_reference",
+    "type": "unknown_evidence",
+    "description": "结论引用不存在的证据时拒绝报告。",
+    "expected_issue_contains": "evidence_refs"
+  },
+  {
+    "case_id": "out_of_scope_action",
+    "type": "out_of_scope_action",
+    "description": "采集动作不能越过诊断范围。",
+    "expected_issue_contains": "Action"
+  },
+  {
+    "case_id": "unknown_collector",
+    "type": "unknown_collector",
+    "description": "即使动作结构正确，也不能使用未注册采集器。",
+    "expected_issue_contains": "Action"
+  },
+  {
+    "case_id": "automatic_execution_forbidden",
+    "type": "auto_execute_forbidden",
+    "description": "动作契约从类型层强制 auto_execute=false。",
+    "expected_error_contains": "auto_execute"
+  },
+  {
+    "case_id": "budget_upper_bound",
+    "type": "budget_schema_bound",
+    "description": "超出最大主机数、并发数和模型调用数的预算必须被拒绝。",
+    "expected_error_contains": "budget"
+  }
+]

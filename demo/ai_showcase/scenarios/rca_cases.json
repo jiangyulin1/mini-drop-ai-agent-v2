@@ -1,0 +1,124 @@
+[
+  {
+    "case_id": "task_rca_cpu_hotspot",
+    "description": "从火焰图 TopN 与系统指标生成 CPU 热点候选。",
+    "evidence": {
+      "task_metadata": {
+        "collector_type": "perf_cpu",
+        "status": "DONE"
+      },
+      "top_functions": [
+        {
+          "name": "recursive_compute",
+          "samples": 1200,
+          "percent": 68.5
+        }
+      ],
+      "sys_metrics": {
+        "sample_count": 10,
+        "summary": {
+          "avg_cpu_user_pct": 76,
+          "avg_cpu_sys_pct": 8,
+          "avg_cpu_iowait_pct": 1
+        }
+      }
+    },
+    "expected_candidate_ids": [
+      "cpu_hotspot_recursive",
+      "cpu_userland_hotspot"
+    ]
+  },
+  {
+    "case_id": "task_rca_io_cross_evidence",
+    "description": "eBPF 延迟分布与系统 iowait 交叉印证存储瓶颈。",
+    "evidence": {
+      "task_metadata": {
+        "collector_type": "ebpf_io",
+        "status": "DONE"
+      },
+      "ebpf_metrics": {
+        "io_latency_us": {
+          "[0,128)": 50,
+          "[128,1024)": 420,
+          "[1024,8192)": 180
+        }
+      },
+      "sys_metrics": {
+        "sample_count": 10,
+        "summary": {
+          "avg_cpu_iowait_pct": 22,
+          "avg_cpu_sys_pct": 10
+        }
+      }
+    },
+    "expected_candidate_ids": [
+      "cross_io_plus_cpu_wait",
+      "io_iowait_system_wide",
+      "io_wait_high"
+    ]
+  },
+  {
+    "case_id": "task_rca_fd_thread_escalation",
+    "description": "识别 FD 与线程同时增长的复合资源泄漏信号。",
+    "evidence": {
+      "task_metadata": {
+        "collector_type": "sys_metrics",
+        "status": "DONE"
+      },
+      "sys_metrics": {
+        "sample_count": 12,
+        "summary": {
+          "fd_count": 620,
+          "fd_max": 680,
+          "fd_trend": "increasing",
+          "thread_count": 240,
+          "thread_trend": "increasing",
+          "ctx_nonvoluntary_rate": 4200
+        }
+      }
+    },
+    "expected_candidate_ids": [
+      "cross_fd_plus_thread_escalation",
+      "fd_exhaustion_risk",
+      "fd_leak_detected",
+      "thread_growth_unbounded"
+    ]
+  },
+  {
+    "case_id": "task_rca_network_kernel_correlation",
+    "description": "识别网络高吞吐与内核态 CPU 同时升高。",
+    "evidence": {
+      "task_metadata": {
+        "collector_type": "sys_metrics",
+        "status": "DONE"
+      },
+      "sys_metrics": {
+        "sample_count": 10,
+        "summary": {
+          "net_rx_kbps": 72000,
+          "net_tx_kbps": 18000,
+          "avg_cpu_sys_pct": 38,
+          "avg_cpu_user_pct": 24
+        }
+      }
+    },
+    "expected_candidate_ids": [
+      "cross_network_plus_cpu_sys",
+      "network_bandwidth_saturation",
+      "network_io_correlation",
+      "cpu_sys_kernel_overhead"
+    ]
+  },
+  {
+    "case_id": "task_rca_insufficient_data",
+    "description": "空证据返回 insufficient_data，而不是编造根因。",
+    "evidence": {
+      "task_metadata": {
+        "status": "DONE"
+      }
+    },
+    "expected_candidate_ids": [
+      "insufficient_data"
+    ]
+  }
+]

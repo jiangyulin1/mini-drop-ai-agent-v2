@@ -1,0 +1,102 @@
+{
+  "scenario_id": "downstream_network_degradation",
+  "query": "gateway 延迟升高，但自身资源正常；检查一跳下游 payment 的网络质量",
+  "scope": {
+    "target_service": "gateway",
+    "same_host_instance_ids": [],
+    "downstream_service_ids": [
+      "payment"
+    ],
+    "instances": [
+      {
+        "service_id": "gateway",
+        "instance_id": "gateway-1",
+        "host_id": "host-gw",
+        "agent_id": "agent-gw",
+        "pid": 22001
+      },
+      {
+        "service_id": "payment",
+        "instance_id": "payment-1",
+        "host_id": "host-pay",
+        "agent_id": "agent-pay",
+        "pid": 22002
+      }
+    ]
+  },
+  "observations": [
+    {
+      "task_id": "task-gateway-normal",
+      "collector_type": "sys_metrics",
+      "target": {
+        "service_id": "gateway",
+        "instance_id": "gateway-1",
+        "host_id": "host-gw",
+        "agent_id": "agent-gw",
+        "pid": 22001
+      },
+      "facts": {
+        "avg_cpu_user_pct": 18,
+        "avg_cpu_sys_pct": 4,
+        "network_latency_p95_ms": 28
+      },
+      "top_function": {
+        "name": "",
+        "percent": 0
+      },
+      "pressure": {
+        "cpu": false,
+        "io_wait": false,
+        "memory": false,
+        "network": false
+      },
+      "evidence_refs": [
+        "ev-gateway-normal"
+      ]
+    },
+    {
+      "task_id": "task-payment-network",
+      "collector_type": "network_metrics",
+      "target": {
+        "service_id": "payment",
+        "instance_id": "payment-1",
+        "host_id": "host-pay",
+        "agent_id": "agent-pay",
+        "pid": 22002
+      },
+      "facts": {
+        "tcp_retransmit_pct": 6.8,
+        "packet_loss_pct": 3.1,
+        "network_latency_p95_ms": 640
+      },
+      "top_function": {
+        "name": "",
+        "percent": 0
+      },
+      "pressure": {
+        "cpu": false,
+        "io_wait": false,
+        "memory": false,
+        "network": true
+      },
+      "evidence_refs": [
+        "ev-payment-retransmit",
+        "ev-payment-latency"
+      ]
+    }
+  ],
+  "expected": {
+    "classification": "downstream_dependency",
+    "finding_types": [
+      "packet_loss_or_latency",
+      "downstream_dependency"
+    ],
+    "knowledge_refs": [
+      "distributed.downstream_pressure",
+      "linux.network.retransmit"
+    ],
+    "action_collectors": [
+      "sys_metrics"
+    ]
+  }
+}
