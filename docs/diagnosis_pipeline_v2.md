@@ -1,5 +1,7 @@
 # Mini-Drop 证据驱动诊断流水线 v2
 
+> 本文描述当前 v2 实现基线。产品目标是生产级、多租户、多集群服务；本文中的三节点仅是首个实验 `EnvironmentProfile`。目标授权、信息源与安全执行架构见 [`ai_authorization_and_tooling.md`](ai_authorization_and_tooling.md)。
+
 ## 1. 核心不变量
 
 本轮不是继续叠加启发式条件，而是把以下约束固化到数据模型、状态机和 Verifier：
@@ -79,11 +81,11 @@ Action 包含 type、collector、target、parameters、renderer version、render
 - R0：只读检查；
 - R1：低风险、可自动编排采集；
 - R2：只允许 `single_execution` 单次审批；
-- R3：只给人工建议。
+- R3：在当前 v2 实现中只给人工建议；目标架构改用操作类别、影响等级和授权结果三轴模型，只有满足严格门槛的低风险可逆变更才可自动执行。
 
 CLI 的远端 API 命令统一支持 `--api-key-env`，通过环境变量生成 Bearer Header。`collect` 支持 `sys_metrics`；`diagnosis-inspect` 可直接查看会话。前端审批弹窗展示目标、参数、风险和预计成本。
 
-## 5. 评测与三节点实测
+## 5. 评测与当前三节点实验 Profile 实测
 
 离线 Golden Harness 位于 `golden_scenarios/`，覆盖自身 CPU 热点、同宿主噪声、共享 I/O、下游 CPU、内存增长、网络异常和 MySQL 锁等待：
 
@@ -111,10 +113,10 @@ make eval
 
 ## 6. 当前能力边界
 
-已经具备：三节点控制链路、显式流水线、全目标 R1 覆盖、单目标自适应 R2、Task 创建 Outbox、并发幂等、证据时间/目标/质量/域校验、确定性 Analyzer、严格报告、结构化 Action 和可重复评测。
+已经具备：当前三节点实验 Profile 的控制链路、显式流水线、全目标 R1 覆盖、单目标自适应 R2、Task 创建 Outbox、并发幂等、证据时间/目标/质量/域校验、确定性 Analyzer、严格报告、结构化 Action 和可重复评测。
 
 部分具备：拓扑来自请求上下文而非 CMDB/Kubernetes/Service Mesh；SQLite/Moto S3 实验环境不等同于 PostgreSQL/MinIO 生产持久化；网络/MySQL/JVM 有 Analyzer 契约和 Golden 输入，但生产采集 Adapter 尚未全部接入。
 
-尚不能宣称：完整 TaskAttempt/独立 Analyzer 队列、任意外部副作用的分布式 exactly-once、生产对象存储对账、大规模调度与容量隔离、OIDC/RBAC/资源组、经过大规模演练校准的误报漏报率，以及无人监督自动修复。
+尚不能宣称：完整 TaskAttempt/独立 Analyzer 队列、任意外部副作用的分布式 exactly-once、生产对象存储对账、大规模调度与容量隔离、OIDC/RBAC/资源组、经过大规模演练校准的误报漏报率，以及受控的低风险自动修复。
 
-因此当前版本适合三节点演示、项目验收和诊断控制面 MVP；进入生产值班前仍需补齐真实拓扑与 Observability Adapter、TaskAttempt、生产存储与权限体系。
+因此当前版本适合作为三节点环境画像下的演示、项目验收和诊断控制面 MVP，而不是产品规模边界；进入生产值班前仍需补齐真实拓扑与 Observability Adapter、TaskAttempt、生产存储、权限体系、Source/Action Gateway 和多集群隔离验证。

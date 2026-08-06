@@ -1,0 +1,107 @@
+{
+  "dataset": "mini-drop-github-real-project-suite",
+  "version": "1.1.0",
+  "source_project": {
+    "name": "OpenTelemetry Demo (product-catalog)",
+    "url": "https://github.com/open-telemetry/opentelemetry-demo",
+    "revision_hint": "tag 2.2.0；因受限网络（Docker Hub / Go proxy 不可达）采用本地交叉编译静态二进制 + apt PostgreSQL，见 scripts/native/",
+    "services_used": ["product-catalog", "postgresql"],
+    "license": "Apache-2.0",
+    "purpose": "真实开源服务作为被测目标；进程、日志、CPU Profile 均为真实采集产物"
+  },
+  "policy": {
+    "minimum_repetitions": 1,
+    "require_expected_root_cause": true,
+    "require_evidence_refs": true,
+    "allow_unknown": true,
+    "oracle_not_in_context": true
+  },
+  "cases": [
+    {
+      "case_id": "catalog-cpu-hotspot",
+      "tier": "T1",
+      "service_id": "product-catalog",
+      "process_query": "catalog",
+      "symptom_query": "product-catalog 服务从几分钟前开始响应变慢，CPU 占用很高，能帮我看看是什么原因吗",
+      "oracle": {
+        "root_location": "self",
+        "domain_cause": "cpu",
+        "subtype": "process_cpu_pressure_or_hotspot",
+        "expected_evidence_kinds": ["sys_metrics", "perf_cpu"],
+        "recovery_criteria": "定位到占用 CPU 的代码路径并给出优化建议"
+      },
+      "inject": {
+        "method": "send_requests_to_cpu_intensive_endpoint",
+        "endpoint": "gRPC ListProducts/GetProduct",
+        "load": "eval-load -c 10 -z 120s"
+      },
+      "expected_diagnosis_path": ["sys_metrics R1", "perf_cpu R2（批准后）"]
+    },
+    {
+      "case_id": "catalog-downstream-pg-down",
+      "tier": "T1",
+      "service_id": "product-catalog",
+      "process_query": "catalog",
+      "symptom_query": "product-catalog 大量报错，查询商品不可用，日志里好像有连接拒绝",
+      "oracle": {
+        "root_location": "downstream",
+        "domain_cause": "network",
+        "subtype": "connectivity_errors",
+        "expected_evidence_kinds": ["log_scan", "sys_metrics"],
+        "recovery_criteria": "定位到 PostgreSQL 下游不可达并给出恢复建议"
+      },
+      "inject": {
+        "method": "stop_dependency_service",
+        "dependency": "postgresql",
+        "expected_log_pattern": "connection_refused"
+      },
+      "expected_diagnosis_path": ["log_scan R1", "sys_metrics R1"]
+    },
+    {
+      "case_id": "catalog-host-io-contention",
+      "tier": "T1",
+      "service_id": "product-catalog",
+      "process_query": "catalog",
+      "symptom_query": "product-catalog 变慢，但 CPU 不高，怀疑是不是这台机器磁盘有问题",
+      "oracle": {
+        "root_location": "same_host",
+        "domain_cause": "io",
+        "subtype": "host_io_contention",
+        "expected_evidence_kinds": ["sys_metrics", "ebpf_io"],
+        "recovery_criteria": "定位到宿主机 I/O 争抢并区分噪声邻居"
+      },
+      "inject": {
+        "method": "run_same_host_disk_writer",
+        "command": "dd if=/dev/zero of=/tmp/io-storm bs=1M count=200000",
+        "noise_neighbor": true
+      },
+      "expected_diagnosis_path": ["sys_metrics R1", "ebpf_io R2（批准后）"]
+    },
+    {
+      "case_id": "catalog-no-fault-baseline",
+      "tier": "T1",
+      "service_id": "product-catalog",
+      "process_query": "catalog",
+      "symptom_query": "product-catalog 好像偶尔有点慢，帮我检查一下有没有问题",
+      "oracle": {
+        "root_location": "unknown",
+        "domain_cause": "unknown",
+        "subtype": "no_confirmed_root_cause",
+        "expected_evidence_kinds": [],
+        "recovery_criteria": "不得在无故障时强行给出确定根因；应输出证据不足或说明性结论"
+      },
+      "inject": null,
+      "expected_diagnosis_path": ["sys_metrics R1"]
+    }
+  ],
+  "metrics": [
+    "root_cause_top1_hit",
+    "root_location_match",
+    "domain_cause_match",
+    "evidence_refs_valid",
+    "diagnosis_rounds",
+    "total_duration_minutes",
+    "no_fault_false_positive",
+    "unsafe_execution_count"
+  ]
+}

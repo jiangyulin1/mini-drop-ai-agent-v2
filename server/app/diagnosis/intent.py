@@ -6,6 +6,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
+from server.app.ai_context import ContextBudget, optimize_evidence_context
 from server.app.ai_provider import chat_completions, get_ai_settings, is_feature_enabled
 from server.app.diagnosis.schemas import (
     CreateDiagnosisRequest,
@@ -13,6 +14,7 @@ from server.app.diagnosis.schemas import (
     NormalizedIntent,
     TimeRange,
 )
+from server.app.prometheus_metrics import record_context_optimization
 
 
 SYSTEM_PROMPT = """你是性能诊断意图解析器，只提取结构化字段，不判断根因，不生成命令。
@@ -36,7 +38,26 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
     if settings.provider.lower() == "openai":
         function["strict"] = True
 
-    context = request.context.model_dump(mode="json")
+    raw_context = request.context.model_dump(mode="json")
+    # The model only needs a bounded projection for intent parsing.  The
+    # orchestrator continues to use the complete validated request object.
+    optimized_context = optimize_evidence_context(
+        raw_context,
+        budget=ContextBudget(
+            max_chars=12_000,
+            max_items_per_list=24,
+            max_string_chars=500,
+            max_depth=6,
+        ),
+        focus_terms=re.findall(r"[A-Za-z0-9_.-]{3,}", request.query),
+    )
+    record_context_optimization(
+        "diagnosis_intent",
+        original_chars=optimized_context.stats.original_chars,
+        optimized_chars=optimized_context.stats.optimized_chars,
+        redacted_fields=optimized_context.stats.redacted_fields,
+    )
+    context = optimized_context.payload
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -91,25 +112,38 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
         intent.evidence_time_policy = request.evidence_time_policy
         if intent.diagnosis_mode == DiagnosisMode.REPRODUCTION:
             intent.evidence_time_policy.allow_reproduction_evidence = True
+        # 校正：明确的关键词信号优先于模型推断（模型可能把"大量报错/连接拒绝"
+        # 误分类为 cpu/latency，导致日志探针不被计划）。
+        hint = _fallback_symptom(request.query)
+        if hint != "unknown_performance_issue":
+            intent.symptom = hint
         return intent
     except Exception:
         return fallback
 
 
-def _fallback_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
-    text = request.query.lower()
+def _fallback_symptom(query: str) -> str:
+    """关键词规则推断 symptom 类别（确定性，供 fallback 与 AI 结果校正共用）。"""
+    text = query.lower()
     if any(key in text for key in ("噪声邻居", "同机", "抢占", "争抢", "noisy neighbor")):
-        symptom = "noisy_neighbor"
-    elif any(key in text for key in ("磁盘", "io", "i/o", "读写", "存储")):
-        symptom = "io_degradation"
-    elif any(key in text for key in ("内存", "oom", "rss", "泄漏", "swap")):
-        symptom = "memory_pressure"
-    elif any(key in text for key in ("cpu", "负载", "热点", "飙高")):
-        symptom = "cpu_saturation"
-    elif any(key in text for key in ("慢", "延迟", "超时", "latency", "timeout")):
-        symptom = "latency_increase"
-    else:
-        symptom = "unknown_performance_issue"
+        return "noisy_neighbor"
+    if any(key in text for key in ("连接拒绝", "拒绝", "refused", "连接失败", "连不上", "econnrefused")):
+        return "connection_failure"
+    if any(key in text for key in ("报错", "错误", "error", "失败", "fail", "不可用", "异常")):
+        return "error_increase"
+    if any(key in text for key in ("磁盘", "io", "i/o", "读写", "存储")):
+        return "io_degradation"
+    if any(key in text for key in ("内存", "oom", "rss", "泄漏", "swap")):
+        return "memory_pressure"
+    if any(key in text for key in ("cpu", "负载", "热点", "飙高")):
+        return "cpu_saturation"
+    if any(key in text for key in ("慢", "延迟", "超时", "latency", "timeout")):
+        return "latency_increase"
+    return "unknown_performance_issue"
+
+
+def _fallback_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
+    symptom = _fallback_symptom(request.query)
 
     target = request.context.service_id or _extract_service(request.query)
     ambiguities = []

@@ -260,6 +260,12 @@ def _required_evidence_domain(finding: DomainFinding) -> str | None:
     declared = finding.facts.get("scope")
     if declared in {"host", "process", "container", "dependency"}:
         return declared
+    # 优先按 Analyzer 注册契约声明的作用域判定所需证据域，
+    # 避免把进程级日志证据误判为 host 级（connectivity_errors 等）。
+    contract_scope = ANALYZER_CONTRACTS.get(finding.analyzer_id, {}).get("scope", "")
+    first_scope = contract_scope.split("|")[0].strip()
+    if first_scope in {"host", "process", "container", "dependency"}:
+        return first_scope
     if finding.category in {"memory", "runtime"}:
         return "process"
     if finding.category == "database":

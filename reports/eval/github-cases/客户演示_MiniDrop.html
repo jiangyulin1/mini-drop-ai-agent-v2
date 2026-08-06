@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>Mini-Drop · 客户演示：AI 性能诊断与恢复</title>
+<style>
+  :root { --ink:#111827; --muted:#6b7280; --line:#e5e7eb; --bg:#f6f7f9; --accent:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:"Segoe UI","Microsoft YaHei",sans-serif; }
+  .hero { background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%); color:#fff; padding:52px 40px 44px; }
+  .hero h1 { margin:0 0 10px; font-size:30px; }
+  .hero .sub { opacity:.85; font-size:14px; line-height:1.8; }
+  .hero .tags { margin-top:16px; display:flex; gap:8px; flex-wrap:wrap; }
+  .hero .tag { background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); padding:4px 12px; border-radius:16px; font-size:12px; }
+  .wrap { max-width:1160px; margin:0 auto; padding:8px 20px 60px; }
+  h2 { font-size:19px; margin:34px 0 4px; }
+  .h2sub { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
+  /* 业务链 */
+  .chain { display:grid; grid-template-columns:repeat(6,1fr); gap:0; background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .step { padding:16px 12px; text-align:center; border-right:1px dashed #d4d9e2; position:relative; }
+  .step:last-child { border-right:none; }
+  .step .num { width:26px; height:26px; margin:0 auto 8px; border-radius:50%; background:var(--accent); color:#fff; font-size:13px; line-height:26px; font-weight:700; }
+  .step .t { font-size:13px; font-weight:600; }
+  .step .d { font-size:11px; color:var(--muted); margin-top:4px; line-height:1.5; }
+  /* 场景卡 */
+  .scenario { background:#fff; border:1px solid var(--line); border-left:5px solid; border-radius:14px; padding:18px 20px; margin:14px 0; }
+  .sc-head { display:flex; align-items:center; gap:12px; }
+  .sc-icon { font-size:24px; }
+  .sc-name { font-size:16px; font-weight:700; }
+  .sc-id { font-size:11px; color:var(--muted); font-family:Consolas,monospace; }
+  .pill { margin-left:auto; padding:4px 12px; border-radius:14px; font-size:12px; font-weight:600; }
+  .pill.pass { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; }
+  .pill.fail { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; }
+  .sc-row { margin-top:12px; }
+  .lbl { font-size:11px; color:var(--muted); display:block; margin-bottom:4px; }
+  .quote { background:#f8fafc; border-left:3px solid var(--accent); padding:8px 12px; border-radius:6px; font-size:13px; color:#334155; }
+  .fault { font-size:13px; color:#475569; }
+  .probes { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:6px; padding:2px 10px; font-size:12px; }
+  .concl { margin-top:14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; }
+  .concl-head { font-weight:700; font-size:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .badge2 { background:var(--accent); color:#fff; font-size:11px; padding:2px 10px; border-radius:10px; font-weight:600; }
+  .badge2.dim { background:#e2e8f0; color:#475569; }
+  .concl-sum { margin-top:8px; font-size:13px; color:#334155; line-height:1.7; }
+  .findings { margin:8px 0 0; padding-left:18px; font-size:12px; color:#475569; line-height:1.7; }
+  .concl-meta { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; font-size:12px; color:#64748b; }
+  .next { margin-top:10px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 12px; font-size:12px; color:#92400e; }
+  .recs { margin-top:10px; font-size:12px; color:#475569; }
+  .recs ul { margin:4px 0 0; padding-left:18px; }
+  /* 能力 */
+  .caps { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
+  .cap { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .cap h3 { margin:0 0 6px; font-size:14px; }
+  .cap p { margin:0; font-size:12px; color:var(--muted); line-height:1.6; }
+  table { border-collapse:collapse; width:100%; font-size:13px; background:#fff; border-radius:10px; overflow:hidden; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); }
+  th { background:#f8fafc; }
+  .num-big { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .num { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px; text-align:center; }
+  .num .v { font-size:28px; font-weight:800; color:var(--accent); }
+  .num .k { font-size:12px; color:var(--muted); margin-top:4px; }
+  .foot { color:var(--muted); font-size:12px; margin-top:30px; text-align:center; line-height:1.8; }
+</style></head><body>
+
+<div class="hero">
+  <h1>🛠 Mini-Drop — AI 性能诊断与恢复系统</h1>
+  <div class="sub">
+    面向基础运维人员的性能诊断产品：用户只需用一句话描述问题，系统自动完成「进程发现 → 证据采集 → AI 归因 → 多轮引导 → 恢复验证」全链路。
+    基于腾讯 Drop 能力复刻，叠加确定性 AI 诊断与受控修复闭环。所有结论均可在三节点真实集群上验证。
+  </div>
+  <div class="tags">
+    <span class="tag">10 种采集能力</span><span class="tag">12 步诊断流水线</span>
+    <span class="tag">R1/R2 风险分级</span><span class="tag">人工批准 + 可回滚修复</span>
+    <span class="tag">GitHub 真实项目评测 4/4 通过</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <h2>一、业务链：从「一句话」到「恢复验证」</h2>
+  <div class="h2sub">基础用户无需知道 PID、探针、证据等内部概念——系统自动完成全部环节</div>
+  <div class="chain">
+    <div class="step"><div class="num">1</div><div class="t">描述问题</div><div class="d">用户用自然语言描述症状，如「服务变慢，CPU 很高」</div></div>
+    <div class="step"><div class="num">2</div><div class="t">自动发现进程</div><div class="d">搜索服务名自动定位目标 PID，无需手工填写</div></div>
+    <div class="step"><div class="num">3</div><div class="t">自动采集证据</div><div class="d">系统指标/日志/CPU Profile 按风险分级自动或经批准执行</div></div>
+    <div class="step"><div class="num">4</div><div class="t">AI 归因</div><div class="d">确定性分析器区分自身/同宿主/下游，给出根因位置与领域</div></div>
+    <div class="step"><div class="num">5</div><div class="t">多轮引导</div><div class="d">证据不足时自动建议「下一步最值得做什么」</div></div>
+    <div class="step"><div class="num">6</div><div class="t">恢复验证</div><div class="d">人工执行建议后回填，触发同参数重采，判定是否真正恢复</div></div>
+  </div>
+
+  <h2>二、真实评测证据（GitHub 开源项目 × 三节点集群）</h2>
+  <div class="h2sub">被测服务为 OpenTelemetry Demo 的 product-catalog（Go，真实开源生产形态）+ PostgreSQL 下游。故障、采集、证据全部真实。</div>
+  <div class="num-big">
+    <div class="num"><div class="v">4/4</div><div class="k">场景通过</div></div>
+    <div class="num"><div class="v">100%</div><div class="k">根因位置匹配</div></div>
+    <div class="num"><div class="v">100%</div><div class="k">领域原因匹配</div></div>
+    <div class="num"><div class="v">0</div><div class="k">无故障误报</div></div>
+  </div>
+  
+    <div class="scenario" style="border-left-color:#d97706">
+      <div class="sc-head">
+        <span class="sc-icon">🔥</span>
+        <div><div class="sc-name">CPU 热点</div><div class="sc-id">catalog-cpu-hotspot</div></div>
+        <span class="pill pass">✅ 通过</span>
+      </div>
+      <div class="sc-row"><span class="lbl">用户描述（基础用户口吻）</span>
+        <div class="quote">“product-catalog 从几分钟前开始响应变慢，CPU 占用很高，能帮我看看是什么原因吗”</div></div>
+      <div class="sc-row"><span class="lbl">故障注入（真实故障）</span>
+        <div class="fault">eval-load 高并发压测 gRPC 端点（模拟业务突增）</div></div>
+      <div class="sc-row"><span class="lbl">执行探针</span><div class="probes"><span class="chip">系统指标</span><span class="chip">CPU Profile</span></div></div>
+      <div class="concl">
+        <div class="concl-head">AI 诊断结论
+          <span class="badge2">自身代码热点 / 进程资源压力</span>
+          <span class="badge2 dim">位置：目标进程自身</span>
+          <span class="badge2 dim">领域：CPU</span>
+        </div>
+        <div class="concl-sum">证据主要集中在目标实例自身，优先检查代码热点、线程竞争或进程资源压力。</div>
+        <ul class="findings"><li><b>process_cpu_pressure</b>（warning）— 目标进程 CPU tick 增量显示其持续占用核心，但缺少 Profile，不能进一步断言具体代码热点。</li><li><b>kernel_overhead</b>（warning）— 系统态 CPU 占比显著，需结合系统调用、网络或内核探针继续区分。</li><li><b>userland_hotspot</b>（warning）— 用户态 CPU 或单一函数热点明显，优先检查目标进程代码路径。</li></ul>
+        <div class="concl-meta">
+          <span>证据 ✓ 4 条</span>
+          <span>位置匹配 ✓ self</span>
+          <span>领域匹配 ✓ cpu</span>
+          <span>无误报 ✓</span>
+        </div>
+        <div class="next"><span class="badge2">下一步</span>验证恢复：执行建议后验证恢复 — 按建议执行处理后，系统会用相同参数重新采集并对比异常指标，判断是否真正恢复、是否有新退化。</div>
+        <div class="recs"><b>建议动作：</b><ul><li>人工确认后的临时缓解</li><li>优化热点函数或线程竞争</li><li>使用同域证据验证优化效果</li></ul></div>
+      </div>
+    </div>
+    <div class="scenario" style="border-left-color:#dc2626">
+      <div class="sc-head">
+        <span class="sc-icon">🔌</span>
+        <div><div class="sc-name">下游故障</div><div class="sc-id">catalog-downstream-pg-down</div></div>
+        <span class="pill pass">✅ 通过</span>
+      </div>
+      <div class="sc-row"><span class="lbl">用户描述（基础用户口吻）</span>
+        <div class="quote">“product-catalog 大量报错，查询商品不可用，日志里好像有连接拒绝”</div></div>
+      <div class="sc-row"><span class="lbl">故障注入（真实故障）</span>
+        <div class="fault">停止 PostgreSQL（下游依赖不可达）</div></div>
+      <div class="sc-row"><span class="lbl">执行探针</span><div class="probes"><span class="chip">日志扫描</span><span class="chip">系统指标</span></div></div>
+      <div class="concl">
+        <div class="concl-head">AI 诊断结论
+          <span class="badge2">下游依赖故障</span>
+          <span class="badge2 dim">位置：下游服务 / 网络链路</span>
+          <span class="badge2 dim">领域：NETWORK</span>
+        </div>
+        <div class="concl-sum">目标进程日志出现 500 次连接类错误（refused/reset/denied），优先怀疑下游依赖或网络策略；CPU 压力更可能是错误风暴的后果而非根因。</div>
+        <ul class="findings"><li><b>error_pattern</b>（warning）— 进程日志尾部出现 50 条错误行，主要模式：connection_refused×500；failed×500。 示例：time=2026-08-06T16:32:29.239+08:00 level=ERROR msg=&quot;GetProduct failed id=6E92ZMYYFZ: faile…</li><li><b>connectivity_errors</b>（warning）— 日志中出现 500 次连接类错误（refused/reset/denied），优先怀疑下游依赖或网络策略。</li><li><b>process_cpu_pressure</b>（warning）— 目标进程 CPU tick 增量显示其持续占用核心，但缺少 Profile，不能进一步断言具体代码热点。</li></ul>
+        <div class="concl-meta">
+          <span>证据 ✓ 4 条</span>
+          <span>位置匹配 ✓ downstream</span>
+          <span>领域匹配 ✓ network</span>
+          <span>无误报 ✓</span>
+        </div>
+        <div class="next"><span class="badge2">下一步</span>建议探针：扫描进程日志 — 查找错误/连接/超时模式，判断是否与报错类原因相关（低风险，自动执行）。</div>
+        <div class="recs"><b>建议动作：</b><ul><li>人工确认后的临时缓解</li><li>降低网络与下游调用开销</li><li>使用同域证据验证优化效果</li></ul></div>
+      </div>
+    </div>
+    <div class="scenario" style="border-left-color:#7c3aed">
+      <div class="sc-head">
+        <span class="sc-icon">💽</span>
+        <div><div class="sc-name">磁盘 IO 争抢</div><div class="sc-id">catalog-host-io-contention</div></div>
+        <span class="pill pass">✅ 通过</span>
+      </div>
+      <div class="sc-row"><span class="lbl">用户描述（基础用户口吻）</span>
+        <div class="quote">“product-catalog 变慢，但 CPU 不高，怀疑是不是这台机器磁盘有问题”</div></div>
+      <div class="sc-row"><span class="lbl">故障注入（真实故障）</span>
+        <div class="fault">同机循环磁盘写入风暴（模拟噪声邻居）</div></div>
+      <div class="sc-row"><span class="lbl">执行探针</span><div class="probes"><span class="chip">系统指标</span><span class="chip">块设备 IO 延迟</span></div></div>
+      <div class="concl">
+        <div class="concl-head">AI 诊断结论
+          <span class="badge2">宿主机资源争抢</span>
+          <span class="badge2 dim">位置：同宿主 / 共享块设备</span>
+          <span class="badge2 dim">领域：IO</span>
+        </div>
+        <div class="concl-sum">宿主内核 CPU（system）占比显著偏高且目标进程 CPU 未饱和，优先怀疑宿主机 I/O 争抢或内核开销（如磁盘写入风暴）。</div>
+        <ul class="findings"><li><b>process_cpu_pressure</b>（warning）— 目标进程 CPU tick 增量显示其持续占用核心，但缺少 Profile，不能进一步断言具体代码热点。</li><li><b>kernel_overhead</b>（warning）— 系统态 CPU 占比显著，需结合系统调用、网络或内核探针继续区分。</li><li><b>host_resource_contention</b>（warning）— 宿主内核 CPU（system）占比显著偏高且目标进程 CPU 未饱和，优先怀疑宿主机 I/O 争抢或内核开销（如磁盘写入风暴）。</li></ul>
+        <div class="concl-meta">
+          <span>证据 ✓ 4 条</span>
+          <span>位置匹配 ✓ same host</span>
+          <span>领域匹配 ✓ io</span>
+          <span>无误报 ✓</span>
+        </div>
+        <div class="next"><span class="badge2">下一步</span>验证恢复：执行建议后验证恢复 — 按建议执行处理后，系统会用相同参数重新采集并对比异常指标，判断是否真正恢复、是否有新退化。</div>
+        <div class="recs"><b>建议动作：</b><ul><li>人工确认后的临时缓解</li><li>降低共享 I/O 争抢</li><li>使用同域证据验证优化效果</li></ul></div>
+      </div>
+    </div>
+    <div class="scenario" style="border-left-color:#16a34a">
+      <div class="sc-head">
+        <span class="sc-icon">✅</span>
+        <div><div class="sc-name">无故障对照</div><div class="sc-id">catalog-no-fault-baseline</div></div>
+        <span class="pill pass">✅ 通过</span>
+      </div>
+      <div class="sc-row"><span class="lbl">用户描述（基础用户口吻）</span>
+        <div class="quote">“product-catalog 好像偶尔有点慢，帮我检查一下有没有问题”</div></div>
+      <div class="sc-row"><span class="lbl">故障注入（真实故障）</span>
+        <div class="fault">不注入任何故障（验证不误报）</div></div>
+      <div class="sc-row"><span class="lbl">执行探针</span><div class="probes"><span class="chip">系统指标</span><span class="chip">CPU Profile</span></div></div>
+      <div class="concl">
+        <div class="concl-head">AI 诊断结论
+          <span class="badge2">证据不足（无确定根因）</span>
+          <span class="badge2 dim">位置：不误报</span>
+          <span class="badge2 dim">领域：UNKNOWN</span>
+        </div>
+        <div class="concl-sum">已有证据不足以区分自身代码、同宿主噪声邻居或下游依赖问题。</div>
+        <ul class="findings"><li><b>insufficient_evidence</b>（info）— 已有证据不足以区分自身代码、同宿主噪声邻居或下游依赖问题。</li></ul>
+        <div class="concl-meta">
+          <span>证据 ✓ 4 条</span>
+          <span>位置匹配 ✓ insufficient evidence</span>
+          <span>领域匹配 ✓ unknown</span>
+          <span>无误报 ✓</span>
+        </div>
+        <div class="next"><span class="badge2">下一步</span>建议探针：扫描进程日志 — 查找错误/连接/超时模式，判断是否与报错类原因相关（低风险，自动执行）。</div>
+        <div class="recs"><b>建议动作：</b><ul><li>人工确认后的临时缓解</li><li>补充区分性证据</li><li>使用同域证据验证优化效果</li></ul></div>
+      </div>
+    </div>
+
+  <h2>三、设计能力</h2>
+  <div class="caps">
+    <div class="cap"><h3>🔍 进程自动发现</h3><p>扫描 /proc 生成候选清单，按服务名自动匹配目标进程，消除「填 PID」门槛。</p></div>
+    <div class="cap"><h3>📜 日志探针</h3><p>通过 /proc/PID/fd 自动发现进程日志文件，提取错误/连接/超时模式，支撑报错类根因。</p></div>
+    <div class="cap"><h3>🔒 安全边界</h3><p>LLM 不直接执行命令；采集按 R1（自动）/R2（需人工确认）分级；修复动作 dry-run → 人工批准 → 可回滚。</p></div>
+    <div class="cap"><h3>🧭 多轮引导</h3><p>每条结论附带「下一步最值得做什么」：证据不足建议区辨性探针，已有根因建议验证恢复。</p></div>
+    <div class="cap"><h3>🔄 恢复验证闭环</h3><p>No-Regression 判定：同参数重采对比基线指标（CPU/IO/内存），判定 recovered / degraded / 未恢复。</p></div>
+    <div class="cap"><h3>🧪 评测可信</h3><p>oracle 只存在于评测配置、不进模型上下文；评分函数为确定性纯函数；无故障场景强制不得输出确定根因。</p></div>
+  </div>
+
+  <h2>四、当前能力边界</h2>
+  <table>
+    <tr><th>能做到</th><th>暂不能（规划中）</th></tr>
+    <tr><td>单服务 CPU / IO / 内存 / 下游网络根因定位</td><td>多跳调用链 Trace 延迟分段</td></tr>
+    <tr><td>日志报错模式定位（连接拒绝/超时/异常）</td><td>完整容器编排（K8s/Compose）发现</td></tr>
+    <tr><td>多轮引导 + 恢复验证闭环</td><td>业务侧自动修复（摘流/重启，需接负载均衡）</td></tr>
+    <tr><td>受控修复动作（dry-run → 批准 → 回滚）</td><td>跨物理机故障隔离（当前为单物理机虚拟集群）</td></tr>
+  </table>
+
+  <div class="foot">
+    演示环境：Hyper-V 三节点（control 192.168.10.10 / worker1 / worker2）· OpenTelemetry Demo 2.2.0 · PostgreSQL 15 · Go 1.25 交叉编译
+    <br>Mini-Drop 后端 523 项测试通过 · 前端 32 项测试通过 · 评测报告：reports/eval/github-cases/
+  </div>
+</div></body></html>

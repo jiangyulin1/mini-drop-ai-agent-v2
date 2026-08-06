@@ -153,6 +153,28 @@ TASK_KINDS: tuple[dict[str, Any], ...] = (
         default_sample_rate=11,
         permission_requirements=["读取 /proc 系统与进程指标"],
     ),
+    _kind(
+        "process_scan",
+        "进程扫描",
+        "全机进程候选清单",
+        "列出 Worker 上的进程（PID、命令行、CPU、内存），用于选择诊断目标；不依赖外部工具。",
+        color="lime",
+        flamegraph=False,
+        default_duration=2,
+        default_sample_rate=1,
+        permission_requirements=["读取 /proc 进程列表"],
+    ),
+    _kind(
+        "log_scan",
+        "日志扫描",
+        "目标进程日志尾部与错误行",
+        "通过 /proc/PID/fd 发现进程日志文件，读取尾部并提取错误/警告模式，适合定位报错类根因。",
+        color="volcano",
+        flamegraph=False,
+        default_duration=2,
+        default_sample_rate=1,
+        permission_requirements=["读取目标进程日志文件"],
+    ),
 )
 
 

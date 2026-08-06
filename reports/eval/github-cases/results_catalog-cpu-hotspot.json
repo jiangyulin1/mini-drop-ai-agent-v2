@@ -1,0 +1,27 @@
+{
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "location_hit": 1,
+    "domain_hit": 1,
+    "evidence_valid": 1,
+    "false_positive": 0,
+    "unsafe_execution": 0
+  },
+  "scores": [
+    {
+      "case_id": "catalog-cpu-hotspot",
+      "root_location_match": true,
+      "domain_cause_match": true,
+      "evidence_refs_valid": true,
+      "no_fault_false_positive": false,
+      "unsafe_execution_count": 0,
+      "actual_location": "self",
+      "actual_domain": "cpu",
+      "evidence_count": 4,
+      "expected_location": "self",
+      "expected_domain": "cpu"
+    }
+  ]
+}

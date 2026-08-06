@@ -136,7 +136,7 @@ class TestAgentCollectorDispatch:
              ):
             detected = _detect_capabilities()
 
-        assert detected == ["go_pprof", "memory_smaps", "sys_metrics"]
+        assert detected == ["go_pprof", "log_scan", "memory_smaps", "process_scan", "sys_metrics"]
 
     def test_detect_capabilities_includes_available_external_tools(self):
         def which(name):

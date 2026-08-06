@@ -1,0 +1,1087 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mini-Drop · 持续诊断工作台概念原型</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --surface: #ffffff;
+      --surface-soft: #f8f9fb;
+      --surface-warm: #fbfaf7;
+      --line: #e4e7ec;
+      --line-strong: #d5d9e1;
+      --text: #20242c;
+      --muted: #667085;
+      --muted-2: #98a2b3;
+      --brand: #2563eb;
+      --brand-hover: #1d4ed8;
+      --brand-soft: #eff6ff;
+      --teal: #087e6a;
+      --teal-soft: #eaf8f5;
+      --amber: #a15c00;
+      --amber-soft: #fff7e8;
+      --red: #b42318;
+      --red-soft: #fff1f0;
+      --shadow: 0 8px 30px rgba(16, 24, 40, .07);
+      --radius: 12px;
+      --sidebar: 278px;
+      --detail: 330px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      overflow: hidden;
+    }
+    button, input, textarea, select { font: inherit; }
+    button { color: inherit; }
+    svg { display: block; }
+    .hidden { display: none !important; }
+
+    .app { height: 100%; display: flex; flex-direction: column; }
+    .topbar {
+      height: 58px;
+      flex: 0 0 58px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 18px;
+      background: rgba(255,255,255,.96);
+      border-bottom: 1px solid var(--line);
+      position: relative;
+      z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 242px; font-weight: 700; letter-spacing: -.2px; }
+    .brand-mark {
+      width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+      color: white; background: linear-gradient(145deg, #1d4ed8, #4f7df3);
+      box-shadow: 0 5px 14px rgba(37,99,235,.22);
+    }
+    .mode-switch {
+      height: 38px; padding: 3px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--surface-soft); display: flex; gap: 2px;
+    }
+    .mode-btn {
+      border: 0; background: transparent; border-radius: 7px; padding: 0 15px;
+      display: flex; align-items: center; gap: 7px; cursor: pointer; color: var(--muted); font-weight: 600;
+    }
+    .mode-btn.active { background: white; color: var(--text); box-shadow: 0 1px 4px rgba(16,24,40,.12); }
+    .topbar-spacer { flex: 1; }
+    .topbar-note { color: var(--muted); font-size: 12px; }
+    .cluster-button { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: white; cursor: pointer; display: flex; align-items: center; gap: 7px; font-size: 12px; }
+    .cluster-button:hover { background: var(--surface-soft); }
+    .icon-btn, .quiet-btn, .primary-btn, .soft-btn, .danger-btn {
+      border-radius: 8px; cursor: pointer; transition: .15s ease; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    }
+    .icon-btn { width: 34px; height: 34px; border: 1px solid var(--line); background: white; }
+    .icon-btn:hover, .quiet-btn:hover { background: var(--surface-soft); border-color: var(--line-strong); }
+    .quiet-btn { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); background: white; }
+    .primary-btn { min-height: 36px; padding: 0 14px; border: 1px solid var(--brand); color: white; background: var(--brand); font-weight: 600; }
+    .primary-btn:hover { background: var(--brand-hover); }
+    .soft-btn { min-height: 34px; padding: 0 12px; border: 1px solid #bfd3ff; color: #174ea6; background: var(--brand-soft); font-weight: 600; }
+    .danger-btn { min-height: 34px; padding: 0 12px; border: 1px solid #f0b8b3; color: var(--red); background: var(--red-soft); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+
+    .workspace { flex: 1; min-height: 0; display: flex; }
+    .case-sidebar {
+      width: var(--sidebar); flex: 0 0 var(--sidebar); background: #f8f9fb; border-right: 1px solid var(--line);
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .sidebar-head { padding: 14px 14px 10px; }
+    .new-case {
+      width: 100%; height: 38px; border: 1px solid var(--line-strong); background: white; border-radius: 9px;
+      display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; font-weight: 600;
+    }
+    .new-case:hover { border-color: #aeb4bf; box-shadow: 0 2px 8px rgba(16,24,40,.05); }
+    .search-box { position: relative; margin-top: 10px; }
+    .search-box input {
+      width: 100%; height: 34px; border: 0; background: #eef0f3; border-radius: 8px; padding: 0 10px 0 32px; outline: 0;
+    }
+    .search-box input:focus { box-shadow: 0 0 0 2px rgba(37,99,235,.13); background: white; }
+    .search-icon { position: absolute; left: 10px; top: 9px; color: var(--muted-2); }
+    .sidebar-label { padding: 12px 16px 6px; font-size: 11px; color: var(--muted-2); font-weight: 700; letter-spacing: .08em; }
+    .case-list { padding: 0 8px 16px; overflow: auto; }
+    .case-item { padding: 11px 10px; border-radius: 9px; cursor: pointer; margin-bottom: 3px; border: 1px solid transparent; }
+    .case-item:hover { background: #f0f2f5; }
+    .case-item.active { background: white; border-color: var(--line); box-shadow: 0 2px 7px rgba(16,24,40,.05); }
+    .case-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .case-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .case-time { color: var(--muted-2); font-size: 11px; }
+    .case-meta { margin: 5px 0 0 18px; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); flex: 0 0 auto; }
+    .status-dot.amber { background: #e79a18; box-shadow: 0 0 0 3px #fff0cf; }
+    .status-dot.blue { background: #3b82f6; box-shadow: 0 0 0 3px #e6f0ff; }
+    .status-dot.green { background: #12a47b; }
+    .status-dot.gray { background: #aeb4bf; }
+    .sidebar-foot { margin-top: auto; border-top: 1px solid var(--line); padding: 10px 12px; color: var(--muted); font-size: 12px; }
+    .agent-health { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; padding: 4px 2px; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+    .agent-health span:nth-child(2) { flex: 1; }
+
+    .main-stage { flex: 1; min-width: 0; min-height: 0; display: flex; position: relative; background: white; }
+    .view { flex: 1; min-width: 0; min-height: 0; }
+
+    /* AI conversation */
+    .ai-view { display: flex; min-height: 0; }
+    .conversation { flex: 1; min-width: 0; display: flex; flex-direction: column; background: white; }
+    .conversation-head {
+      min-height: 70px; padding: 12px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 14px;
+    }
+    .conversation-title { min-width: 0; flex: 1; }
+    .conversation-title h1 { margin: 0; font-size: 16px; line-height: 1.35; }
+    .conversation-sub { margin-top: 5px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .pill.amber { color: var(--amber); background: var(--amber-soft); }
+    .pill.green { color: var(--teal); background: var(--teal-soft); }
+    .pill.blue { color: #175cd3; background: var(--brand-soft); }
+    .head-actions { display: flex; gap: 8px; }
+    .message-scroll { flex: 1; overflow: auto; background: linear-gradient(180deg, #fff 0%, #fff 72%, #fcfcfd 100%); }
+    .message-column { max-width: 840px; margin: 0 auto; padding: 24px 28px 36px; }
+    .event-divider { display: flex; align-items: center; gap: 10px; color: var(--muted-2); font-size: 11px; margin: 3px 0 22px; }
+    .event-divider::before, .event-divider::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+    .message { display: flex; gap: 11px; margin-bottom: 24px; }
+    .avatar { width: 30px; height: 30px; border-radius: 9px; flex: 0 0 30px; display: grid; place-items: center; font-size: 12px; font-weight: 800; }
+    .avatar.ai { color: white; background: linear-gradient(145deg,#2864dd,#5c82ed); }
+    .avatar.user { color: #344054; background: #eef0f3; }
+    .message-body { flex: 1; min-width: 0; }
+    .message-author { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-weight: 650; }
+    .message-author time { color: var(--muted-2); font-size: 11px; font-weight: 400; }
+    .message-text { color: #344054; line-height: 1.72; }
+    .message-text p { margin: 0 0 8px; }
+    .message-text p:last-child { margin-bottom: 0; }
+    .inline-link { border: 0; padding: 0; color: var(--brand); background: transparent; cursor: pointer; }
+    .scope-card, .result-card, .progress-card, .manual-hint {
+      margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: white; overflow: hidden;
+    }
+    .scope-card { border-left: 3px solid #e79a18; }
+    .card-pad { padding: 15px 16px; }
+    .card-kicker { color: var(--amber); font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+    .card-title { font-weight: 700; font-size: 15px; }
+    .card-desc { color: var(--muted); margin-top: 5px; }
+    .choice-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 14px; }
+    .choice {
+      border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; cursor: pointer; display: flex; align-items: center; gap: 9px;
+    }
+    .choice:hover { border-color: #9ab8f6; background: #fafcff; }
+    .choice.selected { border-color: #6e9af5; background: var(--brand-soft); }
+    .choice-check { width: 17px; height: 17px; border: 1px solid #b8bec9; border-radius: 5px; display: grid; place-items: center; color: white; font-size: 11px; }
+    .choice.selected .choice-check { border-color: var(--brand); background: var(--brand); }
+    .choice-main { flex: 1; min-width: 0; }
+    .choice-name { font-weight: 650; }
+    .choice-meta { color: var(--muted); font-size: 11px; margin-top: 1px; }
+    .choice-state { color: var(--teal); font-size: 11px; }
+    .card-actions { display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--line); background: var(--surface-soft); }
+    .risk-note { margin-left: auto; color: var(--muted); font-size: 11px; }
+    .progress-card { background: var(--surface-soft); }
+    .progress-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+    .spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid #c9d6f5; border-top-color: var(--brand); animation: spin .9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress-label { flex: 1; }
+    .progress-time { color: var(--muted-2); font-size: 11px; }
+    .result-card { border-color: #cae9df; background: linear-gradient(180deg,#fff 0%,#fbfffd 100%); }
+    .result-head { padding: 15px 16px 11px; display: flex; align-items: flex-start; gap: 12px; }
+    .result-icon { width: 28px; height: 28px; border-radius: 8px; background: var(--teal-soft); color: var(--teal); display: grid; place-items: center; flex: 0 0 auto; }
+    .confidence { margin-left: auto; text-align: right; }
+    .confidence-label { color: var(--muted); font-size: 11px; }
+    .confidence-value { color: var(--amber); font-weight: 700; }
+    .result-section { margin: 0 16px; padding: 12px 0; border-top: 1px solid #e7f0ec; }
+    .result-label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; margin-bottom: 5px; }
+    .evidence-line { display: flex; align-items: flex-start; gap: 8px; color: #344054; margin-top: 5px; }
+    .evidence-line::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #5ba993; margin-top: 8px; flex: 0 0 auto; }
+    .recommendation { display: flex; gap: 9px; align-items: flex-start; padding: 9px 10px; background: #f3f8ff; border-radius: 8px; color: #263b5e; }
+    .recommendation-index { width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center; background: #dbeafe; color: #175cd3; font-size: 11px; font-weight: 700; }
+    .result-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 11px 16px 14px; }
+    .dataset-card { margin-top: 10px; border: 1px solid #c9d9fa; border-radius: 11px; background: #f8fbff; overflow: hidden; }
+    .dataset-head { display: flex; gap: 11px; align-items: flex-start; padding: 13px 14px; }
+    .dataset-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #175cd3; background: #e8f1ff; flex: 0 0 auto; }
+    .dataset-main { min-width: 0; flex: 1; }
+    .dataset-id { font: 600 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; color: #174ea6; }
+    .dataset-meta { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .dataset-actions { display: flex; gap: 7px; padding: 9px 14px; border-top: 1px solid #dbe6fb; background: white; }
+    .relation-strip { margin-top: 11px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); display: flex; align-items: center; gap: 8px; font-size: 11px; }
+    .relation-strip strong { white-space: nowrap; }
+    .relation-chain { min-width: 0; flex: 1; color: #344054; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .relation-strip .relation-open { border: 0; padding: 0; color: var(--brand); background: transparent; cursor: pointer; white-space: nowrap; }
+    .topology-chain { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 9px 0; }
+    .topology-node { padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: white; font-size: 11px; font-weight: 650; }
+    .topology-node.focus { color: #174ea6; border-color: #a9c5fb; background: var(--brand-soft); }
+    .topology-arrow { color: var(--muted-2); }
+    .context-source { color: var(--muted); font-size: 10px; margin-top: 7px; }
+    .relation-editor { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-top: 12px; }
+    .relation-row { display: grid; grid-template-columns: 1fr 98px 1fr 30px; align-items: center; gap: 7px; padding: 8px; border-bottom: 1px solid var(--line); }
+    .relation-row:last-child { border-bottom: 0; }
+    .relation-row input, .relation-row select { width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 7px; padding: 0 8px; background: white; }
+    .relation-remove { width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+    .relation-remove:hover { color: var(--red); background: var(--red-soft); }
+    .source-options { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 10px; }
+    .source-option { padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: white; cursor: pointer; }
+    .source-option.selected { border-color: #83a8f5; background: var(--brand-soft); }
+    .source-option strong { display: block; font-size: 11px; }
+    .source-option span { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+    .round-toggle { margin: 4px 0 24px 41px; }
+    .round-toggle button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 5px 0; font-size: 12px; }
+    .composer-wrap { border-top: 1px solid var(--line); background: rgba(255,255,255,.96); padding: 12px 20px 14px; }
+    .composer { max-width: 840px; min-height: 76px; margin: 0 auto; border: 1px solid var(--line-strong); border-radius: 13px; background: white; box-shadow: 0 4px 18px rgba(16,24,40,.06); padding: 10px 11px 8px; }
+    .composer textarea { width: 100%; height: 34px; max-height: 100px; resize: none; border: 0; outline: 0; color: var(--text); padding: 3px 4px; }
+    .composer-foot { display: flex; align-items: center; gap: 7px; }
+    .composer-tip { color: var(--muted-2); font-size: 11px; margin-left: 3px; }
+    .send-btn { margin-left: auto; width: 31px; height: 31px; border: 0; border-radius: 8px; color: white; background: var(--brand); cursor: pointer; display: grid; place-items: center; }
+
+    .detail-drawer { width: 0; flex: 0 0 0; overflow: hidden; border-left: 0 solid var(--line); transition: width .2s ease, flex-basis .2s ease; background: var(--surface-soft); }
+    .detail-drawer.open { width: var(--detail); flex-basis: var(--detail); border-left-width: 1px; }
+    .drawer-inner { width: var(--detail); height: 100%; overflow: auto; }
+    .drawer-head { height: 56px; padding: 0 14px 0 18px; display: flex; align-items: center; border-bottom: 1px solid var(--line); background: white; font-weight: 700; }
+    .drawer-head button { margin-left: auto; }
+    .drawer-section { padding: 15px 18px; border-bottom: 1px solid var(--line); }
+    .drawer-title { font-weight: 700; font-size: 12px; margin-bottom: 10px; }
+    .kv { display: grid; grid-template-columns: 78px 1fr; gap: 8px; margin-top: 8px; font-size: 12px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; word-break: break-word; }
+    .evidence-chip { display: flex; gap: 9px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); }
+    .evidence-chip:first-of-type { border-top: 0; }
+    .ev-icon { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--teal-soft); color: var(--teal); flex: 0 0 auto; }
+    .ev-main { flex: 1; min-width: 0; }
+    .ev-name { font-size: 12px; font-weight: 650; }
+    .ev-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    details.tech { margin-top: 8px; }
+    details.tech summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+    .mono { font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; background: #eef0f3; border-radius: 7px; padding: 8px; margin-top: 8px; overflow-wrap: anywhere; }
+
+    /* Manual data console */
+    .console-view { display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
+    .console-head { padding: 14px 18px 12px; background: white; border-bottom: 1px solid var(--line); }
+    .console-title-row { display: flex; align-items: center; gap: 11px; }
+    .console-title-row h1 { font-size: 17px; margin: 0; }
+    .no-ai-badge { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; background: var(--surface-soft); }
+    .console-actions { margin-left: auto; display: flex; gap: 8px; }
+    .scope-toolbar { display: flex; align-items: end; gap: 10px; margin-top: 13px; }
+    .field { min-width: 150px; }
+    .field.wide { min-width: 210px; }
+    .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .field select, .field input { width: 100%; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 0 10px; outline: 0; }
+    .field select:focus, .field input:focus { border-color: #83a8f5; box-shadow: 0 0 0 2px rgba(37,99,235,.1); }
+    .console-tabs { height: 43px; display: flex; align-items: end; padding: 0 18px; gap: 22px; background: white; border-bottom: 1px solid var(--line); }
+    .console-tab { height: 43px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; padding: 0 2px; }
+    .console-tab.active { color: var(--brand); border-bottom-color: var(--brand); font-weight: 650; }
+    .console-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+    .console-content { flex: 1; min-width: 0; overflow: auto; padding: 14px; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(4,minmax(130px,1fr)); gap: 10px; }
+    .metric { background: white; border: 1px solid var(--line); border-radius: 10px; padding: 12px 13px; }
+    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-value { margin-top: 4px; font-size: 21px; font-weight: 700; letter-spacing: -.02em; }
+    .metric-trend { margin-left: 5px; font-size: 11px; font-weight: 500; }
+    .metric-trend.bad { color: var(--red); }
+    .metric-trend.good { color: var(--teal); }
+    .panel-grid { display: grid; grid-template-columns: minmax(0,1.65fr) minmax(300px,1fr); gap: 10px; margin-top: 10px; }
+    .panel { background: white; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .panel-head { height: 45px; padding: 0 14px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); }
+    .panel-title { font-weight: 700; }
+    .panel-sub { color: var(--muted); font-size: 11px; }
+    .panel-tools { margin-left: auto; display: flex; gap: 6px; }
+    .chart-wrap { height: 248px; padding: 16px 14px 12px; position: relative; }
+    .chart-legend { display: flex; gap: 15px; color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+    .legend-key { display: flex; align-items: center; gap: 5px; }
+    .legend-dot { width: 8px; height: 3px; background: var(--brand); border-radius: 3px; }
+    .chart { width: 100%; height: 185px; }
+    .chart-grid { stroke: #edf0f4; stroke-width: 1; }
+    .chart-line { fill: none; stroke: #3b75e7; stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+    .chart-area { fill: url(#cpuGradient); }
+    .chart-line-2 { fill: none; stroke: #14a17d; stroke-width: 1.7; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+    .table-wrap { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { padding: 9px 12px; color: var(--muted); background: var(--surface-soft); font-weight: 600; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    td { padding: 10px 12px; border-bottom: 1px solid #eef0f3; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .bar-cell { display: flex; align-items: center; gap: 8px; }
+    .mini-bar { width: 54px; height: 5px; border-radius: 5px; background: #edf0f4; overflow: hidden; }
+    .mini-bar i { height: 100%; display: block; background: #5f8ce9; }
+    .task-panel { width: 340px; flex: 0 0 340px; border-left: 1px solid var(--line); background: white; display: flex; flex-direction: column; }
+    .task-head { height: 51px; padding: 0 15px; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+    .task-head strong { flex: 1; }
+    .task-body { flex: 1; overflow: auto; padding: 14px; }
+    .task-empty { color: var(--muted); font-size: 12px; background: var(--surface-soft); border: 1px dashed var(--line-strong); border-radius: 9px; padding: 11px; }
+    .host-checks { display: grid; gap: 7px; }
+    .host-check { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; cursor: pointer; }
+    .host-check:hover { background: var(--surface-soft); }
+    .host-check input { width: auto !important; height: auto !important; margin: 0; }
+    .host-check-main { flex: 1; }
+    .host-check-name { display: block; font-weight: 650; font-size: 12px; }
+    .host-check-meta { display: block; color: var(--muted); font-size: 10px; }
+    .form-group { margin-top: 13px; }
+    .form-group:first-child { margin-top: 0; }
+    .form-group label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+    .form-group select, .form-group input { width: 100%; height: 35px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; background: white; }
+    .risk-box { margin-top: 13px; padding: 10px; border-radius: 8px; background: var(--teal-soft); color: #226556; font-size: 12px; }
+    .command-preview { margin-top: 13px; }
+    .command-preview .mono { color: #344054; background: #f3f4f6; }
+    .task-foot { padding: 12px 14px; border-top: 1px solid var(--line); display: flex; gap: 8px; }
+    .task-foot .primary-btn { flex: 1; }
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+      padding: 10px 14px; color: white; background: #20242c; border-radius: 9px; box-shadow: var(--shadow); z-index: 100; transition: .2s ease;
+    }
+    .toast.show { transform: translate(-50%,0); opacity: 1; }
+
+    .modal-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(16,24,40,.32); display: grid; place-items: center; padding: 20px; }
+    .modal { width: min(500px,100%); background: white; border-radius: 14px; box-shadow: 0 20px 60px rgba(16,24,40,.22); overflow: hidden; }
+    .modal-head { padding: 16px 18px; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+    .modal-head strong { flex: 1; font-size: 15px; }
+    .modal-body { padding: 17px 18px; }
+    .modal-body p { margin: 0 0 10px; color: var(--muted); }
+    .modal-body textarea { width: 100%; min-height: 105px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; resize: vertical; outline: 0; }
+    .modal-foot { padding: 11px 18px 15px; display: flex; justify-content: flex-end; gap: 8px; }
+    .cluster-panel { position: fixed; z-index: 70; top: 50px; right: 74px; width: 390px; background: white; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 44px rgba(16,24,40,.16); overflow: hidden; }
+    .cluster-head { height: 48px; display: flex; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--line); }
+    .cluster-head strong { flex: 1; }
+    .cluster-summary { padding: 12px 14px; display: flex; gap: 8px; background: var(--surface-soft); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .node-list { padding: 6px 14px 12px; }
+    .node-row { display: grid; grid-template-columns: minmax(100px,1fr) 72px 72px 60px; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #eef0f3; font-size: 11px; }
+    .node-row:last-child { border-bottom: 0; }
+    .node-name { font-size: 12px; font-weight: 650; }
+    .node-address { color: var(--muted); font-size: 10px; }
+    .node-capabilities { padding: 9px 14px 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .preview-modal { width: min(760px,100%); }
+    .preview-summary { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 12px 0; }
+    .preview-stat { padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+    .preview-stat span { display: block; color: var(--muted); font-size: 10px; }
+    .preview-stat strong { display: block; margin-top: 3px; font-size: 12px; }
+    .preview-table { max-height: 250px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+    .profile-grid { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(280px,.7fr); gap: 10px; }
+    .profile-grid .panel-title { white-space: nowrap; }
+    .profile-grid .panel:first-child .panel-sub { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .flame-wrap { padding: 14px; overflow-x: auto; }
+    .flame-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .flame-search { width: 220px; height: 31px; border: 1px solid var(--line); border-radius: 7px; padding: 0 9px; }
+    .flame-chart { min-width: 660px; }
+    .flame-row { display: flex; height: 25px; gap: 2px; margin-top: 2px; }
+    .flame-block { min-width: 24px; padding: 4px 6px; border-radius: 3px; color: #592f08; background: #f9b45b; font: 10px/17px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+    .flame-block.hot { background: #f47b45; color: #5a1d0a; }
+    .flame-block.warm { background: #f7a14c; }
+    .flame-block.cool { background: #f9cb70; }
+    .flame-block:hover { filter: brightness(.95); outline: 2px solid rgba(180,83,9,.2); }
+    .profile-summary { padding: 13px 14px; }
+    .hotspot { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .hotspot:last-child { border-bottom: 0; }
+    .hotspot-head { display: flex; gap: 8px; align-items: center; }
+    .hotspot-name { flex: 1; font: 600 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .hotspot-value { color: var(--red); font-weight: 700; }
+    .hotspot-meta { margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    @media (max-width: 1100px) {
+      :root { --sidebar: 232px; }
+      .topbar-note { display: none; }
+      .task-panel { width: 300px; flex-basis: 300px; }
+      .metrics-grid { grid-template-columns: repeat(2,1fr); }
+      .panel-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      body { overflow: auto; }
+      .app { min-height: 100%; height: auto; }
+      .topbar { position: sticky; top: 0; }
+      .brand { min-width: 0; }
+      .brand span:last-child { display: none; }
+      .mode-btn { padding: 0 10px; }
+      .workspace { min-height: calc(100vh - 58px); }
+      .case-sidebar { display: none; }
+      .head-actions .quiet-btn { display: none; }
+      .message-column { padding: 20px 16px 30px; }
+      .choice-list { grid-template-columns: 1fr; }
+      .detail-drawer.open { position: absolute; z-index: 30; inset: 0 0 0 auto; box-shadow: -12px 0 30px rgba(16,24,40,.12); }
+      .console-body { flex-direction: column; overflow: auto; }
+      .console-content { overflow: visible; }
+      .task-panel { width: auto; flex: none; border: 1px solid var(--line); margin: 0 14px 14px; border-radius: 10px; }
+      .scope-toolbar { overflow-x: auto; padding-bottom: 2px; }
+      .console-tabs { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">M</span>
+        <span>Mini-Drop</span>
+      </div>
+      <nav class="mode-switch" aria-label="工作模式">
+        <button class="mode-btn active" data-view="ai">
+          <span>✦</span><span>AI 协作</span>
+        </button>
+        <button class="mode-btn" data-view="console">
+          <span>▦</span><span>诊断数据台</span>
+        </button>
+      </nav>
+      <span class="topbar-note" id="modeNote">持续会话 · AI 根据授权推进诊断</span>
+      <div class="topbar-spacer"></div>
+      <button class="cluster-button" id="clusterButton"><i class="status-dot green"></i><span>集群 2 / 2 在线</span><span>⌄</span></button>
+      <button class="icon-btn" title="帮助">?</button>
+      <button class="icon-btn" title="账户">林</button>
+    </header>
+
+    <div class="workspace">
+      <aside class="case-sidebar">
+        <div class="sidebar-head">
+          <button class="new-case" id="newCaseBtn"><span>＋</span> 新建诊断会话</button>
+          <div class="search-box">
+            <span class="search-icon">⌕</span>
+            <input id="caseSearch" placeholder="搜索会话" />
+          </div>
+        </div>
+        <div class="sidebar-label">进行中</div>
+        <div class="case-list" id="caseList">
+          <div class="case-item active" data-search="service-x cpu 飙高 等待确认">
+            <div class="case-line"><i class="status-dot amber"></i><span class="case-title">service-x CPU 飙高</span><time class="case-time">刚刚</time></div>
+            <div class="case-meta"><span>等待确认</span><span>·</span><span>生产环境</span></div>
+          </div>
+          <div class="case-item" data-search="order-api p99 延迟上升 正在分析">
+            <div class="case-line"><i class="status-dot blue"></i><span class="case-title">order-api P99 延迟上升</span><time class="case-time">18m</time></div>
+            <div class="case-meta"><span>正在分析</span><span>·</span><span>2 个实例</span></div>
+          </div>
+          <div class="case-item" data-search="支付回调间歇失败 等待信息">
+            <div class="case-line"><i class="status-dot amber"></i><span class="case-title">支付回调间歇失败</span><time class="case-time">1h</time></div>
+            <div class="case-meta"><span>等待信息</span><span>·</span><span>测试环境</span></div>
+          </div>
+          <div class="sidebar-label" style="padding-left:8px">最近完成</div>
+          <div class="case-item" data-search="gateway 内存增长 已解决">
+            <div class="case-line"><i class="status-dot green"></i><span class="case-title">gateway 内存持续增长</span><time class="case-time">昨天</time></div>
+            <div class="case-meta"><span>已解决</span><span>·</span><span>3 轮诊断</span></div>
+          </div>
+          <div class="case-item" data-search="worker-2 磁盘 io 已关闭">
+            <div class="case-line"><i class="status-dot gray"></i><span class="case-title">worker-2 磁盘 I/O</span><time class="case-time">周一</time></div>
+            <div class="case-meta"><span>已关闭</span><span>·</span><span>1 轮诊断</span></div>
+          </div>
+        </div>
+        <div class="sidebar-foot">
+          <button class="agent-health" id="sidebarClusterButton"><i class="status-dot green"></i><span>2 / 2 个 Worker 在线</span><span>查看 ›</span></button>
+        </div>
+      </aside>
+
+      <main class="main-stage">
+        <section class="view ai-view" id="aiView">
+          <div class="conversation">
+            <header class="conversation-head">
+              <div class="conversation-title">
+                <h1>service-x CPU 飙高</h1>
+                <div class="conversation-sub">
+                  <span class="pill amber" id="caseState"><i class="status-dot amber"></i>等待确认</span>
+                  <span>生产环境</span><span>·</span><span>开始于 09:25</span>
+                </div>
+              </div>
+              <div class="head-actions">
+                <button class="quiet-btn" id="resolveBtn">标记已解决</button>
+                <button class="icon-btn" id="drawerBtn" title="上下文与证据">☷</button>
+              </div>
+            </header>
+
+            <div class="message-scroll" id="messageScroll">
+              <div class="message-column" id="messageColumn">
+                <div class="event-divider">今天 09:25 · 诊断开始</div>
+
+                <article class="message">
+                  <div class="avatar user">我</div>
+                  <div class="message-body">
+                    <div class="message-author">你 <time>09:25</time></div>
+                    <div class="message-text"><p>service-x 从半小时前开始 CPU 持续超过 90%，帮我查一下原因。不要执行会影响业务的操作。</p></div>
+                  </div>
+                </article>
+
+                <article class="message">
+                  <div class="avatar ai">AI</div>
+                  <div class="message-body">
+                    <div class="message-author">Mini-Drop <time>09:25</time></div>
+                    <div class="message-text">
+                      <p>我会限定在 <strong>service-x</strong>，优先进行只读分析，并在任何可能影响业务的操作前请求确认。</p>
+                      <p>目前服务还没有关联到具体运行实例。请确认本次需要检查的范围：</p>
+                    </div>
+                    <div class="scope-card" id="scopeCard">
+                      <div class="card-pad">
+                        <div class="card-kicker">需要你的确认</div>
+                        <div class="card-title">确认 AI 推荐的诊断范围</div>
+                        <div class="card-desc">根据服务拓扑，service-x 当前映射到以下 2 个实例。关联服务只用于分析，不会自动扩散采集。</div>
+                        <div class="choice-list">
+                          <div class="choice selected" data-instance="worker-1">
+                            <span class="choice-check">✓</span>
+                            <div class="choice-main"><div class="choice-name">worker-1</div><div class="choice-meta">192.168.10.11 · PID 1842</div></div>
+                            <span class="choice-state">在线</span>
+                          </div>
+                          <div class="choice selected" data-instance="worker-2">
+                            <span class="choice-check">✓</span>
+                            <div class="choice-main"><div class="choice-name">worker-2</div><div class="choice-meta">192.168.10.12 · PID 1967</div></div>
+                            <span class="choice-state">在线</span>
+                          </div>
+                        </div>
+                        <div class="relation-strip"><strong>服务关系</strong><span class="relation-chain">gateway → service-x → redis-main；service-x → rule-service</span><button class="relation-open">补充或修正</button></div>
+                      </div>
+                      <div class="card-actions">
+                        <button class="primary-btn" id="approveScope">确认并开始只读采集</button>
+                        <button class="quiet-btn" id="manualScope">手动填写</button>
+                        <span class="risk-note">R0 · 无业务修改</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <div class="round-toggle">
+                  <button id="roundToggle">› 查看本轮内部进展（默认收起）</button>
+                  <div class="mono hidden" id="roundDetail">范围解析 → 假设生成 → 区分性探针规划<br>当前阻塞：等待用户确认 service-x 实例范围</div>
+                </div>
+              </div>
+            </div>
+
+            <footer class="composer-wrap">
+              <div class="composer">
+                <textarea id="chatInput" placeholder="补充信息、纠正判断，或直接告诉 AI 下一步…"></textarea>
+                <div class="composer-foot">
+                  <button class="icon-btn" title="添加上下文" style="width:29px;height:29px">＋</button>
+                  <button class="quiet-btn" id="contextBtn" style="min-height:29px;padding:0 9px">@ 服务 / 实例</button>
+                  <button class="quiet-btn relation-open" style="min-height:29px;padding:0 9px">⌘ 服务关系</button>
+                  <span class="composer-tip">Enter 发送 · Shift+Enter 换行</span>
+                  <button class="send-btn" id="sendBtn" title="发送">↑</button>
+                </div>
+              </div>
+            </footer>
+          </div>
+
+          <aside class="detail-drawer" id="detailDrawer">
+            <div class="drawer-inner">
+              <header class="drawer-head">上下文与证据<button class="icon-btn" id="drawerClose" style="width:29px;height:29px">×</button></header>
+              <section class="drawer-section">
+                <div class="drawer-title">诊断范围</div>
+                <dl>
+                  <div class="kv"><dt>服务</dt><dd>service-x</dd></div>
+                  <div class="kv"><dt>环境</dt><dd>生产环境</dd></div>
+                  <div class="kv"><dt>时间范围</dt><dd>08:55 — 现在</dd></div>
+                  <div class="kv"><dt>实例</dt><dd id="drawerInstances">等待确认</dd></div>
+                  <div class="kv"><dt>安全边界</dt><dd>只读；变更操作需确认</dd></div>
+                </dl>
+              </section>
+              <section class="drawer-section">
+                <div class="drawer-title">服务关系 <span id="relationVersion" style="color:var(--muted);font-weight:400">自动发现</span></div>
+                <div class="topology-chain"><span class="topology-node">gateway</span><span class="topology-arrow">→</span><span class="topology-node focus">service-x</span><span class="topology-arrow">→</span><span class="topology-node">redis-main</span></div>
+                <div class="topology-chain"><span class="topology-node focus">service-x</span><span class="topology-arrow">→</span><span class="topology-node">rule-service</span></div>
+                <div class="context-source">来源：注册中心 + 最近 30 分钟调用关系 · 尚未提交给 AI</div>
+                <button class="soft-btn relation-open" style="width:100%;margin-top:10px">检查并提交给 AI</button>
+              </section>
+              <section class="drawer-section">
+                <div class="drawer-title">关键证据 <span id="evidenceCount" style="color:var(--muted);font-weight:400">0</span></div>
+                <div id="emptyEvidence" style="color:var(--muted);font-size:12px">完成范围确认后，关键证据会出现在这里。</div>
+                <div id="evidenceItems" class="hidden">
+                  <div class="evidence-chip"><span class="ev-icon">↗</span><div class="ev-main"><div class="ev-name">进程 CPU 91.7%</div><div class="ev-meta">worker-1 · sys_metrics · 09:27</div></div></div>
+                  <div class="evidence-chip"><span class="ev-icon">⌁</span><div class="ev-main"><div class="ev-name">parseRules 占用 72%</div><div class="ev-meta">perf_cpu · 30 秒采样</div></div></div>
+                  <div class="evidence-chip"><span class="ev-icon">✓</span><div class="ev-main"><div class="ev-name">同主机无明显资源争用</div><div class="ev-meta">host comparison · 09:27</div></div></div>
+                </div>
+              </section>
+              <section class="drawer-section">
+                <div class="drawer-title">关联采集会话 <span id="linkedSessionCount" style="color:var(--muted);font-weight:400">0</span></div>
+                <div id="linkedSessionEmpty" style="color:var(--muted);font-size:12px">可从诊断数据台将人工采集结果关联到当前 Case。</div>
+                <div id="linkedSessionItem" class="evidence-chip hidden"><span class="ev-icon">▦</span><div class="ev-main"><div class="ev-name">collect_092746_a81f</div><div class="ev-meta">2 个 Worker · sys_metrics + perf_cpu · 8.4 MB</div></div></div>
+              </section>
+              <section class="drawer-section">
+                <div class="drawer-title">会话信息</div>
+                <dl>
+                  <div class="kv"><dt>创建人</dt><dd>当前用户</dd></div>
+                  <div class="kv"><dt>诊断轮次</dt><dd id="roundCount">第 1 轮</dd></div>
+                  <div class="kv"><dt>状态</dt><dd id="drawerState">等待确认</dd></div>
+                </dl>
+                <details class="tech">
+                  <summary>技术标识与模型信息</summary>
+                  <div class="mono">case_20260805_092524<br>diag_session_..._18993674<br>deepseek-v4-flash<br>constrained_hybrid</div>
+                </details>
+              </section>
+            </div>
+          </aside>
+        </section>
+
+        <section class="view console-view hidden" id="consoleView">
+          <header class="console-head">
+            <div class="console-title-row">
+              <h1>诊断数据台</h1>
+              <span class="no-ai-badge">独立操作模式 · 不调用 AI</span>
+              <span class="pill blue">已关联 Case：service-x CPU 飙高</span>
+              <div class="console-actions">
+                <button class="quiet-btn" id="refreshConsole">↻ 刷新</button>
+                <button class="primary-btn" id="openTask">＋ 新建采集任务</button>
+              </div>
+            </div>
+            <div class="scope-toolbar">
+              <div class="field wide"><label>目标服务</label><select><option>service-x</option><option>order-api</option><option>gateway</option></select></div>
+              <div class="field"><label>实例</label><select><option>全部在线实例（2）</option><option>worker-1 · 192.168.10.11</option><option>worker-2 · 192.168.10.12</option></select></div>
+              <div class="field"><label>时间范围</label><select><option>最近 30 分钟</option><option>最近 1 小时</option><option>自定义</option></select></div>
+              <button class="quiet-btn">应用范围</button>
+              <span style="color:var(--muted);font-size:11px;margin-left:auto;padding-bottom:8px">数据更新于 09:28:16</span>
+            </div>
+          </header>
+
+          <nav class="console-tabs" id="consoleTabs">
+            <button class="console-tab active" data-tab="metrics">指标</button>
+            <button class="console-tab" data-tab="profiles">性能分析</button>
+            <button class="console-tab" data-tab="topology">服务拓扑</button>
+            <button class="console-tab" data-tab="process">进程</button>
+            <button class="console-tab" data-tab="logs">日志</button>
+            <button class="console-tab" data-tab="network">网络</button>
+            <button class="console-tab" data-tab="evidence">证据库</button>
+            <button class="console-tab" data-tab="tasks">采集任务</button>
+          </nav>
+
+          <div class="console-body">
+            <div class="console-content">
+              <div id="metricsTab">
+                <div class="metrics-grid">
+                  <div class="metric"><div class="metric-label">进程 CPU</div><div class="metric-value">91.7% <span class="metric-trend bad">↑ 28.4%</span></div></div>
+                  <div class="metric"><div class="metric-label">内存 RSS</div><div class="metric-value">1.24 GB <span class="metric-trend">稳定</span></div></div>
+                  <div class="metric"><div class="metric-label">系统负载 1m</div><div class="metric-value">7.82 <span class="metric-trend bad">偏高</span></div></div>
+                  <div class="metric"><div class="metric-label">磁盘 I/O 等待</div><div class="metric-value">2.1% <span class="metric-trend good">正常</span></div></div>
+                </div>
+                <div class="panel-grid">
+                  <section class="panel">
+                    <header class="panel-head"><span class="panel-title">跨节点 CPU 对比</span><span class="panel-sub">2 个 Worker / service-x</span><div class="panel-tools"><button class="icon-btn" style="width:28px;height:28px">⋯</button></div></header>
+                    <div class="chart-wrap">
+                      <div class="chart-legend"><span class="legend-key"><i class="legend-dot"></i>worker-1 · service-x</span><span class="legend-key"><i class="legend-dot" style="background:#14a17d"></i>worker-2 · service-x</span></div>
+                      <svg class="chart" viewBox="0 0 700 185" preserveAspectRatio="none" role="img" aria-label="CPU 使用率趋势图">
+                        <defs><linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f82ea" stop-opacity=".28"/><stop offset="1" stop-color="#4f82ea" stop-opacity="0"/></linearGradient></defs>
+                        <line class="chart-grid" x1="0" y1="25" x2="700" y2="25"/><line class="chart-grid" x1="0" y1="70" x2="700" y2="70"/><line class="chart-grid" x1="0" y1="115" x2="700" y2="115"/><line class="chart-grid" x1="0" y1="160" x2="700" y2="160"/>
+                        <path class="chart-area" d="M0,142 C70,139 105,133 150,137 S235,132 275,125 S328,106 350,63 S405,32 450,39 S520,26 570,31 S650,35 700,24 L700,185 L0,185 Z"/>
+                        <path class="chart-line" d="M0,142 C70,139 105,133 150,137 S235,132 275,125 S328,106 350,63 S405,32 450,39 S520,26 570,31 S650,35 700,24"/>
+                        <path class="chart-line-2" d="M0,132 C80,135 125,128 180,131 S270,127 330,130 S430,127 500,126 S620,123 700,125"/>
+                      </svg>
+                    </div>
+                  </section>
+                  <section class="panel">
+                    <header class="panel-head"><span class="panel-title">各节点目标进程</span><span class="panel-sub">当前快照</span></header>
+                    <div class="table-wrap">
+                      <table>
+                        <thead><tr><th>节点 / PID</th><th>CPU</th><th>内存</th></tr></thead>
+                        <tbody>
+                          <tr><td><strong>worker-1</strong><br><span style="color:var(--muted)">PID 1842</span></td><td><div class="bar-cell">91.7% <span class="mini-bar"><i style="width:92%"></i></span></div></td><td>1.24 GB</td></tr>
+                          <tr><td><strong>worker-2</strong><br><span style="color:var(--muted)">PID 1967</span></td><td><div class="bar-cell">32.4% <span class="mini-bar"><i style="width:32%;background:#14a17d"></i></span></div></td><td>1.08 GB</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </div>
+                <section class="panel" style="margin-top:10px">
+                  <header class="panel-head"><span class="panel-title">采集会话</span><span class="panel-sub">可预览、下载或交给 AI 分析</span><div class="panel-tools"><button class="quiet-btn download-btn" style="min-height:28px">批量下载</button></div></header>
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>会话 ID</th><th>采集器</th><th>节点</th><th>状态</th><th>数据量</th><th>操作</th></tr></thead>
+                      <tbody>
+                        <tr><td><strong>collect_092746_a81f</strong><br><span style="color:var(--muted)">09:27:46</span></td><td>sys_metrics<br>perf_cpu</td><td>2 个 Worker</td><td><span class="pill green">完整</span></td><td>8.4 MB</td><td><button class="inline-link preview-btn">预览</button> · <button class="inline-link download-btn">下载</button> · <button class="inline-link send-ai-btn">AI 分析</button></td></tr>
+                        <tr><td><strong>collect_091812_64be</strong><br><span style="color:var(--muted)">09:18:12</span></td><td>process_snapshot</td><td>worker-1</td><td><span class="pill green">完整</span></td><td>284 KB</td><td><button class="inline-link preview-btn">预览</button> · <button class="inline-link download-btn">下载</button> · <button class="inline-link send-ai-btn">AI 分析</button></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+
+              <div id="topologyTab" class="hidden">
+                <div class="panel-grid">
+                  <section class="panel">
+                    <header class="panel-head"><span class="panel-title">service-x 服务关系</span><span class="panel-sub">拓扑快照 topo_ctx_20260805_0929</span><div class="panel-tools"><button class="quiet-btn relation-open" style="min-height:28px">编辑关系</button><button class="soft-btn relation-submit-direct" style="min-height:28px">提交给 AI</button></div></header>
+                    <div style="padding:34px 26px;min-height:270px;display:grid;place-items:center;background:radial-gradient(circle at center,#f8fbff 0,#fff 68%)">
+                      <div>
+                        <div class="topology-chain" style="justify-content:center;gap:10px"><span class="topology-node">user-gateway<br><small style="color:var(--muted);font-weight:400">上游 · 1.8k req/s</small></span><span class="topology-arrow">→</span><span class="topology-node focus" style="padding:12px 18px">service-x<br><small style="color:var(--muted);font-weight:400">2 个实例</small></span><span class="topology-arrow">→</span><span class="topology-node">redis-main<br><small style="color:var(--muted);font-weight:400">下游 · 3.4 ms</small></span></div>
+                        <div class="topology-chain" style="justify-content:center;margin-top:22px"><span style="width:166px"></span><span class="topology-arrow">└──→</span><span class="topology-node">rule-service<br><small style="color:var(--muted);font-weight:400">下游 · 420 req/s</small></span></div>
+                      </div>
+                    </div>
+                  </section>
+                  <section class="panel">
+                    <header class="panel-head"><span class="panel-title">关系来源与边界</span></header>
+                    <div class="profile-summary"><div class="hotspot"><div class="hotspot-head"><span class="hotspot-name">注册中心映射</span><span class="pill green">可信</span></div><div class="hotspot-meta">service-x → worker-1, worker-2</div></div><div class="hotspot"><div class="hotspot-head"><span class="hotspot-name">调用关系观测</span><span class="pill green">30 分钟</span></div><div class="hotspot-meta">gateway → service-x → redis / rule-service</div></div><div class="risk-box"><strong>采集边界</strong><br>提交给 AI 只增加分析上下文。关联服务不会自动成为采集目标，扩展范围仍需单独确认。</div></div>
+                  </section>
+                </div>
+              </div>
+
+              <div id="profileTab" class="hidden">
+                <div class="profile-grid">
+                  <section class="panel">
+                    <header class="panel-head"><span class="panel-title">CPU 火焰图</span><span class="panel-sub">collect_092746_a81f · worker-1 · PID 1842 · 30 秒</span><div class="panel-tools"><button class="quiet-btn download-btn" style="min-height:28px">下载 SVG</button><button class="quiet-btn send-ai-btn" style="min-height:28px">交给 AI 分析</button></div></header>
+                    <div class="flame-wrap">
+                      <div class="flame-toolbar"><input class="flame-search" placeholder="搜索函数，例如 parseRules"><button class="quiet-btn" style="min-height:31px">重置缩放</button><span style="margin-left:auto;color:var(--muted);font-size:11px">总采样 28,416 · 点击栈帧下钻</span></div>
+                      <div class="flame-chart" title="点击任意栈帧可在正式版本中缩放">
+                        <div class="flame-row"><div class="flame-block cool" style="width:100%">all (28,416 samples)</div></div>
+                        <div class="flame-row"><div class="flame-block warm" style="width:82%">java.lang.Thread.run</div><div class="flame-block cool" style="width:18%">GC / runtime</div></div>
+                        <div class="flame-row"><div class="flame-block warm" style="width:76%">com.minidrop.ServiceHandler.handle</div><div class="flame-block cool" style="width:6%">netty</div><div class="flame-block cool" style="width:18%">G1YoungRemSet</div></div>
+                        <div class="flame-row"><div class="flame-block hot" style="width:72%">com.minidrop.rules.RuleEngine.parseRules</div><div class="flame-block cool" style="width:4%">serialize</div><div class="flame-block cool" style="width:24%">runtime / kernel</div></div>
+                        <div class="flame-row"><div class="flame-block hot" style="width:47%">java.util.regex.Pattern.matcher</div><div class="flame-block warm" style="width:25%">RuleTree.rebuild</div><div class="flame-block cool" style="width:28%">other</div></div>
+                        <div class="flame-row"><div class="flame-block hot" style="width:31%">Pattern$Curly.match</div><div class="flame-block warm" style="width:16%">Pattern$GroupHead.match</div><div class="flame-block warm" style="width:25%">HashMap.resize</div><div class="flame-block cool" style="width:28%">other</div></div>
+                      </div>
+                    </div>
+                  </section>
+                  <section class="panel">
+                    <header class="panel-head"><span class="panel-title">热点函数</span><span class="panel-sub">Self / Total</span></header>
+                    <div class="profile-summary">
+                      <div class="hotspot"><div class="hotspot-head"><span class="hotspot-name">Pattern$Curly.match</span><span class="hotspot-value">31.2%</span></div><div class="hotspot-meta">总占用 47.1% · 8,866 samples</div></div>
+                      <div class="hotspot"><div class="hotspot-head"><span class="hotspot-name">RuleTree.rebuild</span><span class="hotspot-value">24.8%</span></div><div class="hotspot-meta">总占用 25.3% · 7,047 samples</div></div>
+                      <div class="hotspot"><div class="hotspot-head"><span class="hotspot-name">HashMap.resize</span><span class="hotspot-value">13.6%</span></div><div class="hotspot-meta">总占用 16.1% · 3,864 samples</div></div>
+                      <div class="risk-box"><strong>跨节点差异</strong><br>worker-1 的 parseRules() 占用为 72%，worker-2 为 18%。原始 Profile 均可独立查看。</div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+
+              <div id="genericTab" class="hidden">
+                <section class="panel">
+                  <header class="panel-head"><span class="panel-title" id="genericTitle">进程</span><span class="panel-sub">service-x · worker-1</span></header>
+                  <div style="padding:42px;text-align:center;color:var(--muted)">
+                    <div style="font-size:28px;margin-bottom:8px">▦</div>
+                    <strong id="genericHeadline">人工诊断数据视图</strong>
+                    <div style="margin-top:6px">该标签页在正式版本中承载筛选、查询、原始数据和导出能力。</div>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <aside class="task-panel" id="taskPanel">
+              <header class="task-head"><strong>新建采集任务</strong><button class="icon-btn" id="closeTask" style="width:28px;height:28px">×</button></header>
+              <div class="task-body">
+                <div class="task-empty">手动模式只执行你明确配置的采集任务，不生成 AI 推断，也不会自动扩大目标范围。</div>
+                <div class="form-group"><label>目标 Worker（支持多选）</label><div class="host-checks"><label class="host-check"><input class="host-checkbox" type="checkbox" value="worker-1" checked><span class="host-check-main"><span class="host-check-name">worker-1</span><span class="host-check-meta">192.168.10.11 · Agent 在线</span></span><i class="status-dot green"></i></label><label class="host-check"><input class="host-checkbox" type="checkbox" value="worker-2" checked><span class="host-check-main"><span class="host-check-name">worker-2</span><span class="host-check-meta">192.168.10.12 · Agent 在线</span></span><i class="status-dot green"></i></label></div></div>
+                <div class="form-group"><label>采集器</label><select id="collectorSelect"><option value="sys_metrics">系统与进程指标</option><option value="perf_cpu">CPU Profile（30 秒）</option><option value="process_snapshot">进程快照</option><option value="ebpf_io">eBPF I/O 追踪</option></select></div>
+                <div class="form-group"><label>目标 PID</label><input value="1842" /></div>
+                <div class="form-group"><label>采集时长</label><select><option>30 秒</option><option>60 秒</option><option>120 秒</option></select></div>
+                <div class="risk-box"><strong>R0 · 只读</strong><br>当前配置不会修改服务状态或写入业务数据。</div>
+                <div class="command-preview"><div style="font-size:11px;color:var(--muted)">命令预览</div><div class="mono" id="commandPreview">micro-drop collect sys_metrics --agents worker-1,worker-2 --pid service-map --duration 30s</div></div>
+              </div>
+              <footer class="task-foot"><button class="quiet-btn">保存模板</button><button class="primary-btn" id="createTaskBtn">创建并执行</button></footer>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <section class="cluster-panel hidden" id="clusterPanel">
+    <header class="cluster-head"><strong>Worker 与 Agent 状态</strong><span class="pill green">集群正常</span></header>
+    <div class="cluster-summary"><span>控制节点：192.168.10.10</span><span>·</span><span>最后检查：刚刚</span><span>·</span><span>2 个采集任务运行中</span></div>
+    <div class="node-list">
+      <div class="node-row"><div><div class="node-name">worker-1</div><div class="node-address">192.168.10.11 · Agent v1.4</div></div><span class="pill green">在线</span><span>CPU 67%</span><span>心跳 2s</span></div>
+      <div class="node-row"><div><div class="node-name">worker-2</div><div class="node-address">192.168.10.12 · Agent v1.4</div></div><span class="pill green">在线</span><span>CPU 31%</span><span>心跳 3s</span></div>
+    </div>
+    <div class="node-capabilities"><strong>可用能力：</strong>系统指标、进程快照、CPU Profile / 火焰图、eBPF I/O、网络追踪、日志采集</div>
+  </section>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop">
+    <div class="modal">
+      <header class="modal-head"><strong id="modalTitle">纠正当前判断</strong><button class="icon-btn" id="modalClose" style="width:29px;height:29px">×</button></header>
+      <div class="modal-body"><p id="modalDesc">告诉 AI 哪部分判断不准确，或补充它遗漏的事实。你的反馈会开启下一轮分析。</p><textarea id="modalInput" placeholder="例如：这个版本上周已经回滚，CPU 问题仍然存在……"></textarea></div>
+      <footer class="modal-foot"><button class="quiet-btn" id="modalCancel">取消</button><button class="primary-btn" id="modalSubmit">提交并重新分析</button></footer>
+    </div>
+  </div>
+  <div class="modal-backdrop hidden" id="previewBackdrop">
+    <div class="modal preview-modal">
+      <header class="modal-head"><strong>采集数据预览 · collect_092746_a81f</strong><button class="icon-btn" id="previewClose" style="width:29px;height:29px">×</button></header>
+      <div class="modal-body">
+        <p>这是一次可独立引用的多机采集会话。原始文件保持不变，AI 分析结果作为新的派生记录保存。</p>
+        <div class="preview-summary"><div class="preview-stat"><span>目标</span><strong>2 个 Worker</strong></div><div class="preview-stat"><span>采集器</span><strong>sys_metrics + perf_cpu</strong></div><div class="preview-stat"><span>时间</span><strong>30 秒</strong></div><div class="preview-stat"><span>数据量</span><strong>8.4 MB</strong></div></div>
+        <div class="preview-table"><table><thead><tr><th>节点</th><th>目标进程</th><th>CPU</th><th>热点函数</th><th>完整性</th></tr></thead><tbody><tr><td>worker-1</td><td>service-x / PID 1842</td><td>91.7%</td><td>parseRules() · 72%</td><td><span class="pill green">完整</span></td></tr><tr><td>worker-2</td><td>service-x / PID 1967</td><td>32.4%</td><td>parseRules() · 18%</td><td><span class="pill green">完整</span></td></tr></tbody></table></div>
+        <div class="mono">files/<br>├─ worker-1/sys_metrics.json<br>├─ worker-1/cpu-profile.data<br>├─ worker-1/flamegraph.svg<br>├─ worker-2/sys_metrics.json<br>├─ worker-2/cpu-profile.data<br>└─ manifest.json</div>
+      </div>
+      <footer class="modal-foot"><button class="quiet-btn download-btn">下载完整数据包</button><button class="soft-btn" id="previewFlameBtn">查看火焰图</button><button class="primary-btn send-ai-btn">发送到 AI 会话</button></footer>
+    </div>
+  </div>
+  <div class="modal-backdrop hidden" id="relationBackdrop">
+    <div class="modal preview-modal">
+      <header class="modal-head"><strong>提供服务关系给 AI</strong><button class="icon-btn" id="relationClose" style="width:29px;height:29px">×</button></header>
+      <div class="modal-body">
+        <p>确认自动发现的关系，也可以手工修正或补充。提交后会生成独立的拓扑上下文 ID，并保留来源与版本。</p>
+        <div style="font-size:11px;color:var(--muted)">信息来源</div>
+        <div class="source-options"><div class="source-option selected"><strong>自动发现</strong><span>注册中心与调用观测</span></div><div class="source-option"><strong>手工补充</strong><span>用户确认的业务关系</span></div><div class="source-option"><strong>导入文件</strong><span>JSON / YAML / CSV</span></div></div>
+        <div class="relation-editor" id="relationEditor">
+          <div class="relation-row"><input value="user-gateway"><select><option>调用</option><option>依赖</option><option>部署于</option></select><input value="service-x"><button class="relation-remove">×</button></div>
+          <div class="relation-row"><input value="service-x"><select><option>调用</option><option>依赖</option><option>部署于</option></select><input value="redis-main"><button class="relation-remove">×</button></div>
+          <div class="relation-row"><input value="service-x"><select><option>调用</option><option>依赖</option><option>部署于</option></select><input value="rule-service"><button class="relation-remove">×</button></div>
+        </div>
+        <button class="quiet-btn" id="addRelation" style="margin-top:9px">＋ 添加一条关系</button>
+        <div class="risk-box"><strong>范围规则</strong><br>这些关系只帮助 AI 理解上下游和跨节点差异，不代表授权采集关联服务。</div>
+      </div>
+      <footer class="modal-foot"><button class="quiet-btn" id="saveRelation">仅保存</button><button class="primary-btn" id="submitRelation">保存并提交给 AI</button></footer>
+    </div>
+  </div>
+  <div class="toast" id="toast">已完成</div>
+
+  <script>
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+    const aiView = $('#aiView');
+    const consoleView = $('#consoleView');
+    const toast = $('#toast');
+    let toastTimer;
+
+    function showToast(text) {
+      toast.textContent = text;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1900);
+    }
+
+    function toggleCluster() { $('#clusterPanel').classList.toggle('hidden'); }
+    $('#clusterButton').addEventListener('click', toggleCluster);
+    $('#sidebarClusterButton').addEventListener('click', toggleCluster);
+    document.addEventListener('click', e => {
+      if (!$('#clusterPanel').contains(e.target) && !$('#clusterButton').contains(e.target) && !$('#sidebarClusterButton').contains(e.target)) {
+        $('#clusterPanel').classList.add('hidden');
+      }
+    });
+
+    $$('.mode-btn').forEach(btn => btn.addEventListener('click', () => {
+      $$('.mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+      const ai = btn.dataset.view === 'ai';
+      aiView.classList.toggle('hidden', !ai);
+      consoleView.classList.toggle('hidden', ai);
+      history.replaceState(null, '', ai ? '#ai' : '#console');
+      $('#modeNote').textContent = ai ? '持续会话 · AI 根据授权推进诊断' : '人工操作 · 查询与采集均由用户明确发起';
+    }));
+
+    $('#drawerBtn').addEventListener('click', () => $('#detailDrawer').classList.toggle('open'));
+    $('#drawerClose').addEventListener('click', () => $('#detailDrawer').classList.remove('open'));
+    $('#contextBtn').addEventListener('click', () => $('#detailDrawer').classList.add('open'));
+
+    $$('.choice').forEach(choice => choice.addEventListener('click', () => {
+      choice.classList.toggle('selected');
+      $('.choice-check', choice).textContent = choice.classList.contains('selected') ? '✓' : '';
+    }));
+
+    $('#roundToggle').addEventListener('click', e => {
+      const detail = $('#roundDetail');
+      detail.classList.toggle('hidden');
+      e.currentTarget.textContent = detail.classList.contains('hidden') ? '› 查看本轮内部进展（默认收起）' : '⌄ 收起本轮内部进展';
+    });
+
+    function scrollMessages() {
+      const scroller = $('#messageScroll');
+      requestAnimationFrame(() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' }));
+    }
+
+    function addMessage(kind, html, time = '09:28') {
+      const article = document.createElement('article');
+      article.className = 'message';
+      const isAI = kind === 'ai';
+      article.innerHTML = `<div class="avatar ${isAI ? 'ai' : 'user'}">${isAI ? 'AI' : '我'}</div><div class="message-body"><div class="message-author">${isAI ? 'Mini-Drop' : '你'} <time>${time}</time></div><div class="message-text">${html}</div></div>`;
+      $('#messageColumn').appendChild(article);
+      scrollMessages();
+      return article;
+    }
+
+    $('#approveScope').addEventListener('click', () => {
+      const selected = $$('.choice.selected').map(x => x.dataset.instance);
+      if (!selected.length) return showToast('请至少选择一个实例');
+      $('#scopeCard').innerHTML = `<div class="card-pad" style="display:flex;align-items:center;gap:10px"><span class="result-icon">✓</span><div><div class="card-title">范围已确认</div><div class="card-desc">${selected.join('、')} · 只读采集已授权</div></div></div>`;
+      $('#caseState').className = 'pill blue';
+      $('#caseState').innerHTML = '<i class="status-dot blue"></i>正在分析';
+      $('#drawerInstances').textContent = selected.join('、');
+      $('#drawerState').textContent = '正在分析';
+      const progress = addMessage('ai', '<p>已确认实例范围。我正在采集进程指标和 30 秒 CPU Profile，预计约 40 秒完成。</p><div class="progress-card"><div class="progress-row"><span class="spinner"></span><span class="progress-label">采集并比对 CPU 热点</span><span class="progress-time">进行中</span></div></div>');
+      setTimeout(() => {
+        progress.remove();
+        $('#caseState').className = 'pill green';
+        $('#caseState').innerHTML = '<i class="status-dot green"></i>已给出阶段结论';
+        $('#drawerState').textContent = '已给出阶段结论';
+        $('#evidenceCount').textContent = '3';
+        $('#emptyEvidence').classList.add('hidden');
+        $('#evidenceItems').classList.remove('hidden');
+        const result = addMessage('ai', `<p>采集完成。我找到了一个明显的应用内 CPU 热点。</p>
+          <div class="result-card">
+            <div class="result-head"><span class="result-icon">✓</span><div><div class="card-title">当前判断</div><div class="card-desc">CPU 压力更可能来自 service-x 自身的热点循环，暂未发现同主机资源争用。</div></div><div class="confidence"><div class="confidence-label">判断置信度</div><div class="confidence-value">中等</div></div></div>
+            <div class="result-section"><div class="result-label">关键依据</div><div class="evidence-line">worker-1 上 service-x 进程 CPU 为 91.7%</div><div class="evidence-line">CPU Profile 中 parseRules() 占用采样时间 72%</div><div class="evidence-line">同主机其他进程和 I/O 等待均处于正常范围</div></div>
+            <div class="result-section"><div class="result-label">建议下一步</div><div class="recommendation"><span class="recommendation-index">1</span><span>对比最近一次发布前后的 parseRules() 调用量，验证是否由代码变更引入。</span></div></div>
+            <div class="result-actions"><button class="primary-btn verify-btn">开始验证</button><button class="quiet-btn evidence-btn">查看证据</button><button class="quiet-btn correct-btn">这个判断不对</button></div>
+          </div>`);
+        $('.verify-btn', result).addEventListener('click', () => showToast('已进入下一步验证确认'));
+        $('.evidence-btn', result).addEventListener('click', () => $('#detailDrawer').classList.add('open'));
+        $('.correct-btn', result).addEventListener('click', openCorrectionModal);
+      }, 1250);
+    });
+
+    $('#manualScope').addEventListener('click', () => {
+      $('#modalTitle').textContent = '手动补充实例范围';
+      $('#modalDesc').textContent = '填写服务实例、Agent 或 PID。提交后仍会在执行采集前显示目标和风险。';
+      $('#modalInput').placeholder = '例如：worker-1，PID 1842';
+      $('#modalBackdrop').classList.remove('hidden');
+    });
+
+    function sendChat() {
+      const input = $('#chatInput');
+      const value = input.value.trim();
+      if (!value) return;
+      addMessage('user', `<p>${value.replace(/</g, '&lt;').replace(/\n/g, '<br>')}</p>`, '现在');
+      input.value = '';
+      setTimeout(() => addMessage('ai', '<p>收到。我已将这条信息加入当前 Case，并会据此更新诊断范围。涉及新的采集或变更操作时，我仍会单独向你确认。</p>', '现在'), 450);
+    }
+    $('#sendBtn').addEventListener('click', sendChat);
+    $('#chatInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    });
+
+    function openCorrectionModal() {
+      $('#modalTitle').textContent = '纠正当前判断';
+      $('#modalDesc').textContent = '告诉 AI 哪部分判断不准确，或补充它遗漏的事实。你的反馈会开启下一轮分析。';
+      $('#modalInput').placeholder = '例如：这个版本上周已经回滚，CPU 问题仍然存在……';
+      $('#modalInput').value = '';
+      $('#modalBackdrop').classList.remove('hidden');
+    }
+    function closeModal() { $('#modalBackdrop').classList.add('hidden'); }
+    $('#modalClose').addEventListener('click', closeModal);
+    $('#modalCancel').addEventListener('click', closeModal);
+    $('#modalBackdrop').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+    $('#modalSubmit').addEventListener('click', () => {
+      const value = $('#modalInput').value.trim() || '补充了新的实例和诊断信息。';
+      closeModal();
+      addMessage('user', `<p>${value.replace(/</g, '&lt;')}</p>`, '现在');
+      setTimeout(() => addMessage('ai', '<p>明白，我不会继续沿用原结论。我已保留原始证据并开启第 2 轮分析，接下来会优先验证你补充的信息。</p>', '现在'), 400);
+      $('#roundCount').textContent = '第 2 轮';
+    });
+
+    $('#resolveBtn').addEventListener('click', e => {
+      e.currentTarget.textContent = '✓ 已解决';
+      e.currentTarget.disabled = true;
+      $('#caseState').className = 'pill green';
+      $('#caseState').innerHTML = '<i class="status-dot green"></i>已解决';
+      showToast('会话已标记为解决');
+    });
+
+    $('#newCaseBtn').addEventListener('click', () => {
+      $('#modalTitle').textContent = '开始新的诊断会话';
+      $('#modalDesc').textContent = '直接描述现象即可。AI 会在对话中逐步询问真正缺失的信息。';
+      $('#modalInput').placeholder = '例如：order-api 从 10 点开始 P99 延迟超过 2 秒……';
+      $('#modalInput').value = '';
+      $('#modalBackdrop').classList.remove('hidden');
+    });
+
+    $('#caseSearch').addEventListener('input', e => {
+      const term = e.target.value.trim().toLowerCase();
+      $$('.case-item').forEach(item => item.classList.toggle('hidden', !item.dataset.search.toLowerCase().includes(term)));
+    });
+    $$('.case-item').forEach(item => item.addEventListener('click', () => {
+      $$('.case-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      if (!item.dataset.search.includes('service-x')) showToast('概念原型仅展开 service-x 会话');
+    }));
+
+    const tabTitles = { process: '进程与线程', logs: '原始日志查询', network: '网络连接与流量', evidence: '人工证据库', tasks: '采集任务历史' };
+    $$('.console-tab').forEach(tab => tab.addEventListener('click', () => {
+      $$('.console-tab').forEach(t => t.classList.toggle('active', t === tab));
+      const metrics = tab.dataset.tab === 'metrics';
+      const profiles = tab.dataset.tab === 'profiles';
+      const topology = tab.dataset.tab === 'topology';
+      $('#metricsTab').classList.toggle('hidden', !metrics);
+      $('#profileTab').classList.toggle('hidden', !profiles);
+      $('#topologyTab').classList.toggle('hidden', !topology);
+      $('#genericTab').classList.toggle('hidden', metrics || profiles || topology);
+      if (!metrics && !profiles && !topology) {
+        $('#genericTitle').textContent = tabTitles[tab.dataset.tab];
+        $('#genericHeadline').textContent = `${tabTitles[tab.dataset.tab]}数据视图`;
+      }
+    }));
+    $('#refreshConsole').addEventListener('click', e => {
+      e.currentTarget.textContent = '↻ 刷新中';
+      setTimeout(() => { e.currentTarget.textContent = '↻ 刷新'; showToast('诊断数据已刷新'); }, 550);
+    });
+    $('#openTask').addEventListener('click', () => { $('#taskPanel').classList.remove('hidden'); showToast('已打开采集任务配置'); });
+    $('#closeTask').addEventListener('click', () => $('#taskPanel').classList.add('hidden'));
+    function updateCommandPreview() {
+      const hosts = $$('.host-checkbox:checked').map(item => item.value);
+      $('#commandPreview').textContent = `micro-drop collect ${$('#collectorSelect').value} --agents ${hosts.join(',') || '(未选择)'} --pid service-map --duration 30s`;
+    }
+    $('#collectorSelect').addEventListener('change', updateCommandPreview);
+    $$('.host-checkbox').forEach(item => item.addEventListener('change', updateCommandPreview));
+    $('#createTaskBtn').addEventListener('click', e => {
+      const hosts = $$('.host-checkbox:checked').map(item => item.value);
+      if (!hosts.length) return showToast('请至少选择一个 Worker');
+      e.currentTarget.disabled = true;
+      e.currentTarget.textContent = '执行中…';
+      setTimeout(() => { e.currentTarget.disabled = false; e.currentTarget.textContent = '创建并执行'; showToast(`多机采集已创建：collect_093112_f72c（${hosts.length} 节点）`); }, 850);
+    });
+
+    function openPreview() { $('#previewBackdrop').classList.remove('hidden'); }
+    function closePreview() { $('#previewBackdrop').classList.add('hidden'); }
+    $('#previewClose').addEventListener('click', closePreview);
+    $('#previewBackdrop').addEventListener('click', e => { if (e.target === e.currentTarget) closePreview(); });
+    $$('.preview-btn').forEach(btn => btn.addEventListener('click', openPreview));
+    $$('.download-btn').forEach(btn => btn.addEventListener('click', () => showToast('已开始下载原始采集数据包')));
+
+    let dataLinked = false;
+    function sendDatasetToAI() {
+      closePreview();
+      $('.mode-btn[data-view="ai"]').click();
+      if (dataLinked) return showToast('该采集会话已关联到当前 AI 会话');
+      dataLinked = true;
+      $('#linkedSessionCount').textContent = '1';
+      $('#linkedSessionEmpty').classList.add('hidden');
+      $('#linkedSessionItem').classList.remove('hidden');
+      addMessage('user', `<p>请分析这次人工采集的数据，重点比较两个 Worker 的 CPU 差异。</p><div class="dataset-card"><div class="dataset-head"><span class="dataset-icon">▦</span><div class="dataset-main"><div class="dataset-id">collect_092746_a81f</div><div class="dataset-meta">诊断数据台 · 2 个 Worker · sys_metrics + perf_cpu · 包含火焰图</div></div><span class="pill green">数据完整</span></div><div class="dataset-actions"><button class="quiet-btn dataset-preview" style="min-height:29px">预览数据</button><button class="quiet-btn dataset-download" style="min-height:29px">下载</button></div></div>`, '现在');
+      const last = $('#messageColumn').lastElementChild;
+      $('.dataset-preview', last).addEventListener('click', openPreview);
+      $('.dataset-download', last).addEventListener('click', () => showToast('已开始下载原始采集数据包'));
+      setTimeout(() => addMessage('ai', `<p>我已关联采集会话 <strong>collect_092746_a81f</strong>。跨节点对比显示，CPU 压力集中在 worker-1，而不是所有实例共同升高。</p><div class="result-card"><div class="result-head"><span class="result-icon">⌁</span><div><div class="card-title">多机差异分析</div><div class="card-desc">worker-1 的 parseRules() 热点占用 72%，worker-2 仅为 18%。优先检查节点特有流量、规则缓存和实例配置差异。</div></div><div class="confidence"><div class="confidence-label">来源</div><div class="confidence-value">人工采集数据</div></div></div><div class="result-actions"><button class="soft-btn profile-link">查看火焰图</button><button class="quiet-btn">继续比较配置</button></div></div>`, '现在').querySelector('.profile-link').addEventListener('click', openProfiles), 500);
+    }
+    $$('.send-ai-btn').forEach(btn => btn.addEventListener('click', sendDatasetToAI));
+
+    function openProfiles() {
+      closePreview();
+      $('.mode-btn[data-view="console"]').click();
+      $('.console-tab[data-tab="profiles"]').click();
+    }
+    $('#previewFlameBtn').addEventListener('click', openProfiles);
+    $$('.flame-block').forEach(block => block.addEventListener('click', () => showToast(`已选中栈帧：${block.textContent}`)));
+    $('.flame-search').addEventListener('input', e => {
+      const term = e.target.value.trim().toLowerCase();
+      $$('.flame-block').forEach(block => block.style.opacity = !term || block.textContent.toLowerCase().includes(term) ? '1' : '.3');
+    });
+
+    function openRelations() { $('#relationBackdrop').classList.remove('hidden'); }
+    function closeRelations() { $('#relationBackdrop').classList.add('hidden'); }
+    $$('.relation-open').forEach(btn => btn.addEventListener('click', openRelations));
+    $('#relationClose').addEventListener('click', closeRelations);
+    $('#relationBackdrop').addEventListener('click', e => { if (e.target === e.currentTarget) closeRelations(); });
+    $$('.source-option').forEach(option => option.addEventListener('click', () => {
+      $$('.source-option').forEach(item => item.classList.toggle('selected', item === option));
+    }));
+    function bindRelationRemove(button) { button.addEventListener('click', () => button.closest('.relation-row').remove()); }
+    $$('.relation-remove').forEach(bindRelationRemove);
+    $('#addRelation').addEventListener('click', () => {
+      const row = document.createElement('div');
+      row.className = 'relation-row';
+      row.innerHTML = '<input placeholder="上游服务"><select><option>调用</option><option>依赖</option><option>部署于</option></select><input placeholder="下游服务"><button class="relation-remove">×</button>';
+      $('#relationEditor').appendChild(row);
+      bindRelationRemove($('.relation-remove', row));
+    });
+    $('#saveRelation').addEventListener('click', () => {
+      closeRelations();
+      $('#relationVersion').textContent = '已保存 v2';
+      showToast('服务关系已保存，尚未提交给 AI');
+    });
+
+    let relationSubmitted = false;
+    function submitTopologyToAI() {
+      closeRelations();
+      $('.mode-btn[data-view="ai"]').click();
+      $('#relationVersion').textContent = '已提交 v2';
+      if (relationSubmitted) return showToast('当前拓扑版本已提交给 AI');
+      relationSubmitted = true;
+      addMessage('user', `<p>请把这份服务关系作为当前问题的分析上下文，但暂时不要采集关联服务。</p><div class="dataset-card"><div class="dataset-head"><span class="dataset-icon">⌘</span><div class="dataset-main"><div class="dataset-id">topo_ctx_20260805_0934_v2</div><div class="dataset-meta">user-gateway → service-x → redis-main；service-x → rule-service</div></div><span class="pill blue">用户已确认</span></div><div class="dataset-actions"><button class="quiet-btn topology-view" style="min-height:29px">查看服务拓扑</button></div></div>`, '现在');
+      const last = $('#messageColumn').lastElementChild;
+      $('.topology-view', last).addEventListener('click', () => {
+        $('.mode-btn[data-view="console"]').click();
+        $('.console-tab[data-tab="topology"]').click();
+      });
+      setTimeout(() => addMessage('ai', '<p>已关联拓扑上下文 <strong>topo_ctx_20260805_0934_v2</strong>。我会使用上下游关系解释证据，并优先比较 service-x 的两个实例；gateway、redis-main 和 rule-service 目前仅作为上下文，不会被自动采集。</p>', '现在'), 420);
+    }
+    $('#submitRelation').addEventListener('click', submitTopologyToAI);
+    $$('.relation-submit-direct').forEach(btn => btn.addEventListener('click', submitTopologyToAI));
+
+    if (location.hash === '#topology') {
+      $('.mode-btn[data-view="console"]').click();
+      $('.console-tab[data-tab="topology"]').click();
+    } else if (location.hash === '#profiles') {
+      $('.mode-btn[data-view="console"]').click();
+      $('.console-tab[data-tab="profiles"]').click();
+    } else if (location.hash === '#console') {
+      $('.mode-btn[data-view="console"]').click();
+    }
+  </script>
+</body>
+</html>

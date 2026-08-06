@@ -8,12 +8,19 @@ API key and model through environment variables.
 from __future__ import annotations
 
 import os
+import hashlib
+import json
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from server.app.common_utils import env_bool
 
 FeatureName = Literal["nlp", "rca", "summarize"]
+_MODEL_AUDIT: ContextVar[dict[str, Any] | None] = ContextVar("model_audit", default=None)
 
 
 @dataclass(frozen=True)
@@ -62,15 +69,129 @@ def is_feature_enabled(feature: FeatureName) -> bool:
 
 def chat_completions(payload: dict[str, Any], timeout: int = 60):
     settings = get_ai_settings()
-    return _post_json(
-        _chat_url(settings.base_url),
-        headers={
-            "Authorization": f"Bearer {settings.api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=timeout,
-    )
+    audit = _MODEL_AUDIT.get()
+    started_at = datetime.now(timezone.utc)
+    started = time.perf_counter()
+    try:
+        response = _post_json(
+            _chat_url(settings.base_url),
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        if audit:
+            _record_model_audit(
+                audit,
+                settings,
+                started_at=started_at,
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                status="FAILED",
+                error_code=type(exc).__name__,
+            )
+        raise
+
+    if audit:
+        response_json: dict[str, Any] = {}
+        try:
+            parsed = response.json()
+            response_json = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            pass
+        usage = response_json.get("usage") or {}
+        response_hash = hashlib.sha256(
+            json.dumps(
+                response_json,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        succeeded = 200 <= int(response.status_code) < 300
+        _record_model_audit(
+            audit,
+            settings,
+            started_at=started_at,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+            status="SUCCEEDED" if succeeded else "PROVIDER_ERROR",
+            input_tokens=_optional_int(usage.get("prompt_tokens") or usage.get("input_tokens")),
+            output_tokens=_optional_int(
+                usage.get("completion_tokens") or usage.get("output_tokens"),
+            ),
+            response_hash=response_hash,
+            model_snapshot=str(response_json.get("model") or settings.model)[:128],
+            error_code=None if succeeded else f"HTTP_{response.status_code}",
+        )
+    return response
+
+
+@contextmanager
+def model_audit_scope(
+    *,
+    case_id: str,
+    tenant_id: str,
+    context_packet_id: str,
+    prompt_version: str,
+    output_schema: str,
+    recorder,
+):
+    """Associate model calls in this context with immutable audit metadata."""
+    token = _MODEL_AUDIT.set({
+        "case_id": case_id,
+        "tenant_id": tenant_id,
+        "context_packet_id": context_packet_id,
+        "prompt_version": prompt_version,
+        "output_schema": output_schema,
+        "recorder": recorder,
+    })
+    try:
+        yield
+    finally:
+        _MODEL_AUDIT.reset(token)
+
+
+def _record_model_audit(
+    audit: dict[str, Any],
+    settings: AISettings,
+    *,
+    started_at: datetime,
+    latency_ms: int,
+    status: str,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    response_hash: str | None = None,
+    model_snapshot: str | None = None,
+    error_code: str | None = None,
+) -> None:
+    audit["recorder"]({
+        "context_packet_id": audit["context_packet_id"],
+        "case_id": audit["case_id"],
+        "tenant_id": audit["tenant_id"],
+        "provider": settings.provider,
+        "model": settings.model,
+        "model_snapshot": model_snapshot,
+        "prompt_version": audit["prompt_version"],
+        "output_schema": audit["output_schema"],
+        "status": status,
+        "latency_ms": latency_ms,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "response_hash": response_hash,
+        "error_code": error_code,
+        "started_at": started_at,
+        "finished_at": datetime.now(timezone.utc),
+    })
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return max(0, int(value)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _chat_url(base_url: str) -> str:

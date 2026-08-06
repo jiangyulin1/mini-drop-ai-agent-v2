@@ -1,0 +1,131 @@
+.page {
+  width: 100%;
+}
+
+.header,
+.caseHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.caseListCard {
+  min-height: 0;
+}
+
+.caseListCard :global(.ant-list-items) {
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.caseFilters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(5, 5, 5, 0.06);
+}
+
+.caseItem {
+  padding: 14px 16px !important;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.caseItem:hover {
+  background: rgba(22, 119, 255, 0.05);
+}
+
+.caseItem.selected {
+  background: rgba(22, 119, 255, 0.09);
+  border-left-color: #1677ff;
+}
+
+.overviewCard {
+  overflow: hidden;
+  border-left: 4px solid #1677ff;
+}
+
+.finding {
+  margin: 0 0 16px !important;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.needUser {
+  margin-bottom: 16px;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid rgba(5, 5, 5, 0.08);
+}
+
+.summaryItem {
+  min-width: 0;
+  padding: 14px 16px 0 0;
+}
+
+.summaryItem + .summaryItem {
+  padding-left: 16px;
+  border-left: 1px solid rgba(5, 5, 5, 0.08);
+}
+
+.summaryItem :global(.ant-typography) {
+  margin: 4px 0 0;
+}
+
+.messageComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(22, 119, 255, 0.04);
+  border: 1px solid rgba(22, 119, 255, 0.16);
+  border-radius: 8px;
+}
+
+.composerActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .header,
+  .caseHeader {
+    flex-direction: column;
+  }
+
+  .caseFilters,
+  .summaryGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .caseListCard :global(.ant-list-items) {
+    max-height: 260px;
+  }
+
+  .summaryItem,
+  .summaryItem + .summaryItem {
+    padding: 12px 0 0;
+    border-left: none;
+  }
+
+  .summaryItem + .summaryItem {
+    border-top: 1px solid rgba(5, 5, 5, 0.08);
+  }
+}

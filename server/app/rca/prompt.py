@@ -223,6 +223,9 @@ def build_user_message(evidence_json: str, candidates_json: str) -> str:
 {evidence_json}
 </evidence>
 
+说明：证据已由确定性程序脱敏、去重、聚合并限制预算；`_context_meta` 只描述投影过程，
+不能作为事实或 evidence_ref。原始 Evidence/Artifact 未被改写。
+
 【候选原因列表】
 {candidates_json}
 

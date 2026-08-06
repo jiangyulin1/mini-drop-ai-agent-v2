@@ -50,7 +50,7 @@ ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "UPLOADING", "ANALYZING"}
 TERMINAL_TASK_STATUSES = {"DONE", "FAILED"}
 STRUCTURED_ARTIFACT_TYPES = {
     "top_json", "ebpf_metrics", "sys_metrics", "memory_json",
-    "network_metrics", "database_metrics", "runtime_metrics",
+    "network_metrics", "database_metrics", "runtime_metrics", "log_scan",
 }
 ALLOWED_DIAGNOSIS_TRANSITIONS = {
     "CREATED": {"UNDERSTANDING", "USER_CANCELED", "FAILED"},
@@ -63,6 +63,7 @@ ALLOWED_DIAGNOSIS_TRANSITIONS = {
     "WAITING_APPROVAL": {"COLLECTING", "NEED_MORE_EVIDENCE", "BUDGET_EXHAUSTED", "INSUFFICIENT_EVIDENCE", "USER_CANCELED", "FAILED"},
     "NEED_MORE_EVIDENCE": {"ANALYZING", "COLLECTING", "WAITING_APPROVAL", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "USER_CANCELED", "FAILED"},
     "CONCLUDING": {"COMPLETED", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED", "FAILED"},
+    "PAUSED": {"USER_CANCELED", "FAILED"},
 }
 
 
@@ -195,6 +196,12 @@ class DiagnosisOrchestrator:
             intent.time_range.end,
             require_fresh=intent.diagnosis_mode == DiagnosisMode.LIVE,
         )
+        # 复用只覆盖 sys_metrics；当 symptom 需要日志/IO 等额外探针时
+        # （如 connection_failure → log_scan），全量复用会跳过新探针计划，
+        # 导致连接类故障因缺日志证据而误判。此时放弃复用走全新采集。
+        required_r1 = {p for p in choose_probe_ids(intent.symptom) if get_probe(p).risk_level == "R1"}
+        if required_r1 - {"host_process_metrics"}:
+            existing_ids = []
         if existing_ids:
             for task_id in existing_ids:
                 task = self.repo.tasks.get(task_id)
@@ -293,7 +300,7 @@ class DiagnosisOrchestrator:
         item = self.store.get_session(diagnosis_id)
         if item is None:
             return None
-        if advance and item["status"] not in TERMINAL_DIAGNOSIS_STATUSES:
+        if advance and item["status"] not in TERMINAL_DIAGNOSIS_STATUSES | {"PAUSED"}:
             self.advance(diagnosis_id)
         return self.store.get_detail(diagnosis_id)
 
@@ -347,6 +354,32 @@ class DiagnosisOrchestrator:
                     error_code="ADVANCE_FAILED", error_message=str(exc),
                 )
 
+    def pause(self, diagnosis_id: str) -> dict[str, Any]:
+        """Suspend new orchestration work without cancelling in-flight collection."""
+        with self._operation_lock(diagnosis_id):
+            session = self.store.get_session(diagnosis_id)
+            if session is None:
+                raise ValueError("诊断不存在")
+            if session["status"] in TERMINAL_DIAGNOSIS_STATUSES:
+                raise ValueError(f"终态诊断不能暂停: {session['status']}")
+            result = self.store.pause_session(diagnosis_id)
+            BUS.publish("diagnosis_paused", {
+                "diagnosis_id": diagnosis_id,
+                "status": "PAUSED",
+            })
+            return result
+
+    def resume(self, diagnosis_id: str) -> dict[str, Any]:
+        """Resume from the exact workflow state captured at pause time."""
+        with self._operation_lock(diagnosis_id):
+            result = self.store.resume_session(diagnosis_id)
+            BUS.publish("diagnosis_resumed", {
+                "diagnosis_id": diagnosis_id,
+                "status": result["status"],
+            })
+        # Advance outside the operation lock because ``advance`` acquires it.
+        return self.advance(diagnosis_id) or result
+
     def approve(self, diagnosis_id: str, request: ApprovalRequest) -> dict[str, Any]:
         with self._operation_lock(diagnosis_id):
             owner = f"{self.owner_prefix}:{threading.get_ident()}:{uuid4().hex}"
@@ -365,6 +398,8 @@ class DiagnosisOrchestrator:
             raise ValueError("诊断不存在")
         if session["status"] in TERMINAL_DIAGNOSIS_STATUSES:
             raise ValueError(f"终态诊断不能审批: {session['status']}")
+        if session["status"] == DiagnosisStatus.PAUSED.value:
+            raise ValueError("暂停中的诊断不能审批")
         step = self.store.get_probe(request.step_id)
         if step is None or step["diagnosis_id"] != diagnosis_id:
             raise ValueError("审批步骤不存在或不属于当前诊断")
@@ -505,7 +540,7 @@ class DiagnosisOrchestrator:
 
     def _advance_locked(self, diagnosis_id: str) -> None:
         session = self.store.get_session(diagnosis_id)
-        if session is None or session["status"] in TERMINAL_DIAGNOSIS_STATUSES:
+        if session is None or session["status"] in TERMINAL_DIAGNOSIS_STATUSES | {"PAUSED"}:
             return
         deadline = session.get("deadline_at")
         if deadline is not None:
@@ -1133,6 +1168,7 @@ class DiagnosisOrchestrator:
             "actions": diagnostic_actions,
             "diagnostic_commands": diagnostic_actions,
             "recommendations": self._build_recommendations(cluster_assessment),
+            "next_best_action": self._build_next_best_action(cluster_assessment, missing, session),
             "limitations": sorted(set(missing + (["部分目标采集失败"] if failed_targets else []))),
             "coverage": {
                 "task_count": len(tasks),
@@ -1196,6 +1232,7 @@ class DiagnosisOrchestrator:
             "fact_domains": normalize_sys_metrics(values.get("sys_metrics")) if values.get("sys_metrics") else {},
             "top_function": {"name": top_name, "percent": top_percent},
             "pressure": pressure,
+            "log": _log_summary(values.get("log_scan")),
             "evidence_refs": evidence_refs,
         }
 
@@ -1287,6 +1324,71 @@ class DiagnosisOrchestrator:
                     confidence_level="中",
                 ))
         return commands
+
+    def _build_next_best_action(
+        self,
+        assessment: dict[str, Any],
+        missing: list[str],
+        session: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """从缺失证据与归因缺口生成"下一步最值得做什么"，供基础用户多轮推进。
+
+        设计：证据不足时优先建议区分性探针（R2 需用户先确认）；
+        已有根因时建议验证恢复。不生成任何未经注册的探针。
+        """
+        classification = assessment.get("classification")
+        location = assessment.get("root_location", {}).get("type")
+        missing_text = " ".join(missing or [])
+        budget = (session or {}).get("risk_budget") or {}
+        r2_left = int(budget.get("max_medium_risk_probes", 0) or 0) > 0
+        r2_used = any(
+            item.get("risk_level") == "R2"
+            for item in (self.store.list_probes(assessment.get("diagnosis_id", "")) if False else [])
+        )
+        del r2_used  # 探针使用量由风险预算与审批流程控制，此处只负责建议
+
+        unresolved = classification in ("insufficient_evidence", "scope_unresolved") or location in ("unknown", "downstream")
+        if unresolved:
+            candidates: list[dict[str, Any]] = []
+            if "profile" in missing_text.lower() or "TopN" in missing_text:
+                candidates.append({
+                    "type": "probe",
+                    "probe_id": "process_cpu_profile",
+                    "title": "采集 CPU 火焰图",
+                    "description": "用性能采样定位占用 CPU 的具体函数；需要你确认一次短时采集。",
+                    "needs_approval": True,
+                })
+            if "块设备" in missing_text or "block" in missing_text.lower() or "直方图" in missing_text:
+                candidates.append({
+                    "type": "probe",
+                    "probe_id": "process_io_latency",
+                    "title": "采集块设备 I/O 延迟",
+                    "description": "确认磁盘延迟与 I/O 争抢；需要你确认一次短时采集。",
+                    "needs_approval": True,
+                })
+            if not candidates:
+                candidates.append({
+                    "type": "probe",
+                    "probe_id": "process_log_scan",
+                    "title": "扫描进程日志",
+                    "description": "查找错误/连接/超时模式，判断是否与报错类原因相关（低风险，自动执行）。",
+                    "needs_approval": False,
+                })
+            if r2_left:
+                chosen = next((item for item in candidates if item["needs_approval"]), candidates[0])
+            else:
+                chosen = next((item for item in candidates if not item["needs_approval"]), candidates[0])
+            chosen["reason"] = "当前证据不足以区分候选原因，需要补充区分性证据后再收敛结论。"
+            return chosen
+
+        # 已有根因：建议验证恢复（配合人工动作回填与 No-Regression 判定）
+        return {
+            "type": "verify",
+            "probe_id": "",
+            "title": "执行建议后验证恢复",
+            "description": "按建议执行处理后，系统会用相同参数重新采集并对比异常指标，判断是否真正恢复、是否有新退化。",
+            "needs_approval": False,
+        }
 
     @staticmethod
     def _build_recommendations(assessment: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1648,7 +1750,7 @@ class DiagnosisOrchestrator:
             "sys_metrics": ["host", "process", "container"], "top_json": ["process"],
             "ebpf_metrics": ["host", "process"], "memory_json": ["process"],
             "network_metrics": ["host", "dependency"], "database_metrics": ["dependency"],
-            "runtime_metrics": ["process", "runtime"],
+            "runtime_metrics": ["process", "runtime"], "log_scan": ["process"],
         }.get(artifact_type, [])
         evidence_record = {
             "evidence_id": evidence_id,
@@ -2145,6 +2247,35 @@ def _sys_summary(value: Any) -> dict[str, Any]:
     if isinstance(value, dict) and isinstance(value.get("summary"), dict):
         return value["summary"]
     return {}
+
+
+def _log_summary(value: Any) -> dict[str, Any] | None:
+    """把 log_scan.v1 产物聚合为 Analyzer 可用的日志摘要。"""
+    if not isinstance(value, dict):
+        return None
+    files = value.get("log_files")
+    if not isinstance(files, list) or not files:
+        return {"log_files": 0, "error_count": 0, "patterns": {}, "levels": {}}
+    levels: dict[str, int] = {}
+    patterns: dict[str, int] = {}
+    error_count = 0
+    top_errors: list[dict[str, Any]] = []
+    for item in files:
+        for level, count in (item.get("level_counts") or {}).items():
+            levels[level] = levels.get(level, 0) + int(count)
+        for pattern, count in (item.get("patterns") or {}).items():
+            patterns[pattern] = patterns.get(pattern, 0) + int(count)
+        for line in (item.get("error_lines") or []):
+            error_count += 1
+            if len(top_errors) < 10:
+                top_errors.append({"text": str(line.get("text", ""))[:300], "ts": line.get("ts", "")})
+    return {
+        "log_files": len(files),
+        "error_count": error_count,
+        "patterns": patterns,
+        "levels": levels,
+        "top_errors": top_errors,
+    }
 
 
 def _normalized_facts(values: dict[str, Any], sys_summary: dict[str, Any]) -> dict[str, Any]:

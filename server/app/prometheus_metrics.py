@@ -107,6 +107,30 @@ def record_diagnosis(status: str) -> None:
     REGISTRY.counter_inc("mini_drop_diagnosis_total", {"status": status})
 
 
+def record_source_access(source_id: str, outcome: str, latency_ms: float, result_bytes: int = 0) -> None:
+    """Record bounded-cardinality Source Gateway telemetry."""
+    REGISTRY.counter_inc(
+        "mini_drop_ai_source_access_total",
+        {"source": source_id, "outcome": outcome},
+    )
+    REGISTRY.histogram_observe("mini_drop_ai_source_access_latency_ms", latency_ms)
+    if result_bytes > 0:
+        REGISTRY.histogram_observe("mini_drop_ai_source_result_bytes", float(result_bytes))
+
+
+def record_context_optimization(
+    pipeline: str,
+    *,
+    original_chars: int,
+    optimized_chars: int,
+    redacted_fields: int,
+) -> None:
+    labels = {"pipeline": pipeline}
+    REGISTRY.counter_inc("mini_drop_ai_context_original_chars_total", labels, original_chars)
+    REGISTRY.counter_inc("mini_drop_ai_context_optimized_chars_total", labels, optimized_chars)
+    REGISTRY.counter_inc("mini_drop_ai_context_redacted_fields_total", labels, redacted_fields)
+
+
 def record_task_transition(from_status: str, to_status: str) -> None:
     """记录一次任务状态迁移。"""
     REGISTRY.counter_inc("mini_drop_task_transitions_total", {"from": from_status, "to": to_status})

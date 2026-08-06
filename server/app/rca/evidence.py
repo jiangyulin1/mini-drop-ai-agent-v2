@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 
+from server.app.ai_context import optimize_evidence_context
 from server.app.common_utils import status_value
+from server.app.prometheus_metrics import record_context_optimization
 from server.app.rca.models import EvidenceInput
 
 
@@ -73,17 +75,13 @@ def evidence_to_json(evidence: EvidenceInput) -> str:
     parts["task_metadata"] = evidence.task_metadata
 
     if evidence.top_functions:
-        parts["top_functions"] = evidence.top_functions[:10]
+        parts["top_functions"] = evidence.top_functions
 
     if evidence.ebpf_metrics:
         parts["ebpf_metrics"] = evidence.ebpf_metrics
 
     if evidence.sys_metrics:
-        sm = dict(evidence.sys_metrics)
-        # 截断 samples 数组避免超过 LLM token 限制
-        if "samples" in sm and isinstance(sm["samples"], list) and len(sm["samples"]) > 20:
-            sm["samples"] = sm["samples"][:20]
-        parts["sys_metrics"] = sm
+        parts["sys_metrics"] = evidence.sys_metrics
 
     if evidence.baseline_diff:
         parts["baseline_diff"] = evidence.baseline_diff
@@ -95,9 +93,16 @@ def evidence_to_json(evidence: EvidenceInput) -> str:
         parts["tool_results"] = evidence.tool_results
 
     if evidence.suggestions:
-        parts["suggestions"] = evidence.suggestions[:5]
+        parts["suggestions"] = evidence.suggestions
 
     if evidence.failure_events:
-        parts["failure_events"] = evidence.failure_events[-3:]  # 最近 3 条
+        parts["failure_events"] = evidence.failure_events
 
-    return json.dumps(parts, indent=2, ensure_ascii=False, default=str)
+    optimized = optimize_evidence_context(parts)
+    record_context_optimization(
+        "task_rca",
+        original_chars=optimized.stats.original_chars,
+        optimized_chars=optimized.stats.optimized_chars,
+        redacted_fields=optimized.stats.redacted_fields,
+    )
+    return json.dumps(optimized.payload, indent=2, ensure_ascii=False, default=str)

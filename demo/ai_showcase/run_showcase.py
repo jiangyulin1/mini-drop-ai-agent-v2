@@ -164,12 +164,13 @@ def _run_safety_case(case: dict[str, Any]) -> tuple[bool, Any]:
             "process_cpu_profile",
             "process_io_latency",
             "process_memory_map",
+            "process_log_scan",
         }
         actual_ids = {item.probe_id for item in probes}
         collectors = {item.runner_task_kind for item in probes}
         passed = (
             actual_ids == expected_ids
-            and collectors == {"sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps"}
+            and collectors == {"sys_metrics", "perf_cpu", "ebpf_io", "memory_smaps", "log_scan"}
             and all(item.risk_level != "R3" for item in probes)
             and all(item.requires_approval for item in probes if item.risk_level == "R2")
         )

@@ -3,13 +3,12 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Input,
   message,
-  Row,
   Skeleton,
   Space,
+  Tabs,
   Tag,
   Typography,
 } from "antd";
@@ -29,6 +28,9 @@ import {
   saveApiKey,
 } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
+import AuditLogs from "./AuditLogs";
+import DiagnosisHistory from "./DiagnosisHistory";
+import StorageMaintenance from "../components/StorageMaintenance";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
 
 export default function Settings() {
@@ -288,6 +290,35 @@ export default function Settings() {
             清除 Key 后需要重新设置才能访问受保护的 API。
           </Typography.Text>
         </Space>
+      </Card>
+
+      {/* 存储维护（低风险可回滚修复） */}
+      <StorageMaintenance />
+
+      {/* 存档：审计日志与诊断历史（配置类功能收纳于此） */}
+      <Card
+        title={
+          <Space>
+            <SafetyOutlined style={{ color: COLORS.textSecondary }} />
+            审计与存档
+          </Space>
+        }
+        size="small"
+      >
+        <Tabs
+          items={[
+            {
+              key: "audit",
+              label: "审计日志",
+              children: <AuditLogs />,
+            },
+            {
+              key: "history",
+              label: "诊断历史",
+              children: <DiagnosisHistory />,
+            },
+          ]}
+        />
       </Card>
     </Space>
   );

@@ -222,7 +222,10 @@ class DiagnosisStore:
         try:
             rows = (
                 session.query(DiagnosisSessionModel)
-                .filter(~DiagnosisSessionModel.status.in_(terminal_statuses))
+                .filter(
+                    ~DiagnosisSessionModel.status.in_(terminal_statuses),
+                    DiagnosisSessionModel.status != "PAUSED",
+                )
                 .order_by(DiagnosisSessionModel.updated_at.asc())
                 .limit(limit)
                 .all()
@@ -250,6 +253,7 @@ class DiagnosisStore:
             "status": "status",
             "lease_owner": "lease_owner",
             "lease_until": "lease_until",
+            "paused_from_status": "paused_from_status",
         }
         unknown = set(fields) - set(column_map)
         if unknown:
@@ -313,6 +317,88 @@ class DiagnosisStore:
                 from_status=previous,
                 to_status=to_status,
                 payload_json=payload or {},
+                created_at=utcnow(),
+            ))
+            session.commit()
+            session.expire_all()
+            return session.get(DiagnosisSessionModel, diagnosis_id).to_dict()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def pause_session(self, diagnosis_id: str) -> dict[str, Any]:
+        """Atomically suspend orchestration while preserving the resumable state."""
+        session = new_session()
+        try:
+            model = session.get(DiagnosisSessionModel, diagnosis_id)
+            if model is None:
+                raise ValueError(f"诊断 {diagnosis_id} 不存在")
+            if model.status == "PAUSED":
+                return model.to_dict()
+            previous = model.status
+            previous_version = model.row_version
+            changed = session.query(DiagnosisSessionModel).filter(
+                DiagnosisSessionModel.id == diagnosis_id,
+                DiagnosisSessionModel.status == previous,
+                DiagnosisSessionModel.row_version == previous_version,
+            ).update({
+                "status": "PAUSED",
+                "paused_from_status": previous,
+                "row_version": previous_version + 1,
+                "updated_at": utcnow(),
+            }, synchronize_session=False)
+            if changed != 1:
+                raise RuntimeError("diagnosis pause CAS conflict")
+            session.add(DiagnosisEventModel(
+                diagnosis_id=diagnosis_id,
+                event_type="diagnosis_paused",
+                from_status=previous,
+                to_status="PAUSED",
+                payload_json={"paused_from_status": previous},
+                created_at=utcnow(),
+            ))
+            session.commit()
+            session.expire_all()
+            return session.get(DiagnosisSessionModel, diagnosis_id).to_dict()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def resume_session(self, diagnosis_id: str) -> dict[str, Any]:
+        """Atomically restore the workflow state captured by ``pause_session``."""
+        session = new_session()
+        try:
+            model = session.get(DiagnosisSessionModel, diagnosis_id)
+            if model is None:
+                raise ValueError(f"诊断 {diagnosis_id} 不存在")
+            if model.status != "PAUSED":
+                raise ValueError("诊断当前未暂停")
+            target = model.paused_from_status
+            if not target or target == "PAUSED":
+                raise ValueError("诊断缺少可恢复状态")
+            previous_version = model.row_version
+            changed = session.query(DiagnosisSessionModel).filter(
+                DiagnosisSessionModel.id == diagnosis_id,
+                DiagnosisSessionModel.status == "PAUSED",
+                DiagnosisSessionModel.row_version == previous_version,
+            ).update({
+                "status": target,
+                "paused_from_status": None,
+                "row_version": previous_version + 1,
+                "updated_at": utcnow(),
+            }, synchronize_session=False)
+            if changed != 1:
+                raise RuntimeError("diagnosis resume CAS conflict")
+            session.add(DiagnosisEventModel(
+                diagnosis_id=diagnosis_id,
+                event_type="diagnosis_resumed",
+                from_status="PAUSED",
+                to_status=target,
+                payload_json={"resumed_to_status": target},
                 created_at=utcnow(),
             ))
             session.commit()

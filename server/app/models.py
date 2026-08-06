@@ -8,7 +8,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -207,6 +217,406 @@ class AuditLogModel(Base):
             "task_id": self.task_id,
             "metadata": self.meta_json or {},
             "created_at": self.created_at,
+        }
+
+
+class AuthorizationGrantModel(Base):
+    """Durable, revocable authorization envelope for AI source access."""
+
+    __tablename__ = "authorization_grants"
+
+    id = Column(String(128), primary_key=True)
+    principal_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    source_ids_json = Column(JSON, default=list)
+    operations_json = Column(JSON, default=list)
+    resource_scope_json = Column(JSON, default=dict)
+    mode = Column(String(32), nullable=False)
+    case_id = Column(String(128), nullable=True, index=True)
+    constraints_json = Column(JSON, default=dict)
+    valid_until = Column(DateTime(timezone=True), nullable=False, index=True)
+    uses_remaining = Column(Integer, nullable=True)
+    query_count = Column(Integer, nullable=False, default=0)
+    status = Column(String(32), nullable=False, default="ACTIVE", index=True)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_by = Column(String(128), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "grant_id": self.id,
+            "principal_id": self.principal_id,
+            "tenant_id": self.tenant_id,
+            "source_ids": self.source_ids_json or [],
+            "operations": self.operations_json or [],
+            "resource_scope": self.resource_scope_json or {},
+            "mode": self.mode,
+            "case_id": self.case_id,
+            "constraints": self.constraints_json or {},
+            "valid_until": self.valid_until,
+            "uses_remaining": self.uses_remaining,
+            "query_count": self.query_count or 0,
+            "status": self.status,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "revoked_at": self.revoked_at,
+            "revoked_by": self.revoked_by,
+        }
+
+
+# ── AI Incident Case 协作层 ─────────────────────────────────────
+
+
+class IncidentCaseModel(Base):
+    """Tenant-scoped user collaboration aggregate over a diagnosis session."""
+
+    __tablename__ = "incident_cases"
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_incident_case_tenant"),
+    )
+
+    id = Column(String(128), primary_key=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    created_by = Column(String(128), nullable=False, index=True)
+    diagnosis_session_id = Column(
+        String(128), ForeignKey("diagnosis_sessions.id"), nullable=True, index=True,
+    )
+    source_task_id = Column(String(128), ForeignKey("tasks.id"), nullable=True, index=True)
+    title = Column(String(256), nullable=False)
+    problem_description = Column(Text, nullable=False)
+    recovery_goal = Column(Text, nullable=False)
+    run_mode = Column(String(32), nullable=False)
+    environment = Column(String(64), nullable=False)
+    target_scope_json = Column(JSON, default=dict)
+    time_range_json = Column(JSON, default=dict)
+    state = Column(String(40), nullable=False, index=True)
+    state_reason = Column(String(128), nullable=False)
+    impact_json = Column(JSON, default=dict)
+    current_finding_json = Column(JSON, default=dict)
+    current_activity_json = Column(JSON, default=dict)
+    need_user_json = Column(JSON, default=dict)
+    recovery_json = Column(JSON, default=dict)
+    scope_revision = Column(Integer, nullable=False, default=1)
+    row_version = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    stopped_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "case_id": self.id,
+            "tenant_id": self.tenant_id,
+            "created_by": self.created_by,
+            "diagnosis_session_id": self.diagnosis_session_id,
+            "source_task_id": self.source_task_id,
+            "title": self.title,
+            "problem_description": self.problem_description,
+            "recovery_goal": self.recovery_goal,
+            "run_mode": self.run_mode,
+            "environment": self.environment,
+            "target_scope": self.target_scope_json or {},
+            "time_range": self.time_range_json or {},
+            "state": self.state,
+            "state_reason": self.state_reason,
+            "summary": {
+                "impact": self.impact_json or {},
+                "current_finding": self.current_finding_json or {},
+                "what_ai_is_doing": self.current_activity_json or {},
+                "need_you": self.need_user_json or {},
+                "recovery": self.recovery_json or {},
+            },
+            "scope_revision": self.scope_revision,
+            "row_version": self.row_version,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "stopped_at": self.stopped_at,
+            "resolved_at": self.resolved_at,
+        }
+
+
+class CaseEventModel(Base):
+    """Immutable, tenant-bound Case timeline event."""
+
+    __tablename__ = "case_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_case_event_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    actor_id = Column(String(128), nullable=False)
+    payload_json = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "event_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "event_type": self.event_type,
+            "actor_id": self.actor_id,
+            "payload": self.payload_json or {},
+            "created_at": self.created_at,
+        }
+
+
+class ContextPacketModel(Base):
+    """Immutable, versioned projection used as one Case model-call input."""
+
+    __tablename__ = "case_context_packets"
+    __table_args__ = (
+        UniqueConstraint(
+            "id", "case_id", "tenant_id", name="uq_context_packet_case_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_context_packet_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    schema_version = Column(String(64), nullable=False)
+    purpose = Column(String(128), nullable=False)
+    iteration_no = Column(Integer, nullable=False)
+    payload_json = Column(JSON, nullable=False)
+    projection_stats_json = Column(JSON, default=dict)
+    source_versions_json = Column(JSON, default=dict)
+    content_hash = Column(String(64), nullable=False)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "context_packet_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "schema_version": self.schema_version,
+            "purpose": self.purpose,
+            "iteration_no": self.iteration_no,
+            "payload": self.payload_json or {},
+            "projection_stats": self.projection_stats_json or {},
+            "source_versions": self.source_versions_json or {},
+            "content_hash": self.content_hash,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+        }
+
+
+class ModelAttemptModel(Base):
+    """Auditable model-call metadata; raw reasoning and credentials are never stored."""
+
+    __tablename__ = "case_model_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["context_packet_id", "case_id", "tenant_id"],
+            [
+                "case_context_packets.id",
+                "case_context_packets.case_id",
+                "case_context_packets.tenant_id",
+            ],
+            name="fk_model_attempt_context_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    context_packet_id = Column(String(128), nullable=False, index=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    provider = Column(String(64), nullable=False)
+    model = Column(String(128), nullable=False)
+    model_snapshot = Column(String(128), nullable=True)
+    prompt_version = Column(String(128), nullable=False)
+    output_schema = Column(String(128), nullable=False)
+    status = Column(String(32), nullable=False)
+    latency_ms = Column(Integer, nullable=False, default=0)
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    response_hash = Column(String(64), nullable=True)
+    error_code = Column(String(128), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "model_attempt_id": self.id,
+            "context_packet_id": self.context_packet_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "provider": self.provider,
+            "model": self.model,
+            "model_snapshot": self.model_snapshot,
+            "prompt_version": self.prompt_version,
+            "output_schema": self.output_schema,
+            "status": self.status,
+            "latency_ms": self.latency_ms,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "response_hash": self.response_hash,
+            "error_code": self.error_code,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+
+class CaseHypothesisNodeModel(Base):
+    """Normalized Case hypothesis with explicit support, contradiction and gaps."""
+
+    __tablename__ = "case_hypothesis_nodes"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "hypothesis_id", name="uq_case_hypothesis",
+        ),
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_hypothesis_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    hypothesis_id = Column(String(128), nullable=False, index=True)
+    statement = Column(Text, nullable=False)
+    root_entity = Column(String(256), nullable=True)
+    mechanism = Column(String(128), nullable=True)
+    affected_entities_json = Column(JSON, default=list)
+    status = Column(String(32), nullable=False, index=True)
+    supporting_evidence_refs_json = Column(JSON, default=list)
+    contradicting_evidence_refs_json = Column(JSON, default=list)
+    missing_evidence_json = Column(JSON, default=list)
+    alternatives_json = Column(JSON, default=list)
+    score_components_json = Column(JSON, default=dict)
+    source = Column(String(64), nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "hypothesis_id": self.hypothesis_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "statement": self.statement,
+            "root_entity": self.root_entity,
+            "mechanism": self.mechanism,
+            "affected_entities": self.affected_entities_json or [],
+            "status": self.status,
+            "supporting_evidence_refs": self.supporting_evidence_refs_json or [],
+            "contradicting_evidence_refs": self.contradicting_evidence_refs_json or [],
+            "missing_evidence": self.missing_evidence_json or [],
+            "alternatives": self.alternatives_json or [],
+            "score_components": self.score_components_json or {},
+            "source": self.source,
+            "revision": self.revision,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class CaseHypothesisEdgeModel(Base):
+    __tablename__ = "case_hypothesis_edges"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_hypothesis_edge_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    source_hypothesis_id = Column(String(128), nullable=False)
+    target_hypothesis_id = Column(String(128), nullable=False)
+    relation = Column(String(32), nullable=False)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "edge_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "source": self.source_hypothesis_id,
+            "target": self.target_hypothesis_id,
+            "relation": self.relation,
+            "metadata": self.metadata_json or {},
+            "created_at": self.created_at,
+        }
+
+
+class InvestigationIterationModel(Base):
+    """One auditable Case investigation decision and its observed outcome."""
+
+    __tablename__ = "case_investigation_iterations"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "iteration_no", name="uq_case_iteration_no",
+        ),
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_iteration_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    iteration_no = Column(Integer, nullable=False)
+    context_packet_id = Column(
+        String(128), ForeignKey("case_context_packets.id"), nullable=True, index=True,
+    )
+    status = Column(String(32), nullable=False, index=True)
+    input_evidence_refs_json = Column(JSON, default=list)
+    hypothesis_changes_json = Column(JSON, default=list)
+    candidate_actions_json = Column(JSON, default=list)
+    selected_action_json = Column(JSON, default=dict)
+    policy_decision_json = Column(JSON, default=dict)
+    cost_json = Column(JSON, default=dict)
+    result_json = Column(JSON, default=dict)
+    stop_decision_json = Column(JSON, default=dict)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "iteration_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "iteration_no": self.iteration_no,
+            "context_packet_id": self.context_packet_id,
+            "status": self.status,
+            "input_evidence_refs": self.input_evidence_refs_json or [],
+            "hypothesis_changes": self.hypothesis_changes_json or [],
+            "candidate_actions": self.candidate_actions_json or [],
+            "selected_action": self.selected_action_json or {},
+            "policy_decision": self.policy_decision_json or {},
+            "cost": self.cost_json or {},
+            "result": self.result_json or {},
+            "stop_decision": self.stop_decision_json or {},
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "finished_at": self.finished_at,
         }
 
 
@@ -543,6 +953,7 @@ class DiagnosisSessionModel(Base):
     planner_version = Column(String(64), nullable=False)
     lease_owner = Column(String(128), nullable=True)
     lease_until = Column(DateTime(timezone=True), nullable=True)
+    paused_from_status = Column(String(32), nullable=True)
     row_version = Column(Integer, nullable=False, default=0)
     deadline_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
@@ -572,6 +983,7 @@ class DiagnosisSessionModel(Base):
             "planner_version": self.planner_version,
             "lease_owner": self.lease_owner,
             "lease_until": self.lease_until,
+            "paused_from_status": self.paused_from_status,
             "row_version": self.row_version,
             "deadline_at": self.deadline_at,
             "created_at": self.created_at,

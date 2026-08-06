@@ -30,9 +30,18 @@ from server.app.models import (
     AgentModel,
     ArtifactModel,
     AuditLogModel,
+    AuthorizationGrantModel,
+    CaseHypothesisEdgeModel,
+    CaseHypothesisNodeModel,
+    CaseEventModel,
+    ContextPacketModel,
     DiagnosisReportModel,
     DiagnosisRunModel,
+    DiagnosisSessionModel,
     DiagnosisToolResultModel,
+    IncidentCaseModel,
+    InvestigationIterationModel,
+    ModelAttemptModel,
     ProbeExecutionModel,
     RCAFeedbackModel,
     RCAFeedbackWeightModel,
@@ -133,6 +142,18 @@ class SqlRepository:
         return query.first()
 
     @staticmethod
+    def _locked_case(
+        session: OrmSession, case_id: str, tenant_id: str,
+    ) -> IncidentCaseModel | None:
+        query = session.query(IncidentCaseModel).filter(
+            IncidentCaseModel.id == case_id,
+            IncidentCaseModel.tenant_id == tenant_id,
+        )
+        if session.bind is not None and session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.first()
+
+    @staticmethod
     def _notify_after_commit(session: OrmSession, event_type: str, data: dict[str, Any]) -> None:
         """注册一个只在事务提交成功后执行的 SSE 通知。"""
         hooks = session.info.setdefault("_post_commit_notifications", [])
@@ -151,6 +172,1035 @@ class SqlRepository:
             yield session
         finally:
             session.close()
+
+    # ------------------------------------------------------------------
+    # Incident Case collaboration
+    # ------------------------------------------------------------------
+
+    def create_incident_case(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from server.app.case_collaboration import initial_case_state, initial_summary
+
+        now = now_utc()
+        target_scope = payload.get("target_scope") or {}
+        state, state_reason = initial_case_state(target_scope)
+        summary = initial_summary(
+            target_scope=target_scope,
+            recovery_goal=payload["recovery_goal"],
+            state=state,
+        )
+        case = IncidentCaseModel(
+            id=f"case_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:10]}",
+            tenant_id=payload["tenant_id"],
+            created_by=payload["created_by"],
+            diagnosis_session_id=payload.get("diagnosis_session_id"),
+            source_task_id=payload.get("source_task_id"),
+            title=payload["title"],
+            problem_description=payload["problem_description"],
+            recovery_goal=payload["recovery_goal"],
+            run_mode=payload["run_mode"],
+            environment=payload["environment"],
+            target_scope_json=target_scope,
+            time_range_json=payload.get("time_range") or {},
+            state=state.value,
+            state_reason=state_reason,
+            impact_json=summary["impact"],
+            current_finding_json=summary["current_finding"],
+            current_activity_json=summary["what_ai_is_doing"],
+            need_user_json=summary["need_you"],
+            recovery_json=summary["recovery"],
+            scope_revision=1,
+            row_version=0,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._write_session() as session:
+            if case.diagnosis_session_id and session.get(
+                DiagnosisSessionModel, case.diagnosis_session_id,
+            ) is None:
+                raise ValueError("DIAGNOSIS_SESSION_NOT_FOUND")
+            if case.source_task_id and session.get(TaskModel, case.source_task_id) is None:
+                raise ValueError("SOURCE_TASK_NOT_FOUND")
+            session.add(case)
+            session.flush()
+            event = CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type="case_created",
+                actor_id=case.created_by,
+                payload_json={
+                    "state": case.state,
+                    "state_reason": case.state_reason,
+                    "run_mode": case.run_mode,
+                    "scope_revision": case.scope_revision,
+                },
+                created_at=now,
+            )
+            session.add(event)
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": case.tenant_id,
+                "state": case.state,
+            })
+            if case.state == "NEEDS_SCOPE_CONFIRMATION":
+                self._notify_after_commit(session, "scope_confirmation_required", {
+                    "case_id": case.id,
+                    "tenant_id": case.tenant_id,
+                })
+            result = case.to_dict()
+        return result
+
+    def get_incident_case(self, case_id: str, tenant_id: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(IncidentCaseModel).filter(
+                IncidentCaseModel.id == case_id,
+                IncidentCaseModel.tenant_id == tenant_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def list_incident_cases(
+        self,
+        tenant_id: str,
+        *,
+        state: str = "",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(IncidentCaseModel).filter(
+                IncidentCaseModel.tenant_id == tenant_id,
+            )
+            if state:
+                query = query.filter(IncidentCaseModel.state == state)
+            rows = query.order_by(IncidentCaseModel.updated_at.desc()).offset(offset).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    def count_incident_cases(self, tenant_id: str, *, state: str = "") -> int:
+        with self._read_session() as session:
+            query = session.query(IncidentCaseModel).filter(
+                IncidentCaseModel.tenant_id == tenant_id,
+            )
+            if state:
+                query = query.filter(IncidentCaseModel.state == state)
+            return query.count()
+
+    def list_case_events(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        limit: int = 200,
+        after_id: int = 0,
+    ) -> list[dict[str, Any]] | None:
+        with self._read_session() as session:
+            exists = session.query(IncidentCaseModel.id).filter(
+                IncidentCaseModel.id == case_id,
+                IncidentCaseModel.tenant_id == tenant_id,
+            ).first()
+            if exists is None:
+                return None
+            rows = session.query(CaseEventModel).filter(
+                CaseEventModel.case_id == case_id,
+                CaseEventModel.tenant_id == tenant_id,
+                CaseEventModel.id > after_id,
+            ).order_by(CaseEventModel.id.asc()).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    def append_case_message(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        actor_id: str,
+        content: str,
+        kind: str,
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if case.state == "STOPPED":
+                raise ValueError("CASE_STOPPED")
+            event = CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type="user_message",
+                actor_id=actor_id,
+                payload_json={"kind": kind, "content": content},
+                created_at=now,
+            )
+            session.add(event)
+            case.updated_at = now
+            case.row_version += 1
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+                "row_version": case.row_version,
+            })
+            return event.to_dict()
+
+    def record_case_event(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        actor_id: str = "system",
+    ) -> dict[str, Any] | None:
+        """写入一条非用户消息的 Case 时间线事件（验证/人工动作/系统事实）。"""
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if case.state == "STOPPED":
+                raise ValueError("CASE_STOPPED")
+            event = CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type=event_type,
+                actor_id=actor_id,
+                payload_json=payload,
+                created_at=now,
+            )
+            session.add(event)
+            case.updated_at = now
+            case.row_version += 1
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+                "row_version": case.row_version,
+            })
+            return event.to_dict()
+
+    def correct_incident_case(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        actor_id: str,
+        changes: dict[str, Any],
+        reason: str,
+        expected_row_version: int | None = None,
+    ) -> dict[str, Any] | None:
+        from server.app.case_collaboration import initial_case_state, initial_summary
+
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if case.state in {"STOPPED", "RESOLVED"}:
+                raise ValueError("CASE_TERMINAL")
+            if expected_row_version is not None and case.row_version != expected_row_version:
+                raise ValueError("CASE_VERSION_CONFLICT")
+
+            superseded_diagnosis_id = case.diagnosis_session_id
+            session.query(CaseHypothesisNodeModel).filter(
+                CaseHypothesisNodeModel.case_id == case.id,
+                CaseHypothesisNodeModel.tenant_id == tenant_id,
+                CaseHypothesisNodeModel.status.notin_(["RULED_OUT", "WEAKENED"]),
+            ).update({
+                CaseHypothesisNodeModel.status: "WEAKENED",
+                CaseHypothesisNodeModel.missing_evidence_json: [
+                    "Case scope revision changed; hypothesis requires revalidation",
+                ],
+                CaseHypothesisNodeModel.updated_at: now,
+            }, synchronize_session=False)
+            changed_fields: list[str] = []
+            direct_fields = {
+                "problem_description": "problem_description",
+                "recovery_goal": "recovery_goal",
+                "environment": "environment",
+            }
+            for input_name, attr_name in direct_fields.items():
+                if input_name in changes:
+                    setattr(case, attr_name, changes[input_name])
+                    changed_fields.append(input_name)
+            if "target_scope" in changes:
+                case.target_scope_json = changes["target_scope"] or {}
+                changed_fields.append("target_scope")
+            if "time_range" in changes:
+                case.time_range_json = changes["time_range"] or {}
+                changed_fields.append("time_range")
+
+            state, state_reason = initial_case_state(case.target_scope_json or {})
+            summary = initial_summary(
+                target_scope=case.target_scope_json or {},
+                recovery_goal=case.recovery_goal,
+                state=state,
+            )
+            if case.state != "PAUSED":
+                case.state = state.value
+                case.state_reason = f"case_corrected:{state_reason}"
+            case.current_finding_json = {
+                "status": "invalidated",
+                "statement": "范围或恢复目标已被用户修正，旧判断等待重新验证",
+                "evidence_refs": [],
+            }
+            case.current_activity_json = summary["what_ai_is_doing"]
+            case.need_user_json = summary["need_you"]
+            case.recovery_json = {**summary["recovery"], "status": "not_started"}
+            case.diagnosis_session_id = None
+            case.scope_revision += 1
+            case.row_version += 1
+            case.updated_at = now
+            event = CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type="case_corrected",
+                actor_id=actor_id,
+                payload_json={
+                    "reason": reason,
+                    "changed_fields": changed_fields,
+                    "scope_revision": case.scope_revision,
+                    "invalidates_pending_plan": True,
+                    "superseded_diagnosis_id": superseded_diagnosis_id,
+                    "state": case.state,
+                },
+                created_at=now,
+            )
+            session.add(event)
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+                "scope_revision": case.scope_revision,
+            })
+            if case.state == "NEEDS_SCOPE_CONFIRMATION":
+                self._notify_after_commit(session, "scope_confirmation_required", {
+                    "case_id": case.id,
+                    "tenant_id": tenant_id,
+                })
+            return case.to_dict()
+
+    def transition_incident_case(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        actor_id: str,
+        action: str,
+        reason: str,
+        expected_row_version: int | None = None,
+    ) -> dict[str, Any] | None:
+        from server.app.case_collaboration import initial_case_state
+
+        if action not in {"pause", "resume", "stop", "resolve"}:
+            raise ValueError("INVALID_CASE_ACTION")
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if expected_row_version is not None and case.row_version != expected_row_version:
+                raise ValueError("CASE_VERSION_CONFLICT")
+
+            previous = case.state
+            if action == "pause":
+                if previous in {"RESOLVED", "INSUFFICIENT_EVIDENCE", "STOPPED"}:
+                    raise ValueError("CASE_TERMINAL")
+                target = "PAUSED"
+                event_type = "case_paused"
+            elif action == "resume":
+                if previous != "PAUSED":
+                    raise ValueError("CASE_NOT_PAUSED")
+                target, _ = initial_case_state(case.target_scope_json or {})
+                target = target.value
+                event_type = "case_resumed"
+            elif action == "stop":
+                if previous in {"RESOLVED", "INSUFFICIENT_EVIDENCE"}:
+                    raise ValueError("CASE_TERMINAL")
+                target = "STOPPED"
+                event_type = "case_stopped"
+            else:
+                if previous == "STOPPED":
+                    raise ValueError("CASE_TERMINAL")
+                target = "RESOLVED"
+                event_type = "case_resolved"
+
+            if previous == target:
+                return case.to_dict()
+            case.state = target
+            case.state_reason = reason
+            case.updated_at = now
+            case.row_version += 1
+            if target == "STOPPED":
+                case.stopped_at = now
+                case.current_activity_json = {
+                    "status": "stopped",
+                    "message": "Case 已停止，不再执行新的调查动作",
+                }
+                session.query(AuthorizationGrantModel).filter(
+                    AuthorizationGrantModel.case_id == case.id,
+                    AuthorizationGrantModel.tenant_id == tenant_id,
+                    AuthorizationGrantModel.status == "ACTIVE",
+                ).update({
+                    AuthorizationGrantModel.status: "REVOKED",
+                    AuthorizationGrantModel.revoked_at: now,
+                    AuthorizationGrantModel.revoked_by: actor_id,
+                }, synchronize_session=False)
+            elif target == "RESOLVED":
+                case.resolved_at = now
+                case.current_activity_json = {
+                    "status": "resolved",
+                    "message": "用户确认问题已解决",
+                }
+                case.need_user_json = {"required": False, "question": ""}
+                case.recovery_json = {
+                    **(case.recovery_json or {}),
+                    "status": "verified",
+                    "stable_since": now.isoformat(),
+                }
+                session.query(AuthorizationGrantModel).filter(
+                    AuthorizationGrantModel.case_id == case.id,
+                    AuthorizationGrantModel.tenant_id == tenant_id,
+                    AuthorizationGrantModel.status == "ACTIVE",
+                ).update({
+                    AuthorizationGrantModel.status: "REVOKED",
+                    AuthorizationGrantModel.revoked_at: now,
+                    AuthorizationGrantModel.revoked_by: actor_id,
+                }, synchronize_session=False)
+
+            session.add(CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type=event_type,
+                actor_id=actor_id,
+                payload_json={
+                    "from_state": previous,
+                    "to_state": target,
+                    "reason": reason,
+                },
+                created_at=now,
+            ))
+            session.add(AuditLogModel(
+                event_type=event_type.upper(),
+                message=f"Case {case.id}: {event_type}",
+                meta_json={
+                    "case_id": case.id,
+                    "tenant_id": tenant_id,
+                    "actor_id": actor_id,
+                    "from_state": previous,
+                    "to_state": target,
+                    "reason": reason,
+                },
+                created_at=now,
+            ))
+            session.flush()
+            self._notify_after_commit(session, event_type, {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": target,
+            })
+            return case.to_dict()
+
+    def attach_case_diagnosis(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        diagnosis_id: str,
+        actor_id: str,
+        expected_row_version: int | None = None,
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if case.state in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
+                raise ValueError("CASE_NOT_INVESTIGATABLE")
+            if case.diagnosis_session_id:
+                if case.diagnosis_session_id == diagnosis_id:
+                    return case.to_dict()
+                raise ValueError("CASE_DIAGNOSIS_ALREADY_ATTACHED")
+            if expected_row_version is not None and case.row_version != expected_row_version:
+                raise ValueError("CASE_VERSION_CONFLICT")
+            diagnosis = session.get(DiagnosisSessionModel, diagnosis_id)
+            if diagnosis is None:
+                raise ValueError("DIAGNOSIS_SESSION_NOT_FOUND")
+            previous_state = case.state
+            case.diagnosis_session_id = diagnosis_id
+            if diagnosis.status in {"NEEDS_SCOPE_CONFIRMATION", "WAITING_APPROVAL"}:
+                case.state = "WAITING_USER"
+                case.state_reason = diagnosis.status.lower()
+                case.need_user_json = {
+                    "required": True,
+                    "question": (
+                        "请确认服务实例、宿主机或 PID 范围"
+                        if diagnosis.status == "NEEDS_SCOPE_CONFIRMATION"
+                        else "请审查待批准的诊断探针"
+                    ),
+                }
+                case.current_activity_json = {
+                    "status": "waiting_user",
+                    "message": "关联诊断正在等待用户输入",
+                    "diagnosis_session_id": diagnosis_id,
+                }
+            elif diagnosis.status in {
+                "INSUFFICIENT_EVIDENCE", "BUDGET_EXHAUSTED", "TOPOLOGY_UNAVAILABLE",
+            }:
+                case.state = "INSUFFICIENT_EVIDENCE"
+                case.state_reason = diagnosis.status.lower()
+                case.current_activity_json = {
+                    "status": "stopped",
+                    "message": f"关联诊断结束：{diagnosis.status}",
+                    "diagnosis_session_id": diagnosis_id,
+                }
+            elif diagnosis.status in {"COMPLETED", "PARTIAL_COMPLETED"}:
+                case.state = "RECOVERY_PLANNING"
+                case.state_reason = "diagnosis_concluded"
+                case.current_activity_json = {
+                    "status": "recovery_planning",
+                    "message": "诊断已形成结论，等待恢复方案",
+                    "diagnosis_session_id": diagnosis_id,
+                }
+            else:
+                case.state = "INVESTIGATING"
+                case.state_reason = "diagnosis_started"
+                case.current_activity_json = {
+                    "status": "investigating",
+                    "message": "关联诊断正在推进",
+                    "diagnosis_session_id": diagnosis_id,
+                }
+            case.row_version += 1
+            case.updated_at = now
+            session.add(CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type="diagnosis_started",
+                actor_id=actor_id,
+                payload_json={
+                    "diagnosis_session_id": diagnosis_id,
+                    "from_state": previous_state,
+                    "to_state": case.state,
+                },
+                created_at=now,
+            ))
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+                "diagnosis_session_id": diagnosis_id,
+            })
+            return case.to_dict()
+
+    def create_context_packet(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, payload["case_id"], payload["tenant_id"])
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            latest = session.query(ContextPacketModel.iteration_no).filter(
+                ContextPacketModel.case_id == case.id,
+                ContextPacketModel.tenant_id == case.tenant_id,
+            ).order_by(ContextPacketModel.iteration_no.desc()).first()
+            iteration_no = int(payload.get("iteration_no", (latest[0] + 1) if latest else 0))
+            packet = ContextPacketModel(
+                id=f"ctx_{uuid4().hex}",
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                schema_version=payload["schema_version"],
+                purpose=payload["purpose"],
+                iteration_no=iteration_no,
+                payload_json=payload["payload"],
+                projection_stats_json=payload.get("projection_stats") or {},
+                source_versions_json=payload.get("source_versions") or {},
+                content_hash=payload["content_hash"],
+                created_by=payload["created_by"],
+                created_at=now,
+            )
+            session.add(packet)
+            session.flush()
+            session.add(CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type="context_packet_created",
+                actor_id=payload["created_by"],
+                payload_json={
+                    "context_packet_id": packet.id,
+                    "schema_version": packet.schema_version,
+                    "purpose": packet.purpose,
+                    "iteration_no": packet.iteration_no,
+                    "content_hash": packet.content_hash,
+                },
+                created_at=now,
+            ))
+            return packet.to_dict()
+
+    def list_context_packets(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]] | None:
+        with self._read_session() as session:
+            exists = session.query(IncidentCaseModel.id).filter(
+                IncidentCaseModel.id == case_id,
+                IncidentCaseModel.tenant_id == tenant_id,
+            ).first()
+            if exists is None:
+                return None
+            rows = session.query(ContextPacketModel).filter(
+                ContextPacketModel.case_id == case_id,
+                ContextPacketModel.tenant_id == tenant_id,
+            ).order_by(ContextPacketModel.iteration_no.desc()).offset(offset).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    def record_model_attempt(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._write_session() as session:
+            packet = session.query(ContextPacketModel).filter(
+                ContextPacketModel.id == payload["context_packet_id"],
+                ContextPacketModel.case_id == payload["case_id"],
+                ContextPacketModel.tenant_id == payload["tenant_id"],
+            ).first()
+            if packet is None:
+                raise ValueError("CONTEXT_PACKET_NOT_FOUND")
+            attempt = ModelAttemptModel(
+                id=f"model_attempt_{uuid4().hex}",
+                context_packet_id=packet.id,
+                case_id=packet.case_id,
+                tenant_id=packet.tenant_id,
+                provider=payload["provider"],
+                model=payload["model"],
+                model_snapshot=payload.get("model_snapshot"),
+                prompt_version=payload["prompt_version"],
+                output_schema=payload["output_schema"],
+                status=payload["status"],
+                latency_ms=max(0, int(payload.get("latency_ms", 0))),
+                input_tokens=payload.get("input_tokens"),
+                output_tokens=payload.get("output_tokens"),
+                response_hash=payload.get("response_hash"),
+                error_code=payload.get("error_code"),
+                started_at=payload["started_at"],
+                finished_at=payload["finished_at"],
+            )
+            session.add(attempt)
+            session.flush()
+            return attempt.to_dict()
+
+    def list_model_attempts(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]] | None:
+        with self._read_session() as session:
+            exists = session.query(IncidentCaseModel.id).filter(
+                IncidentCaseModel.id == case_id,
+                IncidentCaseModel.tenant_id == tenant_id,
+            ).first()
+            if exists is None:
+                return None
+            rows = session.query(ModelAttemptModel).filter(
+                ModelAttemptModel.case_id == case_id,
+                ModelAttemptModel.tenant_id == tenant_id,
+            ).order_by(ModelAttemptModel.started_at.desc()).offset(offset).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    def sync_case_hypothesis_graph(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        graph: dict[str, Any],
+        source: str,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        status_map = {
+            "UNTESTED": "PROPOSED",
+            "PROPOSED": "PROPOSED",
+            "ACTIVE": "ACTIVE",
+            "SUPPORTED": "ACTIVE",
+            "WEAKENED": "WEAKENED",
+            "RULED_OUT": "RULED_OUT",
+            "CONFIRMED": "CONFIRMED",
+            "UNKNOWN": "UNKNOWN",
+        }
+        hypotheses = list(graph.get("hypotheses") or [])
+        if not any(item.get("hypothesis_id") == "OTHER_UNKNOWN" for item in hypotheses):
+            hypotheses.append({
+                "hypothesis_id": "OTHER_UNKNOWN",
+                "statement": "当前候选集合之外仍可能存在未知原因",
+                "status": "UNKNOWN",
+                "missing_evidence": ["需要能够区分开放集未知原因的新证据"],
+            })
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            incoming_ids: set[str] = set()
+            changes: list[dict[str, Any]] = []
+            for item in hypotheses:
+                hypothesis_id = str(item.get("hypothesis_id") or "").strip()
+                if not hypothesis_id:
+                    continue
+                incoming_ids.add(hypothesis_id)
+                status = status_map.get(str(item.get("status") or "UNTESTED"), "PROPOSED")
+                statement = str(
+                    item.get("statement")
+                    or item.get("description")
+                    or item.get("type")
+                    or hypothesis_id
+                )[:4000]
+                row = session.query(CaseHypothesisNodeModel).filter(
+                    CaseHypothesisNodeModel.case_id == case_id,
+                    CaseHypothesisNodeModel.tenant_id == tenant_id,
+                    CaseHypothesisNodeModel.hypothesis_id == hypothesis_id,
+                ).first()
+                previous_status = row.status if row else None
+                if row is None:
+                    row = CaseHypothesisNodeModel(
+                        id=f"hyp_node_{uuid4().hex}",
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        hypothesis_id=hypothesis_id,
+                        created_at=now,
+                        revision=1,
+                    )
+                    session.add(row)
+                else:
+                    row.revision += 1
+                row.statement = statement
+                row.root_entity = item.get("root_entity") or item.get("target_ref")
+                row.mechanism = item.get("mechanism") or item.get("type")
+                row.affected_entities_json = item.get("affected_entities") or []
+                row.status = status
+                row.supporting_evidence_refs_json = item.get("supporting_evidence_refs") or []
+                row.contradicting_evidence_refs_json = item.get("contradicting_evidence_refs") or []
+                row.missing_evidence_json = item.get("missing_evidence") or []
+                row.alternatives_json = item.get("alternatives") or ["OTHER_UNKNOWN"]
+                row.score_components_json = item.get("score_components") or {
+                    "evidence_score": item.get("evidence_score", 0),
+                }
+                row.source = source
+                row.updated_at = now
+                changes.append({
+                    "hypothesis_id": hypothesis_id,
+                    "from_status": previous_status,
+                    "to_status": status,
+                    "revision": row.revision,
+                })
+
+            session.query(CaseHypothesisEdgeModel).filter(
+                CaseHypothesisEdgeModel.case_id == case_id,
+                CaseHypothesisEdgeModel.tenant_id == tenant_id,
+            ).delete(synchronize_session=False)
+            for edge in graph.get("edges") or []:
+                source_id = edge.get("source") or edge.get("source_hypothesis_id")
+                target_id = edge.get("target") or edge.get("target_hypothesis_id")
+                if source_id not in incoming_ids or target_id not in incoming_ids:
+                    continue
+                session.add(CaseHypothesisEdgeModel(
+                    id=f"hyp_edge_{uuid4().hex}",
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    source_hypothesis_id=source_id,
+                    target_hypothesis_id=target_id,
+                    relation=str(edge.get("relation") or "ALTERNATIVE_TO")[:32],
+                    metadata_json=edge.get("metadata") or {},
+                    created_at=now,
+                ))
+            session.add(CaseEventModel(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                event_type="hypothesis_graph_updated",
+                actor_id=actor_id,
+                payload_json={"changes": changes, "source": source},
+                created_at=now,
+            ))
+            session.flush()
+            nodes = session.query(CaseHypothesisNodeModel).filter(
+                CaseHypothesisNodeModel.case_id == case_id,
+                CaseHypothesisNodeModel.tenant_id == tenant_id,
+            ).order_by(CaseHypothesisNodeModel.hypothesis_id.asc()).all()
+            edges = session.query(CaseHypothesisEdgeModel).filter(
+                CaseHypothesisEdgeModel.case_id == case_id,
+                CaseHypothesisEdgeModel.tenant_id == tenant_id,
+            ).all()
+            return {
+                "hypotheses": [row.to_dict() for row in nodes],
+                "edges": [row.to_dict() for row in edges],
+            }
+
+    def get_case_hypothesis_graph(
+        self, case_id: str, tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            exists = session.query(IncidentCaseModel.id).filter(
+                IncidentCaseModel.id == case_id,
+                IncidentCaseModel.tenant_id == tenant_id,
+            ).first()
+            if exists is None:
+                return None
+            nodes = session.query(CaseHypothesisNodeModel).filter(
+                CaseHypothesisNodeModel.case_id == case_id,
+                CaseHypothesisNodeModel.tenant_id == tenant_id,
+            ).order_by(CaseHypothesisNodeModel.hypothesis_id.asc()).all()
+            edges = session.query(CaseHypothesisEdgeModel).filter(
+                CaseHypothesisEdgeModel.case_id == case_id,
+                CaseHypothesisEdgeModel.tenant_id == tenant_id,
+            ).all()
+            return {
+                "hypotheses": [row.to_dict() for row in nodes],
+                "edges": [row.to_dict() for row in edges],
+            }
+
+    def create_investigation_iteration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, payload["case_id"], payload["tenant_id"])
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            latest = session.query(InvestigationIterationModel.iteration_no).filter(
+                InvestigationIterationModel.case_id == case.id,
+                InvestigationIterationModel.tenant_id == case.tenant_id,
+            ).order_by(InvestigationIterationModel.iteration_no.desc()).first()
+            iteration_no = int(payload.get("iteration_no", (latest[0] + 1) if latest else 0))
+            iteration = InvestigationIterationModel(
+                id=f"iteration_{uuid4().hex}",
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                iteration_no=iteration_no,
+                context_packet_id=payload.get("context_packet_id"),
+                status=payload.get("status", "COMPLETED"),
+                input_evidence_refs_json=payload.get("input_evidence_refs") or [],
+                hypothesis_changes_json=payload.get("hypothesis_changes") or [],
+                candidate_actions_json=payload.get("candidate_actions") or [],
+                selected_action_json=payload.get("selected_action") or {},
+                policy_decision_json=payload.get("policy_decision") or {},
+                cost_json=payload.get("cost") or {},
+                result_json=payload.get("result") or {},
+                stop_decision_json=payload.get("stop_decision") or {},
+                created_by=payload["created_by"],
+                created_at=now,
+                finished_at=now if payload.get("status", "COMPLETED") == "COMPLETED" else None,
+            )
+            session.add(iteration)
+            session.flush()
+            session.add(CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type="investigation_iteration_completed",
+                actor_id=payload["created_by"],
+                payload_json={
+                    "iteration_id": iteration.id,
+                    "iteration_no": iteration.iteration_no,
+                    "selected_action": iteration.selected_action_json,
+                    "stop_decision": iteration.stop_decision_json,
+                },
+                created_at=now,
+            ))
+            return iteration.to_dict()
+
+    def list_investigation_iterations(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]] | None:
+        with self._read_session() as session:
+            exists = session.query(IncidentCaseModel.id).filter(
+                IncidentCaseModel.id == case_id,
+                IncidentCaseModel.tenant_id == tenant_id,
+            ).first()
+            if exists is None:
+                return None
+            rows = session.query(InvestigationIterationModel).filter(
+                InvestigationIterationModel.case_id == case_id,
+                InvestigationIterationModel.tenant_id == tenant_id,
+            ).order_by(InvestigationIterationModel.iteration_no.desc()).offset(offset).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    # ------------------------------------------------------------------
+    # AI authorization grants
+    # ------------------------------------------------------------------
+
+    def create_authorization_grant(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        grant = AuthorizationGrantModel(
+            id=f"grant_{uuid4().hex}",
+            principal_id=payload["principal_id"],
+            tenant_id=payload["tenant_id"],
+            source_ids_json=list(dict.fromkeys(payload["source_ids"])),
+            operations_json=list(dict.fromkeys(payload["operations"])),
+            resource_scope_json=payload.get("resource_scope") or {},
+            mode=payload["mode"],
+            case_id=payload.get("case_id"),
+            constraints_json=payload.get("constraints") or {},
+            valid_until=payload["valid_until"],
+            uses_remaining=payload.get("uses_remaining"),
+            query_count=0,
+            status="ACTIVE",
+            created_by=payload["created_by"],
+            created_at=now,
+        )
+        with self._write_session() as session:
+            session.add(grant)
+            session.flush()
+            session.add(AuditLogModel(
+                event_type="AUTH_GRANT_CREATED",
+                message=f"授权 {grant.id} 已创建",
+                meta_json={
+                    "grant_id": grant.id,
+                    "principal_id": grant.principal_id,
+                    "tenant_id": grant.tenant_id,
+                    "source_ids": grant.source_ids_json,
+                    "operations": grant.operations_json,
+                    "created_by": grant.created_by,
+                },
+                created_at=now,
+            ))
+            result = grant.to_dict()
+        return result
+
+    def list_authorization_grants(
+        self,
+        *,
+        principal_id: str = "",
+        tenant_id: str = "",
+        include_inactive: bool = False,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(AuthorizationGrantModel)
+            if principal_id:
+                query = query.filter(AuthorizationGrantModel.principal_id == principal_id)
+            if tenant_id:
+                query = query.filter(AuthorizationGrantModel.tenant_id == tenant_id)
+            if not include_inactive:
+                query = query.filter(AuthorizationGrantModel.status == "ACTIVE")
+            rows = query.order_by(AuthorizationGrantModel.created_at.desc()).all()
+            return [row.to_dict() for row in rows]
+
+    def revoke_authorization_grant(self, grant_id: str, revoked_by: str) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            grant = session.get(AuthorizationGrantModel, grant_id)
+            if grant is None:
+                return None
+            if grant.status == "ACTIVE":
+                grant.status = "REVOKED"
+                grant.revoked_at = now
+                grant.revoked_by = revoked_by
+                session.add(AuditLogModel(
+                    event_type="AUTH_GRANT_REVOKED",
+                    message=f"授权 {grant.id} 已撤销",
+                    meta_json={"grant_id": grant.id, "revoked_by": revoked_by},
+                    created_at=now,
+                ))
+            session.flush()
+            result = grant.to_dict()
+        return result
+
+    def consume_authorization_grant(
+        self,
+        grant_id: str,
+        *,
+        principal_id: str,
+        tenant_id: str,
+        capability_jti: str,
+        capability_token_fingerprint: str,
+        source_id: str,
+        operation: str,
+        query_fingerprint: str,
+        content_hash: str,
+        projection_hash: str,
+        result_bytes: int,
+    ) -> dict[str, Any]:
+        """Atomically consume one authorized source call after output validation."""
+        now = now_utc()
+        with self._write_session() as session:
+            query = session.query(AuthorizationGrantModel).filter(AuthorizationGrantModel.id == grant_id)
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                query = query.with_for_update()
+            grant = query.first()
+            if grant is None:
+                raise ValueError("GRANT_NOT_FOUND")
+            valid_until = grant.valid_until
+            if valid_until.tzinfo is None:
+                valid_until = valid_until.replace(tzinfo=now.tzinfo)
+            if grant.status != "ACTIVE":
+                raise ValueError("GRANT_NOT_ACTIVE")
+            if valid_until <= now:
+                grant.status = "EXPIRED"
+                raise ValueError("GRANT_EXPIRED")
+            if grant.principal_id != principal_id or grant.tenant_id != tenant_id:
+                raise ValueError("GRANT_SUBJECT_MISMATCH")
+            max_queries = int((grant.constraints_json or {}).get("max_queries", 0) or 0)
+            if max_queries and (grant.query_count or 0) >= max_queries:
+                grant.status = "EXHAUSTED"
+                raise ValueError("GRANT_QUERY_BUDGET_EXHAUSTED")
+            if grant.uses_remaining is not None and grant.uses_remaining <= 0:
+                grant.status = "EXHAUSTED"
+                raise ValueError("GRANT_EXHAUSTED")
+
+            grant.query_count = (grant.query_count or 0) + 1
+            if max_queries and grant.query_count >= max_queries:
+                grant.status = "EXHAUSTED"
+            if grant.uses_remaining is not None:
+                grant.uses_remaining -= 1
+                if grant.uses_remaining == 0:
+                    grant.status = "EXHAUSTED"
+            session.add(AuditLogModel(
+                event_type="SOURCE_ACCESS_GRANTED",
+                message=f"授权 {grant.id} 已用于受控信息读取",
+                meta_json={
+                    "grant_id": grant.id,
+                    "capability_jti": capability_jti,
+                    "capability_token_fingerprint": capability_token_fingerprint,
+                    "source_id": source_id,
+                    "operation": operation,
+                    "query_fingerprint": query_fingerprint,
+                    "content_hash": content_hash,
+                    "projection_hash": projection_hash,
+                    "result_bytes": result_bytes,
+                    "principal_id": principal_id,
+                    "tenant_id": tenant_id,
+                    "query_count": grant.query_count,
+                },
+                created_at=now,
+            ))
+            session.flush()
+            result = grant.to_dict()
+        return result
+
+    def record_source_access_denied(
+        self,
+        *,
+        principal_id: str,
+        tenant_id: str,
+        source_id: str,
+        operation: str,
+        reason_codes: list[str],
+    ) -> None:
+        with self._write_session() as session:
+            session.add(AuditLogModel(
+                event_type="SOURCE_ACCESS_DENIED",
+                message=f"信息源 {source_id} 访问被拒绝",
+                meta_json={
+                    "principal_id": principal_id,
+                    "tenant_id": tenant_id,
+                    "source_id": source_id,
+                    "operation": operation,
+                    "reason_codes": reason_codes,
+                },
+                created_at=now_utc(),
+            ))
 
     # ------------------------------------------------------------------
     # Agent
@@ -1205,6 +2255,18 @@ class SqlRepository:
             meta_json=metadata or {},
             created_at=now_utc(),
         ))
+
+    def record_audit(
+        self, event_type: str, message: str = "",
+        metadata: dict[str, Any] | None = None,
+        task_id: str | None = None, agent_id: str | None = None,
+    ) -> None:
+        """公开的审计写入接口（供 HTTP 层与 Actuation Gateway 使用）。"""
+        with self._write_session() as session:
+            self._write_audit(
+                session, event_type, agent_id=agent_id, task_id=task_id,
+                message=message, metadata=metadata,
+            )
 
     @property
     def audit_logs(self) -> list[AuditLogModel]:

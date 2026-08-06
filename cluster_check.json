@@ -1,0 +1,71 @@
+{
+  "192.168.10.10": {
+    "node": {
+      "ip": "192.168.10.10",
+      "user": "control",
+      "label": "control 控制节点"
+    },
+    "raw": {
+      "HOSTNAME": "control",
+      "KERNEL": "6.8.0-136-generic",
+      "UPTIME": "up 2 minutes\nload: 0.04, 0.03, 0.01",
+      "CPU": "4\nmodel name\t: Intel(R) Core(TM) i7-14700HX",
+      "MEM": "5924 776 4717 5147",
+      "DISK": "/dev/sda2        78G   12G   62G  16% /",
+      "SERVICES": "active active active inactive",
+      "DOCKER": "active",
+      "AGENT_DIR": "",
+      "RELEASE": "/home/control/mini-drop-release-20260728-1705\n/home/control/mini-drop-release-20260729-8a6720f",
+      "PERF": "perf version 6.8.12",
+      "BPFTRACE": "bpftrace v0.20.2",
+      "PYSPY": "",
+      "IP": "eth0             UP             192.168.10.10/24 fe80::215:5dff:fe00:217/64  docker0          DOWN           172.17.0.1/16"
+    }
+  },
+  "192.168.10.11": {
+    "node": {
+      "ip": "192.168.10.11",
+      "user": "worker1",
+      "label": "worker1 采集节点"
+    },
+    "raw": {
+      "HOSTNAME": "worker1",
+      "KERNEL": "6.8.0-136-generic",
+      "UPTIME": "up 2 minutes\nload: 0.00, 0.00, 0.00",
+      "CPU": "4\nmodel name\t: Intel(R) Core(TM) i7-14700HX",
+      "MEM": "3914 532 3213 3382",
+      "DISK": "/dev/sda2        78G   12G   63G  16% /",
+      "SERVICES": "inactive inactive inactive active",
+      "DOCKER": "active",
+      "AGENT_DIR": "/tmp/mini-drop-agent-results\n0",
+      "RELEASE": "/home/worker1/mini-drop-release-20260728-1705\n/home/worker1/mini-drop-release-20260729-8a6720f",
+      "PERF": "perf version 6.8.12",
+      "BPFTRACE": "bpftrace v0.20.2",
+      "PYSPY": "",
+      "IP": "eth0             UP             192.168.10.11/24 fe80::215:5dff:fe00:218/64  docker0          DOWN           172.17.0.1/16"
+    }
+  },
+  "192.168.10.12": {
+    "node": {
+      "ip": "192.168.10.12",
+      "user": "worker2",
+      "label": "worker2 采集节点"
+    },
+    "raw": {
+      "HOSTNAME": "worker2",
+      "KERNEL": "6.8.0-136-generic",
+      "UPTIME": "up 2 minutes\nload: 0.07, 0.02, 0.00",
+      "CPU": "4\nmodel name\t: Intel(R) Core(TM) i7-14700HX",
+      "MEM": "3914 502 3244 3412",
+      "DISK": "/dev/sda2        78G   11G   63G  15% /",
+      "SERVICES": "inactive inactive inactive active",
+      "DOCKER": "active",
+      "AGENT_DIR": "/tmp/mini-drop-agent-results\n0",
+      "RELEASE": "/home/worker2/mini-drop-release-20260728-1705\n/home/worker2/mini-drop-release-20260729-8a6720f",
+      "PERF": "perf version 6.8.12",
+      "BPFTRACE": "bpftrace v0.20.2",
+      "PYSPY": "",
+      "IP": "eth0             UP             192.168.10.12/24 fe80::215:5dff:fe00:219/64  docker0          DOWN           172.17.0.1/16"
+    }
+  }
+}

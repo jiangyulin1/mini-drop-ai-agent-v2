@@ -15,6 +15,7 @@ ANALYZER_CONTRACTS = {
     "network_latency_analyzer.v1": {"required_facts": ["host.network"], "optional_facts": ["dependency.peer"], "minimum_quality": "medium", "scope": "host|dependency"},
     "mysql_lock_analyzer.v1": {"required_facts": ["dependency.mysql_lock_wait"], "optional_facts": ["dependency.blocking_session"], "minimum_quality": "medium", "scope": "dependency"},
     "jvm_gc_analyzer.v1": {"required_facts": ["runtime.jvm_gc"], "optional_facts": ["process.memory"], "minimum_quality": "medium", "scope": "process"},
+    "log_analyzer.v1": {"required_facts": ["log.error_count|log.patterns"], "optional_facts": ["log.top_errors"], "minimum_quality": "low", "scope": "process"},
 }
 
 
@@ -27,6 +28,7 @@ def analyze_observations(observations: list[dict[str, Any]]) -> list[dict[str, A
         _analyze_network,
         _analyze_mysql,
         _analyze_jvm,
+        _analyze_log,
     )
     for observation in observations:
         for analyzer in analyzers:
@@ -86,6 +88,19 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
     target_pressure = any(_has_pressure(obs) for obs in target_obs)
     neighbor_pressure = any(_has_pressure(obs) for obs in same_host_obs)
     downstream_pressure = any(_has_pressure(obs) for obs in downstream_obs)
+    target_connectivity = _log_connectivity_count(target_obs)
+    # 宿主 IO/内核开销信号：iowait 高、块延迟高，或宿主 system CPU 高（内核 IO 处理）
+    # 且目标进程 CPU 未饱和（进程在等待 IO 而非跑热点）。
+    host_iowait = any(
+        obs.get("pressure", {}).get("host_iowait_high")
+        or obs.get("pressure", {}).get("block_latency_high")
+        for obs in target_obs
+    )
+    host_system_high = any(
+        _num((obs.get("summary") or {}).get("avg_cpu_sys_pct")) >= 25
+        and _num((obs.get("summary") or {}).get("process_cpu_core_usage")) < 1.5
+        for obs in target_obs
+    )
     shared_iowait = (
         any(obs.get("pressure", {}).get("io_wait") for obs in target_obs)
         and any(obs.get("pressure", {}).get("io_wait") for obs in same_host_obs)
@@ -137,10 +152,35 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
                 "evidence_refs": _unique_refs(upload_failed_obs),
             },
         ])
-    elif shared_iowait:
+    elif target_connectivity:
+        # 目标进程日志出现连接类错误（refused/reset/unreachable/denied）
+        # 是下游依赖故障的直接信号；即使同时出现 CPU 压力（错误风暴导致），
+        # 也应优先归因下游而不是目标自身代码热点。
+        classification = "downstream_dependency"
+        confidence_level = "高" if target_connectivity >= 5 else "中"
+        summary = (
+            f"目标进程日志出现 {target_connectivity} 次连接类错误（refused/reset/denied），"
+            "优先怀疑下游依赖或网络策略；CPU 压力更可能是错误风暴的后果而非根因。"
+        )
+        confidence_factors = {"scope_coverage": "high", "source_independence": "medium", "discriminating_evidence": "high"}
+        ruled_out.append({
+            "hypothesis": "self_code_regression",
+            "reason": "日志证据指向连接类失败，而非代码热点或内存压力。",
+            "evidence_refs": _unique_refs(target_obs),
+        })
+    elif (shared_iowait or host_iowait or host_system_high) and not target_hot:
         classification = "host_resource_contention"
         confidence_level = "高" if len(all_refs) >= 4 else "中"
-        summary = "目标实例和同宿主实例同时表现出 I/O 等待，倾向于宿主机或共享块设备争抢。"
+        summary = (
+            "目标实例和/或同宿主实例表现出 I/O 等待（宿主 iowait 高），"
+            "倾向于宿主机或共享块设备争抢。"
+            if shared_iowait
+            else (
+                "目标实例所在宿主机的 I/O 等待（iowait）或块延迟显著偏高，优先怀疑宿主磁盘或共享块设备争抢。"
+                if host_iowait
+                else "宿主内核 CPU（system）占比显著偏高且目标进程 CPU 未饱和，优先怀疑宿主机 I/O 争抢或内核开销（如磁盘写入风暴）。"
+            )
+        )
         confidence_factors = {"scope_coverage": "high", "source_independence": "medium", "discriminating_evidence": "high"}
     elif target_obs and same_host_obs and neighbor_pressure and not target_hot and not target_pressure:
         classification = "same_host_noisy_neighbor"
@@ -187,6 +227,10 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         "self": target_obs,
         "shared_resource": target_obs + same_host_obs,
     }.get(location_type, [])
+    if classification == "downstream_dependency" and target_connectivity:
+        # 下游依赖故障的连接类证据来自目标进程日志（log_scan），
+        # 而非下游实例自身；仅当归因由目标日志连接错误驱动时绑定目标观察。
+        selected = target_obs
     if classification == "single_instance_storage_path_failure":
         selected = upload_failed_obs
     selected_refs = _unique_refs(selected)
@@ -194,6 +238,10 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
     if selected:
         target_ref = selected[0].get("target", {}).get("instance_id") or selected[0].get("target", {}).get("host_id")
     domain_type, subtype = _domain_cause(selected)
+    if classification == "host_resource_contention":
+        # 宿主资源争抢归因（iowait/块延迟/宿主 system 开销）统一判为 IO 领域，
+        # 避免进程 CPU 表象（等待 IO 时的短暂 tick）覆盖宿主 IO 争抢的结论。
+        domain_type, subtype = "io", "host_io_contention"
     legacy_confidence = {"不可判断": 0.0, "低": 0.3, "中": 0.65, "高": 0.82}[confidence_level]
     return {
         "classification": classification,
@@ -372,6 +420,64 @@ def _analyze_jvm(obs: dict[str, Any]) -> list[DomainFinding]:
         knowledge_ids=["jvm.gc.pressure"], missing=["堆分代占用", "GC cause"])]
 
 
+def _analyze_log(obs: dict[str, Any]) -> list[DomainFinding]:
+    """基于 process_log_scan 产物输出日志级 Finding（确定性，不读模型）。"""
+    log = obs.get("log") or {}
+    if not log.get("log_files"):
+        return []
+    result: list[DomainFinding] = []
+    error_count = int(log.get("error_count", 0))
+    patterns = log.get("patterns") or {}
+    top_errors = log.get("top_errors") or []
+
+    if error_count > 0:
+        top_patterns = sorted(patterns.items(), key=lambda item: int(item[1]), reverse=True)[:4]
+        pattern_text = "；".join(f"{key}×{count}" for key, count in top_patterns) or "未知模式"
+        sample = top_errors[0].get("text", "")[:200] if top_errors else ""
+        missing: list[str] = []
+        if not top_errors:
+            missing.append("错误行原文（当前仅统计到关键词计数）")
+        result.append(_finding(
+            obs, "log_analyzer.v1", "log", "error_pattern",
+            f"进程日志尾部出现 {error_count} 条错误行，主要模式：{pattern_text}。"
+            + (f" 示例：{sample}" if sample else ""),
+            severity="warning",
+            confidence="高" if error_count >= 5 else "中",
+            facts={
+                "error_count": error_count,
+                "patterns": dict(top_patterns),
+                "log_files": int(log.get("log_files", 0)),
+                "scope": "process",
+            },
+            knowledge_ids=["log.common_error_patterns"],
+            missing=missing,
+        ))
+
+    # 连接类错误往往指向下游依赖，单独成一条便于集群归因
+    connectivity = sum(int(patterns.get(key, 0)) for key in (
+        "connection_refused", "connection_reset", "refused", "econnrefused", "unreachable", "denied",
+    ))
+    if connectivity > 0:
+        result.append(_finding(
+            obs, "log_analyzer.v1", "network", "connectivity_errors",
+            f"日志中出现 {connectivity} 次连接类错误（refused/reset/denied），优先怀疑下游依赖或网络策略。",
+            severity="warning", confidence="中",
+            facts={"connectivity_error_count": connectivity},
+            knowledge_ids=["log.connectivity_errors"],
+        ))
+
+    timeout_count = int(patterns.get("timeout", 0)) + int(patterns.get("timed_out", 0))
+    if timeout_count > 0:
+        result.append(_finding(
+            obs, "log_analyzer.v1", "network", "timeout_errors",
+            f"日志中出现 {timeout_count} 次超时模式，需结合调用耗时与下游延迟验证。",
+            severity="info", confidence="中",
+            facts={"timeout_error_count": timeout_count},
+            knowledge_ids=["log.timeout_errors"],
+        ))
+    return result
+
+
 def _has_self_hotspot(obs: dict[str, Any]) -> bool:
     return _num(obs.get("top_function", {}).get("percent")) >= 40
 
@@ -389,9 +495,22 @@ def _unique_refs(observations: list[dict[str, Any]]) -> list[str]:
     return result
 
 
+def _log_connectivity_count(observations: list[dict[str, Any]]) -> int:
+    """统计观察集合中日志摘要的连接类错误数量（refused/reset/unreachable/denied）。"""
+    total = 0
+    keys = ("connection_refused", "connection_reset", "refused", "econnrefused", "unreachable", "denied")
+    for obs in observations:
+        patterns = (obs.get("log") or {}).get("patterns") or {}
+        for key in keys:
+            total += int(patterns.get(key, 0) or 0)
+    return total
+
+
 def _domain_cause(observations: list[dict[str, Any]]) -> tuple[str, str]:
     if any(obs.get("failure_kind") == "artifact_upload_failed" for obs in observations):
         return "network", "agent_to_object_storage_connectivity"
+    if _log_connectivity_count(observations) > 0:
+        return "network", "connectivity_errors"
     facts = [_facts(obs) for obs in observations]
     if any(_num(item.get("mysql_lock_wait_count")) > 0 or _num(item.get("mysql_lock_wait_seconds")) > 0 for item in facts):
         return "database", "mysql_lock_wait"

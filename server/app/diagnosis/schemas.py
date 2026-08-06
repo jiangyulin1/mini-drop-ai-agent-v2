@@ -17,6 +17,7 @@ class StrictModel(BaseModel):
 
 class DiagnosisStatus(str, Enum):
     CREATED = "CREATED"
+    PAUSED = "PAUSED"
     UNDERSTANDING = "UNDERSTANDING"
     NEEDS_SCOPE_CONFIRMATION = "NEEDS_SCOPE_CONFIRMATION"
     PLANNING = "PLANNING"
@@ -194,7 +195,8 @@ class NormalizedIntent(StrictModel):
     intent_type: Literal["performance_diagnosis"] = "performance_diagnosis"
     symptom: Literal[
         "latency_increase", "cpu_saturation", "io_degradation",
-        "memory_pressure", "noisy_neighbor", "unknown_performance_issue",
+        "memory_pressure", "noisy_neighbor", "error_increase",
+        "connection_failure", "unknown_performance_issue",
     ]
     target_service: Optional[str] = None
     environment: str = "unknown"
@@ -280,7 +282,7 @@ class DiagnosisAction(StrictModel):
 class DomainFinding(StrictModel):
     finding_id: str = Field(min_length=1, max_length=160)
     analyzer_id: str = Field(min_length=1, max_length=128)
-    category: Literal["cpu", "io", "memory", "network", "database", "runtime", "cluster"]
+    category: Literal["cpu", "io", "memory", "network", "database", "runtime", "cluster", "log"]
     finding_type: str = Field(min_length=1, max_length=128)
     severity: Literal["info", "warning", "critical"]
     confidence_level: Literal["高", "中", "低", "不可判断"]

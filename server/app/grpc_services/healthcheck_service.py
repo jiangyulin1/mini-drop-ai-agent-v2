@@ -85,6 +85,7 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
         Proto 定义（hotmethod.proto）:
           0=perf, 1=async-profiler(Java), 2=pprof(Go), 3=py-spy, 4=bpftrace
           5=memory_smaps, 6=sys_metrics, 7=continuous_perf
+          8=process_scan, 9=log_scan
         """
         mapping: dict[str, int] = {
             "perf_cpu": 0,
@@ -95,6 +96,8 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
             "memory_smaps": 5,
             "sys_metrics": 6,
             "continuous_perf": 7,
+            "process_scan": 8,
+            "log_scan": 9,
         }
         return mapping.get(collector_type, 0)
 

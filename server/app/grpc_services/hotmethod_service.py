@@ -199,6 +199,8 @@ def _has_analysis_result(artifacts: list[dict]) -> bool:
         "memory_json",
         "pprof_raw",
         "sys_metrics",
+        "process_scan",
+        "log_scan",
     } & artifact_types)
 
 
@@ -210,6 +212,10 @@ def _analysis_done_reason(artifacts: list[dict]) -> str:
         return "内存时间序列分析已生成"
     if "sys_metrics" in artifact_types:
         return "系统多维指标分析已生成"
+    if "process_scan" in artifact_types:
+        return "进程扫描清单已生成"
+    if "log_scan" in artifact_types:
+        return "日志扫描结果已生成"
     if "continuous_summary" in artifact_types:
         return "连续采样窗口分析已生成"
     if "java_flamegraph_html" in artifact_types:

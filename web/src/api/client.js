@@ -128,6 +128,19 @@ export function listAgents() {
   return api.get("/agents").then(itemsOf);
 }
 
+/** 在目标 Worker 上扫描进程，返回可选择的诊断目标候选。
+ *
+ * 这是“选进程而不是填 PID”的关键接口：
+ * 输入进程名/服务名关键字，返回 pid/comm/cmdline/CPU/内存 候选。
+ */
+export function scanAgentProcesses(agentId, { query = "", timeoutSec = 15 } = {}) {
+  return api.post(`/agents/${agentId}/processes/scan`, {
+    query,
+    timeout_sec: timeoutSec,
+    max_results: 300,
+  });
+}
+
 export function listAuditLogs() {
   return api.get("/audit-logs").then(itemsOf);
 }
@@ -292,6 +305,56 @@ export function listProbeDefinitions() {
   return api.get("/v1/probes");
 }
 
+// ── AI Incident Case 协作层 ─────────────────────────────────────
+
+export function createIncidentCase(payload) {
+  return api.post("/v1/cases", payload);
+}
+
+export function listIncidentCases(params = {}) {
+  return api.get("/v1/cases", { params });
+}
+
+export function getIncidentCase(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}`);
+}
+
+export function listIncidentCaseEvents(caseId, params = {}) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/events`, { params });
+}
+
+export function appendIncidentCaseMessage(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/messages`, payload);
+}
+
+export function correctIncidentCase(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/corrections`, payload);
+}
+
+export function transitionIncidentCase(caseId, action, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/${action}`, payload);
+}
+
+export function startIncidentCaseDiagnosis(caseId, payload = {}) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/diagnoses`, payload);
+}
+
+export function listCaseContextPackets(caseId, params = {}) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/context-packets`, { params });
+}
+
+export function listCaseModelAttempts(caseId, params = {}) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/model-attempts`, { params });
+}
+
+export function getCaseHypotheses(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/hypotheses`);
+}
+
+export function listCaseIterations(caseId, params = {}) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/iterations`, { params });
+}
+
 // ── NLP 自然语言采集 ────────────────────────────────────────────
 
 export function nlpParse(query) {
@@ -352,4 +415,38 @@ export async function ensureEventSourceAuthCookie() {
 
 export function getMetrics() {
   return api.get("/metrics");
+}
+
+// ── 受控修复动作（Actuation）─────────────────────────────────────
+
+/** 对注册动作执行只读 dry-run，返回将影响的清单。 */
+export function dryRunAction(actionId, payload = {}) {
+  return api.post(`/v1/actions/${actionId}/dry-run`, payload);
+}
+
+/** 执行已通过 dry-run 与策略评估的修复动作（人工显式触发）。 */
+export function executeAction(actionId, payload = {}) {
+  return api.post(`/v1/actions/${actionId}/execute`, payload);
+}
+
+/** 回滚已执行的可逆动作。 */
+export function rollbackAction(actionId, payload = {}) {
+  return api.post(`/v1/actions/${actionId}/rollback`, payload);
+}
+
+/** 列出注册动作与执行状态。 */
+export function listRegisteredActions() {
+  return api.get("/v1/actions");
+}
+
+// ── 恢复验证与人工动作（多轮诊断闭环）────────────────────────
+
+/** 触发一次验证采集，对比诊断基线判断是否恢复。 */
+export function verifyCaseRecovery(caseId, payload = {}) {
+  return api.post(`/v1/cases/${caseId}/verification`, payload);
+}
+
+/** 回填人工执行建议动作的结果。 */
+export function recordCaseManualAction(caseId, payload = {}) {
+  return api.post(`/v1/cases/${caseId}/manual-actions`, payload);
 }

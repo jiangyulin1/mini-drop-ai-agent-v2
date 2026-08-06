@@ -54,7 +54,7 @@ const detail = {
   latest_conclusion: null,
 };
 
-describe("DiagnosisWorkbench replay", () => {
+describe("DiagnosisWorkbench", () => {
   beforeEach(() => {
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -75,13 +75,14 @@ describe("DiagnosisWorkbench replay", () => {
     ));
   });
 
-  it("renders the evidence chain when replay advances to step 7 without a selection", () => {
+  it("shows decision evidence first and keeps internal pipeline details collapsed", () => {
     render(<DiagnosisWorkbench detail={detail} />);
 
-    const next = screen.getByRole("button", { name: /下一步/ });
-    for (let index = 0; index < 6; index += 1) fireEvent.click(next);
-
-    expect(screen.getByText("第 7/12 步 · 以下内容来自本次真实会话快照")).toBeInTheDocument();
     expect(screen.getByText("证据链 (1)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /下一步/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/第 1\/12 步/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("内部过程记录（调试）"));
+    expect(screen.getByText("第 1/12 步 · 以下内容来自本次真实会话快照")).toBeInTheDocument();
   });
 });

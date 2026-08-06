@@ -267,11 +267,24 @@ class Collector(Protocol):
 
 ### AI 集群诊断控制层
 
-`/api/v1/diagnoses` 是独立于单个 Task 的可恢复诊断会话，覆盖自然语言意图、历史拓扑快照、候选假设、已有证据复用、受控探针、预算、R2 单次审批、证据血缘和等级置信报告。模型只负责意图理解；探针必须来自服务端注册表，R3 重启/迁移/配置修改不会自动执行。
+`/api/v1/diagnoses` 是独立于单个 Task 的可恢复诊断会话，覆盖自然语言意图、历史拓扑快照、候选假设、已有证据复用、受控探针、预算、单次审批、证据血缘和等级置信报告。模型负责理解、规划和解释；实际信息读取、采集与变更必须经过服务端注册表、Policy Engine 和独立执行边界。
 
 当前轻量版由请求上下文提供服务实例与宿主机映射；没有可靠映射时进入 `NEEDS_SCOPE_CONFIRMATION`，不会向 Agent 扩散采集。后台扫描器使用持久化状态和短租约恢复会话，完成的探针通过 `diagnosis_step_id` 幂等关联，避免重复下发。
 
 诊断结论包含 `cluster_assessment`，会把目标实例、同宿主机实例和一跳下游实例的系统指标放在同一证据平面比较，用于区分自身代码热点、噪声邻居、宿主机资源争抢和下游依赖问题。模糊输入不会被自动执行；系统只返回带审核注释的 `diagnostic_commands`，每条命令都有风险等级、`evidence_refs`、置信度和 `auto_execute=false`。
+
+产品目标是生产级、多租户、多集群服务；当前三节点 Hyper-V 集群只是首个实验 `EnvironmentProfile`。授权体系借鉴成熟编码 Agent 的“模型规划、Harness 控制、Sandbox 强制、越界审批”机制：AI 可在明确 Grant 内自动读取信息和执行经过注册、预检查、可回滚、可验证的低风险修复，任何越界或信息不足都会升级审批或拒绝。完整设计见 [`docs/ai_authorization_and_tooling.md`](docs/ai_authorization_and_tooling.md)。
+
+第二阶段代码已经提供 `/api/v1/identity`、`/api/v1/sources`、`/api/v1/sources/{source_id}/query`、`/api/v1/grants`、`/api/v1/policy/evaluate-source` 和 `/api/v1/actions`。Source Gateway 使用服务端派生主体、持久化 Grant、短期 Capability Token 和原子查询预算，输出带查询指纹、原始/投影哈希与策略轨迹的 EvidenceEnvelope；内置信息源能力不会返回凭据引用。RCA 和诊断意图调用 AI 前会程序化执行敏感字段脱敏、指标序列统计聚合、热点排序、日志/事件去重与优先级筛选，并在字符预算内生成投影；完整原始 Evidence 和 Artifact 保持不变。Action Registry 当前仅支持策略评估，`execution_enabled=false`，不会执行真实变更。企业级部署、治理、SLO 和发布门禁见 [`docs/ai_production_architecture_and_governance.md`](docs/ai_production_architecture_and_governance.md)。
+
+Case 协作层已经提供 `/api/v1/cases` 聚合对象、租户隔离的不可变时间线、五块首页摘要、消息与范围修正、乐观版本控制，以及 Pause/Resume/Stop。关联的 DiagnosisSession 会随 Case 暂停和恢复；Stop 会先取消关联诊断，再原子撤销该租户下绑定此 Case 的有效 Grant，避免后台调查或信息读取在用户停止后继续。Case 启动诊断前会持久化 `case-context.v1`；模型调用审计只保存 Provider、模型快照、Prompt/Schema 版本、Token、耗时、状态和响应哈希，不保存原始思维链。候选原因已规范化为租户级 HypothesisNode/Edge，保留开放集 `OTHER_UNKNOWN`，并通过 InvestigationIteration 记录候选变化、可行动作、确定性 Policy、成本、结果和停止判断；硬约束失败的动作不会进入信息增益排序。当前租户由服务端 `MINI_DROP_API_TENANT_ID` 绑定，客户端请求体不能自行切换租户。
+
+AI 的下一阶段定位是“可持续推进并验证恢复的故障 Case”，不是一次性快照报告。完整的用户功能、三级运行模式、Case 智能循环、模型逻辑角色、ContextPacket、候选图、知识记忆、RecoveryPlan 和开发拆分见 [`docs/ai_functional_design_v3.md`](docs/ai_functional_design_v3.md)；服务边界、协作状态、LLM 权限和评测体系见 [`docs/ai_case_resolution_evaluation_system.md`](docs/ai_case_resolution_evaluation_system.md)。在运行正式 AI 对比实验前，可先检查统一测试集是否存在答案泄漏、不可执行 Fixture 或当前环境缺失的数据源：
+
+```bash
+python scripts/audit_diagnosis_dataset.py /path/to/dataset \
+  --output-dir reports/eval/dataset-audit
+```
 
 ---
 
@@ -298,6 +311,7 @@ PENDING → RUNNING → UPLOADING → ANALYZING → DONE
 | 任务面板 | `/` | 统计卡片、NLP 输入、任务搜索/排序/删除、Agent 列表、SSE 实时通知 |
 | 任务详情 | `/task/:id` | D3 交互式火焰图 + ECharts TopN 联动、eBPF IO Histogram、状态时间线、AI 归因 |
 | AI 集群诊断 | `/ai-diagnosis` | 自然语言诊断、拓扑目标、假设、受控探针审批、证据血缘与等级置信报告 |
+| AI Case 工作台 | `/ai-cases` | 创建 Case、五块恢复摘要、消息/修正、Pause/Resume/Stop、候选/迭代、时间线与模型审计 |
 | 诊断历史 | `/diagnoses` | 全量诊断记录、置信度筛选、搜索过滤 |
 | Agent 详情 | `/agent/:id` | 资源趋势折线图、采集能力标签、关联任务搜索 |
 | 审计日志 | `/audit` | 事件筛选、自由搜索、时间倒序 |
@@ -405,6 +419,19 @@ POST   /api/v1/diagnoses                    # 创建 AI 集群诊断会话
 GET    /api/v1/diagnoses/{id}               # 会话详情并推进可恢复工作流
 POST   /api/v1/diagnoses/{id}/approvals     # R2 探针单次批准/拒绝
 GET    /api/v1/probes                       # 受控探针注册表
+POST   /api/v1/cases                        # 创建租户级 Incident Case
+GET    /api/v1/cases/{id}                   # Case 五块摘要与协作状态
+GET    /api/v1/cases/{id}/events            # 不可变 Case 时间线
+POST   /api/v1/cases/{id}/messages          # 追加用户消息/回答
+POST   /api/v1/cases/{id}/corrections       # 修正范围并使旧计划失效
+POST   /api/v1/cases/{id}/diagnoses         # 固化 ContextPacket 并启动关联诊断
+GET    /api/v1/cases/{id}/context-packets   # 版本化模型输入投影
+GET    /api/v1/cases/{id}/model-attempts    # 模型调用审计元数据
+GET    /api/v1/cases/{id}/hypotheses        # Case 级候选图、反证和缺口
+GET    /api/v1/cases/{id}/iterations        # 调查动作、Policy、成本与停止判断
+POST   /api/v1/cases/{id}/pause             # 暂停 Case 和关联诊断
+POST   /api/v1/cases/{id}/resume            # 恢复 Case 和关联诊断
+POST   /api/v1/cases/{id}/stop              # 停止并撤销 Case Grant
 GET    /api/agents                         # Agent 列表（含离线检测）
 GET    /api/audit-logs                     # 审计日志
 POST   /api/nlp/parse                      # 自然语言解析
@@ -670,6 +697,36 @@ bpftrace 对演示场景足够——Shell 一行命令即可挂载内核探针�
 ---
 
 ## 更新日志
+
+### 2026-08-06 — 三节点真实评测通过（4/4 场景）
+
+- **部署**：本地最新代码（两页前端 + 10 采集器 + 诊断闭环）部署到 Hyper-V 三节点集群（control/worker1/worker2），复用集群现有 venv，前端构建产物更新到 nginx，server + analyzer + 两个 agent 全部切换新代码。
+- **评测环境**：因原 checkoutservice 方案不可行（tag 不存在 / 依赖 Kafka / Docker Hub 与 Go proxy 不可达），改用 otel-demo tag 2.2.0 `product-catalog`（Go + PostgreSQL 下游）+ 本地交叉编译静态二进制 + apt PostgreSQL + 自研 gRPC 压测器 eval-load。
+- **实测结果**：4 场景全部通过（CPU 热点→self/cpu；PG 停→downstream/network；磁盘写→same_host/io；无故障→无误报）。
+- **真实评测暴露并修复**：profiler_type 映射缺失、analyzer 结果类型白名单缺失、report_verifier 未注册 log_analyzer + evidence 域缺失、intent 规则分类缺失关键词、sys_metrics 跨场景复用污染、虚拟化写缓存下 IO 信号改用宿主 system CPU 归因。
+- **验证**：后端 523 passed；前端 32 passed；构建通过。
+
+### 2026-08-05 — 多轮引导 + 恢复验证闭环（No-Regression 判定）
+
+- **多轮引导（next_best_action）**：每条结论附带"下一步最值得做什么"——证据不足时建议区分性探针（CPU Profile / I/O 延迟需用户确认、日志扫描自动执行）；已有根因时建议验证恢复。前端结论卡直接展示引导卡片。
+- **恢复验证闭环**：`POST /api/v1/cases/{id}/verification` 用相同采集器与目标实例重新采集 sys_metrics（10s），与诊断基线对比 process_cpu_cores / iowait / rss，确定性判定 recovered / partially_recovered / not_recovered / degraded / indeterminate（No-Regression）；`POST /api/v1/cases/{id}/manual-actions` 支持人工动作回填（completed/failed/skipped）；结果写入 Case 时间线与审计日志。
+- **前端**：结论卡的"建议的下一步"支持"触发验证采集"按钮并展示指标对比（基线 → 当前 → 判定）。
+- **验证**：后端 523 passed（新增 recovery_verification 9 项）；前端 32 passed；构建通过。
+
+### 2026-08-05 — 单服务多轮诊断补全 + 日志探针 + GitHub 真实项目评测集
+
+- **服务→进程自动发现（面向服务的第一步）**：创建诊断会话后自动弹出范围选择并自动扫描匹配服务名的进程候选，基础用户只需勾选确认，无需知道 PID。
+- **日志探针（log_scan）**：Agent 通过 `/proc/PID/fd` 发现进程日志文件并读取尾部，提取日志级别、错误行与连接/超时模式；新增 `log_analyzer.v1` 确定性 Finding（error_pattern / connectivity_errors / timeout_errors），接入 12 步流水线的证据归一化与分析；`error_increase` / `connection_failure` 症状默认选择日志探针。
+- **GitHub 真实项目评测集**：`benchmarks/github_cases/`——使用 OpenTelemetry Demo `checkoutservice`（真实 Go 服务）+ Redis 依赖 + hey 真实负载，在三节点 VM 上可跑；4 个场景（CPU 热点 / 下游 Redis 不可达 / 宿主机 IO 争抢 / 无故障对照）；setup/inject/cleanup/run_eval 脚本；oracle 不进模型上下文，评分（root_location / domain_cause / evidence 有效性 / 无故障误报 / 危险执行数）为可单测纯函数。
+- **验证**：后端 514 passed（新增 log_scan 8 项、github_eval 6 项）；前端 32 passed；构建通过。
+
+### 2026-08-05 — 最终用户导向前端重构 + 进程发现 + 首个可执行修复动作
+
+- **前端两页 + 设置**：导航收敛为「采集与监控」（`/`）·「AI 诊断」（`/ai-diagnosis`）·「设置」（`/settings`）；诊断历史与审计日志收进设置页归档；两页可互动——第一页任务/进程可「交给 AI 分析」（`?fromTask=` 上下文自动建会话并预填范围）。
+- **采集与监控工作台**：左栏 Agent 节点状态 + 任务列表（状态筛选/搜索），右栏内嵌任务详情（状态时间线 + 火焰图/TopN/eBPF 可视化预览 + 交给 AI 分析）；「多机采集」并入第一页（同一 collection_session_id 跨节点采集，供 AI 会话关联）。
+- **进程发现（选进程而非填 PID）**：Agent 新增 `process_scan` 采集器（R0 级只读 `/proc` 扫描，输出 pid/comm/cmdline/CPU/内存候选）；新增 `POST /api/agents/{id}/processes/scan` 同步扫描 API；范围选择器改为“输入进程名 → 并行扫描在线 Worker → 勾选候选”，唯一候选自动选中，手动 PID 仅作兜底。
+- **受控修复闭环（Actuation Gateway 首个实例）**：`mini-drop.cleanup-expired-cache`（清理自身过期诊断缓存）与 `mini-drop.restore-cache-quarantine`（回滚）两个动作标记为可执行；实现 dry-run → 人工批准 → 执行（移动而非删除）→ 幂等重放 → 回滚完整闭环；`POST /api/v1/actions/{id}/dry-run|execute|rollback`；策略硬拒绝（环境/目标/冗余/未注册）不可绕过；所有操作写审计日志。设置页新增「存储维护」界面（dry-run 清单 → 批准执行 → 回滚）。
+- **验证**：后端 504 passed（新增 process_scan 7 项、Actuation 8 项）；前端 32 passed；lint 与 Vite 生产构建通过。
 
 ### 2026-06-21 — Web 前端业务逻辑完善
 

@@ -1,0 +1,310 @@
+{
+  "cpu-hotspot": {
+    "diagnosis_id": "diag_session_20260806_082858_38415692",
+    "status": "COMPLETED",
+    "classification": "self_code_or_process_pressure",
+    "confidence": "中",
+    "root_location": {
+      "type": "self",
+      "target_ref": "product-catalog-linux-worker-1-709123",
+      "evidence_refs": [
+        "ev_982cf70b2e650ffb2e55",
+        "ev_b7e2a6e7db6659371f0d",
+        "ev_ee870f64e6c405e82e1d",
+        "ev_b214a01ab68ce2d51f84"
+      ]
+    },
+    "domain_cause": {
+      "type": "cpu",
+      "subtype": "process_cpu_pressure",
+      "evidence_refs": [
+        "ev_982cf70b2e650ffb2e55",
+        "ev_b7e2a6e7db6659371f0d",
+        "ev_ee870f64e6c405e82e1d",
+        "ev_b214a01ab68ce2d51f84"
+      ]
+    },
+    "summary": "证据主要集中在目标实例自身，优先检查代码热点、线程竞争或进程资源压力。",
+    "findings": [
+      {
+        "category": "cpu",
+        "finding_type": "process_cpu_pressure",
+        "summary": "目标进程 CPU tick 增量显示其持续占用核心，但缺少 Profile，不能进一步断言具体代码热点。",
+        "severity": "warning"
+      },
+      {
+        "category": "cpu",
+        "finding_type": "kernel_overhead",
+        "summary": "系统态 CPU 占比显著，需结合系统调用、网络或内核探针继续区分。",
+        "severity": "warning"
+      },
+      {
+        "category": "cpu",
+        "finding_type": "userland_hotspot",
+        "summary": "用户态 CPU 或单一函数热点明显，优先检查目标进程代码路径。",
+        "severity": "warning"
+      },
+      {
+        "category": "cluster",
+        "finding_type": "self_code_or_process_pressure",
+        "summary": "证据主要集中在目标实例自身，优先检查代码热点、线程竞争或进程资源压力。",
+        "severity": "warning"
+      }
+    ],
+    "recommendations": [
+      {
+        "title": "人工确认后的临时缓解",
+        "desc": ""
+      },
+      {
+        "title": "优化热点函数或线程竞争",
+        "desc": ""
+      },
+      {
+        "title": "使用同域证据验证优化效果",
+        "desc": ""
+      }
+    ],
+    "next_best_action": {
+      "type": "verify",
+      "probe_id": "",
+      "title": "执行建议后验证恢复",
+      "description": "按建议执行处理后，系统会用相同参数重新采集并对比异常指标，判断是否真正恢复、是否有新退化。",
+      "needs_approval": false
+    },
+    "evidence_count": 4,
+    "probes": [
+      [
+        "host_process_metrics",
+        "COMPLETED"
+      ],
+      [
+        "process_cpu_profile",
+        "COMPLETED"
+      ]
+    ]
+  },
+  "pg-down": {
+    "diagnosis_id": "diag_session_20260806_083228_e5ff96c0",
+    "status": "COMPLETED",
+    "classification": "downstream_dependency",
+    "confidence": "高",
+    "root_location": {
+      "type": "downstream",
+      "target_ref": "product-catalog-linux-worker-1-709123",
+      "evidence_refs": [
+        "ev_319ed4c353a6f9904918",
+        "ev_1e8a5c80bfdd8116e1a1",
+        "ev_643bec791755ceb593da",
+        "ev_e14cc00bccbce342d492"
+      ]
+    },
+    "domain_cause": {
+      "type": "network",
+      "subtype": "connectivity_errors",
+      "evidence_refs": [
+        "ev_319ed4c353a6f9904918",
+        "ev_1e8a5c80bfdd8116e1a1",
+        "ev_643bec791755ceb593da",
+        "ev_e14cc00bccbce342d492"
+      ]
+    },
+    "summary": "目标进程日志出现 500 次连接类错误（refused/reset/denied），优先怀疑下游依赖或网络策略；CPU 压力更可能是错误风暴的后果而非根因。",
+    "findings": [
+      {
+        "category": "log",
+        "finding_type": "error_pattern",
+        "summary": "进程日志尾部出现 50 条错误行，主要模式：connection_refused×500；failed×500。 示例：time=2026-08-06T16:32:29.239+08:00 level=ERROR msg=\"GetProduct failed id=6E92ZMYYFZ: faile…",
+        "severity": "warning"
+      },
+      {
+        "category": "network",
+        "finding_type": "connectivity_errors",
+        "summary": "日志中出现 500 次连接类错误（refused/reset/denied），优先怀疑下游依赖或网络策略。",
+        "severity": "warning"
+      },
+      {
+        "category": "cpu",
+        "finding_type": "process_cpu_pressure",
+        "summary": "目标进程 CPU tick 增量显示其持续占用核心，但缺少 Profile，不能进一步断言具体代码热点。",
+        "severity": "warning"
+      },
+      {
+        "category": "memory",
+        "finding_type": "rss_growth",
+        "summary": "进程 RSS 呈增长趋势或已达到较高水位，应结合限制、回收行为和对象分配继续确认。",
+        "severity": "warning"
+      }
+    ],
+    "recommendations": [
+      {
+        "title": "人工确认后的临时缓解",
+        "desc": ""
+      },
+      {
+        "title": "降低网络与下游调用开销",
+        "desc": ""
+      },
+      {
+        "title": "使用同域证据验证优化效果",
+        "desc": ""
+      }
+    ],
+    "next_best_action": {
+      "type": "probe",
+      "probe_id": "process_log_scan",
+      "title": "扫描进程日志",
+      "description": "查找错误/连接/超时模式，判断是否与报错类原因相关（低风险，自动执行）。",
+      "needs_approval": false,
+      "reason": "当前证据不足以区分候选原因，需要补充区分性证据后再收敛结论。"
+    },
+    "evidence_count": 4,
+    "probes": [
+      [
+        "process_log_scan",
+        "COMPLETED"
+      ],
+      [
+        "host_process_metrics",
+        "COMPLETED"
+      ]
+    ]
+  },
+  "io-contention": {
+    "diagnosis_id": "diag_session_20260806_083610_e4d9c8b5",
+    "status": "COMPLETED",
+    "classification": "host_resource_contention",
+    "confidence": "高",
+    "root_location": {
+      "type": "shared_resource",
+      "target_ref": "product-catalog-linux-worker-1-709123",
+      "evidence_refs": [
+        "ev_58038364c15ad19c7a2c",
+        "ev_5c888023db078092fa19",
+        "ev_89b2101f3de78c7b4185",
+        "ev_20174ae42b24ca5d0ada"
+      ]
+    },
+    "domain_cause": {
+      "type": "io",
+      "subtype": "host_io_contention",
+      "evidence_refs": [
+        "ev_58038364c15ad19c7a2c",
+        "ev_5c888023db078092fa19",
+        "ev_89b2101f3de78c7b4185",
+        "ev_20174ae42b24ca5d0ada"
+      ]
+    },
+    "summary": "宿主内核 CPU（system）占比显著偏高且目标进程 CPU 未饱和，优先怀疑宿主机 I/O 争抢或内核开销（如磁盘写入风暴）。",
+    "findings": [
+      {
+        "category": "cpu",
+        "finding_type": "process_cpu_pressure",
+        "summary": "目标进程 CPU tick 增量显示其持续占用核心，但缺少 Profile，不能进一步断言具体代码热点。",
+        "severity": "warning"
+      },
+      {
+        "category": "cpu",
+        "finding_type": "kernel_overhead",
+        "summary": "系统态 CPU 占比显著，需结合系统调用、网络或内核探针继续区分。",
+        "severity": "warning"
+      },
+      {
+        "category": "cluster",
+        "finding_type": "host_resource_contention",
+        "summary": "宿主内核 CPU（system）占比显著偏高且目标进程 CPU 未饱和，优先怀疑宿主机 I/O 争抢或内核开销（如磁盘写入风暴）。",
+        "severity": "warning"
+      }
+    ],
+    "recommendations": [
+      {
+        "title": "人工确认后的临时缓解",
+        "desc": ""
+      },
+      {
+        "title": "降低共享 I/O 争抢",
+        "desc": ""
+      },
+      {
+        "title": "使用同域证据验证优化效果",
+        "desc": ""
+      }
+    ],
+    "next_best_action": {
+      "type": "verify",
+      "probe_id": "",
+      "title": "执行建议后验证恢复",
+      "description": "按建议执行处理后，系统会用相同参数重新采集并对比异常指标，判断是否真正恢复、是否有新退化。",
+      "needs_approval": false
+    },
+    "evidence_count": 4,
+    "probes": [
+      [
+        "host_process_metrics",
+        "COMPLETED"
+      ],
+      [
+        "process_io_latency",
+        "COMPLETED"
+      ]
+    ]
+  },
+  "no-fault": {
+    "diagnosis_id": "diag_session_20260806_083945_6b8de119",
+    "status": "INSUFFICIENT_EVIDENCE",
+    "classification": "insufficient_evidence",
+    "confidence": "低",
+    "root_location": {
+      "type": "unknown",
+      "target_ref": null,
+      "evidence_refs": []
+    },
+    "domain_cause": {
+      "type": "unknown",
+      "subtype": "unknown",
+      "evidence_refs": []
+    },
+    "summary": "已有证据不足以区分自身代码、同宿主噪声邻居或下游依赖问题。",
+    "findings": [
+      {
+        "category": "cluster",
+        "finding_type": "insufficient_evidence",
+        "summary": "已有证据不足以区分自身代码、同宿主噪声邻居或下游依赖问题。",
+        "severity": "info"
+      }
+    ],
+    "recommendations": [
+      {
+        "title": "人工确认后的临时缓解",
+        "desc": ""
+      },
+      {
+        "title": "补充区分性证据",
+        "desc": ""
+      },
+      {
+        "title": "使用同域证据验证优化效果",
+        "desc": ""
+      }
+    ],
+    "next_best_action": {
+      "type": "probe",
+      "probe_id": "process_log_scan",
+      "title": "扫描进程日志",
+      "description": "查找错误/连接/超时模式，判断是否与报错类原因相关（低风险，自动执行）。",
+      "needs_approval": false,
+      "reason": "当前证据不足以区分候选原因，需要补充区分性证据后再收敛结论。"
+    },
+    "evidence_count": 4,
+    "probes": [
+      [
+        "host_process_metrics",
+        "COMPLETED"
+      ],
+      [
+        "process_cpu_profile",
+        "COMPLETED"
+      ]
+    ]
+  }
+}

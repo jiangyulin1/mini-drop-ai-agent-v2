@@ -59,6 +59,8 @@ class ControlService(control_pb2_grpc.ControlServicer):
         5: "memory_smaps",
         6: "sys_metrics",
         7: "continuous_perf",
+        8: "process_scan",
+        9: "log_scan",
     }
 
     @classmethod

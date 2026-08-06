@@ -69,6 +69,24 @@ _PROBES = {
         estimated_overhead={"cpu_percent": "<2", "disk_mb": "<20"},
         applicable_hypotheses=["HOST_MEMORY_PRESSURE", "MEMORY_LEAK"],
     ),
+    "process_log_scan": ProbeDefinition(
+        probe_id="process_log_scan",
+        name="进程日志扫描",
+        purpose="从进程日志尾部提取错误模式与时间戳，定位报错/超时/连接类根因",
+        runner_task_kind="log_scan",
+        supported_platforms=["linux"],
+        required_capabilities=["log_scan"],
+        risk_level="R1",
+        requires_approval=False,
+        default_duration_seconds=2,
+        max_duration_seconds=5,
+        default_sample_rate=1,
+        estimated_overhead={"cpu_percent": "<1", "disk_mb": "<1"},
+        applicable_hypotheses=[
+            "SELF_CODE_REGRESSION", "DOWNSTREAM_LATENCY", "NETWORK_DEGRADATION",
+            "SHARED_DEPENDENCY_FAILURE", "CONNECTION_POOL_EXHAUSTION",
+        ],
+    ),
 }
 
 
@@ -91,5 +109,7 @@ def choose_probe_ids(symptom: str) -> list[str]:
         "io_degradation": ["host_process_metrics", "process_io_latency"],
         "noisy_neighbor": ["host_process_metrics", "process_io_latency"],
         "memory_pressure": ["process_memory_map", "host_process_metrics"],
+        "error_increase": ["process_log_scan", "host_process_metrics"],
+        "connection_failure": ["process_log_scan", "host_process_metrics"],
     }
-    return mapping.get(symptom, ["host_process_metrics", "process_cpu_profile"])
+    return mapping.get(symptom, ["host_process_metrics", "process_log_scan", "process_cpu_profile"])

@@ -23,10 +23,7 @@ export default function Router() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Dashboard />} />
-          <Route
-            path="/audit"
-            element={<Lazy><AuditLogs /></Lazy>}
-          />
+          <Route path="/audit" element={<Lazy><AuditLogs /></Lazy>} />
           <Route
             path="/task/:taskId"
             element={<Lazy><TaskResult /></Lazy>}
@@ -34,6 +31,10 @@ export default function Router() {
           <Route
             path="/ai-diagnosis"
             element={<Lazy><AIDiagnosis /></Lazy>}
+          />
+          <Route
+            path="/ai-cases"
+            element={<Navigate to="/ai-diagnosis" replace />}
           />
           <Route
             path="/diagnoses"

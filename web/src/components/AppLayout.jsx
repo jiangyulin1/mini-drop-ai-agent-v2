@@ -17,8 +17,6 @@ import {
 } from "antd";
 import {
   DashboardOutlined,
-  AuditOutlined,
-  ExperimentOutlined,
   SettingOutlined,
   MenuUnfoldOutlined,
   KeyOutlined,
@@ -37,11 +35,9 @@ const { Sider, Header, Content } = Layout;
 const { useBreakpoint } = Grid;
 
 const MENU_ITEMS = [
-  { key: "/", icon: <DashboardOutlined />, label: "任务面板" },
-  { key: "/ai-diagnosis", icon: <RobotOutlined />, label: "AI 集群诊断" },
-  { key: "/diagnoses", icon: <ExperimentOutlined />, label: "诊断历史" },
-  { key: "/audit", icon: <AuditOutlined />, label: "审计日志" },
-  { key: "/settings", icon: <SettingOutlined />, label: "系统设置" },
+  { key: "/", icon: <DashboardOutlined />, label: "采集与监控" },
+  { key: "/ai-diagnosis", icon: <RobotOutlined />, label: "AI 诊断" },
+  { key: "/settings", icon: <SettingOutlined />, label: "设置" },
 ];
 
 // ── 暗色主题 tokens ───────────────────────────────────────────
@@ -109,6 +105,7 @@ export default function AppLayout() {
   // ── 路由激活 key ─────────────────────────────────────────
 
   const path = location.pathname;
+  const isAIWorkspace = path.startsWith("/ai-diagnosis");
   const selectedKey = MENU_ITEMS.find(
     (item) => path === item.key || (item.key !== "/" && path.startsWith(item.key))
   )?.key || "/";
@@ -367,12 +364,15 @@ export default function AppLayout() {
         {/* 内容 */}
         <Content
           style={{
-            margin: isMobile ? SPACING.sm : SPACING.lg,
-            padding: isMobile ? SPACING.md : SPACING.xl,
+            margin: isAIWorkspace ? 0 : isMobile ? SPACING.sm : SPACING.lg,
+            padding: isAIWorkspace ? 0 : isMobile ? SPACING.md : SPACING.xl,
             background: T.bgContent,
-            borderRadius: 8,
-            minHeight: `calc(100vh - ${LAYOUT.headerHeight}px - ${SPACING.lg * 2}px)`,
-            border: `1px solid ${T.borderColor}`,
+            borderRadius: isAIWorkspace ? 0 : 8,
+            minHeight: isAIWorkspace
+              ? `calc(100vh - ${LAYOUT.headerHeight}px)`
+              : `calc(100vh - ${LAYOUT.headerHeight}px - ${SPACING.lg * 2}px)`,
+            border: isAIWorkspace ? "none" : `1px solid ${T.borderColor}`,
+            overflow: isAIWorkspace ? "hidden" : "visible",
             transition: "background 0.3s ease, border-color 0.3s ease",
           }}
         >

@@ -32,8 +32,10 @@ from agent.mini_drop_agent.collectors.base import CollectorTask
 from agent.mini_drop_agent.collectors.continuous import ContinuousCollector
 from agent.mini_drop_agent.collectors.ebpf import EBPFCollector
 from agent.mini_drop_agent.collectors.java_async import JavaAsyncProfilerCollector
+from agent.mini_drop_agent.collectors.log_scan import LogScanCollector
 from agent.mini_drop_agent.collectors.memory import MemoryCollector
 from agent.mini_drop_agent.collectors.perf import PerfCollector
+from agent.mini_drop_agent.collectors.process_scan import ProcessScanCollector
 from agent.mini_drop_agent.collectors.pprof import PprofCollector
 from agent.mini_drop_agent.collectors.pyspy import PySpyCollector
 from agent.mini_drop_agent.collectors.sys_metrics import SysMetricsCollector
@@ -63,6 +65,8 @@ COLLECTORS = {
     "go_pprof": PprofCollector(),
     "memory_smaps": MemoryCollector(),
     "sys_metrics": SysMetricsCollector(),
+    "process_scan": ProcessScanCollector(),
+    "log_scan": LogScanCollector(),
 }
 
 CAPABILITIES = sorted(COLLECTORS.keys())
@@ -71,7 +75,7 @@ CAPABILITIES = sorted(COLLECTORS.keys())
 def _detect_capabilities() -> list[str]:
     """Report only collectors that this Agent can execute locally."""
 
-    available = {"go_pprof", "memory_smaps", "sys_metrics"}
+    available = {"go_pprof", "memory_smaps", "sys_metrics", "process_scan", "log_scan"}
     if shutil.which("perf"):
         available.update({"perf_cpu", "continuous_perf"})
     if shutil.which("bpftrace"):
@@ -670,6 +674,8 @@ _PROFILER_TO_COLLECTOR: dict[int, str] = {
     5: "memory_smaps",     # memory smaps
     6: "sys_metrics",      # system multi-metrics
     7: "continuous_perf",  # continuous perf
+    8: "process_scan",     # process discovery
+    9: "log_scan",         # log scanning
 }
 
 # task_type → collector_type 映射（MemCheck 等需要特殊路由的场景）

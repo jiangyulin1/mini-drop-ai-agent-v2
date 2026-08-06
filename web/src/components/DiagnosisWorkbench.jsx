@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Descriptions,
   Empty,
   Progress,
@@ -776,7 +777,7 @@ function ComparisonView({ detail, sessions }) {
 }
 
 export default function DiagnosisWorkbench({ detail, sessions = [] }) {
-  const [mode, setMode] = useState("过程复盘");
+  const [mode, setMode] = useState("证据与假设");
   const evidence = detail.evidence || [];
   const coverage = detail.coverage || [];
   const completedCoverage = coverage.filter((item) => item.status === "COMPLETED").length;
@@ -792,7 +793,7 @@ export default function DiagnosisWorkbench({ detail, sessions = [] }) {
         <Space direction="vertical" size={0}>
           <Typography.Text strong>诊断依据</Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            展示证据、假设与策略对比，不负责推进任务状态
+            优先展示支撑结论的证据与假设，内部执行过程按需查看
           </Typography.Text>
         </Space>
       )}
@@ -800,24 +801,36 @@ export default function DiagnosisWorkbench({ detail, sessions = [] }) {
         <Segmented
           value={mode}
           onChange={setMode}
-          options={["过程复盘", "证据与假设", "策略对比"]}
+          options={["证据与假设", "策略对比"]}
         />
       )}
     >
       <Row gutter={[12, 12]} className={styles.summary}>
-        <Col xs={12} md={6}><Statistic title="分析策略" value={STRATEGY_LABELS[strategy] || strategy} valueStyle={{ fontSize: 17 }} /></Col>
-        <Col xs={12} md={6}><Statistic title="证据数量" value={evidence.length} /></Col>
-        <Col xs={12} md={6}><Statistic title="目标覆盖率" value={coveragePercent} suffix="%" /></Col>
-        <Col xs={12} md={6}><Statistic title="结论版本" value={(detail.conclusion_versions || []).length} /></Col>
+        <Col xs={24} md={8}><Statistic title="分析策略" value={STRATEGY_LABELS[strategy] || strategy} valueStyle={{ fontSize: 17 }} /></Col>
+        <Col xs={12} md={8}><Statistic title="有效证据" value={evidence.length} /></Col>
+        <Col xs={12} md={8}><Statistic title="目标覆盖率" value={coveragePercent} suffix="%" /></Col>
       </Row>
 
-      {mode === "过程复盘" && <ReplayView detail={detail} />}
       {mode === "证据与假设" && (
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
-          <EvidenceGraph detail={detail} />
           <HypothesisBoard hypotheses={detail.hypothesis_graph?.hypotheses || []} />
           <EvidenceChain detail={detail} />
           <OracleEvaluation evaluation={detail.latest_conclusion?.evaluation} />
+          <Collapse
+            ghost
+            items={[
+              {
+                key: "graph",
+                label: "完整因果关系图",
+                children: <EvidenceGraph detail={detail} />,
+              },
+              {
+                key: "replay",
+                label: "内部过程记录（调试）",
+                children: <ReplayView detail={detail} />,
+              },
+            ]}
+          />
         </Space>
       )}
       {mode === "策略对比" && <ComparisonView detail={detail} sessions={sessions} />}

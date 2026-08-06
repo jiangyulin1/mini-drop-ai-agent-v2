@@ -48,6 +48,8 @@ ANALYSIS_RESULT_TYPES = {
     "memory_json",
     "pprof_raw",
     "sys_metrics",
+    "process_scan",
+    "log_scan",
 }
 ANALYZER_VERSION = "0.2.0"
 DEFAULT_MAX_INPUT_BYTES = 1024 * 1024 * 1024

@@ -36,6 +36,9 @@ node_modules/
 web/dist/
 web/.vite/
 
+# Local deployment bundles
+mini-drop-deploy.tar.gz
+
 # Project artifacts
 artifacts/
 tmp/
