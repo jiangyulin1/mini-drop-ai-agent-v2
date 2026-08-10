@@ -1,0 +1,49 @@
+{
+  "case_id": "ob-code-hotspot-001",
+  "user_query": "code-hotspot-fixture CPU 持续偏高，请定位到具体热点函数并说明证据。",
+  "system": {
+    "name": "online-boutique",
+    "version": "trimmed-core",
+    "topology": ["frontend", "productcatalogservice", "code-hotspot-fixture"],
+    "agents": ["worker1", "worker2"]
+  },
+  "fault": {
+    "type": "code_hotspot",
+    "target_service": "code-hotspot-fixture",
+    "target_node": "worker1",
+    "duration_sec": 180,
+    "intensity": 0.7,
+    "reversible": true
+  },
+  "trigger": {
+    "workload_script": "scripts/load-gen.sh",
+    "load_profile": "constant-50qps",
+    "description": "启动版本化 Python 热点 fixture，以低效序列化循环制造可定位的真实函数热点"
+  },
+  "execution": {
+    "preflight_script": "scripts/preflight.sh",
+    "runner_script": "faults/run-fault.sh",
+    "requires_linux": true,
+    "required_env": ["TARGET_URL"]
+  },
+  "performance_requirements": {
+    "baseline_duration_sec": 60,
+    "recovery_timeout_sec": 120,
+    "max_diagnosis_sec": 300,
+    "repetitions": 3
+  },
+  "capture": {
+    "collectors": ["pyspy", "sys_metrics"],
+    "window": "before=60s, during=180s, after=60s"
+  },
+  "expected": {
+    "root_location": "self",
+    "domain_cause": "cpu",
+    "root_entity": "code-hotspot-fixture",
+    "evidence_domains": ["process"]
+  },
+  "oracle_visibility": "private",
+  "ground_truth_source": "self-injected",
+  "status": "designed",
+  "notes": "代码热点使用独立、版本化 Python fixture；VM 运行时应把注入脚本记录的 PID 作为诊断目标。"
+}

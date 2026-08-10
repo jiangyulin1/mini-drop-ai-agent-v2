@@ -1,0 +1,100 @@
+# Online Boutique v0.10.3 Docker Compose smoke-test profile.
+# 服务和端口按官方 v0.10.3 release manifest 固定；状态仍需 Linux VM 实跑验证。
+
+services:
+  frontend:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/frontend:v0.10.3
+    ports: ["8080:8080"]
+    environment:
+      PORT: "8080"
+      PRODUCT_CATALOG_SERVICE_ADDR: productcatalogservice:3550
+      CURRENCY_SERVICE_ADDR: currencyservice:7000
+      CART_SERVICE_ADDR: cartservice:7070
+      CHECKOUT_SERVICE_ADDR: checkoutservice:5050
+      SHIPPING_SERVICE_ADDR: shippingservice:50051
+      AD_SERVICE_ADDR: adservice:9555
+      RECOMMENDATION_SERVICE_ADDR: recommendationservice:8080
+    depends_on:
+      - productcatalogservice
+      - cartservice
+      - checkoutservice
+      - recommendationservice
+      - shippingservice
+      - adservice
+
+  productcatalogservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/productcatalogservice:v0.10.3
+    environment:
+      PORT: "3550"
+
+  cartservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/cartservice:v0.10.3
+    environment:
+      PORT: "7070"
+      REDIS_ADDR: redis-cart:6379
+    depends_on: [redis-cart]
+
+  checkoutservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/checkoutservice:v0.10.3
+    environment:
+      PORT: "5050"
+      PRODUCT_CATALOG_SERVICE_ADDR: productcatalogservice:3550
+      CURRENCY_SERVICE_ADDR: currencyservice:7000
+      CART_SERVICE_ADDR: cartservice:7070
+      SHIPPING_SERVICE_ADDR: shippingservice:50051
+      PAYMENT_SERVICE_ADDR: paymentservice:50051
+      EMAIL_SERVICE_ADDR: emailservice:5000
+    depends_on:
+      - productcatalogservice
+      - currencyservice
+      - cartservice
+      - shippingservice
+      - paymentservice
+      - emailservice
+
+  currencyservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/currencyservice:v0.10.3
+    environment:
+      PORT: "7000"
+
+  recommendationservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/recommendationservice:v0.10.3
+    environment:
+      PORT: "8080"
+      PRODUCT_CATALOG_SERVICE_ADDR: productcatalogservice:3550
+      DISABLE_PROFILER: "1"
+    depends_on: [productcatalogservice]
+
+  shippingservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/shippingservice:v0.10.3
+    environment:
+      PORT: "50051"
+      DISABLE_PROFILER: "1"
+
+  paymentservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/paymentservice:v0.10.3
+    environment:
+      PORT: "50051"
+      DISABLE_PROFILER: "1"
+
+  emailservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/emailservice:v0.10.3
+    environment:
+      PORT: "8080"
+      DISABLE_PROFILER: "1"
+
+  adservice:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/adservice:v0.10.3
+    environment:
+      PORT: "9555"
+
+  redis-cart:
+    image: redis:7-alpine
+
+  loadgenerator:
+    image: us-central1-docker.pkg.dev/google-samples/microservices-demo/loadgenerator:v0.10.3
+    environment:
+      FRONTEND_ADDR: frontend:8080
+      USERS: "5"
+    depends_on:
+      - frontend

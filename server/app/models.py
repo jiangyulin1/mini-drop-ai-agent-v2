@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -282,7 +283,14 @@ class IncidentCaseModel(Base):
     diagnosis_session_id = Column(
         String(128), ForeignKey("diagnosis_sessions.id"), nullable=True, index=True,
     )
+    target_session_id = Column(
+        String(128), ForeignKey(
+            "diagnostic_target_sessions.id", name="fk_incident_case_target_session",
+        ), nullable=True, index=True,
+    )
     source_task_id = Column(String(128), ForeignKey("tasks.id"), nullable=True, index=True)
+    # 数据驱动入口：同一事故窗口、同一明确实例范围内的已完成 Task 证据。
+    initial_task_ids = Column(JSON, default=list)
     title = Column(String(256), nullable=False)
     problem_description = Column(Text, nullable=False)
     recovery_goal = Column(Text, nullable=False)
@@ -310,7 +318,9 @@ class IncidentCaseModel(Base):
             "tenant_id": self.tenant_id,
             "created_by": self.created_by,
             "diagnosis_session_id": self.diagnosis_session_id,
+            "target_session_id": self.target_session_id,
             "source_task_id": self.source_task_id,
+            "initial_task_ids": self.initial_task_ids or [],
             "title": self.title,
             "problem_description": self.problem_description,
             "recovery_goal": self.recovery_goal,
@@ -333,6 +343,153 @@ class IncidentCaseModel(Base):
             "updated_at": self.updated_at,
             "stopped_at": self.stopped_at,
             "resolved_at": self.resolved_at,
+        }
+
+
+class DiagnosticTargetSessionModel(Base):
+    """Long-lived tenant target that accumulates signals and incident Cases."""
+
+    __tablename__ = "diagnostic_target_sessions"
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_target_session_tenant"),
+        UniqueConstraint(
+            "tenant_id", "environment", "service_id",
+            name="uq_target_session_tenant_environment_service",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    service_id = Column(String(128), nullable=False, index=True)
+    environment = Column(String(64), nullable=False, index=True)
+    display_name = Column(String(256), nullable=False)
+    target_scope_json = Column(JSON, default=dict)
+    baseline_json = Column(JSON, default=dict)
+    signal_policy_json = Column(JSON, default=dict)
+    status = Column(String(24), nullable=False, index=True)
+    row_version = Column(Integer, nullable=False, default=0)
+    latest_signal_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "target_session_id": self.id,
+            "tenant_id": self.tenant_id,
+            "service_id": self.service_id,
+            "environment": self.environment,
+            "display_name": self.display_name,
+            "target_scope": self.target_scope_json or {},
+            "baseline": self.baseline_json or {},
+            "signal_policy": self.signal_policy_json or {},
+            "status": self.status,
+            "row_version": self.row_version,
+            "latest_signal_at": self.latest_signal_at,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class TargetSignalModel(Base):
+    """Immutable normalized signal received by a long-lived target session."""
+
+    __tablename__ = "target_signals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["target_session_id", "tenant_id"],
+            ["diagnostic_target_sessions.id", "diagnostic_target_sessions.tenant_id"],
+            name="fk_target_signal_session_tenant",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "target_session_id", "dedupe_key", name="uq_target_signal_dedupe",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    target_session_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    signal_type = Column(String(64), nullable=False, index=True)
+    severity = Column(String(16), nullable=False, index=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    payload_json = Column(JSON, default=dict)
+    profile_window_ids_json = Column(JSON, default=list)
+    dedupe_key = Column(String(128), nullable=False)
+    status = Column(String(24), nullable=False)
+    triggered_case_id = Column(String(128), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "signal_id": self.id,
+            "target_session_id": self.target_session_id,
+            "tenant_id": self.tenant_id,
+            "signal_type": self.signal_type,
+            "severity": self.severity,
+            "observed_at": self.observed_at,
+            "payload": self.payload_json or {},
+            "profile_window_ids": self.profile_window_ids_json or [],
+            "dedupe_key": self.dedupe_key,
+            "status": self.status,
+            "triggered_case_id": self.triggered_case_id,
+            "created_at": self.created_at,
+        }
+
+
+class ProfileWindowModel(Base):
+    """Queryable index over a continuous profiling capture window."""
+
+    __tablename__ = "profile_windows"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["target_session_id", "tenant_id"],
+            ["diagnostic_target_sessions.id", "diagnostic_target_sessions.tenant_id"],
+            name="fk_profile_window_session_tenant",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "target_session_id", "task_id", "window_index",
+            name="uq_profile_window_target_task_index",
+        ),
+        Index(
+            "ix_profile_window_target_time",
+            "target_session_id", "tenant_id", "window_start", "window_end",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    target_session_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    task_id = Column(String(128), ForeignKey("tasks.id"), nullable=False, index=True)
+    agent_id = Column(String(128), nullable=False, index=True)
+    target_pid = Column(Integer, nullable=False)
+    window_index = Column(Integer, nullable=False)
+    window_start = Column(DateTime(timezone=True), nullable=False, index=True)
+    window_end = Column(DateTime(timezone=True), nullable=False, index=True)
+    granularity = Column(String(24), nullable=False, default="detail")
+    artifact_refs_json = Column(JSON, default=list)
+    meta_json = Column("metadata", JSON, default=dict)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "profile_window_id": self.id,
+            "target_session_id": self.target_session_id,
+            "tenant_id": self.tenant_id,
+            "task_id": self.task_id,
+            "agent_id": self.agent_id,
+            "target_pid": self.target_pid,
+            "window_index": self.window_index,
+            "window_start": self.window_start,
+            "window_end": self.window_end,
+            "granularity": self.granularity,
+            "artifact_refs": self.artifact_refs_json or [],
+            "metadata": self.meta_json or {},
+            "expires_at": self.expires_at,
+            "created_at": self.created_at,
         }
 
 
@@ -365,6 +522,118 @@ class CaseEventModel(Base):
             "event_type": self.event_type,
             "actor_id": self.actor_id,
             "payload": self.payload_json or {},
+            "created_at": self.created_at,
+        }
+
+
+class CaseRecoveryPlanModel(Base):
+    """Durable Case recovery workflow from proposal through verification/rollback."""
+
+    __tablename__ = "case_recovery_plans"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_recovery_plan_case_tenant",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "dry_run_attempt_id", name="uq_case_recovery_plans_dry_run_attempt_id",
+        ),
+        Index("ix_recovery_plan_case_status", "case_id", "tenant_id", "status"),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False)
+    tenant_id = Column(String(128), nullable=False)
+    diagnosis_session_id = Column(String(128), nullable=True, index=True)
+    action_id = Column(String(128), nullable=False, index=True)
+    parameters_json = Column(JSON, default=dict)
+    value_after_fix = Column(Text, default="")
+    verification_method = Column(Text, default="")
+    status = Column(String(40), nullable=False, index=True)
+    policy_json = Column(JSON, default=dict)
+    dry_run_attempt_id = Column(String(128), nullable=True)
+    dry_run_json = Column(JSON, default=dict)
+    execution_json = Column(JSON, default=dict)
+    verification_json = Column(JSON, default=dict)
+    rollback_json = Column(JSON, default=dict)
+    requires_approval = Column(Integer, nullable=False, default=1)
+    approved_by = Column(String(128), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    row_version = Column(Integer, nullable=False, default=0)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "recovery_plan_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "diagnosis_session_id": self.diagnosis_session_id,
+            "action_id": self.action_id,
+            "parameters": self.parameters_json or {},
+            "value_after_fix": self.value_after_fix or "",
+            "verification_method": self.verification_method or "",
+            "status": self.status,
+            "policy": self.policy_json or {},
+            "dry_run_attempt_id": self.dry_run_attempt_id,
+            "dry_run": self.dry_run_json or {},
+            "execution": self.execution_json or {},
+            "verification": self.verification_json or {},
+            "rollback": self.rollback_json or {},
+            "requires_approval": bool(self.requires_approval),
+            "approved_by": self.approved_by,
+            "approved_at": self.approved_at,
+            "rejection_reason": self.rejection_reason,
+            "row_version": self.row_version,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class ServiceChangeModel(Base):
+    """用户登记的发布/配置变更（变更登记，C 方案，见 docs/ai_diagnosis_agent_design.md §7）。
+
+    供 AI 做"变更前 vs 变更后"对比与回归关联；也能由 AI 走 Need You 追问后回填。
+    """
+
+    __tablename__ = "service_changes"
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_service_change_tenant"),
+        Index(
+            "ix_service_changes_tenant_service",
+            "tenant_id",
+            "service_id",
+            "changed_at",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    tenant_id = Column(String(128), nullable=False)
+    service_id = Column(String(128), nullable=False)
+    environment = Column(String(64), nullable=False, default="unknown")
+    change_type = Column(String(32), nullable=False)  # release/config/feature_flag/scale/other
+    title = Column(String(256), nullable=False)
+    description = Column(Text, default="")
+    changed_at = Column(DateTime(timezone=True), nullable=False)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "change_id": self.id,
+            "tenant_id": self.tenant_id,
+            "service_id": self.service_id,
+            "environment": self.environment,
+            "change_type": self.change_type,
+            "title": self.title,
+            "description": self.description,
+            "changed_at": self.changed_at,
+            "created_by": self.created_by,
             "created_at": self.created_at,
         }
 
@@ -949,6 +1218,9 @@ class DiagnosisSessionModel(Base):
     evaluation_oracle_json = Column(JSON, default=dict)
     child_task_ids_json = Column(JSON, default=list)
     conclusion_versions_json = Column(JSON, default=list)
+    # 数据驱动入口：initial_tasks 装载为初始证据的记录
+    initial_evidence_loaded_json = Column(JSON, default=list)
+    initial_evidence_count = Column(Integer, default=0)
     model_version = Column(String(128), nullable=False)
     planner_version = Column(String(64), nullable=False)
     lease_owner = Column(String(128), nullable=True)
@@ -964,6 +1236,8 @@ class DiagnosisSessionModel(Base):
             "diagnosis_id": self.id,
             "creator_id": self.creator_id,
             "raw_query": self.raw_query,
+            "initial_evidence_loaded": self.initial_evidence_loaded_json or [],
+            "initial_evidence_count": self.initial_evidence_count or 0,
             "normalized_intent": self.normalized_intent_json or {},
             "target_scope": self.target_scope_json or {},
             "requested_time_range": self.requested_time_range_json or {},

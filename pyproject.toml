@@ -26,6 +26,7 @@ dev = [
     "pytest-cov>=5.0",
     "httpx>=0.27",
     "grpcio-tools>=1.80,<1.81",
+    "jsonschema>=4.23,<5",
     "loguru>=0.7",
 ]
 

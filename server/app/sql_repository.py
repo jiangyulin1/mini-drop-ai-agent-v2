@@ -15,7 +15,7 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -34,21 +34,26 @@ from server.app.models import (
     CaseHypothesisEdgeModel,
     CaseHypothesisNodeModel,
     CaseEventModel,
+    CaseRecoveryPlanModel,
     ContextPacketModel,
     DiagnosisReportModel,
     DiagnosisRunModel,
     DiagnosisSessionModel,
     DiagnosisToolResultModel,
+    DiagnosticTargetSessionModel,
     IncidentCaseModel,
     InvestigationIterationModel,
     ModelAttemptModel,
     ProbeExecutionModel,
+    ProfileWindowModel,
     RCAFeedbackModel,
     RCAFeedbackWeightModel,
     RepairPlanModel,
+    ServiceChangeModel,
     StatusEventModel,
     TaskModel,
     TaskAttemptModel,
+    TargetSignalModel,
 )
 from server.app import storage as store
 from server.app.logging_utils import log_event
@@ -74,6 +79,49 @@ def _collection_queue_ttl_sec(duration_sec: int) -> int:
     except ValueError:
         configured = 900
     return max(int(duration_sec) + 60, configured, 60)
+
+
+INITIAL_EVIDENCE_ARTIFACT_TYPES = {
+    "top_json", "ebpf_metrics", "sys_metrics", "memory_json",
+    "network_metrics", "database_metrics", "runtime_metrics", "log_scan",
+}
+
+RECOVERY_PLAN_TRANSITIONS = {
+    "PROPOSED": {"DRY_RUN_COMPLETED", "DRY_RUN_EMPTY", "FAILED"},
+    "DRY_RUN_COMPLETED": {"APPROVED", "REJECTED", "FAILED"},
+    "APPROVED": {"EXECUTING", "FAILED"},
+    "EXECUTING": {"EXECUTED", "FAILED"},
+    "EXECUTED": {"VERIFIED", "VERIFICATION_FAILED", "ROLLED_BACK"},
+    "VERIFICATION_FAILED": {"ROLLED_BACK"},
+    "FAILED": {"ROLLED_BACK"},
+    "DRY_RUN_EMPTY": set(),
+    "REJECTED": set(),
+    "VERIFIED": set(),
+    "ROLLED_BACK": set(),
+}
+
+TARGET_SESSION_TRANSITIONS = {
+    "ACTIVE": {"PAUSED", "ARCHIVED"},
+    "PAUSED": {"ACTIVE", "ARCHIVED"},
+    "ARCHIVED": set(),
+}
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _parse_aware_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return _as_utc(value)
+    if not value:
+        return None
+    try:
+        return _as_utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    except ValueError:
+        return None
 
 
 class SqlRepository:
@@ -174,6 +222,447 @@ class SqlRepository:
             session.close()
 
     # ------------------------------------------------------------------
+    # Long-lived diagnostic target sessions
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _locked_target_session(
+        session: OrmSession, target_session_id: str, tenant_id: str,
+    ) -> DiagnosticTargetSessionModel | None:
+        query = session.query(DiagnosticTargetSessionModel).filter(
+            DiagnosticTargetSessionModel.id == target_session_id,
+            DiagnosticTargetSessionModel.tenant_id == tenant_id,
+        )
+        if session.bind is not None and session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.first()
+
+    def create_target_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        policy = {
+            "auto_case_severities": ["high", "critical"],
+            "cooldown_seconds": 900,
+            "profile_signal_lookback_seconds": 300,
+            "profile_signal_lookahead_seconds": 60,
+            "profile_detail_retention_hours": 24,
+            **(payload.get("signal_policy") or {}),
+        }
+        severities = policy.get("auto_case_severities")
+        if not isinstance(severities, list) or not set(severities).issubset(
+            {"low", "medium", "high", "critical"}
+        ):
+            raise ValueError("INVALID_AUTO_CASE_SEVERITIES")
+        try:
+            policy["cooldown_seconds"] = min(
+                max(int(policy.get("cooldown_seconds", 900)), 0), 86_400,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("INVALID_COOLDOWN_SECONDS") from exc
+        for name, default, upper in (
+            ("profile_signal_lookback_seconds", 300, 86_400),
+            ("profile_signal_lookahead_seconds", 60, 3_600),
+            ("profile_detail_retention_hours", 24, 24 * 30),
+        ):
+            try:
+                policy[name] = min(max(int(policy.get(name, default)), 0), upper)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"INVALID_{name.upper()}") from exc
+        row = DiagnosticTargetSessionModel(
+            id=f"target_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:10]}",
+            tenant_id=payload["tenant_id"],
+            service_id=payload["service_id"],
+            environment=payload["environment"],
+            display_name=payload.get("display_name") or (
+                f"{payload['service_id']} · {payload['environment']}"
+            ),
+            target_scope_json=payload.get("target_scope") or {},
+            baseline_json=payload.get("baseline") or {},
+            signal_policy_json=policy,
+            status="ACTIVE",
+            row_version=0,
+            created_by=payload["created_by"],
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            with self._write_session() as session:
+                session.add(row)
+                session.flush()
+                result = row.to_dict()
+        except IntegrityError as exc:
+            raise ValueError("TARGET_SESSION_ALREADY_EXISTS") from exc
+        return result
+
+    def get_target_session(
+        self, target_session_id: str, tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(DiagnosticTargetSessionModel).filter(
+                DiagnosticTargetSessionModel.id == target_session_id,
+                DiagnosticTargetSessionModel.tenant_id == tenant_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def list_target_sessions(
+        self, tenant_id: str, *, status: str = "", limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(DiagnosticTargetSessionModel).filter(
+                DiagnosticTargetSessionModel.tenant_id == tenant_id,
+            )
+            if status:
+                query = query.filter(DiagnosticTargetSessionModel.status == status)
+            rows = query.order_by(
+                DiagnosticTargetSessionModel.updated_at.desc(),
+            ).limit(max(1, min(limit, 500))).all()
+            return [row.to_dict() for row in rows]
+
+    def transition_target_session(
+        self,
+        target_session_id: str,
+        tenant_id: str,
+        *,
+        to_status: str,
+        reason: str,
+        actor_id: str,
+        expected_row_version: int,
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            row = self._locked_target_session(session, target_session_id, tenant_id)
+            if row is None:
+                return None
+            if row.row_version != expected_row_version:
+                raise ValueError("TARGET_SESSION_VERSION_CONFLICT")
+            if to_status not in TARGET_SESSION_TRANSITIONS.get(row.status, set()):
+                raise ValueError(f"INVALID_TARGET_SESSION_TRANSITION:{row.status}->{to_status}")
+            previous = row.status
+            row.status = to_status
+            row.row_version += 1
+            row.updated_at = now
+            session.add(AuditLogModel(
+                event_type="TARGET_SESSION_TRANSITION",
+                agent_id=None,
+                task_id=None,
+                message=f"Target session {row.id}: {previous}->{to_status}; {reason}",
+                meta_json={
+                    "actor_id": actor_id,
+                    "target_session_id": row.id,
+                    "from_status": previous,
+                    "to_status": to_status,
+                },
+                created_at=now,
+            ))
+            session.flush()
+            return row.to_dict()
+
+    def record_target_signal(
+        self, target_session_id: str, tenant_id: str, payload: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, bool]:
+        now = now_utc()
+        observed_at = _as_utc(payload["observed_at"])
+        dedupe_key = payload.get("dedupe_key") or hashlib.sha256(
+            json.dumps({
+                "signal_type": payload["signal_type"],
+                "severity": payload["severity"],
+                "observed_at": observed_at.isoformat(),
+                "payload": payload.get("payload") or {},
+            }, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()[:64]
+        with self._write_session() as session:
+            target = self._locked_target_session(session, target_session_id, tenant_id)
+            if target is None:
+                return None, False
+            existing = session.query(TargetSignalModel).filter(
+                TargetSignalModel.target_session_id == target_session_id,
+                TargetSignalModel.dedupe_key == dedupe_key,
+            ).first()
+            if existing is not None:
+                return existing.to_dict(), False
+            signal = TargetSignalModel(
+                id=f"signal_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:10]}",
+                target_session_id=target_session_id,
+                tenant_id=tenant_id,
+                signal_type=payload["signal_type"],
+                severity=payload["severity"],
+                observed_at=observed_at,
+                payload_json=payload.get("payload") or {},
+                dedupe_key=dedupe_key,
+                status="RECEIVED",
+                created_at=now,
+            )
+            session.add(signal)
+            if target.latest_signal_at is None or observed_at > _as_utc(target.latest_signal_at):
+                target.latest_signal_at = observed_at
+            target.updated_at = now
+            target.row_version += 1
+            session.flush()
+            return signal.to_dict(), True
+
+    def list_target_signals(
+        self, target_session_id: str, tenant_id: str, *, limit: int = 100,
+    ) -> list[dict[str, Any]] | None:
+        with self._read_session() as session:
+            target = session.query(DiagnosticTargetSessionModel.id).filter(
+                DiagnosticTargetSessionModel.id == target_session_id,
+                DiagnosticTargetSessionModel.tenant_id == tenant_id,
+            ).first()
+            if target is None:
+                return None
+            rows = session.query(TargetSignalModel).filter(
+                TargetSignalModel.target_session_id == target_session_id,
+                TargetSignalModel.tenant_id == tenant_id,
+            ).order_by(TargetSignalModel.observed_at.desc()).limit(
+                max(1, min(limit, 500)),
+            ).all()
+            return [row.to_dict() for row in rows]
+
+    def index_profile_task(
+        self, target_session_id: str, tenant_id: str, task_id: str,
+    ) -> list[dict[str, Any]] | None:
+        """Validate and idempotently index all successful windows from one task."""
+        now = now_utc()
+        with self._write_session() as session:
+            target = self._locked_target_session(session, target_session_id, tenant_id)
+            if target is None:
+                return None
+            task = session.get(TaskModel, task_id)
+            if task is None:
+                raise ValueError("PROFILE_TASK_NOT_FOUND")
+            if task.collector_type != "continuous_perf" or task.status != TaskStatus.DONE.value:
+                raise ValueError("PROFILE_TASK_NOT_READY")
+            instances = (target.target_scope_json or {}).get("instances") or []
+            allowed = {
+                (str(item.get("agent_id")), int(item.get("pid", 0) or 0))
+                for item in instances if item.get("agent_id") and item.get("pid")
+            }
+            if not allowed:
+                raise ValueError("TARGET_SCOPE_INSTANCES_REQUIRED")
+            if (task.agent_id, int(task.target_pid)) not in allowed:
+                raise ValueError("PROFILE_TASK_SCOPE_MISMATCH")
+            artifacts = session.query(ArtifactModel).filter(
+                ArtifactModel.task_id == task_id,
+            ).order_by(ArtifactModel.id.asc()).all()
+            raw_windows = [
+                item for item in artifacts
+                if item.artifact_type == "continuous_window"
+            ]
+            if not raw_windows:
+                raise ValueError("PROFILE_TASK_HAS_NO_WINDOWS")
+            grouped: dict[int, list[ArtifactModel]] = {}
+            for artifact in artifacts:
+                try:
+                    index = int((artifact.meta_json or {}).get("window_index"))
+                except (TypeError, ValueError):
+                    continue
+                grouped.setdefault(index, []).append(artifact)
+            retention_hours = int(
+                (target.signal_policy_json or {}).get("profile_detail_retention_hours", 24),
+            )
+            indexed: list[ProfileWindowModel] = []
+            for raw in raw_windows:
+                metadata = raw.meta_json or {}
+                try:
+                    window_index = int(metadata["window_index"])
+                    window_start = datetime.fromtimestamp(float(metadata["start_ts"]), tz=timezone.utc)
+                    window_end = datetime.fromtimestamp(float(metadata["end_ts"]), tz=timezone.utc)
+                except (KeyError, TypeError, ValueError, OSError):
+                    continue
+                if window_end < window_start:
+                    continue
+                existing = session.query(ProfileWindowModel).filter(
+                    ProfileWindowModel.target_session_id == target_session_id,
+                    ProfileWindowModel.task_id == task_id,
+                    ProfileWindowModel.window_index == window_index,
+                ).first()
+                if existing is not None:
+                    indexed.append(existing)
+                    continue
+                refs = [{
+                    "artifact_id": artifact.id,
+                    "artifact_type": artifact.artifact_type,
+                    "object_key": artifact.object_key,
+                    "filename": artifact.filename,
+                    "content_type": artifact.content_type,
+                    "size_bytes": artifact.size_bytes,
+                    "sha256": artifact.sha256,
+                } for artifact in grouped.get(window_index, [raw])]
+                row = ProfileWindowModel(
+                    id=f"profile_window_{uuid4().hex[:16]}",
+                    target_session_id=target_session_id,
+                    tenant_id=tenant_id,
+                    task_id=task_id,
+                    agent_id=task.agent_id,
+                    target_pid=task.target_pid,
+                    window_index=window_index,
+                    window_start=window_start,
+                    window_end=window_end,
+                    granularity="detail",
+                    artifact_refs_json=refs,
+                    meta_json={
+                        "collector_type": task.collector_type,
+                        "sample_rate": task.sample_rate,
+                    },
+                    expires_at=window_end + timedelta(hours=retention_hours),
+                    created_at=now,
+                )
+                session.add(row)
+                indexed.append(row)
+            if not indexed:
+                raise ValueError("PROFILE_TASK_HAS_NO_VALID_WINDOWS")
+            session.flush()
+            return [row.to_dict() for row in sorted(indexed, key=lambda item: item.window_start)]
+
+    def list_profile_windows(
+        self,
+        target_session_id: str,
+        tenant_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        include_expired: bool = False,
+        limit: int = 200,
+    ) -> list[dict[str, Any]] | None:
+        with self._read_session() as session:
+            target = session.query(DiagnosticTargetSessionModel.id).filter(
+                DiagnosticTargetSessionModel.id == target_session_id,
+                DiagnosticTargetSessionModel.tenant_id == tenant_id,
+            ).first()
+            if target is None:
+                return None
+            query = session.query(ProfileWindowModel).filter(
+                ProfileWindowModel.target_session_id == target_session_id,
+                ProfileWindowModel.tenant_id == tenant_id,
+                ProfileWindowModel.window_start <= _as_utc(end),
+                ProfileWindowModel.window_end >= _as_utc(start),
+            )
+            if not include_expired:
+                query = query.filter(ProfileWindowModel.expires_at > now_utc())
+            rows = query.order_by(ProfileWindowModel.window_start.asc()).limit(
+                max(1, min(limit, 500)),
+            ).all()
+            return [row.to_dict() for row in rows]
+
+    def create_case_for_target_signal(
+        self,
+        target_session_id: str,
+        signal_id: str,
+        tenant_id: str,
+        *,
+        created_by: str,
+    ) -> dict[str, Any] | None:
+        """Atomically decide whether a new signal should open a Case."""
+        from server.app.case_collaboration import initial_case_state, initial_summary
+
+        now = now_utc()
+        with self._write_session() as session:
+            target = self._locked_target_session(session, target_session_id, tenant_id)
+            if target is None:
+                return None
+            signal_query = session.query(TargetSignalModel).filter(
+                TargetSignalModel.id == signal_id,
+                TargetSignalModel.target_session_id == target_session_id,
+                TargetSignalModel.tenant_id == tenant_id,
+            )
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                signal_query = signal_query.with_for_update()
+            signal = signal_query.first()
+            if signal is None:
+                return None
+            if signal.triggered_case_id:
+                existing = session.get(IncidentCaseModel, signal.triggered_case_id)
+                return existing.to_dict() if existing else None
+            policy = target.signal_policy_json or {}
+            lookback = int(policy.get("profile_signal_lookback_seconds", 300))
+            lookahead = int(policy.get("profile_signal_lookahead_seconds", 60))
+            related_windows = session.query(ProfileWindowModel).filter(
+                ProfileWindowModel.target_session_id == target_session_id,
+                ProfileWindowModel.tenant_id == tenant_id,
+                ProfileWindowModel.window_start <= signal.observed_at + timedelta(seconds=lookahead),
+                ProfileWindowModel.window_end >= signal.observed_at - timedelta(seconds=lookback),
+                ProfileWindowModel.expires_at > now,
+            ).order_by(ProfileWindowModel.window_start.asc()).limit(100).all()
+            signal.profile_window_ids_json = [item.id for item in related_windows]
+            auto_severities = set(policy.get("auto_case_severities") or ["high", "critical"])
+            if target.status != "ACTIVE" or signal.severity not in auto_severities:
+                signal.status = "RECORDED"
+                session.flush()
+                return None
+            terminal_states = {"RESOLVED", "INSUFFICIENT_EVIDENCE", "STOPPED"}
+            recent = session.query(IncidentCaseModel).filter(
+                IncidentCaseModel.tenant_id == tenant_id,
+                IncidentCaseModel.target_session_id == target_session_id,
+                IncidentCaseModel.state.notin_(terminal_states),
+            ).order_by(IncidentCaseModel.created_at.desc()).first()
+            if recent is not None:
+                signal.status = "SUPPRESSED_COOLDOWN"
+                signal.triggered_case_id = recent.id
+                session.flush()
+                return recent.to_dict()
+
+            scope = target.target_scope_json or {}
+            state, state_reason = initial_case_state(scope)
+            summary = initial_summary(
+                target_scope=scope,
+                recovery_goal="恢复服务到目标基线并确认关键健康指标稳定",
+                state=state,
+            )
+            signal_summary = str(
+                (signal.payload_json or {}).get("summary")
+                or (signal.payload_json or {}).get("message")
+                or signal.signal_type
+            )[:1000]
+            case = IncidentCaseModel(
+                id=f"case_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:10]}",
+                tenant_id=tenant_id,
+                created_by=created_by,
+                target_session_id=target.id,
+                initial_task_ids=list(dict.fromkeys(item.task_id for item in related_windows)),
+                title=f"[{signal.severity.upper()}] {target.display_name}: {signal.signal_type}"[:256],
+                problem_description=f"目标会话收到自动信号：{signal_summary}",
+                recovery_goal="恢复服务到目标基线并确认关键健康指标稳定",
+                run_mode="ASSIST",
+                environment=target.environment,
+                target_scope_json=scope,
+                time_range_json={"start": signal.observed_at.isoformat(), "end": signal.observed_at.isoformat()},
+                state=state.value,
+                state_reason=state_reason,
+                impact_json=summary["impact"],
+                current_finding_json=summary["current_finding"],
+                current_activity_json=summary["what_ai_is_doing"],
+                need_user_json=summary["need_you"],
+                recovery_json=summary["recovery"],
+                scope_revision=1,
+                row_version=0,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(case)
+            session.flush()
+            signal.status = "TRIGGERED"
+            signal.triggered_case_id = case.id
+            session.add(CaseEventModel(
+                case_id=case.id,
+                tenant_id=tenant_id,
+                event_type="case_created_from_target_signal",
+                actor_id=created_by,
+                payload_json={
+                    "target_session_id": target.id,
+                    "signal_id": signal.id,
+                    "signal_type": signal.signal_type,
+                    "severity": signal.severity,
+                    "profile_window_ids": signal.profile_window_ids_json or [],
+                },
+                created_at=now,
+            ))
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+            })
+            return case.to_dict()
+
+    # ------------------------------------------------------------------
     # Incident Case collaboration
     # ------------------------------------------------------------------
 
@@ -193,7 +682,9 @@ class SqlRepository:
             tenant_id=payload["tenant_id"],
             created_by=payload["created_by"],
             diagnosis_session_id=payload.get("diagnosis_session_id"),
+            target_session_id=payload.get("target_session_id"),
             source_task_id=payload.get("source_task_id"),
+            initial_task_ids=payload.get("initial_tasks") or payload.get("initial_task_ids") or [],
             title=payload["title"],
             problem_description=payload["problem_description"],
             recovery_goal=payload["recovery_goal"],
@@ -214,12 +705,55 @@ class SqlRepository:
             updated_at=now,
         )
         with self._write_session() as session:
+            if case.target_session_id:
+                target = session.query(DiagnosticTargetSessionModel).filter(
+                    DiagnosticTargetSessionModel.id == case.target_session_id,
+                    DiagnosticTargetSessionModel.tenant_id == case.tenant_id,
+                ).first()
+                if target is None:
+                    raise ValueError("TARGET_SESSION_NOT_FOUND")
+                if target.status == "ARCHIVED":
+                    raise ValueError("TARGET_SESSION_ARCHIVED")
             if case.diagnosis_session_id and session.get(
                 DiagnosisSessionModel, case.diagnosis_session_id,
             ) is None:
                 raise ValueError("DIAGNOSIS_SESSION_NOT_FOUND")
             if case.source_task_id and session.get(TaskModel, case.source_task_id) is None:
                 raise ValueError("SOURCE_TASK_NOT_FOUND")
+            missing_tasks = [
+                task_id for task_id in (case.initial_task_ids or [])
+                if session.get(TaskModel, task_id) is None
+            ]
+            if missing_tasks:
+                raise ValueError(f"INITIAL_TASK_NOT_FOUND:{','.join(missing_tasks)}")
+            target_instances = (target_scope.get("instances") or [])
+            allowed_targets = {
+                (item.get("agent_id"), int(item.get("pid", 0) or 0))
+                for item in target_instances
+                if item.get("agent_id") and item.get("pid")
+            }
+            incident_window = case.time_range_json or {}
+            incident_start = _parse_aware_datetime(incident_window.get("start"))
+            incident_end = _parse_aware_datetime(incident_window.get("end"))
+            for task_id in case.initial_task_ids or []:
+                task = session.get(TaskModel, task_id)
+                if task is None:  # guarded above; keep this branch race-safe
+                    raise ValueError(f"INITIAL_TASK_NOT_FOUND:{task_id}")
+                if task.status != TaskStatus.DONE.value:
+                    raise ValueError(f"INITIAL_TASK_NOT_READY:{task_id}")
+                has_structured_result = session.query(ArtifactModel.id).filter(
+                    ArtifactModel.task_id == task_id,
+                    ArtifactModel.artifact_type.in_(INITIAL_EVIDENCE_ARTIFACT_TYPES),
+                ).first()
+                if has_structured_result is None:
+                    raise ValueError(f"INITIAL_TASK_HAS_NO_STRUCTURED_RESULT:{task_id}")
+                if allowed_targets and (task.agent_id, int(task.target_pid)) not in allowed_targets:
+                    raise ValueError(f"INITIAL_TASK_SCOPE_MISMATCH:{task_id}")
+                if incident_start and incident_end:
+                    task_start = _as_utc(task.started_at or task.created_at)
+                    task_end = _as_utc(task.finished_at or task_start)
+                    if task_end < incident_start or task_start > incident_end:
+                        raise ValueError(f"INITIAL_TASK_TIME_RANGE_MISMATCH:{task_id}")
             session.add(case)
             session.flush()
             event = CaseEventModel(
@@ -248,6 +782,52 @@ class SqlRepository:
                 })
             result = case.to_dict()
         return result
+
+    def create_change_record(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        change = ServiceChangeModel(
+            id=f"chg_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:10]}",
+            tenant_id=payload["tenant_id"],
+            service_id=payload["service_id"],
+            environment=payload.get("environment", "unknown"),
+            change_type=payload.get("change_type", "other"),
+            title=payload["title"],
+            description=payload.get("description", ""),
+            changed_at=payload["changed_at"],
+            created_by=payload["created_by"],
+            created_at=now,
+        )
+        with self._write_session() as session:
+            session.add(change)
+            session.flush()
+            session.expire_all()
+            return session.get(ServiceChangeModel, change.id).to_dict()
+
+    def list_change_records(
+        self,
+        *,
+        tenant_id: str,
+        service_id: str | None = None,
+        environment: str | None = None,
+        since: Any | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(ServiceChangeModel).filter(
+                ServiceChangeModel.tenant_id == tenant_id,
+            )
+            if service_id:
+                query = query.filter(ServiceChangeModel.service_id == service_id)
+            if environment:
+                query = query.filter(ServiceChangeModel.environment == environment)
+            if since is not None:
+                query = query.filter(ServiceChangeModel.changed_at >= since)
+            rows = (
+                query.order_by(ServiceChangeModel.changed_at.desc())
+                .limit(max(1, min(limit, 200)))
+                .all()
+            )
+            return [row.to_dict() for row in rows]
 
     def get_incident_case(self, case_id: str, tenant_id: str) -> dict[str, Any] | None:
         with self._read_session() as session:
@@ -377,6 +957,236 @@ class SqlRepository:
                 "row_version": case.row_version,
             })
             return event.to_dict()
+
+    def create_case_recovery_plan(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        action_id: str,
+        parameters: dict[str, Any],
+        value_after_fix: str,
+        verification_method: str,
+        policy: dict[str, Any],
+        created_by: str,
+        expected_case_version: int | None = None,
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if case.state in {"STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
+                raise ValueError("CASE_NOT_RECOVERABLE")
+            if expected_case_version is not None and case.row_version != expected_case_version:
+                raise ValueError("CASE_VERSION_CONFLICT")
+            active = session.query(CaseRecoveryPlanModel).filter(
+                CaseRecoveryPlanModel.case_id == case_id,
+                CaseRecoveryPlanModel.tenant_id == tenant_id,
+                CaseRecoveryPlanModel.status.in_([
+                    "PROPOSED", "DRY_RUN_COMPLETED", "APPROVED", "EXECUTING", "EXECUTED",
+                    "VERIFICATION_FAILED",
+                ]),
+            ).first()
+            if active is not None:
+                raise ValueError(f"ACTIVE_RECOVERY_PLAN_EXISTS:{active.id}")
+            plan = CaseRecoveryPlanModel(
+                id=f"recovery_{uuid4().hex[:16]}",
+                case_id=case_id,
+                tenant_id=tenant_id,
+                diagnosis_session_id=case.diagnosis_session_id,
+                action_id=action_id,
+                parameters_json=_json_safe(parameters),
+                value_after_fix=value_after_fix,
+                verification_method=verification_method,
+                status="PROPOSED",
+                policy_json=_json_safe(policy),
+                requires_approval=1,
+                row_version=0,
+                created_by=created_by,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(plan)
+            case.state = "RECOVERY_PLANNING"
+            case.state_reason = "recovery_plan_proposed"
+            case.current_activity_json = {
+                "status": "recovery_planning",
+                "message": "恢复方案已创建，正在执行只读预检",
+                "recovery_plan_id": plan.id,
+            }
+            case.recovery_json = {
+                **(case.recovery_json or {}),
+                "status": "planned",
+                "recovery_plan_id": plan.id,
+            }
+            case.row_version += 1
+            case.updated_at = now
+            session.add(CaseEventModel(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                event_type="recovery_plan_created",
+                actor_id=created_by,
+                payload_json={"recovery_plan_id": plan.id, "action_id": action_id},
+                created_at=now,
+            ))
+            session.flush()
+            return plan.to_dict()
+
+    def get_case_recovery_plan(
+        self, case_id: str, tenant_id: str, plan_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            plan = session.query(CaseRecoveryPlanModel).filter(
+                CaseRecoveryPlanModel.id == plan_id,
+                CaseRecoveryPlanModel.case_id == case_id,
+                CaseRecoveryPlanModel.tenant_id == tenant_id,
+            ).first()
+            return plan.to_dict() if plan else None
+
+    def list_case_recovery_plans(
+        self, case_id: str, tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            return [item.to_dict() for item in session.query(CaseRecoveryPlanModel).filter(
+                CaseRecoveryPlanModel.case_id == case_id,
+                CaseRecoveryPlanModel.tenant_id == tenant_id,
+            ).order_by(CaseRecoveryPlanModel.created_at.desc()).all()]
+
+    def transition_case_recovery_plan(
+        self,
+        case_id: str,
+        tenant_id: str,
+        plan_id: str,
+        *,
+        to_status: str,
+        actor_id: str,
+        expected_plan_version: int,
+        updates: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        updates = updates or {}
+        allowed_fields = {
+            "policy_json", "dry_run_attempt_id", "dry_run_json", "execution_json",
+            "verification_json", "rollback_json", "approved_by", "approved_at",
+            "rejection_reason",
+        }
+        unknown_fields = set(updates) - allowed_fields
+        if unknown_fields:
+            raise ValueError(f"RECOVERY_PLAN_UPDATE_FIELDS_INVALID:{sorted(unknown_fields)}")
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            plan = session.query(CaseRecoveryPlanModel).filter(
+                CaseRecoveryPlanModel.id == plan_id,
+                CaseRecoveryPlanModel.case_id == case_id,
+                CaseRecoveryPlanModel.tenant_id == tenant_id,
+            ).with_for_update().first()
+            if plan is None:
+                return None
+            if plan.row_version != expected_plan_version:
+                raise ValueError("RECOVERY_PLAN_VERSION_CONFLICT")
+            if to_status not in RECOVERY_PLAN_TRANSITIONS.get(plan.status, set()):
+                raise ValueError(f"INVALID_RECOVERY_PLAN_TRANSITION:{plan.status}->{to_status}")
+            previous = plan.status
+            for field, value in updates.items():
+                if field.endswith("_json"):
+                    value = _json_safe(value)
+                setattr(plan, field, value)
+            plan.status = to_status
+            plan.row_version += 1
+            plan.updated_at = now
+
+            if to_status == "DRY_RUN_COMPLETED":
+                case.need_user_json = {
+                    "required": True,
+                    "question": "请审查恢复方案预检结果并批准或拒绝",
+                }
+                case.current_activity_json = {
+                    "status": "waiting_approval",
+                    "message": "恢复动作预检通过，等待一次性批准",
+                    "recovery_plan_id": plan.id,
+                }
+            elif to_status == "APPROVED":
+                case.need_user_json = {"required": False, "question": ""}
+                case.current_activity_json = {
+                    "status": "approved",
+                    "message": "恢复动作已批准，等待执行",
+                    "recovery_plan_id": plan.id,
+                }
+            elif to_status == "EXECUTING":
+                case.need_user_json = {"required": False, "question": ""}
+                case.current_activity_json = {
+                    "status": "executing_recovery",
+                    "message": "恢复动作已锁定，正在执行",
+                    "recovery_plan_id": plan.id,
+                }
+            elif to_status == "EXECUTED":
+                case.state = "VERIFYING"
+                case.state_reason = "recovery_action_executed"
+                case.current_activity_json = {
+                    "status": "verifying",
+                    "message": "恢复动作已执行，等待 No-Regression 验证",
+                    "recovery_plan_id": plan.id,
+                }
+                case.recovery_json = {
+                    **(case.recovery_json or {}), "status": "verifying",
+                }
+            elif to_status == "VERIFIED":
+                case.state = "VERIFYING"
+                case.state_reason = "recovery_verified_waiting_stability"
+                case.need_user_json = {
+                    "required": True,
+                    "question": "恢复指标已通过，请确认稳定观察窗口后结案",
+                }
+                case.recovery_json = {
+                    **(case.recovery_json or {}),
+                    "status": "verified",
+                    "stable_since": now.isoformat(),
+                }
+            elif to_status in {"ROLLED_BACK", "REJECTED", "DRY_RUN_EMPTY", "FAILED"}:
+                case.state = "RECOVERY_PLANNING"
+                case.state_reason = f"recovery_plan_{to_status.lower()}"
+                case.need_user_json = {
+                    "required": True,
+                    "question": "恢复方案未完成，请审查结果并选择下一步",
+                }
+                case.recovery_json = {
+                    **(case.recovery_json or {}), "status": to_status.lower(),
+                }
+            elif to_status == "VERIFICATION_FAILED":
+                case.state = "VERIFYING"
+                case.state_reason = "recovery_verification_failed"
+                case.recovery_json = {
+                    **(case.recovery_json or {}), "status": "verification_failed",
+                }
+
+            case.row_version += 1
+            case.updated_at = now
+            event_type = f"recovery_plan_{to_status.lower()}"
+            event_payload = {
+                "recovery_plan_id": plan.id,
+                "action_id": plan.action_id,
+                "from_status": previous,
+                "to_status": to_status,
+            }
+            session.add(CaseEventModel(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                event_type=event_type,
+                actor_id=actor_id,
+                payload_json=event_payload,
+                created_at=now,
+            ))
+            session.add(AuditLogModel(
+                event_type=f"RECOVERY_{to_status}"[:32],
+                message=f"Case {case_id} recovery plan {plan.id}: {previous}->{to_status}",
+                meta_json={**event_payload, "tenant_id": tenant_id, "actor_id": actor_id},
+                created_at=now,
+            ))
+            session.flush()
+            return plan.to_dict()
 
     def correct_incident_case(
         self,

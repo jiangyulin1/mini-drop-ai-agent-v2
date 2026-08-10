@@ -6,6 +6,7 @@
 
 import json
 import re
+import sys
 from unittest import mock
 
 import pytest
@@ -15,6 +16,7 @@ from analyzer.mini_drop_analyzer.hotmethod_analyzer import (
     _load_output_dir,
     _match_rules,
     _parse_top,
+    main,
 )
 
 # 模拟折叠栈文本
@@ -142,3 +144,46 @@ class TestAnalyzerConfig:
 
     def test_load_output_dir_uses_default_when_missing(self, tmp_path):
         assert _load_output_dir(tmp_path / "missing.toml") == "/tmp/mini-drop-analyzer"
+
+
+class TestAnalyzerMain:
+    def test_main_generates_summary_and_outputs(self, tmp_path, capsys):
+        perf_data = tmp_path / "perf.data"
+        perf_data.write_bytes(b"perf")
+        output_root = tmp_path / "output"
+
+        def fake_perf(_source, destination):
+            destination.write_text("perf script", encoding="utf-8")
+            return True, ""
+
+        def fake_collapse(_source, destination):
+            destination.write_text("fib_hotspot;worker 100\n", encoding="utf-8")
+            return True, ""
+
+        def fake_svg(_source, destination):
+            destination.write_text("<svg/>", encoding="utf-8")
+
+        argv = [
+            "hotmethod_analyzer", "--task-id", "task-main", "--perf-data", str(perf_data),
+            "--output-dir", str(output_root),
+        ]
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("analyzer.mini_drop_analyzer.hotmethod_analyzer._perf_script", side_effect=fake_perf), \
+             mock.patch("analyzer.mini_drop_analyzer.hotmethod_analyzer._stackcollapse", side_effect=fake_collapse), \
+             mock.patch("analyzer.mini_drop_analyzer.hotmethod_analyzer._flamegraph_svg", side_effect=fake_svg):
+            main()
+
+        summary = json.loads(capsys.readouterr().out)
+        assert summary["status"] == "SUCCESS"
+        assert summary["top_functions"][0]["name"] == "fib_hotspot"
+        assert (output_root / "task-main" / "flamegraph.json").is_file()
+
+    def test_main_rejects_missing_perf_data(self, tmp_path, capsys):
+        argv = [
+            "hotmethod_analyzer", "--task-id", "task-missing", "--perf-data",
+            str(tmp_path / "missing.data"), "--output-dir", str(tmp_path / "output"),
+        ]
+        with mock.patch.object(sys, "argv", argv), pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+        assert json.loads(capsys.readouterr().out)["status"] == "FAILED"

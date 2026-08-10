@@ -1,0 +1,49 @@
+{
+  "case_id": "ob-same-host-noise-001",
+  "user_query": "productcatalogservice 性能下降，请判断是自身 CPU 热点还是同宿主噪声邻居。",
+  "system": {
+    "name": "online-boutique",
+    "version": "trimmed-core",
+    "topology": ["frontend", "productcatalogservice", "cartservice", "checkoutservice", "currencyservice"],
+    "agents": ["worker1", "worker2"]
+  },
+  "fault": {
+    "type": "cpu",
+    "target_service": "host-level-noise",
+    "target_node": "worker1",
+    "duration_sec": 120,
+    "intensity": 0.8,
+    "reversible": true
+  },
+  "trigger": {
+    "workload_script": "scripts/load-gen.sh",
+    "load_profile": "constant-30qps",
+    "description": "在 worker1 宿主层注入 stress-ng（非容器内），挤压同宿主容器（productcatalog 等），制造噪声邻居 S5"
+  },
+  "execution": {
+    "preflight_script": "scripts/preflight.sh",
+    "runner_script": "faults/run-fault.sh",
+    "requires_linux": true,
+    "required_env": ["TARGET_URL"]
+  },
+  "performance_requirements": {
+    "baseline_duration_sec": 60,
+    "recovery_timeout_sec": 120,
+    "max_diagnosis_sec": 300,
+    "repetitions": 3
+  },
+  "capture": {
+    "collectors": ["sys_metrics", "continuous_perf"],
+    "window": "before=60s, during=120s, after=60s"
+  },
+  "expected": {
+    "root_location": "same_host",
+    "domain_cause": "cpu",
+    "root_entity": "host-worker1",
+    "evidence_domains": ["host", "container"]
+  },
+  "oracle_visibility": "private",
+  "ground_truth_source": "self-injected",
+  "status": "designed",
+  "notes": "核心测试点：目标容器 CPU 高但根因是同宿主竞争（S5 噪声邻居）。"
+}

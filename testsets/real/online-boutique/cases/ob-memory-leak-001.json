@@ -1,0 +1,49 @@
+{
+  "case_id": "ob-memory-leak-001",
+  "user_query": "memory-leak fixture 的 RSS 持续上涨，请判断是否为进程内存泄漏并给出趋势证据。",
+  "system": {
+    "name": "online-boutique",
+    "version": "trimmed-core",
+    "topology": ["frontend", "checkoutservice", "memory-leak-fixture"],
+    "agents": ["worker1", "worker2"]
+  },
+  "fault": {
+    "type": "memory",
+    "target_service": "memory-leak-fixture",
+    "target_node": "worker2",
+    "duration_sec": 300,
+    "intensity": 0.6,
+    "reversible": true
+  },
+  "trigger": {
+    "workload_script": "scripts/load-gen.sh",
+    "load_profile": "constant-30qps",
+    "description": "持续负载下启动版本化内存 fixture，按固定速率分配且不释放，制造可归因的 RSS 增长"
+  },
+  "execution": {
+    "preflight_script": "scripts/preflight.sh",
+    "runner_script": "faults/run-fault.sh",
+    "requires_linux": true,
+    "required_env": ["TARGET_URL"]
+  },
+  "performance_requirements": {
+    "baseline_duration_sec": 60,
+    "recovery_timeout_sec": 120,
+    "max_diagnosis_sec": 360,
+    "repetitions": 3
+  },
+  "capture": {
+    "collectors": ["memory_smaps", "sys_metrics"],
+    "window": "before=60s, during=300s, after=120s"
+  },
+  "expected": {
+    "root_location": "self",
+    "domain_cause": "memory",
+    "root_entity": "memory-leak-fixture",
+    "evidence_domains": ["process"]
+  },
+  "oracle_visibility": "private",
+  "ground_truth_source": "self-injected",
+  "status": "designed",
+  "notes": "独立 fixture 避免把旁路注入进程的 RSS 错归因给 checkoutservice；以记录 PID 作为诊断目标。"
+}

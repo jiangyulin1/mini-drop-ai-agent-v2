@@ -51,7 +51,7 @@ def test_init_db_adds_v2_columns_to_legacy_database(monkeypatch, tmp_path):
     }
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0008_case_investigation"
+            "0014_profile_windows"
         )
     reset_engine()
 
@@ -69,11 +69,13 @@ def test_init_db_creates_fresh_schema_at_head(monkeypatch, tmp_path):
         "incident_cases", "case_events",
         "case_context_packets", "case_model_attempts",
         "case_hypothesis_nodes", "case_hypothesis_edges", "case_investigation_iterations",
+        "case_recovery_plans", "diagnostic_target_sessions", "target_signals",
+        "profile_windows",
     }.issubset(
         inspector.get_table_names()
     )
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0008_case_investigation"
+            "0014_profile_windows"
         )
     reset_engine()

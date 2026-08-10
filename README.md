@@ -19,7 +19,7 @@
 - [环境要求](#环境要求)
 - [整体架构](#整体架构)
 - [核心流程](#核心流程)
-- [8 种采集器](#8-种采集器)
+- [10 种采集器](#10-种采集器)
 - [智能归因——5 层引擎](#智能归因5-层引擎)
 - [任务状态机](#任务状态机)
 - [Web 前端](#web-前端)
@@ -156,7 +156,7 @@ flowchart LR
     Web -->|REST + SSE| Server["Server\nFastAPI :8191"]
     Server -->|任务下发 / 心跳| GRPC["gRPC :50051"]
     GRPC --> Agent["Agent\nprivileged + pid:host"]
-    Agent --> Collectors["8 种采集器\nperf / eBPF / py-spy\njava / pprof / memory\nsys_metrics / continuous"]
+    Agent --> Collectors["10 种采集器\nperf / eBPF / py-spy / java / pprof\nmemory / sys_metrics / continuous\nprocess_scan / log_scan"]
     Agent --> Analyzer["Analyzer CLI\n火焰图 + TopN + 建议"]
     Agent -->|上传产物| MinIO["MinIO\n对象存储 + 预签名 URL"]
     Server -->|持久化| Postgres["PostgreSQL"]
@@ -217,7 +217,7 @@ Agent 启动 `bpftrace io_latency.bt -o io_latency.txt` → 脚本挂载 `kprobe
 
 ---
 
-## 8 种采集器
+## 10 种采集器
 
 | 采集器 | 类型 key | 采集工具 | 产出物 | Web 可视化 |
 |--------|----------|----------|--------|------------|
@@ -229,6 +229,8 @@ Agent 启动 `bpftrace io_latency.bt -o io_latency.txt` → 脚本挂载 `kprobe
 | **Memory** | `memory_smaps` | /proc/PID/smaps | 内存分段 + RSS 趋势 | ECharts 内存时序折线图 |
 | **SysMetrics** | `sys_metrics` | /proc 多维 | CPU/线程/FD/网络/IO 时序 | ECharts 多维仪表盘 |
 | **Continuous** | `continuous_perf` | perf record（周期） | 多窗口火焰图 + 汇总 | 窗口选择器 + 时间轴回放 |
+| **Process Scan** | `process_scan` | `/proc` 进程枚举 | PID/命令/CPU/RSS 候选清单 | 目标进程选择器 |
+| **Log Scan** | `log_scan` | `/proc/PID/fd` + 文件尾部 | 错误/警告模式与时间戳 | 日志摘要与错误行 |
 
 所有采集器实现统一接口：
 
@@ -644,7 +646,7 @@ mini-drop/
 │   └── schemas.py        Pydantic 请求/响应模型 + 参数边界常量
 ├── agent/mini_drop_agent/ Agent 采集端（gRPC 长连接 + 指数退避重试）
 │   ├── main.py           Agent 主循环（注册 → 心跳 → 拉任务 → 执行 → 上报）
-│   ├── collectors/       8 种采集器（perf/eBPF/py-spy/java/pprof/memory/sys/continuous）
+│   ├── collectors/       10 种采集器（含 process_scan / log_scan）
 │   │   └── scripts/      bpftrace 内核探针脚本
 │   ├── config.py         环境变量加载 + 参数边界校验
 │   └── connection.py     gRPC 连接管理 + 认证拦截器 + 重试逻辑
@@ -655,7 +657,7 @@ mini-drop/
 ├── proto/                5 个 gRPC 契约文件（common/init/healthcheck/hotmethod/control）
 ├── demo/                 演示脚本 & 15 种负载场景生成器
 ├── deploy/               Dockerfiles + nginx 配置
-├── tests/                33 个测试文件（单元 + 集成 + E2E）
+├── tests/                57 个测试文件（单元 + 集成 + E2E）
 └── docs/                 设计文档 + 智能归因评测报告
 ```
 

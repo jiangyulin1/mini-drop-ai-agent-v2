@@ -86,6 +86,7 @@ class ContinuousCollector:
             ]
             timeout = window_duration + 30
 
+            proc = None
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -137,10 +138,11 @@ class ContinuousCollector:
 
             except Exception as exc:
                 # 清理管道，防止 fd 泄露
-                try:
-                    proc.communicate(timeout=5)
-                except Exception:
-                    pass
+                if proc is not None:
+                    try:
+                        proc.communicate(timeout=5)
+                    except Exception:
+                        pass
                 windows.append(_Window(index=i, start_ts=start, end_ts=time.time(),
                                        output_dir=window_dir, ok=False, reason=str(exc)))
 

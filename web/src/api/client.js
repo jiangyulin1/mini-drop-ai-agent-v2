@@ -355,6 +355,50 @@ export function listCaseIterations(caseId, params = {}) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/iterations`, { params });
 }
 
+export function getCaseCurrentUnderstanding(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/understanding`);
+}
+
+export function listCaseProposals(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/proposals`);
+}
+
+export function createServiceChange(payload) {
+  return api.post("/v1/changes", payload);
+}
+
+export function listServiceChanges(params = {}) {
+  return api.get("/v1/changes", { params }).then(itemsOf);
+}
+
+export function createTargetSession(payload) {
+  return api.post("/v1/target-sessions", payload);
+}
+
+export function listTargetSessions(params = {}) {
+  return api.get("/v1/target-sessions", { params }).then(itemsOf);
+}
+
+export function transitionTargetSession(targetSessionId, payload) {
+  return api.post(`/v1/target-sessions/${encodeURIComponent(targetSessionId)}/transition`, payload);
+}
+
+export function createTargetSignal(targetSessionId, payload) {
+  return api.post(`/v1/target-sessions/${encodeURIComponent(targetSessionId)}/signals`, payload);
+}
+
+export function listTargetSignals(targetSessionId, params = {}) {
+  return api.get(`/v1/target-sessions/${encodeURIComponent(targetSessionId)}/signals`, { params }).then(itemsOf);
+}
+
+export function indexTargetProfileTask(targetSessionId, taskId) {
+  return api.post(`/v1/target-sessions/${encodeURIComponent(targetSessionId)}/profile-windows/index-task`, { task_id: taskId });
+}
+
+export function listTargetProfileWindows(targetSessionId, params) {
+  return api.get(`/v1/target-sessions/${encodeURIComponent(targetSessionId)}/profile-windows`, { params }).then(itemsOf);
+}
+
 // ── NLP 自然语言采集 ────────────────────────────────────────────
 
 export function nlpParse(query) {
@@ -437,6 +481,34 @@ export function rollbackAction(actionId, payload = {}) {
 /** 列出注册动作与执行状态。 */
 export function listRegisteredActions() {
   return api.get("/v1/actions");
+}
+
+export function listCaseRecoveryPlans(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/recovery-plans`);
+}
+
+export function createCaseRecoveryPlan(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/recovery-plans`, payload);
+}
+
+export function dryRunCaseRecoveryPlan(caseId, planId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/recovery-plans/${encodeURIComponent(planId)}/dry-run`, payload);
+}
+
+export function decideCaseRecoveryPlan(caseId, planId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/recovery-plans/${encodeURIComponent(planId)}/decision`, payload);
+}
+
+export function executeCaseRecoveryPlan(caseId, planId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/recovery-plans/${encodeURIComponent(planId)}/execute`, payload);
+}
+
+export function verifyCaseRecoveryPlan(caseId, planId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/recovery-plans/${encodeURIComponent(planId)}/verify`, payload);
+}
+
+export function rollbackCaseRecoveryPlan(caseId, planId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/recovery-plans/${encodeURIComponent(planId)}/rollback`, payload);
 }
 
 // ── 恢复验证与人工动作（多轮诊断闭环）────────────────────────

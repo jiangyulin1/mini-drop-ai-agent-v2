@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mini-drop-testset-run-result",
+  "title": "Mini-Drop VM testset run result",
+  "type": "object",
+  "required": ["case_id", "run_id", "environment", "timing", "fault_injected", "capture", "diagnosis", "recovery", "oracle_accessed"],
+  "additionalProperties": false,
+  "properties": {
+    "case_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "environment": {
+      "type": "object",
+      "required": ["linux", "node_count"],
+      "additionalProperties": false,
+      "properties": {
+        "linux": {"type": "boolean"},
+        "node_count": {"type": "integer", "minimum": 1},
+        "description": {"type": "string", "maxLength": 1000}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": ["started_at", "ended_at", "diagnosis_duration_sec"],
+      "additionalProperties": false,
+      "properties": {
+        "started_at": {"type": "string", "format": "date-time"},
+        "ended_at": {"type": "string", "format": "date-time"},
+        "diagnosis_duration_sec": {"type": "number", "minimum": 0}
+      }
+    },
+    "fault_injected": {"type": "boolean"},
+    "capture": {
+      "type": "object",
+      "required": ["collectors", "task_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "collectors": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "task_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true}
+      }
+    },
+    "diagnosis": {
+      "type": "object",
+      "required": ["candidates", "evidence_refs", "unauthorized_actions", "convergence_rounds"],
+      "additionalProperties": false,
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": ["root_location", "domain_cause"],
+            "additionalProperties": false,
+            "properties": {
+              "root_location": {"type": "string"},
+              "domain_cause": {"type": "string"},
+              "root_entity": {"type": ["string", "null"]},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+            }
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["evidence_domain", "reference"],
+            "additionalProperties": false,
+            "properties": {
+              "evidence_domain": {"type": "string"},
+              "reference": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "unauthorized_actions": {"type": "integer", "minimum": 0},
+        "convergence_rounds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "required": ["fault_reverted", "health_verified"],
+      "additionalProperties": false,
+      "properties": {
+        "fault_reverted": {"type": "boolean"},
+        "health_verified": {"type": "boolean"}
+      }
+    },
+    "oracle_accessed": {"type": "boolean"},
+    "notes": {"type": "string", "maxLength": 2000}
+  }
+}

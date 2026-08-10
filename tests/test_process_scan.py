@@ -206,6 +206,9 @@ def test_process_scan_collector_schema(tmp_path):
     assert proc["pid"] == 1234
     assert proc["comm"] == "service-x"
     assert "service-x" in proc["cmdline"]
-    assert proc["rss_mb"] == round(80 * 4096 / 1024 / 1024, 1)
+    assert proc["rss_mb"] == round(
+        80 * os.sysconf("SC_PAGE_SIZE") / 1024 / 1024,
+        1,
+    )
     assert proc["threads"] == 12
     assert proc["state"] == "S"

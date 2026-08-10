@@ -1,6 +1,6 @@
 # Mini-Drop 三节点实验集群部署与测试报告
 
-测试日期：2026-07-20、2026-07-22（Asia/Shanghai）
+测试日期：2026-07-20、2026-07-22、2026-08-10（Asia/Shanghai）
 
 ## 1. 实际部署
 
@@ -238,3 +238,33 @@ Control、两个 Worker、Nginx、实验 S3 和两个 Agent 均保持运行，�
 ```bash
 sudo systemctl stop 'mini-drop-demo-*'
 ```
+
+## 8. 2026-08-10 当前 AI/Agent 基线发布与实测
+
+新版本以同一 SHA-256 校验包部署到 control、worker1 和 worker2，三个节点的
+`mini-drop-active` 均切换到 `mini-drop-release-20260810-ai-agent-v1`。切换前已使用
+SQLite online backup API 生成 18,923,520 字节的数据库备份，2026-08-06 发布目录
+继续保留作为回滚点。
+
+发布后结果：
+
+- `mini-drop-server`、`mini-drop-analyzer`、`mini-drop-s3`、`nginx` 和两个
+  `mini-drop-agent` 均为 `active`；
+- `/api/healthz` 返回 `healthy=true`，数据库、对象存储和 Analyzer 均为 `ok`；
+- 实际 SQLite 从 `0008_case_investigation` 升级到 `0014_profile_windows`，
+  空库 `0001 -> 0014` 与 schema drift 检查也通过；
+- `linux-worker-1` 和 `linux-worker-2` 均为 `ONLINE`，真实 `sys_metrics`
+  任务 `task_20260810_120821_8becef` 和 `task_20260810_120830_d1eada`
+  均为 `DONE`，分析状态为 `SUCCEEDED`；
+- worker1 的 `continuous_perf` 任务 `task_20260810_120937_a24762`
+  完成 1/1 窗口，产生 perf.data、flamegraph JSON/SVG 和 Top JSON；
+- 上述持续剖析任务已建立 `profile_window_07e1b7d0adae4345` 索引；
+  同时间低严重度信号正确关联该窗口、保持 `RECORDED`、不误创建 Case，
+  验证用 target session 随后已归档；
+- 直接以 Agent 自身 PID 为剖析目标时任务被安全策略拒绝，改用非 Agent
+  系统进程后成功，证明自剖析保护未被发布破坏。
+
+Online Boutique 在 worker1 完成 Compose `config --quiet` 和所有 shell 脚本
+`bash -n` 检查。运行态仍未开始：VM 和 Mac 访问
+`us-central1-docker.pkg.dev` 均超时，worker 也没有固定 v0.10.3 镜像。因此没有
+把任何案例晋级为 `verified_vm`，也没有在不完整环境中执行故障注入。

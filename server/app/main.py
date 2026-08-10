@@ -17,6 +17,7 @@ import secrets
 import time
 import zipfile
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path as _Path
 from urllib.parse import quote as _url_quote
 
@@ -83,6 +84,7 @@ from server.app.diagnosis.investigation_planner import (
     evaluate_investigation_stop,
     rank_investigation_actions,
 )
+from server.app.diagnosis.proposal_card import build_proposal_cards
 from server.app.diagnosis.schemas import ApprovalRequest, CreateDiagnosisRequest
 from server.app.case_collaboration import (
     CaseCorrectionRequest,
@@ -90,6 +92,14 @@ from server.app.case_collaboration import (
     CaseState,
     CaseTransitionRequest,
     CreateCaseRequest,
+    CreateChangeRequest,
+    CreateRecoveryPlanRequest,
+    CreateTargetSessionRequest,
+    CreateTargetSignalRequest,
+    IndexProfileTaskRequest,
+    RecoveryPlanDecisionRequest,
+    RecoveryPlanExecuteRequest,
+    TargetSessionTransitionRequest,
     StartCaseDiagnosisRequest,
     build_case_diagnosis_query,
     build_case_context_packet,
@@ -1481,15 +1491,185 @@ def get_current_identity(request: Request) -> APIResponse:
 # ── AI Incident Case 协作层（v1）───────────────────────────────
 
 
+@app.post("/api/v1/target-sessions")
+def create_target_session(
+    payload: CreateTargetSessionRequest, request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    try:
+        result = repo.create_target_session({
+            **payload.model_dump(mode="json"),
+            "tenant_id": _request_tenant(),
+            "created_by": _request_principal(request),
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@app.get("/api/v1/target-sessions")
+def list_target_sessions(
+    request: Request, status: str = "", limit: int = 100,
+) -> APIResponse:
+    _require_role(request, "operator")
+    if status and status not in {"ACTIVE", "PAUSED", "ARCHIVED"}:
+        raise HTTPException(status_code=400, detail="未知目标会话状态")
+    items = repo.list_target_sessions(
+        _request_tenant(), status=status, limit=limit,
+    )
+    return APIResponse(data={"items": items})
+
+
+@app.get("/api/v1/target-sessions/{target_session_id}")
+def get_target_session(target_session_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    result = repo.get_target_session(target_session_id, _request_tenant())
+    if result is None:
+        raise HTTPException(status_code=404, detail="目标会话不存在")
+    return APIResponse(data=result)
+
+
+@app.post("/api/v1/target-sessions/{target_session_id}/transition")
+def transition_target_session(
+    target_session_id: str,
+    payload: TargetSessionTransitionRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    to_status = {
+        "pause": "PAUSED", "resume": "ACTIVE", "archive": "ARCHIVED",
+    }[payload.action]
+    try:
+        result = repo.transition_target_session(
+            target_session_id,
+            _request_tenant(),
+            to_status=to_status,
+            reason=payload.reason,
+            actor_id=_request_principal(request),
+            expected_row_version=payload.expected_row_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="目标会话不存在")
+    return APIResponse(data=result)
+
+
+@app.post("/api/v1/target-sessions/{target_session_id}/signals")
+def create_target_signal(
+    target_session_id: str,
+    payload: CreateTargetSignalRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    signal, created = repo.record_target_signal(
+        target_session_id,
+        _request_tenant(),
+        payload.model_dump(mode="python"),
+    )
+    if signal is None:
+        raise HTTPException(status_code=404, detail="目标会话不存在")
+    triggered_case = None
+    if created:
+        triggered_case = repo.create_case_for_target_signal(
+            target_session_id,
+            signal["signal_id"],
+            _request_tenant(),
+            created_by=_request_principal(request),
+        )
+        refreshed = repo.list_target_signals(
+            target_session_id, _request_tenant(), limit=500,
+        ) or []
+        signal = next(
+            (item for item in refreshed if item["signal_id"] == signal["signal_id"]),
+            signal,
+        )
+    return APIResponse(data={
+        "signal": signal,
+        "created": created,
+        "triggered_case": triggered_case,
+    })
+
+
+@app.get("/api/v1/target-sessions/{target_session_id}/signals")
+def list_target_signals(
+    target_session_id: str, request: Request, limit: int = 100,
+) -> APIResponse:
+    _require_role(request, "operator")
+    items = repo.list_target_signals(
+        target_session_id, _request_tenant(), limit=limit,
+    )
+    if items is None:
+        raise HTTPException(status_code=404, detail="目标会话不存在")
+    return APIResponse(data={"items": items})
+
+
+@app.post("/api/v1/target-sessions/{target_session_id}/profile-windows/index-task")
+def index_target_profile_task(
+    target_session_id: str,
+    payload: IndexProfileTaskRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    try:
+        items = repo.index_profile_task(
+            target_session_id, _request_tenant(), payload.task_id,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "PROFILE_TASK_NOT_FOUND" else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    if items is None:
+        raise HTTPException(status_code=404, detail="目标会话不存在")
+    return APIResponse(data={"items": items, "indexed_count": len(items)})
+
+
+@app.get("/api/v1/target-sessions/{target_session_id}/profile-windows")
+def list_target_profile_windows(
+    target_session_id: str,
+    request: Request,
+    start: datetime,
+    end: datetime,
+    include_expired: bool = False,
+    limit: int = 200,
+) -> APIResponse:
+    _require_role(request, "operator")
+    if end.timestamp() <= start.timestamp():
+        raise HTTPException(status_code=400, detail="PROFILE_WINDOW_RANGE_INVALID")
+    if end.timestamp() - start.timestamp() > 7 * 86400:
+        raise HTTPException(status_code=400, detail="PROFILE_WINDOW_RANGE_TOO_LARGE")
+    items = repo.list_profile_windows(
+        target_session_id,
+        _request_tenant(),
+        start=start,
+        end=end,
+        include_expired=include_expired,
+        limit=limit,
+    )
+    if items is None:
+        raise HTTPException(status_code=404, detail="目标会话不存在")
+    return APIResponse(data={"items": items})
+
+
 @app.post("/api/v1/cases")
 def create_incident_case(payload: CreateCaseRequest, request: Request) -> APIResponse:
     _require_role(request, "operator")
+    target = None
+    if payload.target_session_id:
+        target = repo.get_target_session(payload.target_session_id, _request_tenant())
+        if target is None:
+            raise HTTPException(status_code=404, detail="TARGET_SESSION_NOT_FOUND")
+        if target["status"] == "ARCHIVED":
+            raise HTTPException(status_code=409, detail="TARGET_SESSION_ARCHIVED")
     trusted = {
         **payload.model_dump(mode="json", exclude={"time_range"}),
         "time_range": serialize_time_range(payload.time_range),
         "tenant_id": _request_tenant(),
         "created_by": _request_principal(request),
     }
+    if target is not None:
+        trusted["environment"] = target["environment"]
+        trusted["target_scope"] = target["target_scope"]
     try:
         result = repo.create_incident_case(trusted)
     except ValueError as exc:
@@ -1497,6 +1677,39 @@ def create_incident_case(payload: CreateCaseRequest, request: Request) -> APIRes
         status_code = 404 if detail.endswith("_NOT_FOUND") else 409
         raise HTTPException(status_code=status_code, detail=detail) from exc
     return APIResponse(data=result)
+
+
+@app.post("/api/v1/changes")
+def create_change_record(payload: CreateChangeRequest, request: Request) -> APIResponse:
+    """登记一次发布/配置/开关变更（供 AI 做变更前后对比与回归关联）。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    data = payload.model_dump(mode="json", exclude={"changed_at"})
+    data["changed_at"] = payload.changed_at
+    result = repo.create_change_record({
+        **data,
+        "tenant_id": tenant_id,
+        "created_by": principal_id,
+    })
+    return APIResponse(data=result)
+
+
+@app.get("/api/v1/changes")
+def list_change_records(
+    request: Request,
+    service_id: str | None = None,
+    environment: str | None = None,
+) -> APIResponse:
+    """列出登记过的服务变更（按 service/environment 过滤）。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    items = repo.list_change_records(
+        tenant_id=tenant_id,
+        service_id=service_id,
+        environment=environment,
+    )
+    return APIResponse(data={"items": items})
 
 
 @app.get("/api/v1/cases")
@@ -1651,10 +1864,21 @@ def start_case_diagnosis(
         tenant_id=tenant_id,
         include_inactive=False,
     )
+    case_scope = case.get("target_scope") or {}
+    case_service = case_scope.get("service_id")
+    if not case_service and case_scope.get("service_ids"):
+        case_service = case_scope["service_ids"][0]
+    recent_changes = repo.list_change_records(
+        tenant_id=tenant_id,
+        service_id=case_service,
+        environment=case.get("environment"),
+        limit=10,
+    )
     packet_payload, packet_stats, packet_hash = build_case_context_packet(
         case,
         recent_events=events,
         grants=grants,
+        recent_changes=recent_changes,
         iteration_no=0,
         required_output_schema="normalized-diagnosis-intent.v1",
     )
@@ -1679,7 +1903,11 @@ def start_case_diagnosis(
     if not service_id and target_scope.get("service_ids"):
         service_id = target_scope["service_ids"][0]
     diagnosis_request = CreateDiagnosisRequest.model_validate({
-        "query": build_case_diagnosis_query(case, events),
+        "query": build_case_diagnosis_query(
+            case,
+            events,
+            recent_changes=recent_changes,
+        ),
         "context": {
             "service_id": service_id,
             "environment": case["environment"],
@@ -1705,6 +1933,7 @@ def start_case_diagnosis(
             diagnosis = diagnosis_orchestrator.create(
                 diagnosis_request,
                 creator_id=principal_id,
+                initial_task_ids=case.get("initial_task_ids") or [],
             )
         graph = repo.sync_case_hypothesis_graph(
             case_id,
@@ -1789,6 +2018,60 @@ def start_case_diagnosis(
         "diagnosis": diagnosis,
         "context_packet_id": packet["context_packet_id"],
         "investigation_iteration_id": iteration["iteration_id"],
+    })
+
+
+@app.get("/api/v1/cases/{case_id}/proposals")
+def list_case_proposals(case_id: str, request: Request) -> APIResponse:
+    """提案卡：把 Case 诊断的待审批动作派生为可读卡片（依据/作用/影响/成本）。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    actions: list[dict] = []
+    diagnosis_id = case.get("diagnosis_session_id")
+    if diagnosis_id:
+        session = diagnosis_orchestrator.store.get_detail(diagnosis_id)
+        conclusion = (session or {}).get("latest_conclusion") or {}
+        actions = conclusion.get("actions") or []
+    cards = build_proposal_cards(actions, step_id_prefix=f"{case_id}:")
+    return APIResponse(data={"case_id": case_id, "proposals": cards})
+
+
+@app.get("/api/v1/cases/{case_id}/understanding")
+def get_case_current_understanding(case_id: str, request: Request) -> APIResponse:
+    """Return the current programmatic understanding from live Case evidence."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {
+        "hypotheses": [], "edges": [],
+    }
+    diagnosis_id = case.get("diagnosis_session_id")
+    detail = (
+        diagnosis_orchestrator.store.get_detail(diagnosis_id)
+        if diagnosis_id else {}
+    ) or {}
+    recent_changes = repo.list_change_records(
+        tenant_id=tenant_id,
+        service_id=(case.get("target_scope") or {}).get("service_id"),
+        environment=case.get("environment"),
+        limit=10,
+    )
+    packet, _, _ = build_case_context_packet(
+        case,
+        diagnosis={"hypothesis_graph": graph},
+        evidence=detail.get("evidence") or [],
+        recent_changes=recent_changes,
+        required_output_schema="current-understanding.v1",
+    )
+    return APIResponse(data={
+        "case_id": case_id,
+        "diagnosis_id": diagnosis_id,
+        "current_understanding": packet["current_understanding"],
     })
 
 
@@ -2320,6 +2603,431 @@ def _action_evaluation_allows(action_id: str, request: Request, payload: dict[st
     ))
     if evaluation.decision == AuthorizationDecision.DENIED:
         raise HTTPException(status_code=403, detail=f"ACTION_DENIED: {','.join(evaluation.reason_codes)}")
+
+
+def _case_recovery_plan_or_404(case_id: str, tenant_id: str, plan_id: str) -> dict[str, Any]:
+    plan = repo.get_case_recovery_plan(case_id, tenant_id, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="恢复方案不存在")
+    return plan
+
+
+@app.get("/api/v1/cases/{case_id}/recovery-plans")
+def list_case_recovery_plans(case_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    return APIResponse(data={
+        "items": repo.list_case_recovery_plans(case_id, tenant_id),
+    })
+
+
+@app.post("/api/v1/cases/{case_id}/recovery-plans")
+def create_case_recovery_plan(
+    case_id: str,
+    payload: CreateRecoveryPlanRequest,
+    request: Request,
+) -> APIResponse:
+    """Create a durable, approval-gated recovery plan for an executable action."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    definition = DEFAULT_ACTION_REGISTRY.get(payload.action_id)
+    if definition is None:
+        raise HTTPException(status_code=404, detail="ACTION_NOT_REGISTERED")
+    if definition.implementation_status != "executable" or not is_executable(payload.action_id):
+        raise HTTPException(status_code=409, detail="ACTION_POLICY_ONLY_NOT_EXECUTABLE")
+    policy = evaluate_action(payload.action_id, ActionEvaluationRequest(
+        tenant_id=tenant_id,
+        environment=case["environment"],
+        target_count=1,
+        healthy_replicas_after_action=1,
+        rollback_ready=bool(definition.rollback_action_id),
+        dry_run_passed=False,
+        parameters=payload.parameters,
+    ))
+    if policy.decision == AuthorizationDecision.DENIED:
+        raise HTTPException(status_code=403, detail=f"ACTION_DENIED:{','.join(policy.reason_codes)}")
+    try:
+        plan = repo.create_case_recovery_plan(
+            case_id,
+            tenant_id,
+            action_id=payload.action_id,
+            parameters=payload.parameters,
+            value_after_fix=payload.value_after_fix,
+            verification_method=payload.verification_method,
+            policy=policy.model_dump(mode="json"),
+            created_by=_request_principal(request),
+            expected_case_version=payload.expected_case_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=plan)
+
+
+@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/dry-run")
+def dry_run_case_recovery_plan(
+    case_id: str,
+    plan_id: str,
+    payload: RecoveryPlanExecuteRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    plan = _case_recovery_plan_or_404(case_id, tenant_id, plan_id)
+    if plan["status"] != "PROPOSED":
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_PROPOSED")
+    try:
+        dry = ACTUATION_GATEWAY.dry_run(plan["action_id"], plan["parameters"])
+        definition = DEFAULT_ACTION_REGISTRY.get(plan["action_id"])
+        policy = evaluate_action(plan["action_id"], ActionEvaluationRequest(
+            tenant_id=tenant_id,
+            environment=case["environment"],
+            target_count=1,
+            healthy_replicas_after_action=1,
+            rollback_ready=bool(definition and definition.rollback_action_id),
+            dry_run_passed=True,
+            parameters=plan["parameters"],
+        ))
+        if policy.decision == AuthorizationDecision.DENIED:
+            raise ActuationError(f"ACTION_DENIED:{','.join(policy.reason_codes)}")
+        next_status = (
+            "DRY_RUN_COMPLETED"
+            if dry.get("dry_run", {}).get("candidate_count", 0) else "DRY_RUN_EMPTY"
+        )
+        updated = repo.transition_case_recovery_plan(
+            case_id, tenant_id, plan_id,
+            to_status=next_status,
+            actor_id=_request_principal(request),
+            expected_plan_version=payload.expected_plan_version,
+            updates={
+                "policy_json": policy.model_dump(mode="json"),
+                "dry_run_attempt_id": dry["attempt_id"],
+                "dry_run_json": dry["dry_run"],
+            },
+        )
+    except (ActuationError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=updated)
+
+
+@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/decision")
+def decide_case_recovery_plan(
+    case_id: str,
+    plan_id: str,
+    payload: RecoveryPlanDecisionRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    plan = _case_recovery_plan_or_404(case_id, tenant_id, plan_id)
+    if plan["status"] != "DRY_RUN_COMPLETED":
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_READY_FOR_DECISION")
+    now = now_utc()
+    updates = (
+        {"approved_by": _request_principal(request), "approved_at": now}
+        if payload.decision == "approve"
+        else {"rejection_reason": payload.reason}
+    )
+    try:
+        updated = repo.transition_case_recovery_plan(
+            case_id, tenant_id, plan_id,
+            to_status="APPROVED" if payload.decision == "approve" else "REJECTED",
+            actor_id=_request_principal(request),
+            expected_plan_version=payload.expected_plan_version,
+            updates=updates,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=updated)
+
+
+@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/execute")
+def execute_case_recovery_plan(
+    case_id: str,
+    plan_id: str,
+    payload: RecoveryPlanExecuteRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    plan = _case_recovery_plan_or_404(case_id, tenant_id, plan_id)
+    if plan["status"] not in {"APPROVED", "EXECUTING"} or not plan.get("approved_by"):
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_APPROVED")
+    definition = DEFAULT_ACTION_REGISTRY.get(plan["action_id"])
+    policy = evaluate_action(plan["action_id"], ActionEvaluationRequest(
+        tenant_id=tenant_id,
+        environment=case["environment"],
+        target_count=1,
+        healthy_replicas_after_action=1,
+        rollback_ready=bool(definition and definition.rollback_action_id),
+        dry_run_passed=True,
+        parameters=plan["parameters"],
+    ))
+    if policy.decision == AuthorizationDecision.DENIED or not policy.executable:
+        raise HTTPException(status_code=403, detail=f"ACTION_DENIED:{','.join(policy.reason_codes)}")
+    try:
+        if plan["status"] == "APPROVED":
+            plan = repo.transition_case_recovery_plan(
+                case_id, tenant_id, plan_id,
+                to_status="EXECUTING",
+                actor_id=_request_principal(request),
+                expected_plan_version=payload.expected_plan_version,
+            )
+            if plan is None:
+                raise ValueError("RECOVERY_PLAN_NOT_FOUND")
+        elif plan["row_version"] != payload.expected_plan_version:
+            raise ValueError("RECOVERY_PLAN_VERSION_CONFLICT")
+
+        dry_items = (plan.get("dry_run") or {}).get("items") or []
+        inferred = _infer_recovery_execution(plan)
+        if dry_items and len(inferred) == len(dry_items):
+            execution = {
+                "attempt_id": str(plan["dry_run_attempt_id"]),
+                "action_id": plan["action_id"],
+                "stage": "COMPLETED",
+                "executed": inferred,
+                "reconciled_from_postconditions": True,
+            }
+        else:
+            if ACTUATION_GATEWAY.get_attempt(str(plan["dry_run_attempt_id"])) is None:
+                ACTUATION_GATEWAY.restore_dry_run_attempt(
+                    attempt_id=str(plan["dry_run_attempt_id"]),
+                    action_id=plan["action_id"],
+                    items=dry_items,
+                    parameters=plan["parameters"],
+                )
+            execution = ACTUATION_GATEWAY.execute(
+                plan["action_id"],
+                str(plan["dry_run_attempt_id"]),
+                environment=case["environment"],
+            )
+            combined = {
+                str(item.get("task_id") or item.get("source")): item
+                for item in [*inferred, *(execution.get("executed") or [])]
+            }
+            execution["executed"] = list(combined.values())
+        updated = repo.transition_case_recovery_plan(
+            case_id, tenant_id, plan_id,
+            to_status="EXECUTED",
+            actor_id=_request_principal(request),
+            expected_plan_version=plan["row_version"],
+            updates={"execution_json": execution, "policy_json": policy.model_dump(mode="json")},
+        )
+    except ActuationError as exc:
+        current = repo.get_case_recovery_plan(case_id, tenant_id, plan_id)
+        if current and current["status"] == "EXECUTING":
+            attempt = ACTUATION_GATEWAY.get_attempt(str(current.get("dry_run_attempt_id")))
+            failure = {
+                "attempt_id": current.get("dry_run_attempt_id"),
+                "stage": "FAILED",
+                "executed": list(attempt.executed_items) if attempt else [],
+                "error": str(exc),
+            }
+            try:
+                repo.transition_case_recovery_plan(
+                    case_id, tenant_id, plan_id,
+                    to_status="FAILED",
+                    actor_id=_request_principal(request),
+                    expected_plan_version=current["row_version"],
+                    updates={"execution_json": failure},
+                )
+            except ValueError:
+                pass
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=updated)
+
+
+def _infer_recovery_execution(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Recover an execution journal from deterministic filesystem postconditions."""
+    dry_items = (plan.get("dry_run") or {}).get("items") or []
+    if plan["action_id"] == "mini-drop.cleanup-expired-cache":
+        destination_root = _Path(
+            os.getenv("MINI_DROP_QUARANTINE_ROOT", "/tmp/mini-drop-quarantine"),
+        ).expanduser().resolve()
+        destination_field = "quarantine_path"
+    elif plan["action_id"] == "mini-drop.restore-cache-quarantine":
+        destination_root = _Path(
+            os.getenv("MINI_DROP_ARTIFACT_ROOT", "/tmp/mini-drop"),
+        ).expanduser().resolve()
+        destination_field = "restored_path"
+    else:
+        return []
+    if not destination_root.is_dir():
+        return []
+    destinations = [item for item in destination_root.iterdir() if item.is_dir()]
+    inferred: list[dict[str, Any]] = []
+    for item in dry_items:
+        source_value = str(item.get("path") or "").strip()
+        if not source_value:
+            continue
+        source = _Path(source_value)
+        task_id = str(item.get("task_id") or source.name)
+        if source.exists():
+            continue
+        matches = [
+            candidate for candidate in destinations
+            if candidate.name == task_id or candidate.name.startswith(f"{task_id}-")
+        ]
+        if not matches:
+            continue
+        inferred.append({
+            "task_id": task_id,
+            "source": str(source),
+            destination_field: str(sorted(matches)[-1]),
+            "size_bytes": item.get("size_bytes", 0),
+            "reconciled": True,
+        })
+    return inferred
+
+
+def _rollback_case_recovery_plan(
+    case_id: str,
+    tenant_id: str,
+    plan: dict[str, Any],
+    *,
+    actor_id: str,
+) -> dict[str, Any]:
+    definition = DEFAULT_ACTION_REGISTRY.get(plan["action_id"])
+    rollback_id = definition.rollback_action_id if definition else None
+    if not rollback_id or not is_executable(rollback_id):
+        raise ActuationError(f"动作 {plan['action_id']} 没有可执行的回滚动作")
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise ActuationError("Case 不存在")
+    dry = ACTUATION_GATEWAY.dry_run(rollback_id, plan.get("parameters") or {})
+    if dry.get("dry_run", {}).get("candidate_count", 0):
+        result = ACTUATION_GATEWAY.execute(
+            rollback_id, dry["attempt_id"], environment=case["environment"],
+        )
+    else:
+        if (plan.get("execution") or {}).get("executed"):
+            raise ActuationError("ROLLBACK_TARGET_MISSING：已执行动作的回滚目标不存在")
+        result = {"attempt_id": dry["attempt_id"], "stage": "NOTHING_TO_ROLLBACK", "executed": []}
+    updated = repo.transition_case_recovery_plan(
+        case_id, tenant_id, plan["recovery_plan_id"],
+        to_status="ROLLED_BACK",
+        actor_id=actor_id,
+        expected_plan_version=plan["row_version"],
+        updates={"rollback_json": result},
+    )
+    if updated is None:
+        raise ActuationError("恢复方案不存在")
+    return updated
+
+
+@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/rollback")
+def rollback_case_recovery_plan(
+    case_id: str,
+    plan_id: str,
+    payload: RecoveryPlanExecuteRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    plan = _case_recovery_plan_or_404(case_id, tenant_id, plan_id)
+    if plan["row_version"] != payload.expected_plan_version:
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_VERSION_CONFLICT")
+    if plan["status"] not in {"EXECUTED", "VERIFICATION_FAILED", "FAILED"}:
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_ROLLBACKABLE")
+    try:
+        updated = _rollback_case_recovery_plan(
+            case_id, tenant_id, plan, actor_id=_request_principal(request),
+        )
+    except (ActuationError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=updated)
+
+
+def _verify_local_recovery_postconditions(plan: dict[str, Any]) -> dict[str, Any]:
+    """Verify executable maintenance actions without trusting client assertions."""
+    executed = (plan.get("execution") or {}).get("executed") or []
+    if not executed:
+        return {"status": "indeterminate", "reason": "执行结果为空", "checks": []}
+    checks: list[dict[str, Any]] = []
+    if plan["action_id"] == "mini-drop.cleanup-expired-cache":
+        for item in executed:
+            source_value = str(item.get("source") or "").strip()
+            quarantine_value = str(item.get("quarantine_path") or "").strip()
+            source_absent = bool(source_value) and not _Path(source_value).exists()
+            quarantine_present = bool(quarantine_value) and _Path(quarantine_value).is_dir()
+            checks.append({
+                "task_id": item.get("task_id"),
+                "source_absent": source_absent,
+                "quarantine_present": quarantine_present,
+                "passed": source_absent and quarantine_present,
+            })
+    elif plan["action_id"] == "mini-drop.restore-cache-quarantine":
+        for item in executed:
+            source_value = str(item.get("source") or "").strip()
+            restored_value = str(item.get("restored_path") or "").strip()
+            source_absent = bool(source_value) and not _Path(source_value).exists()
+            restored_present = bool(restored_value) and _Path(restored_value).is_dir()
+            checks.append({
+                "task_id": item.get("task_id"),
+                "source_absent": source_absent,
+                "restored_present": restored_present,
+                "passed": source_absent and restored_present,
+            })
+    else:
+        return {
+            "status": "indeterminate",
+            "reason": "该动作尚无注册的服务端验证器",
+            "checks": [],
+        }
+    passed = bool(checks) and all(item["passed"] for item in checks)
+    return {
+        "status": "recovered" if passed else "not_recovered",
+        "reason": f"服务端校验 {len(checks)} 项动作后置条件",
+        "checks": checks,
+    }
+
+
+@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/verify")
+def verify_case_recovery_plan(
+    case_id: str,
+    plan_id: str,
+    payload: RecoveryPlanExecuteRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    plan = _case_recovery_plan_or_404(case_id, tenant_id, plan_id)
+    if plan["row_version"] != payload.expected_plan_version:
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_VERSION_CONFLICT")
+    if plan["status"] != "EXECUTED":
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_EXECUTED")
+    judgment = _verify_local_recovery_postconditions(plan)
+    try:
+        transitioned = repo.transition_case_recovery_plan(
+            case_id, tenant_id, plan_id,
+            to_status="VERIFIED" if judgment["status"] == "recovered" else "VERIFICATION_FAILED",
+            actor_id=_request_principal(request),
+            expected_plan_version=plan["row_version"],
+            updates={"verification_json": judgment},
+        )
+        final_plan = transitioned
+        if judgment["status"] != "recovered":
+            definition = DEFAULT_ACTION_REGISTRY.get(plan["action_id"])
+            if definition and definition.rollback_action_id and is_executable(definition.rollback_action_id):
+                final_plan = _rollback_case_recovery_plan(
+                    case_id, tenant_id, transitioned,
+                    actor_id=_request_principal(request),
+                )
+    except (ActuationError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data={"judgment": judgment, "recovery_plan": final_plan})
 
 
 @app.post("/api/v1/actions/{action_id}/dry-run")

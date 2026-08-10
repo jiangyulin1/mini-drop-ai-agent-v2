@@ -28,6 +28,20 @@ alembic check
 Application startup also runs `upgrade head`. A pre-Alembic database is stamped at
 `0001_baseline` and receives the conditional `0002_release` compatibility migration.
 
+## Native release package
+
+Build `web/dist` first, then create a release archive with the repository script:
+
+```bash
+make package-native RELEASE_NAME=mini-drop-release-YYYYMMDD-name
+```
+
+The command refuses dirty worktrees and existing output archives, packages only files from
+the current Git `HEAD` plus the built `web/dist`, disables macOS AppleDouble resource-fork
+members, scans the final member list, and prints the SHA-256 used for node-to-node verification.
+Runtime `.venv` and the protected environment file are copied from the previous release on
+each node; they must never be included in the archive.
+
 ## Database backup and restore rehearsal
 
 Always restore into a separate rehearsal database first:

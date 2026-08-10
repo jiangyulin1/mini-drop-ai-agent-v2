@@ -170,12 +170,14 @@ def cleanup_expired_cache_execute(attempt: ActuationAttempt) -> list[dict[str, A
             shutil.move(str(source), str(target))
         except OSError as exc:
             raise ActuationError(f"移动失败 {source.name}: {exc}") from exc
-        executed.append({
+        executed_item = {
             "task_id": source.name,
             "source": str(source),
             "quarantine_path": str(target),
             "size_bytes": item.get("size_bytes", 0),
-        })
+        }
+        executed.append(executed_item)
+        attempt.executed_items.append(executed_item)
     return executed
 
 
@@ -213,11 +215,13 @@ def restore_cache_quarantine_execute(attempt: ActuationAttempt) -> list[dict[str
             shutil.move(str(source), str(target))
         except OSError as exc:
             raise ActuationError(f"恢复失败 {source.name}: {exc}") from exc
-        executed.append({
+        executed_item = {
             "task_id": source.name,
             "source": str(source),
             "restored_path": str(target),
-        })
+        }
+        executed.append(executed_item)
+        attempt.executed_items.append(executed_item)
     return executed
 
 
@@ -338,3 +342,39 @@ class ActuationGateway:
 
     def get_attempt(self, attempt_id: str) -> Optional[ActuationAttempt]:
         return self._attempts.get(attempt_id)
+
+    def restore_dry_run_attempt(
+        self,
+        *,
+        attempt_id: str,
+        action_id: str,
+        items: list[dict[str, Any]],
+        parameters: dict[str, Any],
+    ) -> ActuationAttempt:
+        """Rehydrate a server-persisted dry-run after process restart.
+
+        This is intentionally not exposed as an API. Callers must first load a
+        tenant-bound recovery plan from durable storage; client-provided item
+        snapshots are never accepted.
+        """
+        existing = self._attempts.get(attempt_id)
+        if existing is not None:
+            if existing.action_id != action_id:
+                raise ActuationError("持久化 dry-run 与动作不匹配")
+            return existing
+        if not is_executable(action_id):
+            raise ActuationError(f"动作 {action_id} 未开放执行（policy_only）")
+        attempt = ActuationAttempt(
+            attempt_id=attempt_id,
+            action_id=action_id,
+            stage=ActuationStage.DRY_RUN_COMPLETED,
+            dry_run_items=list(items),
+            metadata={"parameters": dict(parameters), "restored_from_store": True},
+        )
+        self._attempts[attempt_id] = attempt
+        self._audit_log("ACTION_DRY_RUN_RESTORED", {
+            "action_id": action_id,
+            "attempt_id": attempt_id,
+            "candidate_count": len(items),
+        })
+        return attempt
