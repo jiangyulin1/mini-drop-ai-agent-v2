@@ -95,5 +95,8 @@ def reset_engine() -> None:
     """重置引擎和 session factory（测试用，强制下次调用时重建）。"""
     global _engine, _sessionmaker
     with _lock:
+        previous_engine = _engine
         _engine = None
         _sessionmaker = None
+        if previous_engine is not None:
+            previous_engine.dispose()

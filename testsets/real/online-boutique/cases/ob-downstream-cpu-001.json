@@ -1,0 +1,49 @@
+{
+  "case_id": "ob-downstream-cpu-001",
+  "user_query": "frontend 下单变慢，请沿依赖链判断根因是否位于下游服务。",
+  "system": {
+    "name": "online-boutique",
+    "version": "trimmed-core",
+    "topology": ["frontend", "productcatalogservice", "cartservice", "checkoutservice", "currencyservice"],
+    "agents": ["worker1", "worker2"]
+  },
+  "fault": {
+    "type": "cpu",
+    "target_service": "currencyservice",
+    "target_node": "worker2",
+    "duration_sec": 120,
+    "intensity": 0.85,
+    "reversible": true
+  },
+  "trigger": {
+    "workload_script": "scripts/load-gen.sh",
+    "load_profile": "constant-50qps",
+    "description": "持续 50 QPS 下单，currencyservice 被 CPU 占满，checkout 调用其超时、前端整体变慢——从 frontend 视角是下游故障"
+  },
+  "execution": {
+    "preflight_script": "scripts/preflight.sh",
+    "runner_script": "faults/run-fault.sh",
+    "requires_linux": true,
+    "required_env": ["TARGET_URL"]
+  },
+  "performance_requirements": {
+    "baseline_duration_sec": 60,
+    "recovery_timeout_sec": 120,
+    "max_diagnosis_sec": 300,
+    "repetitions": 3
+  },
+  "capture": {
+    "collectors": ["perf_cpu", "sys_metrics", "continuous_perf"],
+    "window": "before=60s, during=120s, after=60s"
+  },
+  "expected": {
+    "root_location": "downstream",
+    "domain_cause": "cpu",
+    "root_entity": "currencyservice",
+    "evidence_domains": ["process", "dependency"]
+  },
+  "oracle_visibility": "private",
+  "ground_truth_source": "self-injected",
+  "status": "designed",
+  "notes": "核心测试点：frontend/checkout 报警但根因在 currencyservice（下游归因 S4）。"
+}

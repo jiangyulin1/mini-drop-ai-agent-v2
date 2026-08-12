@@ -1,0 +1,49 @@
+{
+  "case_id": "ob-cpu-hog-001",
+  "user_query": "productcatalogservice CPU 饱和且接口变慢，请判断是服务自身热点还是宿主争抢。",
+  "system": {
+    "name": "online-boutique",
+    "version": "trimmed-core",
+    "topology": ["frontend", "productcatalogservice", "cartservice", "checkoutservice", "currencyservice"],
+    "agents": ["worker1", "worker2"]
+  },
+  "fault": {
+    "type": "cpu",
+    "target_service": "productcatalogservice",
+    "target_node": "worker1",
+    "duration_sec": 120,
+    "intensity": 0.8,
+    "reversible": true
+  },
+  "trigger": {
+    "workload_script": "scripts/load-gen.sh",
+    "load_profile": "constant-50qps",
+    "description": "持续 50 QPS 请求 productcatalog，制造进程级 CPU 饱和"
+  },
+  "execution": {
+    "preflight_script": "scripts/preflight.sh",
+    "runner_script": "faults/run-fault.sh",
+    "requires_linux": true,
+    "required_env": ["TARGET_URL"]
+  },
+  "performance_requirements": {
+    "baseline_duration_sec": 60,
+    "recovery_timeout_sec": 120,
+    "max_diagnosis_sec": 300,
+    "repetitions": 3
+  },
+  "capture": {
+    "collectors": ["perf_cpu", "sys_metrics", "continuous_perf"],
+    "window": "before=60s, during=120s, after=60s"
+  },
+  "expected": {
+    "root_location": "self",
+    "domain_cause": "cpu",
+    "root_entity": "productcatalogservice",
+    "evidence_domains": ["process", "host"]
+  },
+  "oracle_visibility": "private",
+  "ground_truth_source": "self-injected",
+  "status": "designed",
+  "notes": "注入时由 inject.sh 自记录 GT；intensity=0.8 表示占 productcatalog 容器 80% 单核。"
+}

@@ -14,6 +14,7 @@ import { verifyCaseRecovery } from "../../api/client";
 import {
   CheckOutlined,
   DatabaseOutlined,
+  EditOutlined,
   EyeOutlined,
   MoreOutlined,
   PauseOutlined,
@@ -54,7 +55,15 @@ function collectionIdFromText(value) {
   return String(value || "").match(/\[collection:([^\]]+)\]/)?.[1] || "";
 }
 
-function CurrentResult({ diagnosis, caseId, onOpenTechnical, onOpenScope }) {
+function CurrentResult({
+  diagnosis,
+  caseId,
+  currentUnderstanding,
+  proposals,
+  onOpenTechnical,
+  onOpenScope,
+  onSwitchData,
+}) {
   const conclusion = diagnosis?.latest_conclusion;
   const [verifying, setVerifying] = useState(false);
   const [verification, setVerification] = useState(null);
@@ -122,6 +131,20 @@ function CurrentResult({ diagnosis, caseId, onOpenTechnical, onOpenScope }) {
         <div className={styles.cardDescription}>{human.meaning}</div>
         <div className={styles.cardDescription}>{human.impact}</div>
       </div>
+      {currentUnderstanding && (
+        <div className={styles.resultSection}>
+          <div className={styles.resultLabel}>当前理解</div>
+          <div className={styles.cardDescription}>{currentUnderstanding.understanding}</div>
+          {(currentUnderstanding.confirmed || []).slice(0, 3).map((item) => (
+            <div className={styles.evidenceLine} key={item}>{item}</div>
+          ))}
+          {(currentUnderstanding.missing || []).length > 0 && (
+            <div className={styles.cardDescription} style={{ marginTop: 6 }}>
+              仍缺：{currentUnderstanding.missing.slice(0, 3).join("；")}
+            </div>
+          )}
+        </div>
+      )}
       {keyFindings.length > 0 ? (
         <div className={styles.resultSection}>
           <div className={styles.resultLabel}>为什么这样判断</div>
@@ -209,6 +232,24 @@ function CurrentResult({ diagnosis, caseId, onOpenTechnical, onOpenScope }) {
           )}
         </div>
       )}
+      {(proposals || []).length > 0 && (
+        <div className={styles.resultSection}>
+          <div className={styles.resultLabel}>动作提案</div>
+          <div className={styles.recommendationList}>
+            {proposals.slice(0, 4).map((item) => (
+              <div className={styles.recommendationCard} key={item.action_id}>
+                <div className={styles.recommendationHead}>
+                  <span className={styles.recommendationTitle}>{item.predicted_effect}</span>
+                  <Tag color={item.requires_approval ? "orange" : "green"}>
+                    {item.requires_approval ? "需确认" : "自动"} · {item.impact}
+                  </Tag>
+                </div>
+                <div className={styles.cardDescription}>{item.rationale}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className={styles.cardActions}>
         <Button type="primary" icon={<EyeOutlined />} onClick={onOpenTechnical}>查看证据与采集详情</Button>
       </div>
@@ -216,10 +257,75 @@ function CurrentResult({ diagnosis, caseId, onOpenTechnical, onOpenScope }) {
   );
 }
 
+function RecoveryPlanCards({ plans, loading, onAction }) {
+  if (!(plans || []).length) return null;
+  const statusMeta = {
+    PROPOSED: ["等待预检", "blue"],
+    DRY_RUN_COMPLETED: ["等待批准", "orange"],
+    DRY_RUN_EMPTY: ["无需执行", "default"],
+    APPROVED: ["已批准", "purple"],
+    EXECUTED: ["等待验证", "cyan"],
+    VERIFIED: ["验证通过", "green"],
+    VERIFICATION_FAILED: ["验证失败", "red"],
+    ROLLED_BACK: ["已回滚", "gold"],
+    REJECTED: ["已拒绝", "default"],
+    FAILED: ["执行失败", "red"],
+  };
+  return (
+    <Message ai author="Mini-Drop">
+      <div className={styles.resultCard}>
+        <div className={styles.resultLabel}>受控恢复方案</div>
+        <div className={styles.recommendationList}>
+          {plans.slice(0, 3).map((plan) => {
+            const meta = statusMeta[plan.status] || [plan.status, "default"];
+            return (
+              <div className={styles.recommendationCard} key={plan.recovery_plan_id}>
+                <div className={styles.recommendationHead}>
+                  <span className={styles.recommendationTitle}>{plan.action_id}</span>
+                  <Tag color={meta[1]}>{meta[0]}</Tag>
+                </div>
+                <div className={styles.cardDescription}>{plan.value_after_fix}</div>
+                <div className={styles.cardDescription}>验证：{plan.verification_method}</div>
+                {plan.dry_run?.candidate_count !== undefined && (
+                  <div className={styles.recommendationRefs}>预检影响 {plan.dry_run.candidate_count} 项</div>
+                )}
+                <div className={styles.cardActions}>
+                  {plan.status === "PROPOSED" && <Button size="small" loading={loading} onClick={() => onAction(plan, "dry-run")}>只读预检</Button>}
+                  {plan.status === "DRY_RUN_COMPLETED" && <>
+                    <Button size="small" type="primary" loading={loading} onClick={() => onAction(plan, "approve")}>批准一次</Button>
+                    <Button size="small" danger onClick={() => onAction(plan, "reject")}>拒绝</Button>
+                  </>}
+                  {plan.status === "APPROVED" && (
+                    <Popconfirm title="确认执行已预检并批准的恢复动作？" onConfirm={() => onAction(plan, "execute")}>
+                      <Button size="small" type="primary" loading={loading}>执行</Button>
+                    </Popconfirm>
+                  )}
+                  {plan.status === "EXECUTED" && <>
+                    <Button size="small" type="primary" loading={loading} onClick={() => onAction(plan, "verify")}>服务端验证</Button>
+                    <Popconfirm title="确认回滚本次恢复动作？" onConfirm={() => onAction(plan, "rollback")}>
+                      <Button size="small" danger loading={loading}>回滚</Button>
+                    </Popconfirm>
+                  </>}
+                  {plan.status === "VERIFICATION_FAILED" && (
+                    <Button size="small" danger loading={loading} onClick={() => onAction(plan, "rollback")}>立即回滚</Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Message>
+  );
+}
+
 export default function CaseConversation({
   detail,
   events,
   diagnosis,
+  currentUnderstanding,
+  proposals,
+  recoveryPlans,
   loading,
   actionLoading,
   messageText,
@@ -232,6 +338,8 @@ export default function CaseConversation({
   onDecision,
   onTransition,
   onAdvanceAgent,
+  onOpenRecovery,
+  onRecoveryAction,
 }) {
   const state = CASE_STATE_META[detail.state] || { label: detail.state, color: "default", tone: "idle" };
   const status = DIAGNOSIS_STATUS_META[diagnosis?.status] || { label: diagnosis?.status, color: "default" };
@@ -322,6 +430,9 @@ export default function CaseConversation({
           </div>
         </div>
         <div className={styles.caseHeaderActions}>
+          <Button icon={<EditOutlined />} onClick={onOpenScope} disabled={readOnly}>范围</Button>
+          {!readOnly && <Button onClick={onOpenRecovery}>恢复</Button>}
+          {diagnosis && <Button icon={<EyeOutlined />} onClick={onOpenTechnical}>详情</Button>}
           {moreItems.length > 0 && (
             <Dropdown menu={{ items: moreItems, onClick: handleMore }} trigger={["click"]}>
               <Button icon={<MoreOutlined />}>更多</Button>
@@ -457,9 +568,17 @@ export default function CaseConversation({
 
             {diagnosis?.latest_conclusion && (
               <Message ai author="Mini-Drop" time={detail.updated_at}>
-                <CurrentResult diagnosis={diagnosis} caseId={detail.case_id} onOpenTechnical={onOpenTechnical} onOpenScope={onOpenScope} />
+              <CurrentResult
+                diagnosis={diagnosis}
+                caseId={detail.case_id}
+                currentUnderstanding={currentUnderstanding}
+                proposals={proposals}
+                onOpenTechnical={onOpenTechnical}
+                onOpenScope={onOpenScope}
+              />
               </Message>
             )}
+            <RecoveryPlanCards plans={recoveryPlans} loading={actionLoading} onAction={onRecoveryAction} />
           </div>
         </Spin>
       </div>

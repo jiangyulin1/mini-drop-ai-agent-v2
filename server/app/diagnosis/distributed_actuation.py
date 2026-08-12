@@ -111,6 +111,24 @@ class DistributedActuationGateway:
         self._audit("ACTION_EXECUTED", action_id, dry_run_attempt_id, parameters)
         return result
 
+    def get_attempt(self, attempt_id: str):
+        return self.local.get_attempt(attempt_id)
+
+    def restore_dry_run_attempt(
+        self,
+        *,
+        attempt_id: str,
+        action_id: str,
+        items: list[dict[str, Any]],
+        parameters: dict[str, Any],
+    ):
+        return self.local.restore_dry_run_attempt(
+            attempt_id=attempt_id,
+            action_id=action_id,
+            items=items,
+            parameters=parameters,
+        )
+
     def _dispatch(self, parameters: dict[str, Any], operation: str) -> dict[str, Any]:
         agent_id = str(parameters.get("manager_agent_id") or "")
         service_name = str(parameters.get("service_name") or "")

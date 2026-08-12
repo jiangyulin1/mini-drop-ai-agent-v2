@@ -1,0 +1,49 @@
+{
+  "case_id": "ob-cpu-burst-001",
+  "user_query": "productcatalogservice 刚才出现过 60 秒 CPU 突发但现在已恢复，请重建异常窗口并定位原因。",
+  "system": {
+    "name": "online-boutique",
+    "version": "trimmed-core",
+    "topology": ["frontend", "productcatalogservice", "cartservice", "checkoutservice", "currencyservice"],
+    "agents": ["worker1", "worker2"]
+  },
+  "fault": {
+    "type": "cpu",
+    "target_service": "productcatalogservice",
+    "target_node": "worker1",
+    "duration_sec": 60,
+    "intensity": 0.9,
+    "reversible": true
+  },
+  "trigger": {
+    "workload_script": "scripts/load-gen.sh",
+    "load_profile": "constant-50qps + 定时单次突发",
+    "description": "周期（如每 20 分钟一次）60 秒 CPU 突发，模拟 S1 瞬态场景——验证持续 profiling 能补历史窗口"
+  },
+  "execution": {
+    "preflight_script": "scripts/preflight.sh",
+    "runner_script": "faults/run-fault.sh",
+    "requires_linux": true,
+    "required_env": ["TARGET_URL"]
+  },
+  "performance_requirements": {
+    "baseline_duration_sec": 60,
+    "recovery_timeout_sec": 120,
+    "max_diagnosis_sec": 300,
+    "repetitions": 3
+  },
+  "capture": {
+    "collectors": ["continuous_perf", "sys_metrics"],
+    "window": "before=60s, during=60s, after=60s"
+  },
+  "expected": {
+    "root_location": "self",
+    "domain_cause": "cpu",
+    "root_entity": "productcatalogservice",
+    "evidence_domains": ["process", "host"]
+  },
+  "oracle_visibility": "private",
+  "ground_truth_source": "self-injected",
+  "status": "designed",
+  "notes": "瞬态场景核心：突发已过时依赖持续 profiling ring buffer 重建窗口证据，验证 S1 闭环。"
+}

@@ -251,6 +251,8 @@ class DiagnosisStore:
             "hypothesis_graph": "hypothesis_graph_json",
             "child_task_ids": "child_task_ids_json",
             "conclusion_versions": "conclusion_versions_json",
+            "initial_evidence_loaded": "initial_evidence_loaded_json",
+            "initial_evidence_count": "initial_evidence_count",
             "status": "status",
             "lease_owner": "lease_owner",
             "lease_until": "lease_until",

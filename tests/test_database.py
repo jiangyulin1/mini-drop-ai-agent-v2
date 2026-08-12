@@ -69,6 +69,8 @@ def test_init_db_creates_fresh_schema_at_head(monkeypatch, tmp_path):
         "incident_cases", "case_events",
         "case_context_packets", "case_model_attempts",
         "case_hypothesis_nodes", "case_hypothesis_edges", "case_investigation_iterations",
+        "case_recovery_plans", "diagnostic_target_sessions", "target_signals",
+        "profile_windows",
     }.issubset(
         inspector.get_table_names()
     )

@@ -1,0 +1,49 @@
+{
+  "case_id": "ob-network-delay-001",
+  "user_query": "frontend 调用 checkoutservice 延迟升高，请区分服务自身慢与网络路径退化。",
+  "system": {
+    "name": "online-boutique",
+    "version": "trimmed-core",
+    "topology": ["frontend", "productcatalogservice", "cartservice", "checkoutservice", "currencyservice"],
+    "agents": ["worker1", "worker2"]
+  },
+  "fault": {
+    "type": "delay",
+    "target_service": "checkoutservice",
+    "target_node": "worker2",
+    "duration_sec": 120,
+    "intensity": 0.3,
+    "reversible": true
+  },
+  "trigger": {
+    "workload_script": "scripts/load-gen.sh",
+    "load_profile": "constant-50qps",
+    "description": "持续 50 QPS，tc netem 对 frontend→checkout 路径加 30ms 延迟 + 轻微抖动，制造下游延迟假象"
+  },
+  "execution": {
+    "preflight_script": "scripts/preflight.sh",
+    "runner_script": "faults/run-fault.sh",
+    "requires_linux": true,
+    "required_env": ["TARGET_URL", "FAULT_IFACE"]
+  },
+  "performance_requirements": {
+    "baseline_duration_sec": 60,
+    "recovery_timeout_sec": 120,
+    "max_diagnosis_sec": 300,
+    "repetitions": 3
+  },
+  "capture": {
+    "collectors": ["sys_metrics", "log_scan", "continuous_perf"],
+    "window": "before=60s, during=120s, after=60s"
+  },
+  "expected": {
+    "root_location": "downstream",
+    "domain_cause": "network",
+    "root_entity": "checkoutservice",
+    "evidence_domains": ["network", "dependency"]
+  },
+  "oracle_visibility": "private",
+  "ground_truth_source": "self-injected",
+  "status": "designed",
+  "notes": "delay 注入在 worker2 网络层（tc netem）；GT 记录为下游网络故障。"
+}

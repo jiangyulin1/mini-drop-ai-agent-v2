@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 
 from server.app.case_collaboration import build_case_diagnosis_query
 from server.app.database import init_db, reset_engine
-from server.app.main import app, diagnosis_orchestrator
+from server.app.main import app, diagnosis_orchestrator, repo
 from server.app.models import Base
+from server.app.schemas import CreateTaskRequest
+from server.app.state_machine import Actor, TaskStatus
 
 
 @pytest.fixture(autouse=True)
@@ -387,3 +389,192 @@ def test_case_correction_cancels_and_detaches_superseded_diagnosis(client: TestC
     )
     events = client.get(f"/api/v1/cases/{case['case_id']}/events").json()["data"]["items"]
     assert events[-1]["payload"]["superseded_diagnosis_id"] == diagnosis["diagnosis_id"]
+
+
+def test_case_initial_tasks_validation_rejects_unknown_task(client: TestClient):
+    payload = _case_payload()
+    payload["initial_tasks"] = ["task-nonexistent"]
+    created = client.post("/api/v1/cases", json=payload)
+    assert created.status_code == 409
+    assert "INITIAL_TASK_NOT_FOUND" in created.json()["detail"]
+
+
+def test_case_data_driven_initial_tasks_preload_evidence(client: TestClient):
+    """数据驱动入口：已有、同范围且同事故窗口 Task 先于新探针参与分析。"""
+    repo.register_agent("a1", "host-1", "10.0.0.1", capabilities=["sys_metrics", "perf_cpu"])
+    task = repo.create_task(CreateTaskRequest(
+        name="prior-collection",
+        agent_id="a1",
+        target_pid=1234,
+        collector_type="perf_cpu",
+        duration_sec=15,
+    ))
+    repo.transition_task(task.id, TaskStatus.RUNNING, "accepted", Actor.SERVER)
+    repo.transition_task(task.id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+    repo.transition_task(task.id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+    repo.add_artifacts(task.id, [{
+        "artifact_type": "sys_metrics",
+        "object_key": f"tasks/{task.id}/sys_metrics.json",
+        "metadata": {"data": {
+            "sample_count": 10,
+            "summary": {
+                "avg_cpu_user_pct": 92.0,
+                "avg_cpu_sys_pct": 5.0,
+                "avg_cpu_iowait_pct": 1.0,
+                "load1m": 8.0,
+                "thread_count": 20,
+                "thread_trend": "stable",
+                "fd_count": 20,
+                "fd_trend": "stable",
+                "fd_max": 25,
+                "vmrss_mb": 200,
+                "vmrss_mb_max": 210,
+                "ctx_nonvoluntary_rate": 10,
+                "net_rx_kbps": 10,
+                "net_tx_kbps": 10,
+            },
+        }},
+    }])
+    repo.transition_task(task.id, TaskStatus.DONE, "analysis complete", Actor.ANALYZER)
+
+    payload = _case_payload()
+    payload["initial_tasks"] = [task.id]
+    now = datetime.now(timezone.utc)
+    payload["time_range"] = {
+        "start": (now - timedelta(minutes=1)).isoformat(),
+        "end": (now + timedelta(minutes=1)).isoformat(),
+        "source": "user_expression",
+    }
+    payload["target_scope"] = {
+        "cluster_id": "prod-a",
+        "service_id": "service-a",
+        "instances": [{
+            "service_id": "service-a",
+            "instance_id": "service-a-1",
+            "host_id": "host-1",
+            "agent_id": "a1",
+            "pid": 1234,
+            "environment": "production",
+        }],
+    }
+    created = client.post("/api/v1/cases", json=payload)
+    assert created.status_code == 200
+    case = created.json()["data"]
+    assert case["initial_task_ids"] == [task.id]
+
+    resp = client.post(
+        f"/api/v1/cases/{case['case_id']}/diagnoses",
+        json={"budget_profile": "development"},
+    )
+    assert resp.status_code == 200, resp.text
+    diagnosis = resp.json()["data"]["diagnosis"]
+    assert diagnosis["status"] == "COMPLETED"
+    assert diagnosis["child_task_ids"] == [task.id]
+    assert diagnosis["initial_evidence_loaded"] == [task.id]
+    assert diagnosis["probes"] == []
+    assert diagnosis["latest_conclusion"]["domain_cause"]["type"] == "cpu"
+    evidence = diagnosis_orchestrator.store.list_evidence(diagnosis["diagnosis_id"])
+    task_evidence = [ev for ev in evidence if ev.get("source_type") == "task_event"]
+    assert any(ev["derived_artifact_ref"] == f"task:{task.id}" for ev in task_evidence), (
+        "数据驱动入口未把已有 Task 装载为初始证据"
+    )
+    proposals = client.get(
+        f"/api/v1/cases/{case['case_id']}/proposals",
+    ).json()["data"]["proposals"]
+    assert proposals
+    assert any(item["action_id"] == "act_cpu_profile" for item in proposals)
+
+    understanding = client.get(
+        f"/api/v1/cases/{case['case_id']}/understanding",
+    ).json()["data"]["current_understanding"]
+    assert understanding["understanding"] != "OTHER_UNKNOWN：尚无活跃候选解释"
+    assert understanding["confirmed"]
+
+
+def test_case_initial_tasks_require_completed_structured_result(client: TestClient):
+    repo.register_agent("a1", "host-1", "10.0.0.1", capabilities=["sys_metrics"])
+    task = repo.create_task(CreateTaskRequest(
+        name="unfinished", agent_id="a1", target_pid=1234,
+        collector_type="sys_metrics", duration_sec=15,
+    ))
+    payload = _case_payload()
+    payload["initial_tasks"] = [task.id]
+    created = client.post("/api/v1/cases", json=payload)
+    assert created.status_code == 409
+    assert "INITIAL_TASK_NOT_READY" in created.json()["detail"]
+
+
+def test_case_initial_tasks_require_a_structured_artifact(client: TestClient):
+    repo.register_agent("a1", "host-1", "10.0.0.1", capabilities=["sys_metrics"])
+    task = repo.create_task(CreateTaskRequest(
+        name="done-without-result", agent_id="a1", target_pid=1234,
+        collector_type="sys_metrics", duration_sec=15,
+    ))
+    repo.transition_task(task.id, TaskStatus.RUNNING, "accepted", Actor.SERVER)
+    repo.transition_task(task.id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+    repo.transition_task(task.id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+    repo.transition_task(task.id, TaskStatus.DONE, "done", Actor.ANALYZER)
+    payload = _case_payload()
+    payload["initial_tasks"] = [task.id]
+    created = client.post("/api/v1/cases", json=payload)
+    assert created.status_code == 409
+    assert "INITIAL_TASK_HAS_NO_STRUCTURED_RESULT" in created.json()["detail"]
+
+
+def test_case_initial_tasks_must_match_explicit_instance_scope(client: TestClient):
+    repo.register_agent("a1", "host-1", "10.0.0.1", capabilities=["sys_metrics"])
+    task = repo.create_task(CreateTaskRequest(
+        name="other-process", agent_id="a1", target_pid=9999,
+        collector_type="sys_metrics", duration_sec=15,
+    ))
+    repo.transition_task(task.id, TaskStatus.RUNNING, "accepted", Actor.SERVER)
+    repo.transition_task(task.id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+    repo.transition_task(task.id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+    repo.add_artifacts(task.id, [{
+        "artifact_type": "sys_metrics",
+        "object_key": f"tasks/{task.id}/sys_metrics.json",
+        "metadata": {"data": {"sample_count": 1, "summary": {}}},
+    }])
+    repo.transition_task(task.id, TaskStatus.DONE, "done", Actor.ANALYZER)
+    now = datetime.now(timezone.utc)
+    payload = _case_payload()
+    payload["time_range"] = {
+        "start": (now - timedelta(minutes=1)).isoformat(),
+        "end": (now + timedelta(minutes=1)).isoformat(),
+        "source": "user_expression",
+    }
+    payload["target_scope"] = {
+        "service_id": "checkout",
+        "instances": [{
+            "service_id": "checkout", "instance_id": "checkout-1",
+            "host_id": "host-1", "agent_id": "a1", "pid": 1234,
+            "environment": "production",
+        }],
+    }
+    payload["initial_tasks"] = [task.id]
+    created = client.post("/api/v1/cases", json=payload)
+    assert created.status_code == 409
+    assert "INITIAL_TASK_SCOPE_MISMATCH" in created.json()["detail"]
+
+
+def test_case_initial_tasks_must_overlap_incident_window(client: TestClient):
+    repo.register_agent("a1", "host-1", "10.0.0.1", capabilities=["sys_metrics"])
+    task = repo.create_task(CreateTaskRequest(
+        name="old-evidence", agent_id="a1", target_pid=1234,
+        collector_type="sys_metrics", duration_sec=15,
+    ))
+    repo.transition_task(task.id, TaskStatus.RUNNING, "accepted", Actor.SERVER)
+    repo.transition_task(task.id, TaskStatus.UPLOADING, "collected", Actor.AGENT)
+    repo.transition_task(task.id, TaskStatus.ANALYZING, "analyzing", Actor.ANALYZER)
+    repo.add_artifacts(task.id, [{
+        "artifact_type": "sys_metrics",
+        "object_key": f"tasks/{task.id}/sys_metrics.json",
+        "metadata": {"data": {"sample_count": 1, "summary": {}}},
+    }])
+    repo.transition_task(task.id, TaskStatus.DONE, "done", Actor.ANALYZER)
+
+    payload = _case_payload()
+    payload["initial_tasks"] = [task.id]
+    created = client.post("/api/v1/cases", json=payload)
+    assert created.status_code == 409
+    assert "INITIAL_TASK_TIME_RANGE_MISMATCH" in created.json()["detail"]

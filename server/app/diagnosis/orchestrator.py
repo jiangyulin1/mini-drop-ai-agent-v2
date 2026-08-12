@@ -148,7 +148,13 @@ class DiagnosisOrchestrator:
             details=details,
         )
 
-    def create(self, request: CreateDiagnosisRequest, creator_id: str = "demo_user") -> dict[str, Any]:
+    def create(
+        self,
+        request: CreateDiagnosisRequest,
+        creator_id: str = "demo_user",
+        *,
+        initial_task_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         budget = self._effective_budget(request.budget_profile, request.budget)
         nlp_enabled = is_feature_enabled("nlp")
         model_enabled = nlp_enabled and budget.max_model_calls > 0
@@ -288,7 +294,76 @@ class DiagnosisOrchestrator:
             "existing_data_analysis_started",
         )
 
-        existing_ids = self._find_reusable_tasks(
+        # Explicitly selected initial evidence is part of the diagnosis input,
+        # not an after-the-fact attachment. Analyze it before planning any new
+        # probes so a sufficient existing evidence set cannot trigger redundant
+        # collection. Repository validation already requires DONE tasks with a
+        # structured result and, when instances are present, an in-scope target.
+        selected_ids = list(dict.fromkeys(initial_task_ids or []))
+        selected_tasks = []
+        for task_id in selected_ids:
+            task = self.repo.tasks.get(task_id)
+            if task is None:
+                raise ValueError(f"INITIAL_TASK_NOT_FOUND:{task_id}")
+            if status_value(task.status) != "DONE":
+                raise ValueError(f"INITIAL_TASK_NOT_READY:{task_id}")
+            if not self._structured_artifacts(self.repo.artifacts.get(task_id, [])):
+                raise ValueError(f"INITIAL_TASK_HAS_NO_STRUCTURED_RESULT:{task_id}")
+            selected_tasks.append(task)
+        if selected_tasks:
+            self.store.update_session(
+                diagnosis_id,
+                child_task_ids=selected_ids,
+                initial_evidence_loaded=selected_ids,
+                initial_evidence_count=len(selected_ids),
+            )
+            self._complete_node(
+                diagnosis_id,
+                "plan_evidence",
+                input_refs=["explicit_initial_tasks"],
+                output_refs=[f"task:{task_id}" for task_id in selected_ids],
+                metrics={
+                    "initial_task_count": len(selected_ids),
+                    "reusable_task_count": len(selected_ids),
+                    "planned_probe_count": 0,
+                },
+            )
+            self._complete_node(
+                diagnosis_id,
+                "risk_gate",
+                input_refs=[f"task:{task_id}" for task_id in selected_ids],
+                output_refs=["explicit_user_selected_evidence"],
+                metrics={"new_probe_count": 0},
+            )
+            self.store.update_pipeline_node(
+                diagnosis_id,
+                "run_probes",
+                "SKIPPED",
+                metrics={"reason": "explicit_initial_evidence"},
+            )
+            self._transition(
+                diagnosis_id,
+                DiagnosisStatus.ANALYZING,
+                "initial_evidence_analysis_started",
+            )
+            if self._analyze_tasks(diagnosis_id, selected_tasks):
+                self._transition(
+                    diagnosis_id, DiagnosisStatus.CONCLUDING, "conclusion_generated",
+                )
+                self._transition(
+                    diagnosis_id, DiagnosisStatus.COMPLETED, "diagnosis_completed",
+                )
+                return self.store.get_detail(diagnosis_id) or {}
+            if intent.diagnosis_mode == DiagnosisMode.HISTORICAL:
+                self._ensure_insufficient_conclusion(diagnosis_id, selected_tasks)
+                self._transition(
+                    diagnosis_id,
+                    DiagnosisStatus.INSUFFICIENT_EVIDENCE,
+                    "historical_initial_evidence_insufficient",
+                )
+                return self.store.get_detail(diagnosis_id) or {}
+
+        existing_ids = [] if selected_tasks else self._find_reusable_tasks(
             target_scope,
             intent.time_range.start,
             intent.time_range.end,

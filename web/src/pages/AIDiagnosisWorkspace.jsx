@@ -27,18 +27,31 @@ import {
   advanceAutonomousCase,
   approveDiagnosisProbe,
   correctIncidentCase,
+  createCaseRecoveryPlan,
   createIncidentCase,
+  createServiceChange,
+  createTargetSession,
+  decideCaseRecoveryPlan,
+  dryRunCaseRecoveryPlan,
+  executeCaseRecoveryPlan,
   getDiagnosisSession,
+  getCaseCurrentUnderstanding,
   getIncidentCase,
   getTask,
   listAgents,
   listDiagnosisSessions,
   listIncidentCaseEvents,
   listIncidentCases,
+  listCaseProposals,
+  listCaseRecoveryPlans,
+  listRegisteredActions,
   listTasks,
+  listTargetSessions,
   runAIValidation,
   startIncidentCaseDiagnosis,
   transitionIncidentCase,
+  verifyCaseRecoveryPlan,
+  rollbackCaseRecoveryPlan,
 } from "../api/client";
 import { useSearchParams } from "react-router-dom";
 import styles from "./AIDiagnosis.module.css";
@@ -82,6 +95,11 @@ export default function AIDiagnosisWorkspace() {
   const [caseDetail, setCaseDetail] = useState(null);
   const [events, setEvents] = useState([]);
   const [diagnosis, setDiagnosis] = useState(null);
+  const [currentUnderstanding, setCurrentUnderstanding] = useState(null);
+  const [proposals, setProposals] = useState([]);
+  const [recoveryPlans, setRecoveryPlans] = useState([]);
+  const [registeredActions, setRegisteredActions] = useState([]);
+  const [targetSessions, setTargetSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -95,9 +113,15 @@ export default function AIDiagnosisWorkspace() {
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scopeCase, setScopeCase] = useState(null);
   const [technicalOpen, setTechnicalOpen] = useState(false);
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [targetOpen, setTargetOpen] = useState(false);
   const [focusCollectionId, setFocusCollectionId] = useState("");
   const [scopeAutoSearch, setScopeAutoSearch] = useState(false);
   const [newForm] = Form.useForm();
+  const [changeForm] = Form.useForm();
+  const [recoveryForm] = Form.useForm();
+  const [targetForm] = Form.useForm();
   const newRunMode = Form.useWatch("run_mode", newForm);
   const [searchParams, setSearchParams] = useSearchParams();
   const handledFromTask = useRef("");
@@ -127,13 +151,19 @@ export default function AIDiagnosisWorkspace() {
       listIncidentCases({ limit: 200 }),
       listDiagnosisSessions({ limit: 50 }),
       listTasks({ limit: 200 }),
+      listRegisteredActions(),
+      listTargetSessions({ limit: 200 }),
     ]);
     if (listRequestSequence.current !== requestId) return;
-    const [agentResult, caseResult, sessionResult, taskResult] = results;
+    const [agentResult, caseResult, sessionResult, taskResult, actionResult, targetResult] = results;
     if (agentResult.status === "fulfilled") setAgents(agentResult.value || []);
     if (caseResult.status === "fulfilled") setCases(caseResult.value?.items || []);
     if (sessionResult.status === "fulfilled") setLegacySessions(sessionResult.value || []);
     if (taskResult.status === "fulfilled") setTasks((taskResult.value || []).filter(isUserVisibleTask));
+    if (actionResult.status === "fulfilled") setRegisteredActions(
+      (actionResult.value?.items || []).filter((item) => item.implementation_status === "executable"),
+    );
+    if (targetResult.status === "fulfilled") setTargetSessions(targetResult.value || []);
     const firstError = results.find((item) => item.status === "rejected");
     if (firstError && !quiet) message.error(`加载失败：${firstError.reason?.message || "请求失败"}`);
 
@@ -165,6 +195,9 @@ export default function AIDiagnosisWorkspace() {
       if (isCurrent()) {
         setCaseDetail(null);
         setDiagnosis(null);
+        setCurrentUnderstanding(null);
+        setProposals([]);
+        setRecoveryPlans([]);
         setEvents([]);
       }
       return;
@@ -178,9 +211,12 @@ export default function AIDiagnosisWorkspace() {
     try {
       if (key.startsWith("case:")) {
         const caseId = key.slice(5);
-        const [detail, eventResult] = await Promise.all([
+        const [detail, eventResult, understandingResult, proposalResult, recoveryResult] = await Promise.all([
           getIncidentCase(caseId),
           listIncidentCaseEvents(caseId, { limit: 300 }),
+          getCaseCurrentUnderstanding(caseId),
+          listCaseProposals(caseId),
+          listCaseRecoveryPlans(caseId),
         ]);
         if (!isCurrent()) return;
         let nextDiagnosis = null;
@@ -190,12 +226,18 @@ export default function AIDiagnosisWorkspace() {
         if (!isCurrent()) return;
         setCaseDetail(detail);
         setEvents(eventResult.items || []);
+        setCurrentUnderstanding(understandingResult.current_understanding || null);
+        setProposals(proposalResult.proposals || []);
+        setRecoveryPlans(recoveryResult.items || []);
         setDiagnosis(nextDiagnosis);
       } else {
         const nextDiagnosis = await getDiagnosisSession(key.slice(10));
         if (!isCurrent()) return;
         setCaseDetail(null);
         setEvents([]);
+        setCurrentUnderstanding(null);
+        setProposals([]);
+        setRecoveryPlans([]);
         setDiagnosis(nextDiagnosis);
       }
     } catch (error) {
@@ -271,13 +313,18 @@ export default function AIDiagnosisWorkspace() {
     setActionLoading(true);
     try {
       const serviceId = values.service_id?.trim() || "";
+      const selectedTarget = targetSessions.find(
+        (item) => item.target_session_id === values.target_session_id,
+      );
       const created = await createIncidentCase({
         title: createCaseTitle(values.problem_description, serviceId),
         problem_description: values.problem_description.trim(),
         recovery_goal: values.recovery_goal?.trim() || "确认原因并给出安全处置建议",
         run_mode: values.run_mode || "COLLABORATE",
-        environment: values.environment || "production",
-        target_scope: serviceId ? { service_id: serviceId, instances: [], dependencies: [] } : {},
+        environment: selectedTarget?.environment || values.environment || "production",
+        target_scope: selectedTarget?.target_scope
+          || (serviceId ? { service_id: serviceId, instances: [], dependencies: [] } : {}),
+        target_session_id: selectedTarget?.target_session_id,
       });
       setNewOpen(false);
       newForm.resetFields();
@@ -298,7 +345,121 @@ export default function AIDiagnosisWorkspace() {
     }
   }
 
-  // ── 从第一页“交给 AI 分析”进入 ────────────────────────
+  async function createLongLivedTarget() {
+    const values = await targetForm.validateFields();
+    setActionLoading(true);
+    try {
+      const created = await createTargetSession({
+        service_id: values.service_id.trim(),
+        environment: values.environment,
+        display_name: values.display_name?.trim() || undefined,
+        target_scope: {
+          service_id: values.service_id.trim(),
+          instances: [],
+          dependencies: [],
+        },
+      });
+      targetForm.resetFields();
+      await refreshLists({ quiet: true });
+      setTargetOpen(false);
+      newForm.setFieldValue("target_session_id", created.target_session_id);
+      setNewOpen(true);
+      message.success("长期目标已创建，可直接发起诊断");
+    } catch (error) {
+      message.error(`创建长期目标失败：${error.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  function openChangeRegistration() {
+    if (!caseDetail) return;
+    changeForm.setFieldsValue({
+      service_id: caseDetail.target_scope?.service_id || "",
+      environment: caseDetail.environment || "production",
+      change_type: "release",
+    });
+    setChangeOpen(true);
+  }
+
+  async function registerChange() {
+    const values = await changeForm.validateFields();
+    setActionLoading(true);
+    try {
+      await createServiceChange({
+        ...values,
+        changed_at: new Date(values.changed_at).toISOString(),
+      });
+      setChangeOpen(false);
+      changeForm.resetFields();
+      await loadSelection(selectedKey, { quiet: true });
+      message.success("变更已登记，后续诊断会作为待验证相关性使用");
+    } catch (error) {
+      message.error(`登记失败：${error.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  function openRecoveryPlan() {
+    const preferred = registeredActions.find(
+      (item) => item.action_id === "mini-drop.cleanup-expired-cache",
+    ) || registeredActions[0];
+    recoveryForm.setFieldsValue({
+      action_id: preferred?.action_id,
+      retention_days: 7,
+      value_after_fix: "释放过期诊断缓存占用，同时保留可恢复副本",
+      verification_method: "由服务端确认源目录消失且隔离区副本存在",
+    });
+    setRecoveryOpen(true);
+  }
+
+  async function createRecoveryPlan() {
+    if (!caseDetail) return;
+    const values = await recoveryForm.validateFields();
+    setActionLoading(true);
+    try {
+      await createCaseRecoveryPlan(caseDetail.case_id, {
+        action_id: values.action_id,
+        parameters: values.action_id === "mini-drop.cleanup-expired-cache"
+          ? { retention_days: Number(values.retention_days || 7) }
+          : {},
+        value_after_fix: values.value_after_fix,
+        verification_method: values.verification_method,
+        expected_case_version: caseDetail.row_version,
+      });
+      setRecoveryOpen(false);
+      recoveryForm.resetFields();
+      await loadSelection(selectedKey);
+      message.success("恢复方案已创建，请先执行只读预检");
+    } catch (error) {
+      message.error(`创建恢复方案失败：${error.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function recoveryPlanAction(plan, action) {
+    if (!caseDetail) return;
+    setActionLoading(true);
+    try {
+      const version = { expected_plan_version: plan.row_version };
+      if (action === "dry-run") await dryRunCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, version);
+      if (action === "approve") await decideCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, { ...version, decision: "approve", reason: "用户已核对影响清单与回滚路径" });
+      if (action === "reject") await decideCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, { ...version, decision: "reject", reason: "用户拒绝本次恢复动作" });
+      if (action === "execute") await executeCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, version);
+      if (action === "verify") await verifyCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, version);
+      if (action === "rollback") await rollbackCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, version);
+      await loadSelection(selectedKey);
+      message.success("恢复方案状态已更新");
+    } catch (error) {
+      message.error(`恢复操作失败：${error.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  // ── 从第一页"交给 AI 分析"进入 ────────────────────────
 
   async function createCaseFromTask(taskId) {
     setActionLoading(true);
@@ -331,6 +492,7 @@ export default function AIDiagnosisWorkspace() {
           dependencies: [],
           evidence_task_ids: [taskId],
         },
+        initial_tasks: [taskId],
       });
       await refreshLists({ quiet: true });
       chooseSelection(`case:${created.case_id}`);
@@ -584,6 +746,12 @@ export default function AIDiagnosisWorkspace() {
         <Tooltip title="查看能力、准确率和适用范围">
           <Button size="small" aria-label="能力与准确率" icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)} />
         </Tooltip>
+        <Button size="small" onClick={() => setTargetOpen(true)}>长期目标</Button>
+        {caseDetail && <Button size="small" onClick={openChangeRegistration}>登记变更</Button>}
+        {caseDetail && registeredActions.length > 0 && !["RESOLVED", "STOPPED"].includes(caseDetail.state) && (
+          <Button size="small" onClick={openRecoveryPlan}>恢复方案</Button>
+        )}
+        <Button size="small" icon={<ExperimentOutlined />} loading={validationLoading} onClick={validateAIService}>服务检测</Button>
         <WorkerStatus agents={agents} loading={workerLoading} onRefresh={refreshWorkers} />
       </header>
 
@@ -635,6 +803,9 @@ export default function AIDiagnosisWorkspace() {
             detail={caseDetail}
             events={events}
             diagnosis={diagnosis}
+            currentUnderstanding={currentUnderstanding}
+            proposals={proposals}
+            recoveryPlans={recoveryPlans}
             loading={detailLoading}
             actionLoading={actionLoading}
             messageText={messageText}
@@ -647,6 +818,8 @@ export default function AIDiagnosisWorkspace() {
             onDecision={decideProbe}
             onTransition={transition}
             onAdvanceAgent={advanceAgent}
+            onOpenRecovery={openRecoveryPlan}
+            onRecoveryAction={recoveryPlanAction}
           />
         ) : diagnosis ? (
           <LegacyConversation
@@ -668,7 +841,17 @@ export default function AIDiagnosisWorkspace() {
       </div>
 
       <Modal title="新建诊断" open={newOpen} onCancel={() => setNewOpen(false)} onOk={createCase} okText="创建" confirmLoading={actionLoading} width={660} destroyOnHidden>
-        <Form form={newForm} layout="vertical" initialValues={{ environment: "production", recovery_goal: "恢复服务并连续验证两次", run_mode: "COLLABORATE" }}>
+        <Form form={newForm} layout="vertical" initialValues={{ environment: "production", recovery_goal: "确认原因并给出安全处置建议", run_mode: "COLLABORATE" }}>
+          <Form.Item name="target_session_id" label="关联长期目标">
+            <Select
+              allowClear
+              placeholder="可选：复用长期目标范围和历史信号"
+              options={targetSessions.filter((item) => item.status !== "ARCHIVED").map((item) => ({
+                value: item.target_session_id,
+                label: `${item.display_name} · ${item.status === "ACTIVE" ? "监控中" : "已暂停"}`,
+              }))}
+            />
+          </Form.Item>
           <Form.Item name="problem_description" label="发生了什么" rules={[{ required: true, min: 3, message: "请描述问题" }]}>
             <Input.TextArea rows={4} maxLength={2000} showCount placeholder="例如：service-x 从半小时前开始 CPU 持续超过 90%" autoFocus />
           </Form.Item>
@@ -724,7 +907,7 @@ export default function AIDiagnosisWorkspace() {
           <li>先确认服务、Worker、容器或 PID；范围不清楚时系统停止，不猜测目标。</li>
           <li>补充服务调用关系，便于区分当前服务、同机干扰和下游依赖。</li>
           <li>系统优先进行低风险采集，并对重复、过期、失败和相互冲突的数据进行清理。</li>
-          <li>结论同时展示“看到了什么、意味着什么、还缺什么”，置信分只表示本次证据强度。</li>
+          <li>结论同时展示"看到了什么、意味着什么、还缺什么"，置信分只表示本次证据强度。</li>
           <li>只有已登记、已授权且通过预演的动作可以执行；未知命令不会执行。</li>
           <li>修复后检查系统指标和真实业务请求，连续两次通过才判定恢复；失败则回滚并重新诊断。</li>
         </ol>
@@ -735,6 +918,47 @@ export default function AIDiagnosisWorkspace() {
         <Typography.Paragraph>
           不应直接用于未登记的数据库写操作、数据删除、跨集群流量切换或其他不可逆操作。当前也缺少完整的 Prometheus SLO、分布式 Trace、Java JFR、Go mutex pprof 和 Python GIL 深度分析。
         </Typography.Paragraph>
+      </Modal>
+
+      <Modal title="创建长期诊断目标" open={targetOpen} onCancel={() => setTargetOpen(false)} onOk={createLongLivedTarget} okText="创建并诊断" confirmLoading={actionLoading} width={620} destroyOnHidden>
+        <Alert type="info" showIcon message="长期目标会积累信号、历史 profiling 窗口和关联 Case；高严重度信号可按策略自动开 Case。" style={{ marginBottom: 16 }} />
+        <Form form={targetForm} layout="vertical" initialValues={{ environment: "production" }}>
+          <Form.Item name="service_id" label="服务标识" rules={[{ required: true, min: 1 }]}><Input maxLength={128} placeholder="例如 checkoutservice" /></Form.Item>
+          <Form.Item name="display_name" label="显示名称"><Input maxLength={256} placeholder="可选" /></Form.Item>
+          <Form.Item name="environment" label="环境" rules={[{ required: true }]}><Select options={[{ value: "production", label: "生产" }, { value: "staging", label: "预发布" }, { value: "development", label: "开发" }]} /></Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal title="登记服务变更" open={changeOpen} onCancel={() => setChangeOpen(false)} onOk={registerChange} okText="登记" confirmLoading={actionLoading} width={620} destroyOnHidden>
+        <Alert type="info" showIcon message="变更只作为待验证相关性，不会直接被当作根因。" style={{ marginBottom: 16 }} />
+        <Form form={changeForm} layout="vertical">
+          <Space size={12} align="start" style={{ width: "100%" }}>
+            <Form.Item name="service_id" label="服务" rules={[{ required: true }]} style={{ flex: 1 }}><Input /></Form.Item>
+            <Form.Item name="environment" label="环境" rules={[{ required: true }]} style={{ width: 150 }}><Select options={[{ value: "production", label: "生产" }, { value: "staging", label: "预发布" }, { value: "development", label: "开发" }]} /></Form.Item>
+          </Space>
+          <Form.Item name="change_type" label="变更类型" rules={[{ required: true }]}>
+            <Select options={[{ value: "release", label: "发布" }, { value: "config", label: "配置" }, { value: "feature_flag", label: "功能开关" }, { value: "scale", label: "扩缩容" }, { value: "other", label: "其他" }]} />
+          </Form.Item>
+          <Form.Item name="title" label="变更标题" rules={[{ required: true, min: 3 }]}><Input maxLength={256} /></Form.Item>
+          <Form.Item name="changed_at" label="变更时间" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
+          <Form.Item name="description" label="说明"><Input.TextArea rows={3} maxLength={2000} /></Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal title="创建受控恢复方案" open={recoveryOpen} onCancel={() => setRecoveryOpen(false)} onOk={createRecoveryPlan} okText="创建方案" confirmLoading={actionLoading} width={660} destroyOnHidden>
+        <Alert type="warning" showIcon message="创建后不会立即执行：必须先只读预检，再由你批准一次。" style={{ marginBottom: 16 }} />
+        <Form form={recoveryForm} layout="vertical">
+          <Form.Item name="action_id" label="注册动作" rules={[{ required: true }]}>
+            <Select options={registeredActions.map((item) => ({ value: item.action_id, label: item.title }))} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.action_id !== current.action_id}>
+            {({ getFieldValue }) => getFieldValue("action_id") === "mini-drop.cleanup-expired-cache" && (
+              <Form.Item name="retention_days" label="保留天数" rules={[{ required: true }]}><Input type="number" min={1} max={365} /></Form.Item>
+            )}
+          </Form.Item>
+          <Form.Item name="value_after_fix" label="预期价值" rules={[{ required: true, min: 3 }]}><Input.TextArea rows={2} maxLength={2000} /></Form.Item>
+          <Form.Item name="verification_method" label="验证方法" rules={[{ required: true, min: 3 }]}><Input.TextArea rows={2} maxLength={2000} /></Form.Item>
+        </Form>
       </Modal>
 
       <ScopeEditorModal open={scopeOpen} detail={scopeCase} agents={agents} saving={actionLoading} autoSearch={scopeAutoSearch} onClose={closeScopeEditor} onSave={saveScope} />

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from server.app.diagnosis.schemas import ProbeDefinition
+from server.app.task_kinds import TASK_KINDS
 
 
 _PROBES = {
@@ -152,3 +155,59 @@ def choose_probe_ids(symptom: str) -> list[str]:
         "network_degradation": ["endpoint_connectivity_probe", "host_process_metrics", "process_log_scan"],
     }
     return mapping.get(symptom, ["host_process_metrics", "process_log_scan", "process_cpu_profile"])
+
+
+# 已注册 TaskKind 采集器白名单（模型只能在白名单内提案候选外采集，永不自创命令）。
+# 见 docs/ai_diagnosis_agent_design.md §5.2 候选缺失兜底。
+COLLECTOR_WHITELIST = [item["key"] for item in TASK_KINDS]
+
+# 证据域 → 默认候选探针；映射为空即"候选缺失"，进入兜底路径。
+_DOMAIN_PROBE_MAP = {
+    "host": ["host_process_metrics"],
+    "process": ["process_cpu_profile"],
+    "container": ["host_process_metrics"],
+    "dependency": ["process_log_scan"],
+    "database": [],        # 无注册探针 → 候选缺失
+    "runtime": ["process_memory_map"],
+    "network": [],         # 无注册探针 → 候选缺失
+}
+
+# 兜底时按证据域倾向选择的白名单采集器（确定性，避免模型自由发散）。
+_DOMAIN_COLLECTOR_HINT = {
+    "database": "log_scan",      # 白名单内最接近（正式 mysql_lock 探针待注册后替换）
+    "network": "sys_metrics",    # 白名单内最接近（正式 tcp_retransmit 探针待注册后替换）
+}
+
+
+def fallback_candidates_for_gap(
+    missing_domains: list[str],
+    *,
+    existing_collectors: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """候选缺失兜底：无注册探针覆盖的证据域 → 从白名单提案候选外采集器。
+
+    每条兜底候选强制：
+    - ``candidate_gap=True``（前端标"兜底路径"）；
+    - ``requires_approval=True`` + ``approval_policy="single_execution"``（始终 USER_APPROVAL）；
+    - 采集器来自 ``COLLECTOR_WHITELIST``，绝不越出白名单。
+    """
+    existing = set(existing_collectors or [])
+    proposals: list[dict[str, Any]] = []
+    for domain in missing_domains:
+        if _DOMAIN_PROBE_MAP.get(domain):
+            continue  # 有默认候选，不走兜底
+        hint = _DOMAIN_COLLECTOR_HINT.get(domain)
+        # 没有经过设计映射的证据域不能拿任意采集器“凑数”；这类缺口应明确
+        # 暴露给用户，等待注册真正有区分度的探针。
+        candidate = hint if hint and hint not in existing else None
+        if candidate is None:
+            continue  # 白名单已全部用过，不再发散
+        existing.add(candidate)
+        proposals.append({
+            "collector_type": candidate,
+            "evidence_domain": domain,
+            "candidate_gap": True,
+            "requires_approval": True,
+            "approval_policy": "single_execution",
+        })
+    return proposals

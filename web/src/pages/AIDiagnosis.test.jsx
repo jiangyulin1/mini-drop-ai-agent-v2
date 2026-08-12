@@ -5,11 +5,16 @@ import { MemoryRouter } from "react-router-dom";
 import AIDiagnosis from "./AIDiagnosis";
 import {
   getIncidentCase,
+  getCaseCurrentUnderstanding,
   listAgents,
   listDiagnosisSessions,
   listIncidentCaseEvents,
   listIncidentCases,
   listTasks,
+  listCaseProposals,
+  listCaseRecoveryPlans,
+  listRegisteredActions,
+  listTargetSessions,
 } from "../api/client";
 
 vi.mock("../api/client", () => ({
@@ -17,9 +22,16 @@ vi.mock("../api/client", () => ({
   approveDiagnosisProbe: vi.fn(),
   correctIncidentCase: vi.fn(),
   createIncidentCase: vi.fn(),
+  createCaseRecoveryPlan: vi.fn(),
+  createServiceChange: vi.fn(),
+  createTargetSession: vi.fn(),
+  decideCaseRecoveryPlan: vi.fn(),
+  dryRunCaseRecoveryPlan: vi.fn(),
+  executeCaseRecoveryPlan: vi.fn(),
   createTask: vi.fn(),
   downloadTaskArtifact: vi.fn(),
   getDiagnosisSession: vi.fn(),
+  getCaseCurrentUnderstanding: vi.fn(),
   getIncidentCase: vi.fn(),
   getTask: vi.fn(),
   getTaskArtifactContent: vi.fn(),
@@ -28,10 +40,16 @@ vi.mock("../api/client", () => ({
   listDiagnosisSessions: vi.fn(),
   listIncidentCaseEvents: vi.fn(),
   listIncidentCases: vi.fn(),
+  listCaseProposals: vi.fn(),
+  listCaseRecoveryPlans: vi.fn(),
+  listRegisteredActions: vi.fn(),
+  listTargetSessions: vi.fn(),
   listTasks: vi.fn(),
   runAIValidation: vi.fn(),
   startIncidentCaseDiagnosis: vi.fn(),
   transitionIncidentCase: vi.fn(),
+  verifyCaseRecoveryPlan: vi.fn(),
+  rollbackCaseRecoveryPlan: vi.fn(),
 }));
 
 const CASE = {
@@ -74,6 +92,17 @@ describe("AIDiagnosis workspace", () => {
     }]);
     listIncidentCases.mockResolvedValue({ items: [CASE], total: 1 });
     getIncidentCase.mockResolvedValue(CASE);
+    getCaseCurrentUnderstanding.mockResolvedValue({
+      current_understanding: {
+        understanding: "OTHER_UNKNOWN：尚无活跃候选解释",
+        confirmed: [],
+        missing: [],
+      },
+    });
+    listCaseProposals.mockResolvedValue({ proposals: [] });
+    listCaseRecoveryPlans.mockResolvedValue({ items: [] });
+    listRegisteredActions.mockResolvedValue({ items: [] });
+    listTargetSessions.mockResolvedValue([]);
     listIncidentCaseEvents.mockResolvedValue({ items: [], total: 0 });
     listDiagnosisSessions.mockResolvedValue([]);
     listTasks.mockResolvedValue([]);
@@ -86,7 +115,8 @@ describe("AIDiagnosis workspace", () => {
     expect(await screen.findByText("设置诊断范围")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看 Worker 状态" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /服务检测/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /服务检测/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /长期目标/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /范围与服务关系/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^诊断数据$/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /能力与准确率/ }));
@@ -105,5 +135,20 @@ describe("AIDiagnosis workspace", () => {
     expect(screen.getByRole("button", { name: /新建多机采集/ })).toBeInTheDocument();
 
     await waitFor(() => expect(getIncidentCase).toHaveBeenCalledWith(CASE.case_id));
+  });
+
+  it("opens change registration from the selected case", async () => {
+    render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "登记变更" }));
+    expect(await screen.findByText("变更只作为待验证相关性，不会直接被当作根因。"))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText("服务")).toHaveValue("service-x");
+  });
+
+  it("opens long-lived target creation", async () => {
+    render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "长期目标" }));
+    expect(await screen.findByText(/长期目标会积累信号/)).toBeInTheDocument();
+    expect(screen.getByLabelText("服务标识")).toBeInTheDocument();
   });
 });

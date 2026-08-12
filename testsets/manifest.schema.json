@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mini-drop-testset-manifest",
+  "title": "Mini-Drop 测试案例 manifest",
+  "description": "真实/合成测试案例的统一描述。设计见 docs/ai_testset_design.md。",
+  "type": "object",
+  "required": ["case_id", "user_query", "system", "fault", "trigger", "execution", "performance_requirements", "expected", "oracle_visibility", "ground_truth_source", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "case_id": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9-_]{2,127}$" },
+    "user_query": { "type": "string", "minLength": 3, "maxLength": 2000 },
+    "system": {
+      "type": "object",
+      "required": ["name", "agents"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "enum": ["online-boutique", "sock-shop", "synthetic"] },
+        "version": { "type": "string" },
+        "topology": { "type": "array", "items": { "type": "string" }, "maxItems": 64 },
+        "agents": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 64 }
+      }
+    },
+    "fault": {
+      "type": "object",
+      "required": ["type", "target_service", "target_node", "reversible"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["cpu", "memory", "delay", "loss", "disk", "connection", "code_hotspot", "code_leak"]
+        },
+        "target_service": { "type": "string" },
+        "target_node": { "type": "string" },
+        "duration_sec": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reversible": { "type": "boolean" }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["workload_script", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "workload_script": { "type": "string" },
+        "load_profile": { "type": "string" },
+        "description": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "collectors": { "type": "array", "items": { "type": "string" }, "maxItems": 32 },
+        "window": { "type": "string", "description": "如 before=60s, during=120s, after=60s" }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": ["preflight_script", "runner_script", "requires_linux", "required_env"],
+      "additionalProperties": false,
+      "properties": {
+        "preflight_script": { "type": "string", "minLength": 1 },
+        "runner_script": { "type": "string", "minLength": 1 },
+        "requires_linux": { "type": "boolean" },
+        "required_env": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "performance_requirements": {
+      "type": "object",
+      "required": ["baseline_duration_sec", "recovery_timeout_sec", "max_diagnosis_sec", "repetitions"],
+      "additionalProperties": false,
+      "properties": {
+        "baseline_duration_sec": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "recovery_timeout_sec": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "max_diagnosis_sec": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "repetitions": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "required": ["root_location", "domain_cause"],
+      "additionalProperties": false,
+      "properties": {
+        "root_location": { "type": "string", "enum": ["self", "same_host", "downstream", "shared_resource", "unknown"] },
+        "domain_cause": { "type": "string", "enum": ["cpu", "io", "memory", "network", "database", "runtime", "unknown"] },
+        "root_entity": { "type": "string" },
+        "evidence_domains": { "type": "array", "items": { "type": "string" }, "maxItems": 16 }
+      }
+    },
+    "ground_truth_source": {
+      "type": "string",
+      "enum": ["rcaeval", "self-injected", "upstream-fix", "synthetic"]
+    },
+    "oracle_visibility": { "type": "string", "const": "private" },
+    "status": {
+      "type": "string",
+      "enum": ["designed", "verified_offline", "verified_vm", "regression"]
+    },
+    "notes": { "type": "string", "maxLength": 2000 }
+  }
+}

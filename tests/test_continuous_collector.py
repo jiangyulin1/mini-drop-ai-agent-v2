@@ -104,6 +104,41 @@ class TestContinuousExecution:
 
         assert result.ok is False
 
+    def test_perf_process_start_failure_is_reported_not_crashed(self, collector, tmp_path):
+        collector.OUTPUT_BASE = str(tmp_path)
+        task = CollectorTask(
+            id="t-start-failure", collector_type="continuous_perf",
+            target_pid=1234, sample_rate=11, duration_sec=1,
+        )
+        with mock.patch("shutil.which", return_value="/usr/bin/perf"), \
+             mock.patch.object(collector, "_pid_exists", return_value=True), \
+             mock.patch("subprocess.Popen", side_effect=OSError("cannot fork")):
+            result = collector.collect(task)
+
+        assert result.ok is False
+        summary = next(a for a in result.artifacts if a["artifact_type"] == "continuous_summary")
+        assert summary["metadata"]["windows"][0]["reason"] == "cannot fork"
+
+    def test_timeout_terminates_perf_and_returns_failed_window(self, collector, tmp_path):
+        collector.OUTPUT_BASE = str(tmp_path)
+        task = CollectorTask(
+            id="t-timeout", collector_type="continuous_perf",
+            target_pid=1234, sample_rate=11, duration_sec=1,
+        )
+        proc = mock.MagicMock(returncode=None)
+        proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="perf", timeout=31),
+            (b"", b""),
+        ]
+        with mock.patch("shutil.which", return_value="/usr/bin/perf"), \
+             mock.patch.object(collector, "_pid_exists", return_value=True), \
+             mock.patch("subprocess.Popen", return_value=proc):
+            result = collector.collect(task)
+
+        assert result.ok is False
+        proc.terminate.assert_called_once()
+        proc.wait.assert_called_once_with(timeout=5)
+
 
 class TestPidCheck:
     def test_pid_exists_on_linux(self, collector):
