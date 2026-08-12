@@ -9,7 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import Field
 
@@ -26,9 +26,9 @@ class ExperimentSpec(StrictModel):
     reasoner_version: str = Field(min_length=1, max_length=64)
     repetitions: int = Field(default=1, ge=1, le=100)
     seed: int = 0
-    model_provider: str | None = Field(default=None, max_length=64)
-    model: str | None = Field(default=None, max_length=128)
-    prompt_version: str | None = Field(default=None, max_length=64)
+    model_provider: Optional[str] = Field(default=None, max_length=64)
+    model: Optional[str] = Field(default=None, max_length=128)
+    prompt_version: Optional[str] = Field(default=None, max_length=64)
     rule_version: str = Field(min_length=1, max_length=64)
     feature_version: str = Field(min_length=1, max_length=64)
     planner_version: str = Field(min_length=1, max_length=64)

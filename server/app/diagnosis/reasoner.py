@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Optional, Protocol
 
 from pydantic import Field, model_validator
 
@@ -31,9 +31,9 @@ class ReasonerDecision(StrictModel):
     strategy_id: str = Field(min_length=1, max_length=64)
     strategy_version: str = Field(min_length=1, max_length=64)
     decision_type: Literal["conclusion", "next_probe", "abstain"]
-    assessment: dict[str, Any] | None = None
+    assessment: Optional[dict[str, Any]] = None
     ranked_causes: list[dict[str, Any]] = Field(default_factory=list)
-    next_probe_request: dict[str, Any] | None = None
+    next_probe_request: Optional[dict[str, Any]] = None
     evidence_refs: list[str] = Field(default_factory=list)
     uncertainty: float = Field(default=0.0, ge=0.0, le=1.0)
     rationale_summary: str = Field(default="", max_length=2000)
