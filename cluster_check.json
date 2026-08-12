@@ -7,10 +7,10 @@
     },
     "raw": {
       "HOSTNAME": "control",
-      "KERNEL": "6.8.0-136-generic",
-      "UPTIME": "up 2 minutes\nload: 0.04, 0.03, 0.01",
+      "KERNEL": "6.8.0-137-generic",
+      "UPTIME": "up 21 hours, 58 minutes\nload: 0.05, 0.03, 0.00",
       "CPU": "4\nmodel name\t: Intel(R) Core(TM) i7-14700HX",
-      "MEM": "5924 776 4717 5147",
+      "MEM": "5924 920 3270 5003",
       "DISK": "/dev/sda2        78G   12G   62G  16% /",
       "SERVICES": "active active active inactive",
       "DOCKER": "active",
@@ -31,10 +31,10 @@
     "raw": {
       "HOSTNAME": "worker1",
       "KERNEL": "6.8.0-136-generic",
-      "UPTIME": "up 2 minutes\nload: 0.00, 0.00, 0.00",
+      "UPTIME": "up 21 hours, 57 minutes\nload: 0.08, 0.03, 0.01",
       "CPU": "4\nmodel name\t: Intel(R) Core(TM) i7-14700HX",
-      "MEM": "3914 532 3213 3382",
-      "DISK": "/dev/sda2        78G   12G   63G  16% /",
+      "MEM": "3914 895 162 3018",
+      "DISK": "/dev/sda2        78G   17G   57G  23% /",
       "SERVICES": "inactive inactive inactive active",
       "DOCKER": "active",
       "AGENT_DIR": "/tmp/mini-drop-agent-results\n0",
@@ -42,7 +42,7 @@
       "PERF": "perf version 6.8.12",
       "BPFTRACE": "bpftrace v0.20.2",
       "PYSPY": "",
-      "IP": "eth0             UP             192.168.10.11/24 fe80::215:5dff:fe00:218/64  docker0          DOWN           172.17.0.1/16"
+      "IP": "eth0             UP             192.168.10.11/24 fe80::215:5dff:fe00:218/64  docker0          DOWN           172.17.0.1/16  docker_gwbridge  UP             172.18.0.1/16 fe80::1461:e4ff:fea1:a543/64  veth813afd9@if8  UP             fe80::b0a8:29ff:fe51:ba5a/64  vethf099802@if90 UP             fe80::b007:80ff:feed:e675/64  veth060c8fb@if92 UP             fe80::8830:e5ff:fede:1cb7/64  veth1801fd1@if96 UP             fe80::4089:2ff:fe26:a6a4/64  vetha711308@if100 UP             fe80::d4fb:51ff:fe85:6593/64  veth476f91e@if106 UP             fe80::a0b4:caff:fead:5ba5/64"
     }
   },
   "192.168.10.12": {
@@ -53,11 +53,11 @@
     },
     "raw": {
       "HOSTNAME": "worker2",
-      "KERNEL": "6.8.0-136-generic",
-      "UPTIME": "up 2 minutes\nload: 0.07, 0.02, 0.00",
+      "KERNEL": "6.8.0-137-generic",
+      "UPTIME": "up 21 hours, 57 minutes\nload: 0.03, 0.01, 0.00",
       "CPU": "4\nmodel name\t: Intel(R) Core(TM) i7-14700HX",
-      "MEM": "3914 502 3244 3412",
-      "DISK": "/dev/sda2        78G   11G   63G  15% /",
+      "MEM": "3914 918 1577 2996",
+      "DISK": "/dev/sda2        78G   14G   61G  18% /",
       "SERVICES": "inactive inactive inactive active",
       "DOCKER": "active",
       "AGENT_DIR": "/tmp/mini-drop-agent-results\n0",
@@ -65,7 +65,7 @@
       "PERF": "perf version 6.8.12",
       "BPFTRACE": "bpftrace v0.20.2",
       "PYSPY": "",
-      "IP": "eth0             UP             192.168.10.12/24 fe80::215:5dff:fe00:219/64  docker0          DOWN           172.17.0.1/16"
+      "IP": "eth0             UP             192.168.10.12/24 fe80::215:5dff:fe00:219/64  docker0          DOWN           172.17.0.1/16  docker_gwbridge  UP             172.18.0.1/16 fe80::14a0:63ff:fef6:746c/64  veth45156e0@if11 UP             fe80::fc7c:58ff:fe7f:8a3a/64  vethb0fd6fb@if46 UP             fe80::644f:9bff:fe34:8745/64  vethca04529@if50 UP             fe80::dcf8:47ff:fecd:4bed/64  veth0c0a4eb@if54 UP             fe80::50a7:e1ff:fed7:39d5/64  veth7f95a2a@if64 UP             fe80::78d2:d0ff:fe18:4225/64  veth6189670@if66 UP             fe80::80dd:d9ff:fe6a:1052/64  veth92523d3@if68 UP             fe80::3402:98ff:fe61:6b50/64  veth7129723@if102 UP             fe80::1ce8:4cff:fed3:f64b/64"
     }
   }
 }

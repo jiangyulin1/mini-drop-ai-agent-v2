@@ -85,6 +85,14 @@ describe("AIDiagnosis workspace", () => {
     expect((await screen.findAllByText("service-x CPU 飙高")).length).toBeGreaterThan(0);
     expect(await screen.findByText("设置诊断范围")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看 Worker 状态" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /服务检测/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /范围与服务关系/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^诊断数据$/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /能力与准确率/ }));
+    expect(await screen.findByText(/严格根因准确率 80%/)).toBeInTheDocument();
+    expect(screen.getByText(/连续两次通过才判定恢复/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /关\s*闭/ }));
     expect(screen.getByRole("button", { name: /发送并分析/ })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "设置范围" }));

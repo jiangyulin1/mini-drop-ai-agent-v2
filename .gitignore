@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.egg-info/
+# Claude Code 本地配置（含本机 VM 密码等敏感环境变量，不入库）
+.claude/
 .eggs/
 dist/
 build/
@@ -52,6 +54,9 @@ logs/
 perf.data
 perf.data.*
 *.hprof
+
+# VM 评测原始诊断 bundle（可从 runner 复现，体积大不入库）
+reports/eval/**/bundles/
 
 # Secrets
 *.pem

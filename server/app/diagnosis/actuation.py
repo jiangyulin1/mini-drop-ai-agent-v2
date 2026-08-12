@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ from server.app.diagnosis.authorization import AuthorizationDecision, OperationC
 from server.app.diagnosis.schemas import StrictModel
 
 TASK_DIR_PATTERN = re.compile(r"^task_[A-Za-z0-9_.-]{6,128}$")
+SWARM_SERVICE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,127}$")
 
 
 def cache_root() -> Path:
@@ -221,6 +223,132 @@ def restore_cache_quarantine_execute(attempt: ActuationAttempt) -> list[dict[str
     return executed
 
 
+# ── Docker Swarm bounded recovery ─────────────────────────────
+
+
+def _allowed_swarm_services() -> set[str]:
+    return {
+        item.strip()
+        for item in os.getenv("MINI_DROP_AUTONOMY_SWARM_SERVICES", "").split(",")
+        if item.strip()
+    }
+
+
+def _validate_swarm_service(value: Any) -> str:
+    service = str(value or "")
+    if not SWARM_SERVICE_PATTERN.fullmatch(service):
+        raise ActuationError("service_name 非法")
+    if service not in _allowed_swarm_services():
+        raise ActuationError(f"服务 {service} 不在自主处置允许列表")
+    return service
+
+
+def _docker_json(args: list[str]) -> Any:
+    docker = shutil.which("docker")
+    if not docker:
+        raise ActuationError("docker 命令不可用")
+    try:
+        result = subprocess.run(
+            [docker, *args], capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ActuationError(f"Docker 只读检查失败: {exc}") from exc
+    if result.returncode != 0:
+        raise ActuationError(f"Docker 只读检查失败: {result.stderr.strip()[:300]}")
+    try:
+        import json
+        return json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise ActuationError("Docker 返回了无效 JSON") from exc
+
+
+def _docker_run(args: list[str], *, timeout: int = 90) -> str:
+    docker = shutil.which("docker")
+    if not docker:
+        raise ActuationError("docker 命令不可用")
+    try:
+        result = subprocess.run(
+            [docker, *args], capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ActuationError(f"Docker 动作失败: {exc}") from exc
+    if result.returncode != 0:
+        raise ActuationError(f"Docker 动作失败: {result.stderr.strip()[:300]}")
+    return result.stdout.strip()
+
+
+def _inspect_swarm_service(service: str) -> dict[str, Any]:
+    value = _docker_json(["service", "inspect", service])
+    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
+        raise ActuationError(f"无法唯一定位 Swarm 服务 {service}")
+    return value[0]
+
+
+def _swarm_preflight_item(service: str) -> dict[str, Any]:
+    value = _inspect_swarm_service(service)
+    spec = value.get("Spec") or {}
+    labels = spec.get("Labels") or {}
+    if str(labels.get("mini-drop.autonomy", "")).lower() != "true":
+        raise ActuationError("服务缺少 mini-drop.autonomy=true 标签")
+    if str(labels.get("mini-drop.stateless", "")).lower() != "true":
+        raise ActuationError("服务缺少 mini-drop.stateless=true 标签，拒绝自动重启")
+    replicas = int((((spec.get("Mode") or {}).get("Replicated") or {}).get("Replicas", 0)) or 0)
+    if replicas < 1:
+        raise ActuationError("服务没有期望副本，拒绝自动重启")
+    return {
+        "service_name": service,
+        "service_id": value.get("ID"),
+        "version_index": int((value.get("Version") or {}).get("Index", 0) or 0),
+        "replicas": replicas,
+        "labels": {
+            "mini-drop.autonomy": labels.get("mini-drop.autonomy"),
+            "mini-drop.stateless": labels.get("mini-drop.stateless"),
+        },
+    }
+
+
+def swarm_restart_dry_run(parameters: dict[str, Any]) -> dict[str, Any]:
+    service = _validate_swarm_service(parameters.get("service_name"))
+    item = _swarm_preflight_item(service)
+    return {"candidate_count": 1, "items": [item], "update_order": "start-first"}
+
+
+def swarm_restart_execute(attempt: ActuationAttempt) -> list[dict[str, Any]]:
+    executed: list[dict[str, Any]] = []
+    for item in attempt.dry_run_items:
+        service = _validate_swarm_service(item.get("service_name"))
+        current = _swarm_preflight_item(service)
+        if current["version_index"] != int(item.get("version_index", -1)):
+            raise ActuationError("服务在 dry-run 后已被修改，拒绝执行（并发变更）")
+        output = _docker_run([
+            "service", "update", "--force", "--update-order", "start-first",
+            "--label-add", f"mini-drop.last-actuation={attempt.attempt_id}", service,
+        ])
+        executed.append({
+            "service_name": service,
+            "previous_version_index": current["version_index"],
+            "replicas": current["replicas"],
+            "output": output[:500],
+            "rollback_action_id": "swarm.rollback-service",
+        })
+    return executed
+
+
+def swarm_rollback_dry_run(parameters: dict[str, Any]) -> dict[str, Any]:
+    service = _validate_swarm_service(parameters.get("service_name"))
+    item = _swarm_preflight_item(service)
+    return {"candidate_count": 1, "items": [item]}
+
+
+def swarm_rollback_execute(attempt: ActuationAttempt) -> list[dict[str, Any]]:
+    executed: list[dict[str, Any]] = []
+    for item in attempt.dry_run_items:
+        service = _validate_swarm_service(item.get("service_name"))
+        output = _docker_run(["service", "rollback", "--detach=false", service], timeout=120)
+        executed.append({"service_name": service, "output": output[:500]})
+    return executed
+
+
 # ── 执行器注册表 ─────────────────────────────────────────────
 
 Executor = Callable[[ActuationAttempt], list[dict[str, Any]]]
@@ -234,6 +362,15 @@ EXECUTORS: dict[str, dict[str, Any]] = {
     "mini-drop.restore-cache-quarantine": {
         "dry_run": restore_cache_quarantine_dry_run,
         "execute": restore_cache_quarantine_execute,
+    },
+    "swarm.restart-stateless-service": {
+        "dry_run": swarm_restart_dry_run,
+        "execute": swarm_restart_execute,
+        "rollback_action_id": "swarm.rollback-service",
+    },
+    "swarm.rollback-service": {
+        "dry_run": swarm_rollback_dry_run,
+        "execute": swarm_rollback_execute,
     },
 }
 

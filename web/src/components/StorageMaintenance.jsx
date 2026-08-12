@@ -62,15 +62,17 @@ export default function StorageMaintenance() {
       message.warning("请先执行 dry-run");
       return;
     }
+    const approvedDryRun = dryRunResult;
+    const approvedRetentionDays = approvedDryRun.dry_run?.retention_days ?? retentionDays;
     Modal.confirm({
       title: "确认执行清理？",
       icon: <SafetyCertificateOutlined style={{ color: "#fa8c16" }} />,
       content: (
         <div>
-          <p>将把 <strong>{dryRunResult.dry_run?.candidate_count || 0}</strong> 个超过保留期
-            （{retentionDays} 天）的诊断产物移入隔离区，释放约 {formatBytes(dryRunResult.dry_run?.total_bytes)}。</p>
+          <p>将把 <strong>{approvedDryRun.dry_run?.candidate_count || 0}</strong> 个超过保留期
+            （{approvedRetentionDays} 天）的诊断产物移入隔离区，释放约 {formatBytes(approvedDryRun.dry_run?.total_bytes)}。</p>
           <p style={{ color: "#999", fontSize: 12 }}>
-            移动而非删除，执行后可随时回滚恢复。所有操作写入审计日志。
+            批准对象：{approvedDryRun.attempt_id}。移动而非删除，所有操作写入审计日志。
           </p>
         </div>
       ),
@@ -81,7 +83,7 @@ export default function StorageMaintenance() {
         setExecuting(true);
         try {
           const result = await executeAction(CLEANUP_ACTION, {
-            dry_run_attempt_id: dryRunResult.attempt_id,
+            dry_run_attempt_id: approvedDryRun.attempt_id,
             dry_run_passed: true,
             rollback_ready: true,
             environment: "production",
@@ -99,9 +101,13 @@ export default function StorageMaintenance() {
   }
 
   async function runRollback() {
+    if (lastExecution?.action_id !== CLEANUP_ACTION || lastExecution?.stage !== "COMPLETED") {
+      message.warning("本页尚无可回滚的清理执行");
+      return;
+    }
     Modal.confirm({
-      title: "确认回滚恢复？",
-      content: "将隔离区中的缓存目录移回缓存根目录。",
+      title: "确认恢复全局隔离区？",
+      content: "当前后端会恢复隔离区内所有可恢复目录，范围可能包含其他清理批次，并非只恢复最近一次执行。",
       okText: "恢复",
       cancelText: "取消",
       onOk: async () => {
@@ -144,7 +150,10 @@ export default function StorageMaintenance() {
             min={1}
             max={365}
             value={retentionDays}
-            onChange={(value) => setRetentionDays(value || 7)}
+            onChange={(value) => {
+              setRetentionDays(value || 7);
+              setDryRunResult(null);
+            }}
             addonAfter="天"
             style={{ width: 130 }}
           />
@@ -165,9 +174,10 @@ export default function StorageMaintenance() {
         <Button
           icon={<RollbackOutlined />}
           loading={rollingBack}
+          disabled={lastExecution?.action_id !== CLEANUP_ACTION || lastExecution?.stage !== "COMPLETED"}
           onClick={runRollback}
         >
-          回滚恢复
+          恢复全局隔离区
         </Button>
       </Space>
 

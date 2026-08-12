@@ -18,14 +18,22 @@ from server.app.ai_provider import get_ai_settings, is_feature_enabled
 from server.app.common_utils import status_value
 from server.app.diagnosis.intent import parse_diagnosis_intent
 from server.app.diagnosis.actions import collect_action, inspect_command_action, inspect_session_action
+from server.app.diagnosis.adaptive_planner import (
+    build_probe_candidates,
+    select_probe_actions,
+)
+from server.app.diagnosis.causal_graph import build_causal_graph
+from server.app.diagnosis.resource_identity import build_identity_graph
 from server.app.diagnosis.domain_analyzers import (
     analyze_observations,
     assess_cluster,
     cluster_finding,
 )
+from server.app.diagnosis.evidence_guard import curate_observations
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe, list_probes
 from server.app.diagnosis.report_verifier import evidence_integrity_hash, verify_report
+from server.app.diagnosis.root_entity_resolver import resolve_root_entity
 from server.app.diagnosis.schemas import (
     ApprovalRequest,
     CreateDiagnosisRequest,
@@ -46,11 +54,14 @@ from server.app.state_machine import Actor
 
 
 PLANNER_VERSION = "diagnosis-orchestrator-v1"
+# 自适应补证最大轮数：超过后不再安排新一轮探针，直接按已有证据收敛/拒答。
+MAX_INVESTIGATION_ROUNDS = 3
 ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "UPLOADING", "ANALYZING"}
 TERMINAL_TASK_STATUSES = {"DONE", "FAILED"}
 STRUCTURED_ARTIFACT_TYPES = {
     "top_json", "ebpf_metrics", "sys_metrics", "memory_json",
     "network_metrics", "database_metrics", "runtime_metrics", "log_scan",
+    "connection_probe",
 }
 ALLOWED_DIAGNOSIS_TRANSITIONS = {
     "CREATED": {"UNDERSTANDING", "USER_CANCELED", "FAILED"},
@@ -106,6 +117,33 @@ class DiagnosisOrchestrator:
             input_refs=input_refs, output_refs=output_refs, metrics=metrics,
         )
 
+    def _trace(
+        self,
+        diagnosis_id: str,
+        *,
+        stage: str,
+        component: str,
+        decision: str,
+        summary: str,
+        input_refs: list[str] | None = None,
+        output_refs: list[str] | None = None,
+        evidence_refs: list[str] | None = None,
+        alternatives: list[dict[str, Any]] | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self.store.record_decision_trace(
+            diagnosis_id,
+            stage=stage,
+            component=component,
+            decision=decision,
+            summary=summary,
+            input_refs=input_refs,
+            output_refs=output_refs,
+            evidence_refs=evidence_refs,
+            alternatives=alternatives,
+            details=details,
+        )
+
     def create(self, request: CreateDiagnosisRequest, creator_id: str = "demo_user") -> dict[str, Any]:
         intent = parse_diagnosis_intent(request)
         self._enforce_service_scope(intent.target_service)
@@ -148,6 +186,57 @@ class DiagnosisOrchestrator:
             "planner_version": f"{PLANNER_VERSION}:{intent.analysis_strategy.value.lower()}",
             "deadline_at": utcnow() + timedelta(minutes=budget.max_duration_minutes),
         })
+        self._trace(
+            diagnosis_id,
+            stage="intent",
+            component="intent_parser",
+            decision="normalized_intent",
+            summary=f"Normalized the operator symptom as {intent.symptom}.",
+            input_refs=["raw_query"],
+            output_refs=["normalized_intent"],
+            details={
+                "symptom": intent.symptom,
+                "target_service": intent.target_service,
+                "ambiguities": intent.ambiguities,
+                "model_enabled": is_feature_enabled("nlp"),
+                "model_version": get_ai_settings().model,
+            },
+        )
+        self._trace(
+            diagnosis_id,
+            stage="scope",
+            component="deterministic_scope_resolver",
+            decision="resolved_target_scope",
+            summary=(
+                f"Resolved {len(target_scope['instances'])} target instance(s); "
+                f"scope is {target_scope.get('scope_completeness', 'unknown')}."
+            ),
+            input_refs=["normalized_intent", snapshot["snapshot_id"]],
+            output_refs=["target_scope"],
+            details={
+                "scope_completeness": target_scope.get("scope_completeness"),
+                "instance_refs": [
+                    item.get("instance_id") for item in target_scope.get("instances", [])
+                ],
+                "dependency_count": len(target_scope.get("dependencies") or []),
+            },
+        )
+        self._trace(
+            diagnosis_id,
+            stage="hypothesis",
+            component="deterministic_hypothesis_builder",
+            decision="initialized_candidates",
+            summary=f"Initialized {len(hypotheses)} causal hypotheses before collection.",
+            input_refs=["normalized_intent", "target_scope"],
+            output_refs=[item["hypothesis_id"] for item in hypotheses],
+            alternatives=[{
+                "id": item["hypothesis_id"],
+                "type": item["type"],
+                "status": item["status"],
+                "score": item["evidence_score"],
+                "missing_evidence": item["missing_evidence_requirements"],
+            } for item in hypotheses],
+        )
         self._complete_node(
             diagnosis_id, "understand_intent",
             output_refs=["normalized_intent"],
@@ -241,6 +330,16 @@ class DiagnosisOrchestrator:
             )
             self.store.update_pipeline_node(diagnosis_id, "run_probes", "SKIPPED")
             self.store.update_session(diagnosis_id, child_task_ids=existing_ids)
+            self._trace(
+                diagnosis_id,
+                stage="probe_plan",
+                component="evidence_planner",
+                decision="reuse_existing_evidence",
+                summary=f"Reused {len(existing_ids)} fresh task(s) covering every target.",
+                input_refs=["target_scope", "hypothesis_graph"],
+                output_refs=[f"task:{task_id}" for task_id in existing_ids],
+                details={"reused_task_ids": existing_ids, "new_probe_count": 0},
+            )
             existing_tasks = [self.repo.tasks[task_id] for task_id in existing_ids if task_id in self.repo.tasks]
             self._transition(
                 diagnosis_id,
@@ -283,6 +382,28 @@ class DiagnosisOrchestrator:
             diagnosis_id, "run_probes", "RUNNING",
             input_refs=[item["step_id"] for item in probes],
             output_refs=[f"task:{item['task_id']}" for item in probes if item.get("task_id")],
+        )
+        self._trace(
+            diagnosis_id,
+            stage="probe_plan",
+            component="evidence_planner_and_risk_gate",
+            decision="planned_registered_probes",
+            summary=(
+                f"Planned {len(probes)} registered probe(s); "
+                f"{sum(1 for item in probes if item['requires_approval'])} require approval."
+            ),
+            input_refs=["target_scope", "hypothesis_graph"],
+            output_refs=[item["step_id"] for item in probes],
+            alternatives=[{
+                "id": item["step_id"],
+                "probe_id": item["probe_id"],
+                "status": item["status"],
+                "risk_level": item["risk_level"],
+                "requires_approval": item["requires_approval"],
+                "reason": item["reason"],
+                "target_ref": (item.get("target") or {}).get("instance_id"),
+            } for item in probes],
+            details={"analysis_strategy": intent.analysis_strategy.value},
         )
         if not probes:
             self._ensure_insufficient_conclusion(diagnosis_id, [])
@@ -652,6 +773,11 @@ class DiagnosisOrchestrator:
             )
             self._transition(diagnosis_id, DiagnosisStatus.ANALYZING, "evidence_analysis_started")
             informative = self._analyze_tasks(diagnosis_id, terminal_tasks)
+            if self._plan_adaptive_round(diagnosis_id, terminal_tasks):
+                # 活跃假设的契约仍缺可补事实且预算允许：进入新一轮受控采集。
+                # 健康系统（NEG/ROBUST）的运行时/日志常规信号经阈值过滤后不会误报，
+                # 因此这里的补证由缺失事实驱动而非"是否已结案"驱动。
+                return
             if informative:
                 for probe in self.store.list_probes(diagnosis_id):
                     if probe["status"] == "WAITING_APPROVAL":
@@ -812,11 +938,39 @@ class DiagnosisOrchestrator:
         strategy = session.get("normalized_intent", {}).get(
             "analysis_strategy", "CONSTRAINED_HYBRID",
         )
-        probe_ids = (
-            [item.probe_id for item in list_probes()]
-            if strategy == "EXPLORATORY"
-            else choose_probe_ids(symptom)
-        )
+        if strategy == "EXPLORATORY":
+            probe_ids = [item.probe_id for item in list_probes()]
+        elif strategy == "DECISION_TREE":
+            # 决策树路径保持静态映射，便于确定性复现。
+            probe_ids = choose_probe_ids(symptom)
+        else:
+            # 主路径：首轮先做低成本广度扫描（host 指标 + 日志），把定向探针
+            # （runtime_snapshot / memory_map / connection_probe）留给自适应补证轮，
+            # 避免对每个目标都铺昂贵探针。广度探针不可用时退回契约缺失事实选探针。
+            available = self._available_probes_for_scope(instances)
+            breadth = [
+                probe_id for probe_id in ("host_process_metrics", "process_log_scan")
+                if any(item.probe_id == probe_id for item in available)
+            ]
+            if breadth:
+                probe_ids = breadth
+            else:
+                hypotheses = (session.get("hypothesis_graph") or {}).get("hypotheses", [])
+                candidates = build_probe_candidates(
+                    symptom=symptom,
+                    hypotheses=hypotheses,
+                    observations=[],
+                    scope=target_scope,
+                    available_probes=available,
+                    targets=instances,
+                    round_number=1,
+                    connection_endpoints=self._resolve_endpoint_targets(target_scope),
+                )
+                selected = select_probe_actions(candidates, max_actions=2)
+                probe_ids = [str(item["source_id"]) for item in selected]
+                if not probe_ids:
+                    # 兼容回退：契约没有可用探针时退回静态映射。
+                    probe_ids = choose_probe_ids(symptom)
         planned: list[ProbePlan] = []
         planned_duration = 0
         duration_limit = min(budget.max_duration_minutes * 60, budget.max_total_probe_cpu_seconds)
@@ -855,6 +1009,181 @@ class DiagnosisOrchestrator:
                 "status": status,
             })
         self._fill_ready_queue(diagnosis_id)
+
+    def _available_probes_for_scope(
+        self,
+        instances: list[dict[str, Any]],
+        *,
+        allow_r2: bool = False,
+    ) -> list[Any]:
+        """按目标 Agent 能力过滤注册探针；R2/R3 默认排除（R2 走自适应审批）。"""
+        agents = {str(item.get("agent_id")) for item in instances}
+        caps: set[str] = set()
+        for agent_id in agents:
+            agent = self.repo.agents.get(agent_id)
+            if agent is not None and status_value(agent.status) == "ONLINE":
+                caps.update(getattr(agent, "capabilities", []) or [])
+        available: list[Any] = []
+        for probe in list_probes():
+            if probe.risk_level == "R3":
+                continue
+            if probe.risk_level == "R2" and not allow_r2:
+                continue
+            required = set(probe.required_capabilities or [])
+            if required and not required.issubset(caps):
+                continue
+            available.append(probe)
+        return available
+
+    def _resolve_endpoint_targets(self, scope: dict[str, Any]) -> list[dict[str, Any]]:
+        """把目标服务的下游依赖解析为受控连接探针的端点参数。
+
+        端点地址用服务名：Agent 在调用方容器 netns 内经 overlay DNS 解析。
+        caller_pid 取目标服务第一个实例的 PID，供 nsenter 进入其 netns。
+        """
+        target_service = scope.get("target_service")
+        dependencies = scope.get("dependencies") or []
+        downstream = {
+            str(edge.get("target_service"))
+            for edge in dependencies
+            if edge.get("source_service") == target_service
+            and edge.get("relation")
+            in {"CALLS", "READS_FROM", "WRITES_TO", "PUBLISHES_TO", "SHARES_DEPENDENCY"}
+        }
+        if not downstream:
+            return []
+        caller_pid = None
+        for instance in scope.get("instances", []):
+            if instance.get("service_id") == target_service and instance.get("pid"):
+                caller_pid = int(instance["pid"])
+                break
+        return [
+            {"service": service, "caller_pid": caller_pid}
+            for service in sorted(downstream)
+        ]
+
+    def _plan_adaptive_round(self, diagnosis_id: str, tasks: list[Any]) -> bool:
+        """证据需求驱动的补证轮：按契约缺失事实选择并下发一个新探针。
+
+        命中任一条件即返回 False 交给现有收敛逻辑：
+        - 已达最大轮数；
+        - 探针 CPU 时长预算耗尽；
+        - 所有相关契约的事实已满足（没有可补足的缺失事实）；
+        - 唯一可选的探针已采集过（无新信息增益）。
+        """
+        session = self.store.get_session(diagnosis_id) or {}
+        # 决定性单一根因（存储路径失败/磁盘耗尽/OOM）已由充分证据闭环，
+        # 不再补证；其余情况按活跃假设契约的缺失事实决定是否采集。
+        versions = session.get("conclusion_versions") or []
+        if versions:
+            latest_classification = (
+                (versions[-1].get("cluster_assessment") or {}).get("classification")
+            )
+            if latest_classification in {
+                "single_instance_storage_path_failure",
+                "filesystem_exhaustion",
+                "process_oom",
+            }:
+                return False
+        resource_budget = session.get("resource_budget") or {}
+        budget_used = dict(session.get("budget_used") or {})
+        round_no = int(budget_used.get("investigation_round", 0) or 0)
+        if round_no >= MAX_INVESTIGATION_ROUNDS:
+            return False
+        probes = self.store.list_probes(diagnosis_id)
+        used_seconds = sum(
+            int((item.get("parameters") or {}).get("duration_sec", 0) or 0)
+            for item in probes
+            if item.get("status") != "REJECTED_POLICY"
+        )
+        cpu_limit = int(resource_budget.get("max_total_probe_cpu_seconds", 120) or 120)
+        if used_seconds >= cpu_limit:
+            return False
+
+        target_scope = session.get("target_scope") or {}
+        instances = target_scope.get("instances", [])
+        available = self._available_probes_for_scope(instances)
+        present_facts = list(budget_used.get("collected_facts") or [])
+        candidates = build_probe_candidates(
+            symptom=(session.get("normalized_intent") or {}).get("symptom", ""),
+            hypotheses=(session.get("hypothesis_graph") or {}).get("hypotheses", []),
+            observations=[],
+            scope=target_scope,
+            available_probes=available,
+            targets=instances,
+            round_number=round_no + 1,
+            connection_endpoints=self._resolve_endpoint_targets(target_scope),
+            present_facts=present_facts,
+        )
+        if not candidates:
+            return False
+        collected = {item["probe_id"] for item in probes}
+        selected = select_probe_actions(candidates, max_actions=1, exclude_probe_ids=collected)
+        if not selected:
+            return False
+        action = selected[0]
+        probe_id = str(action["source_id"])
+        definition = get_probe(probe_id)
+        target = dict(action.get("parameters", {}).get("target") or {})
+        duration = min(
+            definition.default_duration_seconds,
+            max(1, cpu_limit - used_seconds),
+        )
+        if duration <= 0 or not target:
+            return False
+        step_key = (
+            f"{diagnosis_id}:{probe_id}:{target.get('instance_id', '?' )}:"
+            f"r{round_no + 1}"
+        )
+        step_id = f"step_{hashlib.sha256(step_key.encode()).hexdigest()[:14]}"
+        parameters: dict[str, Any] = {
+            "duration_sec": duration,
+            "sample_rate": definition.default_sample_rate,
+            "adaptive_round": round_no + 1,
+        }
+        if probe_id == "endpoint_connectivity_probe":
+            parameters["endpoints"] = action.get("parameters", {}).get("endpoints") or []
+        mechanisms = ", ".join(
+            (action.get("parameters", {}).get("contract_mechanisms") or [])[:3],
+        )
+        missing_facts = ", ".join(
+            (action.get("parameters", {}).get("missing_facts") or [])[:6],
+        )
+        reason = (
+            f"自适应第 {round_no + 1} 轮：{mechanisms or '相关机制'} 仍缺证据事实 "
+            f"{missing_facts}，补充 {definition.name} 以收敛候选。"
+        )
+        self.store.add_probe({
+            "step_id": step_id,
+            "diagnosis_id": diagnosis_id,
+            "probe_id": probe_id,
+            "target": target,
+            "parameters": parameters,
+            "reason": reason,
+            "risk_level": definition.risk_level,
+            "requires_approval": definition.requires_approval,
+            "status": "READY",
+        })
+        budget_used["investigation_round"] = round_no + 1
+        self.store.update_session(diagnosis_id, budget_used=budget_used)
+        self._trace(
+            diagnosis_id,
+            stage="probe_plan",
+            component="adaptive_planner",
+            decision="adaptive_evidence_supplement",
+            summary=reason,
+            input_refs=[f"task:{task.id}" for task in tasks],
+            output_refs=[step_id],
+            details={
+                "round": round_no + 1,
+                "probe_id": probe_id,
+                "missing_facts": (action.get("parameters", {}).get("missing_facts") or []),
+                "contract_mechanisms": (action.get("parameters", {}).get("contract_mechanisms") or []),
+            },
+        )
+        self._fill_ready_queue(diagnosis_id)
+        self._transition(diagnosis_id, DiagnosisStatus.COLLECTING, "adaptive_evidence_supplement")
+        return True
 
     def _fill_ready_queue(self, diagnosis_id: str) -> None:
         session = self.store.get_session(diagnosis_id) or {}
@@ -946,6 +1275,8 @@ class DiagnosisOrchestrator:
                 "diagnosis_step_id": step_id,
                 "probe_id": definition.probe_id,
                 "registered_probe": True,
+                # connection_probe 需要端点参数才能在远端执行受控探测。
+                "endpoints": (step.get("parameters") or {}).get("endpoints") or [],
             },
         ))
         self.store.update_probe(step_id, status="SCHEDULED", task_id=task.id)
@@ -1043,13 +1374,66 @@ class DiagnosisOrchestrator:
             else:
                 missing.append(f"{task.id}:structured_artifact")
 
+        # 持久化本轮已收集的扁平事实键，供自适应补证轮计算契约缺失事实。
+        session = self.store.get_session(diagnosis_id) or {}
+        if task_observations:
+            usage = dict(session.get("budget_used", {}))
+            collected = set(usage.get("collected_facts") or [])
+            for observation in task_observations:
+                collected.update((observation.get("facts") or {}).keys())
+                collected.update((observation.get("pressure") or {}).keys())
+            usage["collected_facts"] = sorted(collected)
+            self.store.update_session(diagnosis_id, budget_used=usage)
+
         evidence_items = self.store.list_evidence(diagnosis_id)
         evidence_ids = [item["evidence_id"] for item in evidence_items]
+        session = self.store.get_session(diagnosis_id) or {}
+        incident_end = (session.get("effective_time_range") or {}).get("end")
+        task_observations, evidence_review = curate_observations(
+            task_observations,
+            incident_end=incident_end,
+            max_age_seconds=max(
+                300,
+                int((session.get("resource_budget") or {}).get("max_duration_minutes", 10)) * 60,
+            ),
+        )
         self.store.update_pipeline_node(
             diagnosis_id, "normalize_evidence", "COMPLETED",
             input_refs=[f"task:{task.id}" for task in tasks],
             output_refs=evidence_ids,
-            metrics={"evidence_count": len(evidence_items), "observation_count": len(task_observations)},
+            metrics={
+                "evidence_count": len(evidence_items),
+                "observation_count": len(task_observations),
+                "suppressed_observation_count": evidence_review["suppressed_observation_count"],
+                "source_independence_count": evidence_review["source_independence_count"],
+                "conflict_count": len(evidence_review["conflicts"]),
+            },
+        )
+        self._trace(
+            diagnosis_id,
+            stage="evidence_curation",
+            component="evidence_guard.v1",
+            decision="curated_observations",
+            summary=(
+                f"Kept {evidence_review['effective_observation_count']} observation(s), "
+                f"suppressed {evidence_review['suppressed_observation_count']} duplicate(s), "
+                f"and found {len(evidence_review['conflicts'])} conflict(s)."
+            ),
+            input_refs=[f"task:{task.id}" for task in tasks],
+            output_refs=evidence_ids,
+            evidence_refs=evidence_review.get("effective_evidence_refs") or [],
+            alternatives=[{
+                "id": item.get("task_id"),
+                "decision": "suppressed",
+                "reason": item.get("reason"),
+                "duplicate_of": item.get("duplicate_of"),
+                "evidence_refs": item.get("evidence_refs") or [],
+            } for item in evidence_review.get("suppressed") or []],
+            details={
+                "source_families": evidence_review.get("source_families") or [],
+                "quality_gate_passed": evidence_review.get("quality_gate_passed"),
+                "conflicts": evidence_review.get("conflicts") or [],
+            },
         )
 
         if not all_candidates and not task_observations:
@@ -1087,12 +1471,63 @@ class DiagnosisOrchestrator:
             output_refs=[item["finding_id"] for item in findings],
             metrics={"finding_count": len(findings), "candidate_count": len(deduped)},
         )
+        self._trace(
+            diagnosis_id,
+            stage="candidate_assessment",
+            component="domain_analyzers_and_candidate_calibrator",
+            decision="ranked_candidates",
+            summary=f"Derived {len(findings)} finding(s) and retained {len(deduped)} candidate(s).",
+            input_refs=evidence_ids,
+            output_refs=[item["finding_id"] for item in findings],
+            evidence_refs=list(dict.fromkeys(
+                ref for item in findings for ref in item.get("evidence_refs", [])
+            )),
+            alternatives=[{
+                "id": item.get("candidate_id"),
+                "rank": item.get("rank"),
+                "confidence_level": item.get("confidence_level"),
+                "score_components": item.get("score_components") or {},
+                "evidence_refs": item.get("evidence_refs") or [],
+                "missing_evidence": item.get("missing_evidence") or [],
+            } for item in deduped],
+            details={"findings": [{
+                "finding_id": item.get("finding_id"),
+                "finding_type": item.get("finding_type"),
+                "severity": item.get("severity"),
+                "confidence_level": item.get("confidence_level"),
+                "evidence_refs": item.get("evidence_refs") or [],
+                "contradicting_evidence_refs": item.get("contradicting_evidence_refs") or [],
+                "missing_evidence": item.get("missing_evidence") or [],
+            } for item in findings]},
+        )
 
         self.store.update_pipeline_node(
             diagnosis_id, "assess_cluster", "RUNNING",
             input_refs=[item["finding_id"] for item in findings] + evidence_ids,
         )
         cluster_assessment = self._build_cluster_assessment(diagnosis_id, task_observations)
+        cluster_assessment["root_entity"] = resolve_root_entity(
+            cluster_assessment,
+            session.get("target_scope") or {},
+            task_observations,
+        )
+        # P3：统一资源身份图 + 多原因因果图（传播边 + 每原因 EvidenceContract 覆盖率）。
+        try:
+            target_scope = session.get("target_scope") or {}
+            identity_graph = build_identity_graph(
+                service_id=target_scope.get("target_service"),
+                instances=target_scope.get("instances") or [],
+                dependencies=target_scope.get("dependencies") or [],
+            )
+            collected = usage.get("collected_facts") or []
+            cluster_assessment["causal_graph"] = build_causal_graph(
+                cluster_assessment,
+                {fact: True for fact in collected},
+                identity_entities=[node.stable_id for node in identity_graph.nodes()],
+            )
+        except Exception:
+            # 图构建是增强信息，失败不阻断诊断主流程。
+            cluster_assessment["causal_graph"] = None
         if cluster_assessment["classification"] == "single_instance_storage_path_failure":
             for candidate in deduped:
                 if candidate["candidate_id"] != "artifact_storage_unreachable":
@@ -1123,12 +1558,35 @@ class DiagnosisOrchestrator:
             output_refs=[cluster_item["finding_id"]],
             metrics={"classification": cluster_assessment["classification"]},
         )
+        self._trace(
+            diagnosis_id,
+            stage="causal_assessment",
+            component="deterministic_cluster_assessor",
+            decision="selected_root_cause",
+            summary=str(cluster_assessment.get("summary") or "No supported root cause."),
+            input_refs=[item["finding_id"] for item in findings] + evidence_ids,
+            output_refs=[cluster_item["finding_id"]],
+            evidence_refs=cluster_assessment.get("evidence_refs") or [],
+            alternatives=[{
+                "id": item.get("hypothesis"),
+                "decision": "ruled_out",
+                "reason": item.get("reason"),
+                "evidence_refs": item.get("evidence_refs") or [],
+            } for item in cluster_assessment.get("ruled_out") or []],
+            details={
+                "classification": cluster_assessment.get("classification"),
+                "confidence": cluster_assessment.get("confidence"),
+                "confidence_level": cluster_assessment.get("confidence_level"),
+                "confidence_factors": cluster_assessment.get("confidence_factors") or {},
+                "root_location": cluster_assessment.get("root_location") or {},
+                "domain_cause": cluster_assessment.get("domain_cause") or {},
+            },
+        )
 
         self.store.update_pipeline_node(
             diagnosis_id, "retrieve_knowledge", "RUNNING",
             input_refs=[item["finding_id"] for item in findings],
         )
-        session = self.store.get_session(diagnosis_id) or {}
         knowledge_context = retrieve_knowledge(session.get("raw_query", ""), findings)
         knowledge_refs = [item["knowledge_id"] for item in knowledge_context]
         self.store.update_pipeline_node(
@@ -1151,6 +1609,26 @@ class DiagnosisOrchestrator:
             output_refs=[item["action_id"] for item in diagnostic_actions],
             metrics={"action_count": len(diagnostic_actions)},
         )
+        self._trace(
+            diagnosis_id,
+            stage="action_policy",
+            component="registered_action_renderer",
+            decision="validated_reviewable_actions",
+            summary=f"Rendered {len(diagnostic_actions)} registered, non-auto-executing action(s).",
+            input_refs=evidence_ids + [item["finding_id"] for item in findings],
+            output_refs=[item["action_id"] for item in diagnostic_actions],
+            evidence_refs=list(dict.fromkeys(
+                ref for item in diagnostic_actions for ref in item.get("evidence_refs", [])
+            )),
+            alternatives=[{
+                "id": item.get("action_id"),
+                "action_type": item.get("action_type"),
+                "risk_level": item.get("risk_level"),
+                "approval_policy": item.get("approval_policy"),
+                "requires_approval": item.get("requires_approval"),
+                "auto_execute": item.get("auto_execute"),
+            } for item in diagnostic_actions],
+        )
         conclusion = {
             "version": len((self.store.get_session(diagnosis_id) or {}).get("conclusion_versions", [])) + 1,
             "generated_at": utcnow().isoformat(),
@@ -1170,6 +1648,7 @@ class DiagnosisOrchestrator:
             "recommendations": self._build_recommendations(cluster_assessment),
             "next_best_action": self._build_next_best_action(cluster_assessment, missing, session),
             "limitations": sorted(set(missing + (["部分目标采集失败"] if failed_targets else []))),
+            "evidence_review": evidence_review,
             "coverage": {
                 "task_count": len(tasks),
                 "failed_targets": failed_targets,
@@ -1192,10 +1671,37 @@ class DiagnosisOrchestrator:
             self.store.record_event(
                 diagnosis_id, "report_verification_failed", {"issues": verification["issues"]},
             )
+            self._trace(
+                diagnosis_id,
+                stage="report_verification",
+                component="report_verifier",
+                decision="rejected_report",
+                summary="Rejected the report because its references or actions were not valid.",
+                input_refs=evidence_ids + knowledge_refs + [
+                    item["action_id"] for item in diagnostic_actions
+                ],
+                details=verification,
+            )
             return False
         self.store.update_pipeline_node(
             diagnosis_id, "verify_report", "COMPLETED",
             output_refs=["verified_report"], metrics=verification,
+        )
+        self._trace(
+            diagnosis_id,
+            stage="report_verification",
+            component="report_verifier",
+            decision="accepted_report",
+            summary=(
+                f"Validated {verification['checked_evidence_refs']} evidence reference(s), "
+                f"{verification['checked_knowledge_refs']} knowledge reference(s), and "
+                f"{verification['checked_actions']} action(s)."
+            ),
+            input_refs=evidence_ids + knowledge_refs + [
+                item["action_id"] for item in diagnostic_actions
+            ],
+            output_refs=["verified_report"],
+            details=verification,
         )
         self._append_conclusion(diagnosis_id, conclusion)
         self._update_hypotheses(diagnosis_id, deduped, cluster_assessment)
@@ -1219,6 +1725,8 @@ class DiagnosisOrchestrator:
         return {
             "task_id": task.id,
             "collector_type": task.collector_type,
+            "observed_at": _iso(task.finished_at or task.started_at or task.created_at),
+            "duration_sec": int(task.duration_sec or 0),
             "target": target,
             "collection_status": status_value(task.status),
             "status_reason": task.status_reason or "",
@@ -1245,6 +1753,8 @@ class DiagnosisOrchestrator:
         return {
             "task_id": task.id,
             "collector_type": task.collector_type,
+            "observed_at": _iso(task.finished_at or task.started_at or task.created_at),
+            "duration_sec": int(task.duration_sec or 0),
             "target": self._target_for_task(diagnosis_id, task),
             "collection_status": status_value(task.status),
             "status_reason": task.status_reason or "",
@@ -1751,6 +2261,7 @@ class DiagnosisOrchestrator:
             "ebpf_metrics": ["host", "process"], "memory_json": ["process"],
             "network_metrics": ["host", "dependency"], "database_metrics": ["dependency"],
             "runtime_metrics": ["process", "runtime"], "log_scan": ["process"],
+            "connection_probe": ["dependency"],
         }.get(artifact_type, [])
         evidence_record = {
             "evidence_id": evidence_id,
@@ -1884,7 +2395,12 @@ class DiagnosisOrchestrator:
     def _build_target_scope(self, request, intent, budget: DiagnosisBudget) -> dict[str, Any]:
         all_instances = [item.model_dump(mode="json") for item in request.context.instances]
         excluded: list[dict[str, Any]] = []
+        # 同一 instance_id 声明了多个进程身份：这是来自不同来源的冲突证据，
+        # 无法判定哪一个才是真实目标，不能假装目标唯一。把冲突 instance_id 的
+        # 全部实例排除，让 scope 走 unresolved（拒绝作答），而不是把诊断请求
+        # 直接拒成 409。
         identities: dict[str, tuple[Any, ...]] = {}
+        conflicting_ids: set[str] = set()
         for item in all_instances:
             identity = (
                 item.get("agent_id"), item.get("pid"), item.get("process_start_time"),
@@ -1892,14 +2408,19 @@ class DiagnosisOrchestrator:
             )
             previous = identities.setdefault(item["instance_id"], identity)
             if previous != identity:
-                raise ValueError(f"instance_id {item['instance_id']} 指向多个进程身份")
+                conflicting_ids.add(item["instance_id"])
+        if conflicting_ids:
+            excluded.extend(
+                {"instance_id": instance_id, "reason": "identity_conflict"}
+                for instance_id in sorted(conflicting_ids)
+            )
 
         eligible: list[dict[str, Any]] = []
         for item in all_instances:
-            reason = None
-            if intent.environment != "unknown" and item["environment"] != intent.environment:
+            reason = "identity_conflict" if item["instance_id"] in conflicting_ids else None
+            if reason is None and intent.environment != "unknown" and item["environment"] != intent.environment:
                 reason = "environment_mismatch"
-            else:
+            if reason is None:
                 agent = self.repo.agents.get(item["agent_id"])
                 if agent is None:
                     reason = "agent_not_registered"
@@ -1923,6 +2444,9 @@ class DiagnosisOrchestrator:
                 "scope_completeness": "unresolved",
                 "same_host_instance_ids": [],
                 "downstream_service_ids": [],
+                "dependencies": [
+                    edge.model_dump(mode="json") for edge in request.context.dependencies
+                ],
                 "max_topology_hops": budget.max_topology_hops,
             }
 
@@ -1968,17 +2492,36 @@ class DiagnosisOrchestrator:
             "scope_completeness": "complete" if not excluded else "partial",
             "same_host_instance_ids": [item["instance_id"] for item in same_host],
             "downstream_service_ids": sorted(downstream_services),
+            "dependencies": [
+                edge.model_dump(mode="json") for edge in request.context.dependencies
+            ],
             "max_topology_hops": budget.max_topology_hops,
         }
 
     def _build_hypotheses(self, symptom: str, target_scope: dict[str, Any]) -> list[dict[str, Any]]:
         base = {
             "cpu_saturation": ["CPU_SATURATION", "SELF_CODE_REGRESSION", "SAME_HOST_NOISY_NEIGHBOR"],
-            "latency_increase": ["SELF_CODE_REGRESSION", "DOWNSTREAM_LATENCY", "SAME_HOST_NOISY_NEIGHBOR"],
+            "latency_increase": [
+                "SELF_CODE_REGRESSION", "DOWNSTREAM_LATENCY", "SAME_HOST_NOISY_NEIGHBOR",
+                # 延迟升高也可能是运行时锁/停顿：必须让运行时契约进入候选，
+                # 否则运行时类症状永远采不到 runtime_snapshot。
+                "LOCK_CONTENTION", "RUNTIME_STALL",
+            ],
             "io_degradation": ["HOST_DISK_CONTENTION", "SAME_HOST_NOISY_NEIGHBOR", "DOWNSTREAM_LATENCY"],
             "memory_pressure": ["HOST_MEMORY_PRESSURE", "MEMORY_LEAK", "SAME_HOST_NOISY_NEIGHBOR"],
             "noisy_neighbor": ["SAME_HOST_NOISY_NEIGHBOR", "HOST_DISK_CONTENTION", "TRAFFIC_SURGE"],
-        }.get(symptom, ["CPU_SATURATION", "DOWNSTREAM_LATENCY", "INSUFFICIENT_EVIDENCE"])
+            "runtime_stall": ["LOCK_CONTENTION", "RUNTIME_STALL", "SELF_CODE_REGRESSION"],
+            "disk_exhaustion": ["FILESYSTEM_EXHAUSTION", "HOST_DISK_CONTENTION", "LOG_WRITE_AMPLIFICATION"],
+            "network_degradation": ["NETWORK_DEGRADATION", "DOWNSTREAM_LATENCY", "SAME_HOST_NOISY_NEIGHBOR"],
+            "error_increase": [
+                "DOWNSTREAM_LATENCY", "SELF_CODE_REGRESSION", "CPU_SATURATION",
+                "LOCK_CONTENTION", "RUNTIME_STALL",
+            ],
+            "unknown_performance_issue": [
+                "CPU_SATURATION", "DOWNSTREAM_LATENCY", "LOCK_CONTENTION",
+                "RUNTIME_STALL", "MEMORY_LEAK",
+            ],
+        }.get(symptom, ["CPU_SATURATION", "DOWNSTREAM_LATENCY", "LOCK_CONTENTION", "RUNTIME_STALL", "INSUFFICIENT_EVIDENCE"])
         targets = [item["instance_id"] for item in target_scope.get("instances", [])]
         created_at = utcnow().isoformat()
         return [{
@@ -2028,6 +2571,8 @@ class DiagnosisOrchestrator:
                 hypothesis["supporting_evidence_refs"] = matched["evidence_refs"]
                 hypothesis["missing_evidence_requirements"] = matched["missing_evidence"]
                 hypothesis["score_components"] = matched["score_components"]
+                if cluster_assessment.get("root_entity"):
+                    hypothesis["root_entity"] = cluster_assessment["root_entity"]
                 base_score = {"高": 85, "中": 65, "低": 40}.get(
                     matched.get("confidence_level"), 30,
                 )
@@ -2284,6 +2829,12 @@ def _normalized_facts(values: dict[str, Any], sys_summary: dict[str, Any]) -> di
     for artifact_type, raw in values.items():
         if artifact_type == "top_json" or not isinstance(raw, dict):
             continue
+        if artifact_type == "log_scan":
+            log = _log_summary(raw) or {}
+            for key, value in (log.get("patterns") or {}).items():
+                facts[f"{key}_count"] = int(value or 0)
+            facts["log_error_count"] = int(log.get("error_count", 0) or 0)
+            continue
         payload = raw.get("summary") if isinstance(raw.get("summary"), dict) else raw
         for key, value in payload.items():
             if isinstance(value, (str, int, float, bool)) or value is None:
@@ -2332,6 +2883,19 @@ def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str
     fd_trend = str(summary.get("fd_trend") or "").lower()
     top_items = values.get("top_json") if isinstance(values.get("top_json"), list) else []
     top_percent = _num((top_items[0] or {}).get("percent")) if top_items else 0.0
+    log = _log_summary(values.get("log_scan")) or {}
+    log_patterns = log.get("patterns") or {}
+    log_disk_full = any(
+        _num(log_patterns.get(key)) > 0
+        for key in ("enospc", "no_space_left", "disk_full")
+    )
+    log_network_loss = any(
+        _num(log_patterns.get(key)) > 0
+        for key in (
+            "timeout", "timed_out", "connection_refused", "connection_reset",
+            "unreachable", "econnrefused",
+        )
+    )
     return {
         "cpu": process_cpu_cores >= 0.75 or cpu_user + cpu_sys >= 75 or top_percent >= 45,
         "io_wait": cpu_iowait >= 20 or _has_ebpf_latency(values.get("ebpf_metrics")),
@@ -2342,6 +2906,34 @@ def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str
         "fd": fd_count >= 1000 or (fd_trend == "increasing" and fd_count >= 200),
         "thread": threads >= 512,
         "load": load1m >= 4,
+        "disk_full": max(
+            _num(summary.get("root_fs_used_pct")),
+            _num(summary.get("target_fs_used_pct")),
+        ) >= 95 or log_disk_full or (
+            summary.get("target_fs_available_bytes") is not None
+            and _num(summary.get("target_fs_used_pct")) > 0
+            and _num(summary.get("target_fs_available_bytes")) == 0
+        ),
+        "network_loss": (
+            _num(summary.get("tcp_retransmit_pct")) >= 5
+            or _num(summary.get("tcp_timeout_delta")) >= 3
+            or log_network_loss
+        ),
+        "oom": _num(summary.get("container_oom_kill_delta")) > 0,
+        "runtime_lock": any(
+            # 与 domain_analyzers 锁检测阈值一致：Go/Python 常规 futex 停放不能误报。
+            _num((raw.get("summary") or raw).get("lock_waiter_count_max")) >= 15
+            and _num((raw.get("summary") or raw).get("blocked_thread_ratio_max")) >= 0.9
+            for raw in values.values() if isinstance(raw, dict)
+        ),
+        "runtime_stall": any(
+            _num((raw.get("summary") or raw).get("stopped_thread_count_max")) >= 2
+            or (
+                _num((raw.get("summary") or raw).get("thread_count_max")) >= 2
+                and _num((raw.get("summary") or raw).get("cpu_tick_delta")) == 0
+            )
+            for raw in values.values() if isinstance(raw, dict)
+        ),
     }
 
 
@@ -2420,5 +3012,10 @@ def _candidate_matches_hypothesis(candidate_id: str, hypothesis_type: str) -> bo
         "MEMORY_LEAK": ("memory", "fd_leak"),
         "DOWNSTREAM_LATENCY": ("network", "latency"),
         "TRAFFIC_SURGE": ("network", "load"),
+        "LOCK_CONTENTION": ("lock", "futex", "mutex", "runtime"),
+        "RUNTIME_STALL": ("runtime", "stall", "blocked"),
+        "FILESYSTEM_EXHAUSTION": ("filesystem", "enospc", "disk_full"),
+        "LOG_WRITE_AMPLIFICATION": ("log", "write", "disk"),
+        "NETWORK_DEGRADATION": ("network", "retransmit", "packet_loss", "timeout"),
     }.get(hypothesis_type, ())
     return any(token in candidate_id for token in tokens)

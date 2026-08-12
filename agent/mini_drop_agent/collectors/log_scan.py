@@ -48,20 +48,28 @@ _LOG_PATTERNS: dict[str, re.Pattern] = {
     "connection_refused": re.compile(r"connection\s*refused|econnrefused", re.IGNORECASE),
     "connection_reset": re.compile(r"connection\s*reset|econnreset", re.IGNORECASE),
     "timeout": re.compile(r"timed?\s*out|timeout", re.IGNORECASE),
+    "downstream_endpoint": re.compile(
+        r"server\s*endpoint\s*:|serverendpoint\s*:|upstream\s*=|downstream\s*=",
+        re.IGNORECASE,
+    ),
     "exception": re.compile(r"exception|panic", re.IGNORECASE),
     "out_of_memory": re.compile(r"out\s*of\s*memory|\boom\b", re.IGNORECASE),
+    "enospc": re.compile(r"\benospc\b|no\s+space\s+left|disk\s+full", re.IGNORECASE),
     "deadlock": re.compile(r"deadlock", re.IGNORECASE),
+    "lock_timeout": re.compile(r"lock\s+(?:wait\s+)?timeout|could\s+not\s+obtain\s+lock", re.IGNORECASE),
     "denied": re.compile(r"\bdenied\b|permission\s*denied", re.IGNORECASE),
     "failed": re.compile(r"\bfailed\b|\bfailure\b", re.IGNORECASE),
     "unreachable": re.compile(r"unreachable", re.IGNORECASE),
 }
 _HIGH_SIGNAL_PATTERNS = {
     "connection_refused", "connection_reset", "exception", "out_of_memory",
-    "deadlock", "denied", "unreachable",
+    "deadlock", "lock_timeout", "enospc", "denied", "unreachable",
 }
 _TS_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"
 )
+_CONTAINER_ID_RE = re.compile(r"(?<![0-9a-f])([0-9a-f]{64})(?![0-9a-f])", re.IGNORECASE)
+_DOCKER_CONTAINERS_ROOT = "/var/lib/docker/containers"
 
 
 class LogScanCollector:
@@ -149,7 +157,43 @@ class LogScanCollector:
                 candidates.append(target)
             elif size > 64 * 1024 and self._looks_like_text_log(target):
                 candidates.append(target)
+        # Docker normally connects container stdout/stderr to a pipe, which is
+        # intentionally skipped above.  Resolve the container identity from
+        # the host PID's cgroup and read Docker's bounded json-file log instead.
+        for target in self._discover_docker_json_logs(pid):
+            if target not in seen:
+                seen.add(target)
+                candidates.append(target)
         return candidates
+
+    def _discover_docker_json_logs(self, pid: int) -> list[str]:
+        root = os.path.realpath(
+            os.getenv("MINI_DROP_DOCKER_CONTAINERS_ROOT", _DOCKER_CONTAINERS_ROOT)
+        )
+        paths: list[str] = []
+        for container_id in self._container_ids_for_pid(pid):
+            candidate = os.path.realpath(
+                os.path.join(root, container_id, f"{container_id}-json.log")
+            )
+            try:
+                if os.path.commonpath((root, candidate)) != root:
+                    continue
+                if os.path.isfile(candidate) and os.path.getsize(candidate) > 0:
+                    paths.append(candidate)
+            except (OSError, ValueError):
+                continue
+        return paths
+
+    @staticmethod
+    def _container_ids_for_pid(pid: int) -> list[str]:
+        values: list[str] = []
+        for path in (f"/proc/{pid}/cgroup", f"/proc/{pid}/cpuset"):
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                    values.extend(_CONTAINER_ID_RE.findall(handle.read()))
+            except (FileNotFoundError, PermissionError, OSError):
+                continue
+        return list(dict.fromkeys(value.lower() for value in values))
 
     @staticmethod
     def _looks_like_text_log(path: str) -> bool:

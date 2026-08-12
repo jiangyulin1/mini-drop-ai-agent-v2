@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -86,7 +87,12 @@ class ProcessScanCollector:
                 continue  # 排除 Agent 自身进程
             comm = cur.get("comm", "")
             cmdline = cur.get("cmdline", "")
-            if query and query not in comm.lower() and query not in cmdline.lower():
+            container = cur.get("container") or {}
+            container_text = " ".join(str(value or "") for value in (
+                container.get("id"), container.get("name"), container.get("image"),
+                container.get("service_name"), container.get("task_name"),
+            )).lower()
+            if query and query not in comm.lower() and query not in cmdline.lower() and query not in container_text:
                 continue
             cpu_ticks = max(0, cur["ticks"] - prev["ticks"])
             cpu_percent = round(cpu_ticks * 100.0 / CLK_TCK / sample_sec, 1)
@@ -100,6 +106,11 @@ class ProcessScanCollector:
                 "cpu_percent": cpu_percent,
                 "cpu_seconds": round(cur.get("cpu_ticks_total", 0) / CLK_TCK, 1),
                 "username": cur.get("username", ""),
+                "container_id": container.get("id"),
+                "container_name": container.get("name"),
+                "container_image": container.get("image"),
+                "container_service": container.get("service_name"),
+                "container_task": container.get("task_name"),
             })
 
         # 按 CPU 占用降序，其次按 RSS 降序，让用户优先看到最可疑的进程
@@ -156,6 +167,7 @@ class ProcessScanCollector:
                 comm = self._read_comm(proc_dir)
                 cmdline = self._read_cmdline(proc_dir)
                 status = self._read_status(proc_dir)
+                container = self._read_container_context(pid)
                 result[pid] = {
                     "ticks": stat["ticks"],
                     "cpu_ticks_total": stat["cpu_ticks_total"],
@@ -165,9 +177,38 @@ class ProcessScanCollector:
                     "state": status.get("state", stat["state"]),
                     "threads": status.get("threads", 0),
                     "username": status.get("username", ""),
+                    "container": container,
                 }
             except (PermissionError, FileNotFoundError, ProcessLookupError, OSError):
                 continue
+        return result
+
+    @staticmethod
+    def _read_container_context(pid: int) -> dict[str, Any]:
+        """Resolve Docker/Swarm identity from cgroup without invoking Docker."""
+        try:
+            cgroup = open(f"/proc/{pid}/cgroup", "r", encoding="utf-8").read()
+        except (PermissionError, FileNotFoundError, OSError):
+            return {}
+        matches = re.findall(r"(?<![0-9a-f])([0-9a-f]{64})(?![0-9a-f])", cgroup.lower())
+        if not matches:
+            return {}
+        container_id = matches[-1]
+        result: dict[str, Any] = {"id": container_id}
+        config_path = f"/var/lib/docker/containers/{container_id}/config.v2.json"
+        try:
+            if os.path.getsize(config_path) > 1024 * 1024:
+                return result
+            config = json.loads(open(config_path, "r", encoding="utf-8").read())
+        except (PermissionError, FileNotFoundError, OSError, ValueError, TypeError):
+            return result
+        labels = ((config.get("Config") or {}).get("Labels") or {})
+        result.update({
+            "name": str(config.get("Name") or "").lstrip("/")[:256],
+            "image": str((config.get("Config") or {}).get("Image") or "")[:512],
+            "service_name": str(labels.get("com.docker.swarm.service.name") or "")[:256],
+            "task_name": str(labels.get("com.docker.swarm.task.name") or "")[:256],
+        })
         return result
 
     @staticmethod

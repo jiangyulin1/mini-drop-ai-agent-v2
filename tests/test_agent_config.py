@@ -136,7 +136,10 @@ class TestAgentCollectorDispatch:
              ):
             detected = _detect_capabilities()
 
-        assert detected == ["go_pprof", "log_scan", "memory_smaps", "process_scan", "sys_metrics"]
+        assert detected == [
+            "connection_probe", "go_pprof", "log_scan", "memory_smaps",
+            "process_scan", "runtime_snapshot", "sys_metrics",
+        ]
 
     def test_detect_capabilities_includes_available_external_tools(self):
         def which(name):
@@ -153,7 +156,7 @@ class TestAgentCollectorDispatch:
              ):
             detected = _detect_capabilities()
 
-        assert detected == sorted(COLLECTORS)
+        assert detected == sorted(set(COLLECTORS) - {"swarm_actuation"})
 
     def test_unregistered_collector_reports_failure_without_artifact(self):
         ok, reason, artifacts = _run_collector({
@@ -195,6 +198,31 @@ class TestAgentCollectorDispatch:
         assert task["request_params"]["options"]["port"] == 6061
         assert task["request_id"] == "trace-options"
         assert task["request_params"]["options"]["pprof_endpoint"] == "/custom"
+
+    def test_heartbeat_prefers_valid_exact_collector_name(self):
+        class Stub:
+            def Do(self, _request, timeout):
+                return healthcheck_pb2.HealthCheckResponse(
+                    pending=True,
+                    task_desc=hotmethod_pb2.TaskDesc(
+                        task_id="task_runtime",
+                        profiler_type=0,
+                        options_json='{"_collector_type":"runtime_snapshot"}',
+                        sample_argv=hotmethod_pb2.RecordArgv(pid=42, hz=1, duration=3),
+                    ),
+                )
+
+        task = _heartbeat(
+            Stub(),
+            AgentConfig(
+                agent_id="agent-runtime",
+                server_grpc_addr="localhost:50051",
+                agent_ip_addr="127.0.0.1",
+            ),
+        )
+
+        assert task["collector_type"] == "runtime_snapshot"
+        assert "_collector_type" not in task["request_params"]["options"]
 
     def test_heartbeat_returns_cancel_directive_for_active_attempt(self):
         class Stub:

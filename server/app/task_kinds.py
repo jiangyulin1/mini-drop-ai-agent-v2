@@ -175,6 +175,28 @@ TASK_KINDS: tuple[dict[str, Any], ...] = (
         default_sample_rate=1,
         permission_requirements=["读取目标进程日志文件"],
     ),
+    _kind(
+        "runtime_snapshot",
+        "运行时快照",
+        "线程状态、锁等待与运行时类型",
+        "只读 /proc，识别 Java、Go、Python 等运行时，并汇总线程阻塞和锁等待。",
+        color="purple",
+        flamegraph=False,
+        default_duration=5,
+        default_sample_rate=1,
+        permission_requirements=["读取目标进程及其线程的 /proc 信息"],
+    ),
+    _kind(
+        "connection_probe",
+        "下游连通性探针",
+        "下游端点 TCP/HTTP 连通性与容器状态",
+        "受控探测目标服务声明的下游端点可达性，并读取下游容器状态；只读、零注入。",
+        color="geekblue",
+        flamegraph=False,
+        default_duration=10,
+        default_sample_rate=1,
+        permission_requirements=["对受控端点发起 TCP/HTTP 连接探测、读取 docker 容器状态"],
+    ),
 )
 
 

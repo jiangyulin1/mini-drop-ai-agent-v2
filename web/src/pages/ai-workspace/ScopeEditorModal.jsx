@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -35,12 +35,24 @@ export default function ScopeEditorModal({ open, detail, agents, saving, onClose
   const [scanning, setScanning] = useState(false);
   const [scanResults, setScanResults] = useState({}); // agentId -> { status, processes, message }
   const [autoSearchDone, setAutoSearchDone] = useState(false);
+  const scanSequence = useRef(0);
+  const detailRef = useRef(detail);
+  const agentsRef = useRef(agents);
+  detailRef.current = detail;
+  agentsRef.current = agents;
+  const caseId = detail?.case_id || "";
 
   useEffect(() => {
-    if (!open || !detail) return;
-    const currentInstances = detail.target_scope?.instances || [];
+    if (!open || !caseId) {
+      scanSequence.current += 1;
+      setScanning(false);
+      return;
+    }
+    const currentDetail = detailRef.current;
+    const currentAgents = agentsRef.current;
+    const currentInstances = currentDetail.target_scope?.instances || [];
     const currentByAgent = new Map(currentInstances.map((item) => [item.agent_id, item]));
-    setTargets(agents.map((agent) => {
+    setTargets(currentAgents.map((agent) => {
       const current = currentByAgent.get(agent.id);
       return {
         agent,
@@ -49,25 +61,45 @@ export default function ScopeEditorModal({ open, detail, agents, saving, onClose
         instanceId: current?.instance_id || "",
       };
     }));
-    setScanKeyword(detail.target_scope?.service_id || "");
+    setScanKeyword(currentDetail.target_scope?.service_id || "");
     setScanResults({});
     setAutoSearchDone(false);
+    scanSequence.current += 1;
     form.setFieldsValue({
-      service_id: detail.target_scope?.service_id || detail.target_scope?.service_ids?.[0] || "",
-      environment: detail.environment || "production",
-      recovery_goal: detail.recovery_goal || "确认原因并给出安全处置建议",
-      dependencies: detail.target_scope?.dependencies || [],
+      service_id: currentDetail.target_scope?.service_id || currentDetail.target_scope?.service_ids?.[0] || "",
+      environment: currentDetail.environment || "production",
+      recovery_goal: currentDetail.recovery_goal || "确认原因并给出安全处置建议",
+      dependencies: currentDetail.target_scope?.dependencies || [],
+      swarm_service: currentDetail.target_scope?.orchestration?.swarm_service || "",
+      manager_agent_id: currentDetail.target_scope?.orchestration?.manager_agent_id || "",
+      authorize_restart: (currentDetail.target_scope?.autonomy_policy?.allowed_action_ids || []).includes("swarm.restart-stateless-service"),
+      auto_approve_profilers: (currentDetail.target_scope?.autonomy_policy?.auto_approve_probe_ids || []).length > 0,
+      verification_url: currentDetail.target_scope?.verification?.http_checks?.[0]?.url || "",
     });
-  }, [agents, detail, form, open]);
+  }, [caseId, form, open]);
 
-  // 创建会话后自动搜索：基础用户无需手动点击，直接看到候选进程
+  // Polling may replace Agent objects every few seconds. Merge live status into
+  // the draft without resetting the user's selected PIDs or form values.
   useEffect(() => {
-    if (!open || !autoSearch || autoSearchDone || scanning) return;
-    setAutoSearchDone(true);
-    const timer = window.setTimeout(() => { searchProcesses(); }, 250);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, autoSearch, autoSearchDone]);
+    if (!open) return;
+    setTargets((currentTargets) => {
+      const currentByAgent = new Map(currentTargets.map((item) => [item.agent.id, item]));
+      const scopedByAgent = new Map(
+        (detailRef.current?.target_scope?.instances || []).map((item) => [item.agent_id, item]),
+      );
+      return agents.map((agent) => {
+        const draft = currentByAgent.get(agent.id);
+        if (draft) return { ...draft, agent };
+        const scoped = scopedByAgent.get(agent.id);
+        return {
+          agent,
+          checked: Boolean(scoped) || (scopedByAgent.size === 0 && agent.status === "ONLINE"),
+          pid: scoped?.pid || null,
+          instanceId: scoped?.instance_id || "",
+        };
+      });
+    });
+  }, [agents, open]);
 
   function updateTarget(agentId, patch) {
     setTargets((items) => items.map((item) => (
@@ -76,22 +108,25 @@ export default function ScopeEditorModal({ open, detail, agents, saving, onClose
   }
 
   /** 在勾选的在线 Worker 上搜索进程，返回每个 Agent 的候选列表。 */
-  async function searchProcesses() {
+  const searchProcesses = useCallback(async () => {
     const keyword = scanKeyword.trim();
     const selectedOnline = targets.filter((item) => item.checked && item.agent.status === "ONLINE");
     if (!selectedOnline.length) {
       message.warning("请先勾选至少一个在线 Worker");
-      return;
+      return false;
     }
     if (!keyword) {
       message.warning("请输入进程名或服务名关键字（例如 service-x）");
-      return;
+      return false;
     }
+    const requestId = scanSequence.current + 1;
+    scanSequence.current = requestId;
     setScanning(true);
     setScanResults({});
     const settled = await Promise.allSettled(selectedOnline.map((item) =>
       scanAgentProcesses(item.agent.id, { query: keyword, timeoutSec: 15 }),
     ));
+    if (scanSequence.current !== requestId) return false;
     const next = {};
     settled.forEach((result, index) => {
       const agentId = selectedOnline[index].agent.id;
@@ -117,9 +152,23 @@ export default function ScopeEditorModal({ open, detail, agents, saving, onClose
         || (proc.cmdline || "").toLowerCase().includes(keyword.toLowerCase()),
       );
       const picked = exact.length === 1 ? exact[0] : found.processes.length === 1 ? found.processes[0] : null;
-      return picked ? { ...item, pid: picked.pid, instanceId: `${form.getFieldValue("service_id") || "service"}-${picked.pid}` } : item;
+      return picked ? { ...item, pid: picked.pid, instanceId: "" } : item;
     }));
-  }
+    return true;
+  }, [form, scanKeyword, targets]);
+
+  // Auto-search only after the modal draft and Worker list are ready. This
+  // avoids capturing the empty target list from the opening render.
+  useEffect(() => {
+    if (!open || !autoSearch || autoSearchDone || scanning) return undefined;
+    if (!scanKeyword.trim()) return undefined;
+    if (!targets.some((item) => item.checked && item.agent.status === "ONLINE")) return undefined;
+    const timer = window.setTimeout(() => {
+      setAutoSearchDone(true);
+      void searchProcesses();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [autoSearch, autoSearchDone, open, scanKeyword, scanning, searchProcesses, targets]);
 
   const checkedOnlineCount = useMemo(
     () => targets.filter((item) => item.checked && item.agent.status === "ONLINE").length,
@@ -127,15 +176,32 @@ export default function ScopeEditorModal({ open, detail, agents, saving, onClose
   );
 
   async function submit(startAfter) {
-    const values = await form.validateFields();
-    const instances = targets.filter((item) => item.checked && Number(item.pid) > 0).map((item, index) => ({
-      service_id: values.service_id,
-      instance_id: item.instanceId || `${values.service_id}-${item.agent.hostname || item.agent.id}-${index + 1}`,
-      host_id: item.agent.hostname || item.agent.id,
-      agent_id: item.agent.id,
-      pid: Number(item.pid),
-      environment: values.environment,
-    }));
+    let values;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    const existingInstances = detail.target_scope?.instances || [];
+    const instances = targets.filter((item) => item.checked && Number(item.pid) > 0).map((item) => {
+      const pid = Number(item.pid);
+      const existing = existingInstances.find((instance) => (
+        instance.agent_id === item.agent.id
+        && Number(instance.pid) === pid
+        && instance.service_id === values.service_id
+      ));
+      const generatedId = `${values.service_id}-${item.agent.id}-${pid}`
+        .replace(/[^a-zA-Z0-9_.:-]+/g, "-")
+        .slice(0, 128);
+      return {
+        service_id: values.service_id,
+        instance_id: existing?.instance_id || generatedId,
+        host_id: item.agent.hostname || item.agent.id,
+        agent_id: item.agent.id,
+        pid,
+        environment: values.environment,
+      };
+    });
     if (startAfter && instances.length === 0) {
       form.setFields([{ name: "service_id", errors: ["开始诊断前，请至少选择一个进程（搜索候选或手动填写 PID）"] }]);
       return;
@@ -155,6 +221,34 @@ export default function ScopeEditorModal({ open, detail, agents, saving, onClose
         service_id: values.service_id,
         instances,
         dependencies,
+        ...(detail.run_mode === "AUTHORIZED_AUTONOMY" ? {
+          orchestration: {
+            ...(detail.target_scope?.orchestration || {}),
+            swarm_service: values.swarm_service || "",
+            manager_agent_id: values.manager_agent_id || "",
+            replicas: detail.target_scope?.orchestration?.replicas || 1,
+          },
+          autonomy_policy: {
+            max_iterations: 8,
+            max_actions: 3,
+            stable_verification_count: 2,
+            max_auto_impact: values.authorize_restart ? "I2" : "I1",
+            allowed_action_ids: values.authorize_restart ? ["swarm.restart-stateless-service"] : [],
+            auto_approve_probe_ids: values.auto_approve_profilers
+              ? ["process_cpu_profile", "process_io_latency"]
+              : [],
+          },
+          verification: values.verification_url ? {
+            http_checks: [{
+              name: "服务恢复检查",
+              url: values.verification_url,
+              method: "GET",
+              expected_statuses: [200],
+              samples: 3,
+              timeout_sec: 5,
+            }],
+          } : { http_checks: [] },
+        } : {}),
       },
     }, startAfter);
   }
@@ -293,6 +387,37 @@ export default function ScopeEditorModal({ open, detail, agents, saving, onClose
         >
           <Input placeholder="例如：确认 CPU 根因并给出可验证的处理建议" />
         </Form.Item>
+
+        {detail?.run_mode === "AUTHORIZED_AUTONOMY" && (
+          <div className={styles.actionCard} style={{ marginBottom: 14 }}>
+            <Typography.Text strong>自动处置</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ margin: "3px 0 10px" }}>
+              服务还必须在部署端加入自主处置白名单和无状态标签。
+            </Typography.Paragraph>
+            <Form.Item name="swarm_service" label="Swarm 服务名">
+              <Input placeholder="例如 online-boutique_paymentservice" />
+            </Form.Item>
+            <Form.Item name="manager_agent_id" label="Swarm Manager Worker">
+              <Select
+                allowClear
+                placeholder="选择运行 Swarm Manager 的 Worker"
+                options={agents.filter((item) => item.status === "ONLINE").map((item) => ({
+                  value: item.id,
+                  label: item.hostname || item.id,
+                }))}
+              />
+            </Form.Item>
+            <Form.Item name="verification_url" label="恢复检查 URL">
+              <Input placeholder="例如 http://192.168.10.11:8080/" />
+            </Form.Item>
+            <Form.Item name="authorize_restart" valuePropName="checked">
+              <Checkbox>允许 Agent 以 start-first 方式重启该无状态服务</Checkbox>
+            </Form.Item>
+            <Form.Item name="auto_approve_profilers" valuePropName="checked">
+              <Checkbox>允许自动执行受预算限制的 CPU / I/O 深度采集</Checkbox>
+            </Form.Item>
+          </div>
+        )}
 
         <Typography.Text strong>服务关系</Typography.Text>
         <Typography.Paragraph type="secondary" style={{ margin: "3px 0 8px" }}>

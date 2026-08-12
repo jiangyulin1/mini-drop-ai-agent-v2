@@ -31,7 +31,8 @@
         "jvm_gc_time_pct": 24.5,
         "vmrss_mb": 3200,
         "vmrss_mb_max": 3380,
-        "vmrss_trend": "growing"
+        "vmrss_trend": "growing",
+        "vmrss_slope_bytes_per_second": 2097152
       },
       "top_function": {
         "name": "",

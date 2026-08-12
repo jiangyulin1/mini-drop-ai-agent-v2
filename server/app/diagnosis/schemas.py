@@ -197,6 +197,7 @@ class NormalizedIntent(StrictModel):
         "latency_increase", "cpu_saturation", "io_degradation",
         "memory_pressure", "noisy_neighbor", "error_increase",
         "connection_failure", "unknown_performance_issue",
+        "runtime_stall", "disk_exhaustion", "network_degradation",
     ]
     target_service: Optional[str] = None
     environment: str = "unknown"

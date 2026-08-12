@@ -12,7 +12,21 @@ from pydantic import BaseModel, Field
 
 from server.app.state_machine import TaskStatus
 
-CollectorType = Literal["perf_cpu", "ebpf_io", "pyspy", "continuous_perf", "java_async", "go_pprof", "memory_smaps", "sys_metrics", "process_scan", "log_scan"]
+CollectorType = Literal[
+    "perf_cpu",
+    "ebpf_io",
+    "pyspy",
+    "continuous_perf",
+    "java_async",
+    "go_pprof",
+    "memory_smaps",
+    "sys_metrics",
+    "process_scan",
+    "log_scan",
+    "runtime_snapshot",
+    "swarm_actuation",
+    "connection_probe",
+]
 MIN_TASK_DURATION_SEC = 1
 MAX_TASK_DURATION_SEC = 120
 MIN_SAMPLE_RATE = 1

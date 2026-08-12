@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from agent.mini_drop_agent.collectors.log_scan import LogScanCollector
-from server.app.diagnosis.domain_analyzers import analyze_observations
+from server.app.diagnosis.domain_analyzers import analyze_observations, assess_cluster
 from server.app.diagnosis.orchestrator import _log_summary
 from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe, list_probes
 
@@ -122,6 +122,62 @@ def test_log_analyzer_silent_without_logs():
     assert analyze_observations([observation]) == []
 
 
+def test_cluster_attributes_endpoint_timeout_to_downstream():
+    # 超时+downstream_endpoint 只是下游怀疑信号，需连接探针主动确认（endpoint 不可达）
+    # 才判下游；仅凭超时日志会误伤健康系统（NEG 案例），不能单独驱动下游归因。
+    observation = {
+        "task_id": "task_cart",
+        "target": {"instance_id": "cart-1", "service_id": "cartservice", "pid": 123},
+        "evidence_refs": ["ev-cart-log"],
+        "pressure": {},
+        "facts": {
+            "endpoint.reachable": False,
+            "endpoint.unreachable_count": 1,
+            "endpoint.downstream_service": "redis-cart",
+        },
+        "log": {
+            "error_count": 5,
+            "patterns": {"timeout": 5, "downstream_endpoint": 5},
+        },
+    }
+    assessment = assess_cluster(
+        {
+            "target_service": "cartservice",
+            "same_host_instance_ids": [],
+            "downstream_service_ids": ["redis-cart"],
+            "instances": [observation["target"]],
+        },
+        [observation],
+    )
+    assert assessment["classification"] == "downstream_dependency"
+    assert assessment["root_location"]["type"] == "downstream"
+    assert assessment["domain_cause"]["type"] == "network"
+
+
+def test_endpoint_timeout_alone_does_not_classify_downstream():
+    # 仅 timeout+downstream_endpoint（无连接失败、无探针确认）→ 拒答（回归守卫）。
+    observation = {
+        "task_id": "task_healthy",
+        "target": {"instance_id": "svc-1", "service_id": "frontend", "pid": 123},
+        "evidence_refs": ["ev-healthy"],
+        "pressure": {},
+        "log": {
+            "error_count": 45,
+            "patterns": {"timeout": 45, "downstream_endpoint": 45},
+        },
+    }
+    assessment = assess_cluster(
+        {
+            "target_service": "frontend",
+            "same_host_instance_ids": [],
+            "downstream_service_ids": ["redis-cart"],
+            "instances": [observation["target"]],
+        },
+        [observation],
+    )
+    assert assessment["classification"] == "insufficient_evidence"
+
+
 def test_collector_no_logs_returns_empty_artifact(tmp_path, monkeypatch):
     # 不存在的 PID → 发现不到日志 → 返回空 artifact（不算失败）
     collector = LogScanCollector()
@@ -134,3 +190,59 @@ def test_collector_no_logs_returns_empty_artifact(tmp_path, monkeypatch):
     payload = json.loads(Path(result.artifacts[0]["local_path"]).read_text(encoding="utf-8"))
     assert payload["schema_version"] == "log_scan.v1"
     assert payload["log_files"] == []
+
+
+def test_discovers_docker_json_log_from_cgroup_identity(tmp_path, monkeypatch):
+    container_id = "a" * 64
+    log_root = tmp_path / "containers"
+    log_path = log_root / container_id / f"{container_id}-json.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        '{"log":"ERROR connection refused to redis-cart:6379\\n",'
+        '"time":"2026-08-10T15:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MINI_DROP_DOCKER_CONTAINERS_ROOT", str(log_root))
+    monkeypatch.setattr(
+        LogScanCollector,
+        "_container_ids_for_pid",
+        staticmethod(lambda _pid: [container_id]),
+    )
+
+    collector = LogScanCollector()
+    assert collector._discover_docker_json_logs(123) == [str(log_path)]
+    parsed = collector._parse_log(str(log_path))
+    assert parsed["patterns"]["connection_refused"] == 1
+    assert parsed["level_counts"]["ERROR"] == 1
+
+
+def test_parse_log_marks_timeout_with_server_endpoint(tmp_path):
+    log_file = tmp_path / "cart-json.log"
+    log_file.write_text(
+        '{"log":"ERROR RedisTimeoutException: Timeout awaiting response; '
+        'serverEndpoint: redis-cart:6379\\n"}\n',
+        encoding="utf-8",
+    )
+    parsed = LogScanCollector()._parse_log(str(log_file))
+    assert parsed["patterns"]["timeout"] == 1
+    assert parsed["patterns"]["downstream_endpoint"] == 1
+
+
+def test_extracts_container_id_from_cgroup_and_cpuset(tmp_path, monkeypatch):
+    container_id = "b" * 64
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/321/cgroup":
+            return real_open(tmp_path / "cgroup", *args, **kwargs)
+        if path == "/proc/321/cpuset":
+            return real_open(tmp_path / "cpuset", *args, **kwargs)
+        return real_open(path, *args, **kwargs)
+
+    (tmp_path / "cgroup").write_text(
+        f"0::/system.slice/docker-{container_id}.scope\n", encoding="utf-8"
+    )
+    (tmp_path / "cpuset").write_text(f"/docker/{container_id}\n", encoding="utf-8")
+    monkeypatch.setattr("builtins.open", fake_open)
+
+    assert LogScanCollector._container_ids_for_pid(321) == [container_id]

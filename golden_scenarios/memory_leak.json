@@ -8,7 +8,7 @@
   "observations": [{
     "task_id": "task-memory", "collector_type": "sys_metrics",
     "target": {"service_id": "service-a", "instance_id": "service-a-1", "host_id": "host-1", "agent_id": "a1", "pid": 1001},
-    "facts": {"vmrss_mb": 880, "vmrss_mb_max": 920, "vmrss_trend": "increasing"},
+    "facts": {"vmrss_mb": 880, "vmrss_mb_max": 920, "vmrss_trend": "increasing", "vmrss_slope_bytes_per_second": 4194304},
     "top_function": {"name": "", "percent": 0},
     "pressure": {"cpu": false, "io_wait": false, "memory": true},
     "evidence_refs": ["ev-memory-series"]

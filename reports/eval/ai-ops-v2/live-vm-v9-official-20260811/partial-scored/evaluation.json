@@ -1,0 +1,785 @@
+{
+  "schema_version": "1.0",
+  "dataset": "mini-drop-ai-ops-comparison",
+  "dataset_version": "2.0.0-candidate.1",
+  "dataset_case_count": 30,
+  "evaluated_case_count": 7,
+  "evaluated_run_count": 7,
+  "missing_cases": [
+    "OB-SINGLE-CPU-001",
+    "OB-SINGLE-LATENCY-001",
+    "OB-SINGLE-PAYMENT-001",
+    "OB-SINGLE-NOISY-CPU-001",
+    "OB-SINGLE-HOST-IO-001",
+    "OB-SINGLE-HOST-MEM-001",
+    "OB-SINGLE-PARTITION-001",
+    "OB-SINGLE-OOM-001",
+    "OB-SINGLE-JAVA-LOCK-001",
+    "OB-SINGLE-PYTHON-LOCK-001",
+    "OB-SINGLE-MEMLEAK-001",
+    "OB-SINGLE-RUNTIME-STALL-001",
+    "OB-SINGLE-NETLOSS-001",
+    "OB-COMPOUND-DISK-NET-001",
+    "OB-COMPOUND-NOISY-DOWNSTREAM-001",
+    "OB-COMPOUND-OOM-RECOVERY-001",
+    "OB-COMPOUND-CROSS-WORKER-001",
+    "OB-COMPOUND-PAYMENT-REDIS-001",
+    "OB-NEG-HEALTHY-001",
+    "OB-ROBUST-STALE-001",
+    "OB-ROBUST-DUPLICATE-001",
+    "OB-ROBUST-COLLECTOR-FAIL-001",
+    "OB-ROBUST-CONFLICT-001"
+  ],
+  "aggregate": {
+    "schema_version": "1.0",
+    "case_count": 7,
+    "run_count": 7,
+    "unique_case_count": 7,
+    "mean_score": 83.53,
+    "exact_root_matches": 3,
+    "exact_root_accuracy": 0.4286,
+    "exact_root_accuracy_wilson_95": [
+      0.1582,
+      0.7495
+    ],
+    "run_exact_root_matches": 3,
+    "run_exact_root_accuracy": 0.4286,
+    "repeated_case_count": 0,
+    "repeat_output_consistency": null,
+    "root_dimension_accuracy": {
+      "location_type": {
+        "matched": 2,
+        "specified": 5,
+        "accuracy": 0.4,
+        "wilson_95": [
+          0.1176,
+          0.7693
+        ]
+      },
+      "domain_type": {
+        "matched": 4,
+        "specified": 5,
+        "accuracy": 0.8,
+        "wilson_95": [
+          0.3755,
+          0.9638
+        ]
+      },
+      "classification": {
+        "matched": 4,
+        "specified": 5,
+        "accuracy": 0.8,
+        "wilson_95": [
+          0.3755,
+          0.9638
+        ]
+      },
+      "root_entity": {
+        "matched": 0,
+        "specified": 1,
+        "accuracy": 0.0,
+        "wilson_95": [
+          0.0,
+          0.7935
+        ]
+      }
+    },
+    "expected_abstention_count": 2,
+    "correct_abstention_count": 2,
+    "correct_abstention_rate": 1.0,
+    "citation_valid_rate": 1.0,
+    "runtime_trace_coverage": 1.0,
+    "unsafe_action_count": 0,
+    "results": [
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-SINGLE-REDIS-001",
+        "diagnosis_id": "diag_session_20260811_102035_ab835b73",
+        "score": 89.47,
+        "raw_score": 85.0,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": false,
+        "expected_abstention": false,
+        "correct_abstention": false,
+        "actual": {
+          "location_type": "downstream",
+          "domain_type": "network",
+          "classification": "downstream_dependency",
+          "root_entity": "cartservice-worker2-8838-r1-1786443592-0"
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 35.0,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "location_type",
+                "expected": [
+                  "downstream"
+                ],
+                "actual": "downstream",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "domain_type",
+                "expected": [
+                  "database",
+                  "network"
+                ],
+                "actual": "network",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "classification",
+                "expected": [
+                  "downstream_dependency"
+                ],
+                "actual": "downstream_dependency",
+                "matched": true,
+                "weight": 15.0
+              },
+              {
+                "dimension": "root_entity",
+                "expected": [
+                  "redis-cart"
+                ],
+                "actual": "cartservice-worker2-8838-r1-1786443592-0",
+                "matched": false,
+                "weight": 5.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 25.0,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 8,
+            "invalid_references": [],
+            "required_collectors": [
+              "log_scan",
+              "sys_metrics"
+            ],
+            "observed_collectors": [
+              "log_scan",
+              "sys_metrics"
+            ],
+            "collector_recall": 1.0,
+            "independent_source_count": 2,
+            "quality_gate_passed": true
+          },
+          "trace": {
+            "score": 15.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 9,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "action_policy",
+              "candidate_assessment",
+              "causal_assessment",
+              "evidence_curation",
+              "hypothesis",
+              "intent",
+              "probe_plan",
+              "report_verification",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 1
+      },
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-SINGLE-DISK-001",
+        "diagnosis_id": "diag_session_20260811_101344_8d5e783d",
+        "score": 82.71,
+        "raw_score": 78.57,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": false,
+        "expected_abstention": false,
+        "correct_abstention": false,
+        "actual": {
+          "location_type": "shared_resource",
+          "domain_type": "io",
+          "classification": "filesystem_exhaustion",
+          "root_entity": "service-x-worker1-84311-r2-1786443165-0"
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 28.57,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "location_type",
+                "expected": [
+                  "self"
+                ],
+                "actual": "shared_resource",
+                "matched": false,
+                "weight": 10.0
+              },
+              {
+                "dimension": "domain_type",
+                "expected": [
+                  "io"
+                ],
+                "actual": "io",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "classification",
+                "expected": [
+                  "filesystem_exhaustion"
+                ],
+                "actual": "filesystem_exhaustion",
+                "matched": true,
+                "weight": 15.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 25.0,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 4,
+            "invalid_references": [],
+            "required_collectors": [
+              "log_scan",
+              "sys_metrics"
+            ],
+            "observed_collectors": [
+              "log_scan",
+              "sys_metrics"
+            ],
+            "collector_recall": 1.0,
+            "independent_source_count": 2,
+            "quality_gate_passed": true
+          },
+          "trace": {
+            "score": 15.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 9,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "action_policy",
+              "candidate_assessment",
+              "causal_assessment",
+              "evidence_curation",
+              "hypothesis",
+              "intent",
+              "probe_plan",
+              "report_verification",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 2
+      },
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-SINGLE-GO-LOCK-001",
+        "diagnosis_id": "diag_session_20260811_101807_7e87a54c",
+        "score": 48.42,
+        "raw_score": 46.0,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": false,
+        "expected_abstention": false,
+        "correct_abstention": false,
+        "actual": {
+          "location_type": "unknown",
+          "domain_type": "unknown",
+          "classification": "insufficient_evidence",
+          "root_entity": null
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 0.0,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "location_type",
+                "expected": [
+                  "self"
+                ],
+                "actual": "unknown",
+                "matched": false,
+                "weight": 10.0
+              },
+              {
+                "dimension": "domain_type",
+                "expected": [
+                  "runtime"
+                ],
+                "actual": "unknown",
+                "matched": false,
+                "weight": 10.0
+              },
+              {
+                "dimension": "classification",
+                "expected": [
+                  "runtime_lock_contention"
+                ],
+                "actual": "insufficient_evidence",
+                "matched": false,
+                "weight": 15.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 21.0,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 6,
+            "invalid_references": [],
+            "required_collectors": [
+              "runtime_snapshot",
+              "sys_metrics"
+            ],
+            "observed_collectors": [
+              "log_scan",
+              "perf_cpu",
+              "sys_metrics"
+            ],
+            "collector_recall": 0.5,
+            "independent_source_count": 3,
+            "quality_gate_passed": true
+          },
+          "trace": {
+            "score": 15.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 14,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "action_policy",
+              "candidate_assessment",
+              "causal_assessment",
+              "evidence_curation",
+              "hypothesis",
+              "intent",
+              "probe_plan",
+              "report_verification",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 1
+      },
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-COMPOUND-MEM-LOCK-001",
+        "diagnosis_id": "diag_session_20260811_101023_c59ddde6",
+        "score": 91.93,
+        "raw_score": 87.33,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": true,
+        "expected_abstention": false,
+        "correct_abstention": false,
+        "actual": {
+          "location_type": "self",
+          "domain_type": "runtime",
+          "classification": "compound_incident",
+          "root_entity": "python-service-worker1-83467-r3-1786442964-0"
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 40.0,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "location_type",
+                "expected": [
+                  "self"
+                ],
+                "actual": "self",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "domain_type",
+                "expected": [
+                  "memory",
+                  "runtime"
+                ],
+                "actual": "runtime",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "classification",
+                "expected": [
+                  "compound_incident"
+                ],
+                "actual": "compound_incident",
+                "matched": true,
+                "weight": 15.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 22.33,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 4,
+            "invalid_references": [],
+            "required_collectors": [
+              "memory_smaps",
+              "runtime_snapshot",
+              "sys_metrics"
+            ],
+            "observed_collectors": [
+              "runtime_snapshot",
+              "sys_metrics"
+            ],
+            "collector_recall": 0.667,
+            "independent_source_count": 2,
+            "quality_gate_passed": true
+          },
+          "trace": {
+            "score": 15.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 9,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "action_policy",
+              "candidate_assessment",
+              "causal_assessment",
+              "evidence_curation",
+              "hypothesis",
+              "intent",
+              "probe_plan",
+              "report_verification",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 3
+      },
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-COMPOUND-STALE-REAL-001",
+        "diagnosis_id": "diag_session_20260811_101153_c1ada379",
+        "score": 82.71,
+        "raw_score": 78.57,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": false,
+        "expected_abstention": false,
+        "correct_abstention": false,
+        "actual": {
+          "location_type": "downstream",
+          "domain_type": "network",
+          "classification": "network_degradation",
+          "root_entity": "service-x-worker1-83913-r3-1786443075-0"
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 28.57,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "location_type",
+                "expected": [
+                  "self"
+                ],
+                "actual": "downstream",
+                "matched": false,
+                "weight": 10.0
+              },
+              {
+                "dimension": "domain_type",
+                "expected": [
+                  "network"
+                ],
+                "actual": "network",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "classification",
+                "expected": [
+                  "network_degradation"
+                ],
+                "actual": "network_degradation",
+                "matched": true,
+                "weight": 15.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 25.0,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 4,
+            "invalid_references": [],
+            "required_collectors": [
+              "log_scan",
+              "sys_metrics"
+            ],
+            "observed_collectors": [
+              "log_scan",
+              "sys_metrics"
+            ],
+            "collector_recall": 1.0,
+            "independent_source_count": 2,
+            "quality_gate_passed": true
+          },
+          "trace": {
+            "score": 15.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 9,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "action_policy",
+              "candidate_assessment",
+              "causal_assessment",
+              "evidence_curation",
+              "hypothesis",
+              "intent",
+              "probe_plan",
+              "report_verification",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 3
+      },
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-NEG-TRANSIENT-001",
+        "diagnosis_id": "diag_session_20260811_101524_f37d3399",
+        "score": 94.74,
+        "raw_score": 90.0,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": true,
+        "expected_abstention": true,
+        "correct_abstention": true,
+        "actual": {
+          "location_type": "unknown",
+          "domain_type": "unknown",
+          "classification": "insufficient_evidence",
+          "root_entity": null
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 40.0,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "abstention",
+                "expected": true,
+                "actual": "insufficient_evidence",
+                "matched": true,
+                "weight": 40.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 25.0,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 6,
+            "invalid_references": [],
+            "required_collectors": [
+              "sys_metrics"
+            ],
+            "observed_collectors": [
+              "log_scan",
+              "perf_cpu",
+              "sys_metrics"
+            ],
+            "collector_recall": 1.0,
+            "independent_source_count": 3,
+            "quality_gate_passed": true
+          },
+          "trace": {
+            "score": 15.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 14,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "action_policy",
+              "candidate_assessment",
+              "causal_assessment",
+              "evidence_curation",
+              "hypothesis",
+              "intent",
+              "probe_plan",
+              "report_verification",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 1
+      },
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-ROBUST-SCOPE-001",
+        "diagnosis_id": "diag_session_20260811_100851_199c083c",
+        "score": 94.74,
+        "raw_score": 90.0,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": true,
+        "expected_abstention": true,
+        "correct_abstention": true,
+        "actual": {
+          "location_type": "unknown",
+          "domain_type": "unknown",
+          "classification": "scope_unresolved",
+          "root_entity": null
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 40.0,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "abstention",
+                "expected": true,
+                "actual": "scope_unresolved",
+                "matched": true,
+                "weight": 40.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 20.0,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 0,
+            "invalid_references": [],
+            "required_collectors": [],
+            "observed_collectors": [],
+            "collector_recall": 1.0,
+            "independent_source_count": 0,
+            "quality_gate_passed": false
+          },
+          "trace": {
+            "score": 20.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 3,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "hypothesis",
+              "intent",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 1
+      }
+    ]
+  }
+}

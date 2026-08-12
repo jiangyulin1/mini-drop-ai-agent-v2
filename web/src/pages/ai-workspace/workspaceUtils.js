@@ -25,6 +25,7 @@ export const CASE_STATE_META = {
 
 export const DIAGNOSIS_STATUS_META = {
   CREATED: { label: "已创建", color: "default" },
+  PAUSED: { label: "已暂停", color: "default" },
   UNDERSTANDING: { label: "理解问题", color: "blue" },
   NEEDS_SCOPE_CONFIRMATION: { label: "需要范围", color: "orange" },
   PLANNING: { label: "准备诊断", color: "blue" },
@@ -49,6 +50,43 @@ export const PROBE_LABELS = {
   process_io_latency: "I/O 延迟",
   process_memory_map: "进程内存",
 };
+
+export const AGENT_PHASE_META = {
+  OBSERVING: { label: "等待诊断", detail: "正在等待下一轮调查。" },
+  STARTING_DIAGNOSIS: { label: "准备诊断", detail: "正在整理范围和已有数据。" },
+  DIAGNOSING: { label: "正在诊断", detail: "正在采集并核对关键证据。" },
+  WAITING_APPROVAL: { label: "等待确认", detail: "有采集或操作需要确认。" },
+  ACTION_DISPATCHING: { label: "正在执行修复", detail: "修复任务已下发，系统会避免重复执行。" },
+  ACTION_EXECUTED: { label: "修复已执行", detail: "开始检查服务和业务是否恢复。" },
+  VERIFYING: { label: "正在验证", detail: "正在检查指标和业务请求。" },
+  MONITORING: { label: "观察恢复", detail: "首次检查通过，继续确认是否稳定。" },
+  ROLLBACK_DISPATCHING: { label: "正在回滚", detail: "恢复未达到标准，正在撤销本次变更。" },
+  ROLLED_BACK: { label: "已回滚", detail: "准备重新诊断并选择其他方案。" },
+  RESOLVED: { label: "已恢复", detail: "恢复目标已连续通过验证。" },
+  ESCALATED: { label: "需要人工处理", detail: "自动处理已安全停止。" },
+};
+
+const AGENT_ERROR_TEXT = {
+  MAX_ITERATIONS_REACHED: "达到调查轮次上限。",
+  MAX_ACTIONS_REACHED: "达到自动处置次数上限。",
+  EVIDENCE_QUALITY_GATE_FAILED: "证据质量不足，已停止自动处理。",
+  HIGH_QUALITY_EVIDENCE_CONFLICT: "关键证据相互冲突，已停止自动处理。",
+  NO_REGISTERED_RECOVERY_ACTION: "没有适用于当前原因的安全修复动作。",
+  ACTION_NOT_PREAUTHORIZED: "修复动作未获得本次会话授权。",
+  ACTION_NOT_EXECUTABLE: "修复动作尚未开放执行。",
+  ACTION_IMPACT_EXCEEDS_GRANT: "修复影响超过本次会话授权范围。",
+  RECOVERY_NOT_VERIFIED: "修复后未达到恢复标准。",
+};
+
+export function agentErrorText(value) {
+  const reason = String(value || "");
+  if (!reason) return "";
+  if (AGENT_ERROR_TEXT[reason]) return AGENT_ERROR_TEXT[reason];
+  if (reason.startsWith("ACTION_FAILED:")) return `修复执行失败：${reason.slice(14)}`;
+  if (reason.startsWith("ROLLBACK_FAILED:")) return `回滚失败：${reason.slice(16)}`;
+  if (reason.startsWith("DIAGNOSIS_START_FAILED:")) return "诊断启动失败，请检查服务状态。";
+  return reason;
+}
 
 export const RELATION_OPTIONS = [
   { value: "CALLS", label: "调用" },
@@ -135,6 +173,18 @@ export function uniqueInstances(instances) {
 export function shortTitle(problem) {
   const value = String(problem || "").trim().replace(/\s+/g, " ");
   return value.length > 30 ? `${value.slice(0, 30)}…` : value;
+}
+
+export function nextConversationScroll({
+  caseChanged,
+  nearBottom,
+  previousTop,
+  scrollHeight,
+  clientHeight,
+}) {
+  const bottom = Math.max(0, scrollHeight - clientHeight);
+  if (caseChanged || nearBottom) return bottom;
+  return Math.min(Math.max(0, previousTop), bottom);
 }
 
 export function eventText(event) {

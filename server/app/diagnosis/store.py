@@ -18,6 +18,7 @@ from server.app.models import (
     TopologySnapshotModel,
 )
 from server.app.diagnosis.pipeline import PIPELINE_NODES, PIPELINE_VERSION, node_run_id
+from server.app.diagnosis.audit_trace import TRACE_EVENT_TYPE, build_trace_step
 
 
 def utcnow() -> datetime:
@@ -430,6 +431,66 @@ class DiagnosisStore:
                 created_at=utcnow(),
             ))
             session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def record_decision_trace(
+        self,
+        diagnosis_id: str,
+        *,
+        stage: str,
+        component: str,
+        decision: str,
+        summary: str,
+        input_refs: list[str] | None = None,
+        output_refs: list[str] | None = None,
+        evidence_refs: list[str] | None = None,
+        alternatives: list[dict[str, Any]] | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Append one observable decision and chain it to the previous record."""
+        session = new_session()
+        try:
+            model = session.get(DiagnosisSessionModel, diagnosis_id)
+            if model is None:
+                raise ValueError(f"diagnosis {diagnosis_id} does not exist")
+            previous_event = (
+                session.query(DiagnosisEventModel)
+                .filter(
+                    DiagnosisEventModel.diagnosis_id == diagnosis_id,
+                    DiagnosisEventModel.event_type == TRACE_EVENT_TYPE,
+                )
+                .order_by(DiagnosisEventModel.id.desc())
+                .first()
+            )
+            previous = previous_event.payload_json if previous_event else {}
+            payload = build_trace_step(
+                diagnosis_id=diagnosis_id,
+                sequence=int(previous.get("sequence", 0)) + 1,
+                stage=stage,
+                component=component,
+                decision=decision,
+                summary=summary,
+                input_refs=input_refs,
+                output_refs=output_refs,
+                evidence_refs=evidence_refs,
+                alternatives=alternatives,
+                details=details,
+                previous_hash=previous.get("step_hash"),
+            )
+            session.add(DiagnosisEventModel(
+                diagnosis_id=diagnosis_id,
+                event_type=TRACE_EVENT_TYPE,
+                from_status=model.status,
+                to_status=model.status,
+                payload_json=payload,
+                created_at=utcnow(),
+            ))
+            session.commit()
+            return payload
         except Exception:
             session.rollback()
             raise

@@ -1,0 +1,284 @@
+{
+  "schema_version": "1.0",
+  "left_name": "baseline-v9",
+  "right_name": "round3-final",
+  "paired_case_count": 30,
+  "left_exact": 15,
+  "right_exact": 18,
+  "left_only_correct": 1,
+  "right_only_correct": 4,
+  "mcnemar_exact_p_value": 0.375,
+  "interpretation": "A lower p-value indicates stronger evidence that paired root-cause accuracy differs; do not rank systems from score alone when the paired sample is small.",
+  "cases": [
+    {
+      "case_id": "OB-COMPOUND-CROSS-WORKER-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 64.66,
+      "right_score": 82.71,
+      "score_delta_right_minus_left": 18.05
+    },
+    {
+      "case_id": "OB-COMPOUND-DISK-NET-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 82.71,
+      "right_score": 82.71,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-COMPOUND-MEM-LOCK-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 91.93,
+      "right_score": 91.93,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-COMPOUND-NOISY-DOWNSTREAM-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 44.21,
+      "right_score": 76.69,
+      "score_delta_right_minus_left": 32.48
+    },
+    {
+      "case_id": "OB-COMPOUND-OOM-RECOVERY-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 87.33,
+      "right_score": 87.33,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-COMPOUND-PAYMENT-REDIS-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 76.69,
+      "right_score": 28.07,
+      "score_delta_right_minus_left": -48.62
+    },
+    {
+      "case_id": "OB-COMPOUND-STALE-REAL-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 82.71,
+      "right_score": 76.69,
+      "score_delta_right_minus_left": -6.02
+    },
+    {
+      "case_id": "OB-NEG-HEALTHY-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-NEG-TRANSIENT-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-ROBUST-COLLECTOR-FAIL-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-ROBUST-CONFLICT-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 75.44,
+      "right_score": 75.44,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-ROBUST-DUPLICATE-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-ROBUST-SCOPE-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-ROBUST-STALE-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-SINGLE-CPU-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-SINGLE-DISK-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 82.71,
+      "right_score": 82.71,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-SINGLE-GO-LOCK-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": true,
+      "left_score": 48.42,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 46.32
+    },
+    {
+      "case_id": "OB-SINGLE-HOST-IO-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 86.32,
+      "right_score": 90.53,
+      "score_delta_right_minus_left": 4.21
+    },
+    {
+      "case_id": "OB-SINGLE-HOST-MEM-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 64.66,
+      "right_score": 52.63,
+      "score_delta_right_minus_left": -12.03
+    },
+    {
+      "case_id": "OB-SINGLE-JAVA-LOCK-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-SINGLE-LATENCY-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 52.63,
+      "right_score": 52.63,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-SINGLE-MEMLEAK-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 82.71,
+      "right_score": 78.5,
+      "score_delta_right_minus_left": -4.21
+    },
+    {
+      "case_id": "OB-SINGLE-NETLOSS-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": false,
+      "left_score": 94.74,
+      "right_score": 76.69,
+      "score_delta_right_minus_left": -18.05
+    },
+    {
+      "case_id": "OB-SINGLE-NOISY-CPU-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 64.66,
+      "right_score": 52.63,
+      "score_delta_right_minus_left": -12.03
+    },
+    {
+      "case_id": "OB-SINGLE-OOM-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-SINGLE-PARTITION-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": true,
+      "left_score": 48.42,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 46.32
+    },
+    {
+      "case_id": "OB-SINGLE-PAYMENT-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": true,
+      "left_score": 46.0,
+      "right_score": 90.0,
+      "score_delta_right_minus_left": 44.0
+    },
+    {
+      "case_id": "OB-SINGLE-PYTHON-LOCK-001",
+      "repetition": 1,
+      "left_exact": true,
+      "right_exact": true,
+      "left_score": 94.74,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 0.0
+    },
+    {
+      "case_id": "OB-SINGLE-REDIS-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": true,
+      "left_score": 89.47,
+      "right_score": 94.74,
+      "score_delta_right_minus_left": 5.27
+    },
+    {
+      "case_id": "OB-SINGLE-RUNTIME-STALL-001",
+      "repetition": 1,
+      "left_exact": false,
+      "right_exact": false,
+      "left_score": 49.82,
+      "right_score": 52.63,
+      "score_delta_right_minus_left": 2.81
+    }
+  ]
+}

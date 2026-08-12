@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import {
   Button,
   Collapse,
@@ -12,13 +13,15 @@ import {
   Typography,
 } from "antd";
 import { Link } from "react-router-dom";
-import DiagnosisWorkbench from "../../components/DiagnosisWorkbench";
 import EvidenceReference from "../../components/EvidenceReference";
-import TaskVisualizationPreview from "../../components/TaskVisualizationPreview";
 import styles from "../AIDiagnosis.module.css";
 import { DIAGNOSIS_STATUS_META, PROBE_LABELS } from "./workspaceUtils";
 
+const DiagnosisWorkbench = lazy(() => import("../../components/DiagnosisWorkbench"));
+const TaskVisualizationPreview = lazy(() => import("../../components/TaskVisualizationPreview"));
+
 export default function DiagnosisTechnicalDrawer({ open, onClose, diagnosis, onDecision }) {
+  if (!open) return null;
   if (!diagnosis) {
     return <Drawer open={open} onClose={onClose} title="诊断详情"><Empty description="尚无诊断数据" /></Drawer>;
   }
@@ -47,7 +50,9 @@ export default function DiagnosisTechnicalDrawer({ open, onClose, diagnosis, onD
               </List.Item>
             )}
           />
-          <DiagnosisWorkbench detail={diagnosis} sessions={[diagnosis]} />
+          <Suspense fallback={<Typography.Text type="secondary">正在加载证据工作台…</Typography.Text>}>
+            <DiagnosisWorkbench detail={diagnosis} sessions={[diagnosis]} />
+          </Suspense>
         </Space>
       ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无证据" />,
     },
@@ -58,7 +63,11 @@ export default function DiagnosisTechnicalDrawer({ open, onClose, diagnosis, onD
         <Tabs items={probeTasks.map((probe) => ({
           key: probe.task_id,
           label: PROBE_LABELS[probe.probe_id] || probe.probe_id,
-          children: <TaskVisualizationPreview taskId={probe.task_id} />,
+          children: (
+            <Suspense fallback={<Typography.Text type="secondary">正在加载可视化…</Typography.Text>}>
+              <TaskVisualizationPreview taskId={probe.task_id} revision={probe.updated_at || probe.status} />
+            </Suspense>
+          ),
         }))} />
       ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无采集任务" />,
     },

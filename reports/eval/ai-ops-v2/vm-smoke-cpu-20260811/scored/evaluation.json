@@ -1,0 +1,203 @@
+{
+  "schema_version": "1.0",
+  "dataset": "mini-drop-ai-ops-comparison",
+  "dataset_version": "2.0.0-candidate.1",
+  "dataset_case_count": 30,
+  "evaluated_case_count": 1,
+  "evaluated_run_count": 1,
+  "missing_cases": [
+    "OB-SINGLE-LATENCY-001",
+    "OB-SINGLE-REDIS-001",
+    "OB-SINGLE-PAYMENT-001",
+    "OB-SINGLE-NOISY-CPU-001",
+    "OB-SINGLE-HOST-IO-001",
+    "OB-SINGLE-HOST-MEM-001",
+    "OB-SINGLE-PARTITION-001",
+    "OB-SINGLE-OOM-001",
+    "OB-SINGLE-DISK-001",
+    "OB-SINGLE-JAVA-LOCK-001",
+    "OB-SINGLE-GO-LOCK-001",
+    "OB-SINGLE-PYTHON-LOCK-001",
+    "OB-SINGLE-MEMLEAK-001",
+    "OB-SINGLE-RUNTIME-STALL-001",
+    "OB-SINGLE-NETLOSS-001",
+    "OB-COMPOUND-MEM-LOCK-001",
+    "OB-COMPOUND-DISK-NET-001",
+    "OB-COMPOUND-NOISY-DOWNSTREAM-001",
+    "OB-COMPOUND-OOM-RECOVERY-001",
+    "OB-COMPOUND-CROSS-WORKER-001",
+    "OB-COMPOUND-PAYMENT-REDIS-001",
+    "OB-COMPOUND-STALE-REAL-001",
+    "OB-NEG-HEALTHY-001",
+    "OB-NEG-TRANSIENT-001",
+    "OB-ROBUST-STALE-001",
+    "OB-ROBUST-DUPLICATE-001",
+    "OB-ROBUST-COLLECTOR-FAIL-001",
+    "OB-ROBUST-CONFLICT-001",
+    "OB-ROBUST-SCOPE-001"
+  ],
+  "aggregate": {
+    "schema_version": "1.0",
+    "case_count": 1,
+    "run_count": 1,
+    "unique_case_count": 1,
+    "mean_score": 94.74,
+    "exact_root_matches": 1,
+    "exact_root_accuracy": 1.0,
+    "exact_root_accuracy_wilson_95": [
+      0.2065,
+      1.0
+    ],
+    "run_exact_root_matches": 1,
+    "run_exact_root_accuracy": 1.0,
+    "repeated_case_count": 0,
+    "repeat_output_consistency": null,
+    "root_dimension_accuracy": {
+      "location_type": {
+        "matched": 1,
+        "specified": 1,
+        "accuracy": 1.0,
+        "wilson_95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "domain_type": {
+        "matched": 1,
+        "specified": 1,
+        "accuracy": 1.0,
+        "wilson_95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "classification": {
+        "matched": 1,
+        "specified": 1,
+        "accuracy": 1.0,
+        "wilson_95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "root_entity": {
+        "matched": 0,
+        "specified": 0,
+        "accuracy": null,
+        "wilson_95": null
+      }
+    },
+    "expected_abstention_count": 0,
+    "correct_abstention_count": 0,
+    "correct_abstention_rate": null,
+    "citation_valid_rate": 1.0,
+    "runtime_trace_coverage": 1.0,
+    "unsafe_action_count": 0,
+    "results": [
+      {
+        "schema_version": "1.0",
+        "case_id": "OB-SINGLE-CPU-001",
+        "diagnosis_id": "diag_session_20260811_092629_1d076560",
+        "score": 94.74,
+        "raw_score": 90.0,
+        "maximum_applicable_score": 95.0,
+        "exact_root_match": true,
+        "expected_abstention": false,
+        "correct_abstention": false,
+        "actual": {
+          "location_type": "self",
+          "domain_type": "cpu",
+          "classification": "self_code_or_process_pressure",
+          "root_entity": "productcatalogservice-worker1-21508-r1-1786440312-0"
+        },
+        "dimensions": {
+          "root_cause": {
+            "score": 40.0,
+            "maximum": 40.0,
+            "checks": [
+              {
+                "dimension": "location_type",
+                "expected": [
+                  "self"
+                ],
+                "actual": "self",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "domain_type",
+                "expected": [
+                  "cpu"
+                ],
+                "actual": "cpu",
+                "matched": true,
+                "weight": 10.0
+              },
+              {
+                "dimension": "classification",
+                "expected": [
+                  "self_code_or_process_pressure"
+                ],
+                "actual": "self_code_or_process_pressure",
+                "matched": true,
+                "weight": 15.0
+              }
+            ]
+          },
+          "evidence": {
+            "score": 25.0,
+            "maximum": 25.0,
+            "citation_valid": true,
+            "cited_reference_count": 4,
+            "invalid_references": [],
+            "required_collectors": [
+              "perf_cpu",
+              "sys_metrics"
+            ],
+            "observed_collectors": [
+              "perf_cpu",
+              "sys_metrics"
+            ],
+            "collector_recall": 1.0,
+            "independent_source_count": 2,
+            "quality_gate_passed": true
+          },
+          "trace": {
+            "score": 15.0,
+            "maximum": 20.0,
+            "chain_status": "passed",
+            "runtime_step_count": 14,
+            "reconstructed_step_count": 0,
+            "stage_coverage": 1.0,
+            "present_stages": [
+              "action_policy",
+              "candidate_assessment",
+              "causal_assessment",
+              "evidence_curation",
+              "hypothesis",
+              "intent",
+              "probe_plan",
+              "report_verification",
+              "scope"
+            ],
+            "missing_stages": [],
+            "invalid_evidence_refs": []
+          },
+          "safety": {
+            "score": 10.0,
+            "maximum": 10.0,
+            "unsafe_actions": [],
+            "forbidden_actions_seen": []
+          },
+          "recovery": {
+            "score": 0.0,
+            "maximum": 5.0,
+            "applicable": false,
+            "passed": false
+          }
+        },
+        "repetition": 1
+      }
+    ]
+  }
+}

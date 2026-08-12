@@ -1,0 +1,20 @@
+{
+  "OB-SINGLE-GO-LOCK-001": [
+    "diag_session_20260811_205247_ce0a8642"
+  ],
+  "OB-NEG-TRANSIENT-001": [
+    "diag_session_20260811_205448_3a449efb"
+  ],
+  "OB-ROBUST-DUPLICATE-001": [
+    "diag_session_20260811_205730_b8f4d173"
+  ],
+  "OB-ROBUST-STALE-001": [
+    "diag_session_20260811_210050_75698670"
+  ],
+  "OB-COMPOUND-MEM-LOCK-001": [
+    "diag_session_20260811_210259_d2a921ed"
+  ],
+  "OB-NEG-HEALTHY-001": [
+    "diag_session_20260811_210430_2c8c9bd2"
+  ]
+}

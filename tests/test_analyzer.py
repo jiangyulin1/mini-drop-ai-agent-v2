@@ -46,6 +46,15 @@ class TestParseTop:
         top = _parse_top(collapsed)
         # samples 在各栈行间可能重复计数，不检验 sum
         assert top[0]["percent"] > 0
+        assert all(item["percent"] <= 100 for item in top)
+
+    def test_recursive_symbol_is_counted_once_per_stack(self, tmp_path):
+        collapsed = tmp_path / "collapsed.txt"
+        collapsed.write_text("root;recur;recur;recur 90\nroot;leaf 10\n")
+        top = _parse_top(collapsed)
+        recur = next(item for item in top if item["name"] == "recur")
+        assert recur["samples"] == 90
+        assert recur["percent"] == 90.0
 
     def test_empty_collapsed_file(self, tmp_path):
         collapsed = tmp_path / "collapsed.txt"

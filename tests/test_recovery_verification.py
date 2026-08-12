@@ -65,6 +65,30 @@ def test_judge_recovery_normal_when_both_low():
     assert result["status"] == "recovered"  # 本就接近 0，视为正常
 
 
+def test_judge_recovery_ignores_unchanged_rss_when_absolute_guards_are_healthy():
+    result = _judge_recovery(
+        {
+            "rss_bytes": 50_000_000,
+            "container_memory_usage_ratio": 0.05,
+            "oom_kill_delta": 0,
+            "filesystem_used_ratio": 0.2,
+            "tcp_retransmit_ratio": 0,
+            "tcp_timeout_delta": 0,
+        },
+        {
+            "rss_bytes": 52_000_000,
+            "container_memory_usage_ratio": 0.06,
+            "oom_kill_delta": 0,
+            "filesystem_used_ratio": 0.2,
+            "tcp_retransmit_ratio": 0,
+            "tcp_timeout_delta": 0,
+        },
+    )
+
+    assert result["metrics"]["rss_bytes"]["verdict"] == "unchanged"
+    assert result["status"] == "recovered"
+
+
 # ── manual-actions API ─────────────────────────────────────
 
 

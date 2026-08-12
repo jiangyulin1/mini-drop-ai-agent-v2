@@ -1,0 +1,92 @@
+{
+  "OB-SINGLE-JAVA-LOCK-001": [
+    "diag_session_20260812_032257_cde1a7d7"
+  ],
+  "OB-NEG-HEALTHY-001": [
+    "diag_session_20260812_032447_e008f02c"
+  ],
+  "OB-SINGLE-NETLOSS-001": [
+    "diag_session_20260812_032747_c9d77a74"
+  ],
+  "OB-COMPOUND-OOM-RECOVERY-001": [
+    "diag_session_20260812_033019_957a1224"
+  ],
+  "OB-SINGLE-GO-LOCK-001": [
+    "diag_session_20260812_033149_08bce339"
+  ],
+  "OB-SINGLE-REDIS-001": [
+    "diag_session_20260812_033402_714ef008"
+  ],
+  "OB-SINGLE-PARTITION-001": [
+    "diag_session_20260812_033659_897d87f6"
+  ],
+  "OB-SINGLE-CPU-001": [
+    "diag_session_20260812_033924_f97fb4c7"
+  ],
+  "OB-SINGLE-PYTHON-LOCK-001": [
+    "diag_session_20260812_034147_898cbdba"
+  ],
+  "OB-ROBUST-DUPLICATE-001": [
+    "diag_session_20260812_034337_a460d605"
+  ],
+  "OB-COMPOUND-MEM-LOCK-001": [
+    "diag_session_20260812_034659_d322cc15"
+  ],
+  "OB-ROBUST-STALE-001": [
+    "diag_session_20260812_034848_ffef32b4"
+  ],
+  "OB-COMPOUND-PAYMENT-REDIS-001": [
+    "diag_session_20260812_035122_fcd3a6cf"
+  ],
+  "OB-ROBUST-CONFLICT-001": [
+    "diag_session_20260812_035410_bc0e4cd5"
+  ],
+  "OB-NEG-TRANSIENT-001": [
+    "diag_session_20260812_035535_63a201e6"
+  ],
+  "OB-SINGLE-DISK-001": [
+    "diag_session_20260812_035836_c73e0c36"
+  ],
+  "OB-ROBUST-SCOPE-001": [
+    "diag_session_20260812_040008_dd2dc937"
+  ],
+  "OB-ROBUST-COLLECTOR-FAIL-001": [
+    "diag_session_20260812_040120_8dfcef70"
+  ],
+  "OB-SINGLE-MEMLEAK-001": [
+    "diag_session_20260812_040310_21f93d02"
+  ],
+  "OB-COMPOUND-NOISY-DOWNSTREAM-001": [
+    "diag_session_20260812_040443_26314e6c"
+  ],
+  "OB-COMPOUND-CROSS-WORKER-001": [
+    "diag_session_20260812_040654_2d05267c"
+  ],
+  "OB-SINGLE-PAYMENT-001": [
+    "diag_session_20260812_040959_8e4c539d"
+  ],
+  "OB-SINGLE-HOST-MEM-001": [
+    "diag_session_20260812_041245_a2a796d2"
+  ],
+  "OB-SINGLE-NOISY-CPU-001": [
+    "diag_session_20260812_041436_0adfe9c0"
+  ],
+  "OB-SINGLE-LATENCY-001": [
+    "diag_session_20260812_041802_8deab707"
+  ],
+  "OB-SINGLE-RUNTIME-STALL-001": [
+    "diag_session_20260812_042434_f5ad388f"
+  ],
+  "OB-COMPOUND-STALE-REAL-001": [
+    "diag_session_20260812_042642_34b87809"
+  ],
+  "OB-COMPOUND-DISK-NET-001": [
+    "diag_session_20260812_042912_a33c16c7"
+  ],
+  "OB-SINGLE-OOM-001": [
+    "diag_session_20260812_043108_7c3a2b4b"
+  ],
+  "OB-SINGLE-HOST-IO-001": [
+    "diag_session_20260812_043240_cd8e38ee"
+  ]
+}

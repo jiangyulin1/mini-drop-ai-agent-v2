@@ -260,6 +260,8 @@ def test_action_registry_is_policy_only_and_blocks_unsafe_scope(client: TestClie
     assert executable_ids == {
         "mini-drop.cleanup-expired-cache",
         "mini-drop.restore-cache-quarantine",
+        "swarm.restart-stateless-service",
+        "swarm.rollback-service",
     }
     service_ids = {
         item["action_id"] for item in listed["items"]

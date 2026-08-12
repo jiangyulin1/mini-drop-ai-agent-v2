@@ -24,6 +24,7 @@ import {
 import {
   healthz,
   getAIConfig,
+  getCurrentUser,
   getStoredApiKey,
   saveApiKey,
 } from "../api/client";
@@ -38,22 +39,40 @@ export default function Settings() {
   const [error, setError] = useState("");
   const [health, setHealth] = useState(null);
   const [aiConfig, setAiConfig] = useState(null);
+  const [aiConfigError, setAiConfigError] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
   const [apiKey, setApiKey] = useState(getStoredApiKey() || "");
   const [savingKey, setSavingKey] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
     setLoading(true);
+    setCurrentUser(null);
+    setAiConfigError("");
     try {
       const results = await Promise.allSettled([
         healthz(),
         getAIConfig(),
+        getCurrentUser(),
       ]);
       if (results[0].status === "fulfilled") setHealth(results[0].value);
-      if (results[1].status === "fulfilled") setAiConfig(results[1].value);
-      const failures = results
-        .filter((result) => result.status === "rejected")
-        .map((result) => result.reason?.message || "配置加载失败");
+      if (results[1].status === "fulfilled") {
+        setAiConfig(results[1].value);
+      } else {
+        setAiConfig(null);
+        setAiConfigError(
+          results[1].reason?.status === 404
+            ? "当前服务未启用 AI Provider"
+            : results[1].reason?.message || "AI 配置读取失败",
+        );
+      }
+      if (results[2].status === "fulfilled") setCurrentUser(results[2].value);
+      const failures = [
+        results[0].status === "rejected" ? `健康检查失败：${results[0].reason?.message || "请求失败"}` : "",
+        results[2].status === "rejected" && results[2].reason?.status !== 401
+          ? `认证状态检查失败：${results[2].reason?.message || "请求失败"}`
+          : "",
+      ].filter(Boolean);
       if (failures.length) setError([...new Set(failures)].join("；"));
     } finally {
       setLoading(false);
@@ -76,12 +95,27 @@ export default function Settings() {
     setSavingKey(true);
     try {
       await saveApiKey(apiKey.trim());
-      setApiKey(apiKey.trim());
+      setApiKey("");
       message.success(apiKey.trim() ? "API Key 已验证并保存" : "API Key 已清除");
       window.dispatchEvent(new Event("mini-drop:auth-changed"));
       await load();
     } catch (err) {
       message.error(err.message);
+    } finally {
+      setSavingKey(false);
+    }
+  }
+
+  async function handleClearKey() {
+    setSavingKey(true);
+    try {
+      await saveApiKey("");
+      setApiKey("");
+      window.dispatchEvent(new Event("mini-drop:auth-changed"));
+      message.success("浏览器认证已清除");
+      await load();
+    } catch (clearError) {
+      message.error(`清除失败：${clearError.message}`);
     } finally {
       setSavingKey(false);
     }
@@ -224,8 +258,8 @@ export default function Settings() {
         ) : (
           <Alert
             type="warning"
-            message="无法获取 AI 配置"
-            description="请确认已设置 MINI_DROP_AI_ENABLED 及相关环境变量"
+            message={aiConfigError || "AI Provider 未启用"}
+            description="需要 AI 能力时，请配置 MINI_DROP_AI_ENABLED 及对应 Provider 环境变量"
             showIcon
           />
         )}
@@ -241,17 +275,17 @@ export default function Settings() {
         }
         size="small"
         extra={
-          apiKey ? (
-            <Tag color="green">Key 已设置</Tag>
+          currentUser ? (
+            <Tag color="green">访问正常</Tag>
           ) : (
-            <Tag color="default">未设置</Tag>
+            <Tag color="orange">需要认证</Tag>
           )
         }
       >
         <Space direction="vertical" style={{ width: "100%" }} size={12}>
           <Alert
             type="info"
-            message="API Key 同时保存在 HttpOnly Cookie（优先）和 localStorage（降级）中"
+            message="验证通过后优先保存在 HttpOnly Cookie，浏览器不会继续保留可读取的明文副本"
             showIcon
           />
           <Input.Password
@@ -270,19 +304,14 @@ export default function Settings() {
             >
               保存
             </Button>
-            {apiKey && (
+            {(currentUser || apiKey) && (
               <Button
                 size="small"
                 danger
-                onClick={async () => {
-                  setApiKey("");
-                  await saveApiKey("");
-                  window.dispatchEvent(new Event("mini-drop:auth-changed"));
-                  message.success("API Key 已清除");
-                  await load();
-                }}
+                loading={savingKey}
+                onClick={handleClearKey}
               >
-                清除 Key
+                清除浏览器认证
               </Button>
             )}
           </Space>

@@ -1,7 +1,8 @@
 # Mini-Drop AI 生产级授权、信息源与安全执行设计
 
-> 状态：目标架构（2026-08-05）  
-> 当前实现：诊断 R0/R1 可自动采集，R2 单次审批；已落地可信主体、内置信息源注册表、持久化 Grant、确定性 Source Policy、内部短期 Capability Token、Source Gateway、EvidenceEnvelope、Action Registry 策略评估和程序化 AI 上下文优化，业务变更仍不自动执行。  
+> 状态：授权与安全执行约束；实施进度以 [`autonomous_ops_agent_implementation_plan.md`](autonomous_ops_agent_implementation_plan.md) 为准。
+>
+> 当前实现：诊断 R0/R1 可自动采集，R2 单次审批；已落地可信主体、内置信息源注册表、持久化 Grant、确定性 Source Policy、内部短期 Capability Token、Source Gateway、EvidenceEnvelope、Action Registry、受限执行入口、验证器和回滚骨架。自动处置仍只允许逐动作、逐环境晋级，不能视为通用生产自治。
 > 目标：在生产级、多租户、多集群环境中，让 AI 在明确授权边界内自主读取信息、执行采集，并自动完成经过注册和验证的低风险修复。
 
 ## 1. 设计定位
@@ -342,7 +343,7 @@ POST   /api/v1/control/red-button
 低风险自动修复只有在固定 Case 集中达到持续、统计显著的成功率，并且所有安全硬
 指标为零后，才能从 `USER_APPROVAL` 晋升到 `AUTO_REVIEWED` 或 `AUTO_GRANTED`。
 
-## 12. 从当前实现迁移
+## 12. 实施状态与剩余工作
 
 1. 已完成：保留现有 Probe Registry、Evidence、Budget、R2 单次审批和诊断 Outbox。
 2. 已完成第二阶段：增加服务端派生主体、内置 Source Registry、持久化
@@ -353,8 +354,9 @@ POST   /api/v1/control/red-button
    Connector，并输出带查询指纹、内容/投影哈希、脱敏统计和策略轨迹的 EvidenceEnvelope。
 4. 已完成第一阶段：RCA 与意图解析调用前由确定性程序执行敏感字段脱敏、指标序列聚合、
    热点排序、事件去重、信号优先和上下文预算控制；原始 Evidence/Artifact 不被改写。
-5. 已完成策略阶段：Action Registry 和确定性预检 API 已落地，但所有 Action 均为
-   `policy_only`，API 明确返回 `execution_enabled=false`。
+5. 已完成受限执行骨架：Action Registry、确定性预检、dry-run、幂等执行、验证和回滚
+   接口已落地；只有明确标记为 `executable` 且同时通过环境白名单和 Case Policy 的动作
+   才能执行。
 6. 已完成 Case 授权联动：Case Stop 会取消关联 DiagnosisSession，并撤销同租户下绑定
    该 Case 的有效 Grant；Pause/Resume 同步控制诊断编排，避免暂停后继续下发新动作。
 7. 下一步：将现有 `risk_level` 完整迁移为
@@ -362,12 +364,12 @@ POST   /api/v1/control/red-button
    增加持久化 JTI 防重放和 KMS 多密钥轮换。
 8. 下一步：接入 OIDC、真实 Observability/Topology Connector、KMS 密钥轮换与
    Capability 防重放存储。
-9. 下一步：实现 Action Grant，将采集执行与变更执行拆为 Probe Gateway 和
-   Actuation Gateway。
-10. 先在实验环境实现一个 Mini-Drop 自身低风险可逆动作；加入 dry-run、验证、回滚和
-   No-Regression 测试后，再开放业务侧动作。
+9. 下一步：完成独立 Action Grant、持久化 ActionAttempt、跨 Control 副本租约和版本栅栏，
+   将采集授权与变更授权彻底分离。
+10. 下一步：让正式评测由 Agent 自己完成恢复、复测和回滚；外部 Runner 只负责故障注入
+    和兜底清理。未达到恢复与安全门禁前，不扩大业务动作范围。
 11. 用独立 EnvironmentProfile 描述三节点实验环境；生产拓扑通过部署配置扩展，不写死
    在 AI 领域模型或 Case 协议中。
 
-更完整的企业级身份、数据治理、Model Gateway、高可用、SLO、发布门禁和分阶段上线
-方案见 [`ai_production_architecture_and_governance.md`](ai_production_architecture_and_governance.md)。
+持续调查、证据治理、自动处置闭环、高可用、评测门禁和分阶段实施见
+[`autonomous_ops_agent_implementation_plan.md`](autonomous_ops_agent_implementation_plan.md)。

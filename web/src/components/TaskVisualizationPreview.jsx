@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -24,16 +24,17 @@ import {
   prepareAsyncProfilerHtml,
   unavailableVisualArtifacts,
 } from "../utils/artifacts";
-import EBPFHistogram from "./EBPFHistogram";
-import FlamegraphViewer from "./FlamegraphViewer";
-import SandboxedArtifactFrame from "./SandboxedArtifactFrame";
-import TopNChart from "./TopNChart";
+
+const EBPFHistogram = lazy(() => import("./EBPFHistogram"));
+const FlamegraphViewer = lazy(() => import("./FlamegraphViewer"));
+const SandboxedArtifactFrame = lazy(() => import("./SandboxedArtifactFrame"));
+const TopNChart = lazy(() => import("./TopNChart"));
 
 function artifactIndex(artifact) {
   return artifact?.metadata?.window_index ?? null;
 }
 
-export default function TaskVisualizationPreview({ taskId }) {
+export default function TaskVisualizationPreview({ taskId, revision = "" }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [task, setTask] = useState(null);
@@ -111,7 +112,7 @@ export default function TaskVisualizationPreview({ taskId }) {
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [revision, taskId]);
 
   if (loading) {
     return <Skeleton active paragraph={{ rows: 6 }} />;
@@ -148,6 +149,7 @@ export default function TaskVisualizationPreview({ taskId }) {
       </Space>
 
       {(flameArtifact || continuousArtifact || embeddedDocument || top.length > 0) && (
+        <Suspense fallback={<Skeleton active paragraph={{ rows: 6 }} />}>
         <Row gutter={[16, 16]}>
           <Col xs={24} xl={top.length > 0 ? 16 : 24}>
             {flameArtifact && (
@@ -181,9 +183,14 @@ export default function TaskVisualizationPreview({ taskId }) {
             </Col>
           )}
         </Row>
+        </Suspense>
       )}
 
-      {ebpfData && <EBPFHistogram data={ebpfData} height={320} />}
+      {ebpfData && (
+        <Suspense fallback={<Skeleton.Input active block style={{ height: 320 }} />}>
+          <EBPFHistogram data={ebpfData} height={320} />
+        </Suspense>
+      )}
 
       {!hasInlineVisualization && unavailableVisuals.length > 0 && (
         <Alert

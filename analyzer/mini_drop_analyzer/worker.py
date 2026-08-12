@@ -50,6 +50,8 @@ ANALYSIS_RESULT_TYPES = {
     "sys_metrics",
     "process_scan",
     "log_scan",
+    "runtime_metrics",
+    "actuation_result",
 }
 ANALYZER_VERSION = "0.2.0"
 DEFAULT_MAX_INPUT_BYTES = 1024 * 1024 * 1024

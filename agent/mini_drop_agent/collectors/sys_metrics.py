@@ -43,7 +43,12 @@ class SysMetricsCollector:
                 "psi": self._read_psi(),
                 "process": self._read_process_metrics(task.target_pid),
                 "container": self._read_cgroup_metrics(task.target_pid),
-                "host_network": self._read_network_dev(),
+                # /proc/<pid>/net follows the target network namespace. This
+                # keeps container/netns packet-loss evidence scoped to the
+                # workload instead of silently reporting host-only counters.
+                "host_network": self._read_network_dev(task.target_pid),
+                "host_tcp": self._read_tcp_counters(task.target_pid),
+                "filesystems": self._read_filesystems(task.target_pid, task.options),
             })
             previous_host_cpu = host_cpu
             if mode == "snapshot" or len(samples) >= self.MAX_SAMPLES:
@@ -226,6 +231,11 @@ class SysMetricsCollector:
             memory_max = read("memory.max")
             result["memory_limit_bytes"] = None if memory_max == "max" else int(memory_max)
             result["memory_current_bytes"] = int(read("memory.current"))
+            memory_events: dict[str, int] = {}
+            for line in read("memory.events").splitlines():
+                name, raw = line.split()[:2]
+                memory_events[name] = int(raw)
+            result["memory_events"] = memory_events
             quota, period = read("cpu.max").split()[:2]
             result["cpu_quota_cores"] = None if quota == "max" else int(quota) / int(period)
             io_totals = {"rbytes": 0, "wbytes": 0}
@@ -235,16 +245,23 @@ class SysMetricsCollector:
                     if name in io_totals:
                         io_totals[name] += int(raw)
             result["io"] = {"read_bytes": io_totals["rbytes"], "write_bytes": io_totals["wbytes"]}
+            try:
+                result["pids_current"] = int(read("pids.current"))
+                pids_max = read("pids.max")
+                result["pids_max"] = None if pids_max == "max" else int(pids_max)
+            except (FileNotFoundError, PermissionError, ValueError):
+                pass
             result["cgroup_path"] = path
         except (FileNotFoundError, PermissionError, ValueError, StopIteration):
             pass
         return result
 
     @staticmethod
-    def _read_network_dev() -> dict[str, int]:
+    def _read_network_dev(pid: int | None = None) -> dict[str, int]:
         rx_total = tx_total = 0
+        path = f"/proc/{pid}/net/dev" if pid else "/proc/net/dev"
         try:
-            with open("/proc/net/dev", "r", encoding="utf-8") as handle:
+            with open(path, "r", encoding="utf-8") as handle:
                 for line in handle:
                     if ":" not in line:
                         continue
@@ -254,6 +271,84 @@ class SysMetricsCollector:
         except (FileNotFoundError, PermissionError, IndexError, ValueError):
             pass
         return {"rx_bytes": rx_total, "tx_bytes": tx_total}
+
+    @staticmethod
+    def _read_tcp_counters(pid: int | None = None) -> dict[str, int]:
+        """Read monotonic TCP counters used to distinguish loss from low traffic."""
+        result: dict[str, int] = {}
+        net_root = f"/proc/{pid}/net" if pid else "/proc/net"
+        wanted = {
+            "OutSegs": "out_segments",
+            "RetransSegs": "retrans_segments",
+            "InErrs": "in_errors",
+            "OutRsts": "out_resets",
+        }
+        try:
+            lines = open(f"{net_root}/snmp", "r", encoding="utf-8").read().splitlines()
+            for index in range(0, len(lines) - 1, 2):
+                if not lines[index].startswith("Tcp:") or not lines[index + 1].startswith("Tcp:"):
+                    continue
+                names = lines[index].split()[1:]
+                values = lines[index + 1].split()[1:]
+                for name, raw in zip(names, values):
+                    if name in wanted:
+                        result[wanted[name]] = int(raw)
+        except (FileNotFoundError, PermissionError, OSError, ValueError):
+            pass
+        try:
+            lines = open(f"{net_root}/netstat", "r", encoding="utf-8").read().splitlines()
+            for index in range(0, len(lines) - 1, 2):
+                if not lines[index].startswith("TcpExt:") or not lines[index + 1].startswith("TcpExt:"):
+                    continue
+                names = lines[index].split()[1:]
+                values = lines[index + 1].split()[1:]
+                for name, raw in zip(names, values):
+                    if name in {"TCPTimeouts", "TCPAbortOnTimeout", "ListenDrops", "ListenOverflows"}:
+                        result[name] = int(raw)
+        except (FileNotFoundError, PermissionError, OSError, ValueError):
+            pass
+        return result
+
+    @staticmethod
+    def _read_filesystems(pid: int, options: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """Return bounded filesystem capacity facts without walking directories."""
+        requested = options.get("filesystem_paths") or []
+        if not isinstance(requested, list):
+            requested = []
+        paths = ["/", "/tmp", f"/proc/{pid}/root", f"/proc/{pid}/cwd"]
+        try:
+            paths.extend(
+                f"/proc/{pid}/fd/{name}"
+                for name in os.listdir(f"/proc/{pid}/fd")[:64]
+            )
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+        for value in requested[:5]:
+            if isinstance(value, str) and value.startswith("/") and len(value) <= 512:
+                paths.append(value)
+        result: dict[str, dict[str, Any]] = {}
+        for raw_path in dict.fromkeys(paths):
+            try:
+                stats = os.statvfs(raw_path)
+                total = int(stats.f_blocks * stats.f_frsize)
+                available = int(stats.f_bavail * stats.f_frsize)
+                used = max(0, total - int(stats.f_bfree * stats.f_frsize))
+                key = (
+                    "target_root" if raw_path == f"/proc/{pid}/root"
+                    else "target_cwd" if raw_path == f"/proc/{pid}/cwd"
+                    else raw_path
+                )
+                result[key] = {
+                    "path": raw_path,
+                    "total_bytes": total,
+                    "available_bytes": available,
+                    "used_ratio": used / total if total > 0 else 0.0,
+                    "inode_available": int(stats.f_favail),
+                    "inode_total": int(stats.f_files),
+                }
+            except (FileNotFoundError, PermissionError, OSError, AttributeError):
+                continue
+        return result
 
     @classmethod
     def _compute_v2(cls, pid: int, samples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -281,7 +376,9 @@ class SysMetricsCollector:
             "memory": dict(last.get("host_memory", {})),
             "psi": dict(last.get("psi", {})),
             "network": {"scope": "host", "rx_bytes_per_second": cls._counter_rate(first, last, "host_network", "rx_bytes"),
-                        "tx_bytes_per_second": cls._counter_rate(first, last, "host_network", "tx_bytes")},
+                        "tx_bytes_per_second": cls._counter_rate(first, last, "host_network", "tx_bytes"),
+                        "tcp": cls._tcp_delta(first, last)},
+            "filesystems": dict(last.get("filesystems", {})),
         }
         process = {
             "pid": pid,
@@ -294,7 +391,34 @@ class SysMetricsCollector:
             "io": {"read_bytes_per_second": rate("read_bytes"), "write_bytes_per_second": rate("write_bytes")},
             "threads": {"count": int(proc_last.get("num_threads", 0)), "growth_per_minute": rate("num_threads") * 60},
         }
-        return {"host": host, "process": process, "container": dict(last.get("container", {}))}
+        container = dict(last.get("container", {}))
+        first_events = (first.get("container", {}) or {}).get("memory_events", {}) or {}
+        last_events = container.get("memory_events", {}) or {}
+        container["memory_event_deltas"] = {
+            key: max(0, int(last_events.get(key, 0)) - int(first_events.get(key, 0)))
+            for key in set(first_events) | set(last_events)
+        }
+        limit = container.get("memory_limit_bytes")
+        current = container.get("memory_current_bytes")
+        container["memory_usage_ratio"] = (
+            float(current) / float(limit)
+            if isinstance(limit, int) and limit > 0 and isinstance(current, int)
+            else None
+        )
+        return {"host": host, "process": process, "container": container}
+
+    @staticmethod
+    def _tcp_delta(first: dict[str, Any], last: dict[str, Any]) -> dict[str, Any]:
+        before = first.get("host_tcp", {}) or {}
+        after = last.get("host_tcp", {}) or {}
+        deltas = {
+            key: max(0, int(after.get(key, 0)) - int(before.get(key, 0)))
+            for key in set(before) | set(after)
+        }
+        out_segments = deltas.get("out_segments", 0)
+        retrans = deltas.get("retrans_segments", 0)
+        deltas["retransmit_ratio"] = retrans / out_segments if out_segments > 0 else 0.0
+        return deltas
 
     @staticmethod
     def _counter_rate(first: dict[str, Any], last: dict[str, Any], group: str, name: str) -> float:
@@ -304,6 +428,20 @@ class SysMetricsCollector:
     @staticmethod
     def _legacy_summary(value: dict[str, Any]) -> dict[str, Any]:
         host, process = value["host"], value["process"]
+        container = value.get("container", {}) or {}
+        memory = host.get("memory", {}) or {}
+        total_memory = float(memory.get("total_bytes", 0) or 0)
+        available_memory = float(memory.get("available_bytes", 0) or 0)
+        root_fs = (host.get("filesystems", {}) or {}).get("/", {}) or {}
+        filesystems = host.get("filesystems", {}) or {}
+        target_fs = filesystems.get("target_root", {}) or {}
+        fullest = max(
+            (item for item in filesystems.values() if isinstance(item, dict)),
+            key=lambda item: float(item.get("used_ratio", 0) or 0),
+            default=target_fs,
+        )
+        tcp = (host.get("network", {}) or {}).get("tcp", {}) or {}
+        memory_events = container.get("memory_event_deltas", {}) or {}
         return {
             "avg_cpu_user_pct": round(host["cpu"]["user_ratio"] * 100, 1),
             "avg_cpu_sys_pct": round(host["cpu"]["system_ratio"] * 100, 1),
@@ -325,6 +463,23 @@ class SysMetricsCollector:
             "process_write_bytes_per_second": process["io"]["write_bytes_per_second"],
             "net_rx_kbps": host["network"]["rx_bytes_per_second"] / 1024,
             "net_tx_kbps": host["network"]["tx_bytes_per_second"] / 1024,
+            "tcp_out_segments_delta": int(tcp.get("out_segments", 0) or 0),
+            "tcp_retransmit_delta": int(tcp.get("retrans_segments", 0) or 0),
+            "tcp_retransmit_pct": round(float(tcp.get("retransmit_ratio", 0) or 0) * 100, 3),
+            "tcp_timeout_delta": int(tcp.get("TCPTimeouts", 0) or 0),
+            "tcp_listen_drop_delta": int(tcp.get("ListenDrops", 0) or 0),
+            "host_memory_available_ratio": available_memory / total_memory if total_memory > 0 else None,
+            "memory_psi_avg10": float((host.get("psi", {}) or {}).get("memory_some_avg10", 0) or 0),
+            "root_fs_used_pct": round(float(root_fs.get("used_ratio", 0) or 0) * 100, 2),
+            "root_fs_available_bytes": int(root_fs.get("available_bytes", 0) or 0),
+            "target_fs_used_pct": round(float(fullest.get("used_ratio", 0) or 0) * 100, 2),
+            "target_fs_available_bytes": int(fullest.get("available_bytes", 0) or 0),
+            "target_fs_path": str(fullest.get("path", ""))[:512],
+            "container_memory_current_bytes": container.get("memory_current_bytes"),
+            "container_memory_limit_bytes": container.get("memory_limit_bytes"),
+            "container_memory_usage_ratio": container.get("memory_usage_ratio"),
+            "container_oom_delta": int(memory_events.get("oom", 0) or 0),
+            "container_oom_kill_delta": int(memory_events.get("oom_kill", 0) or 0),
         }
 
     @staticmethod

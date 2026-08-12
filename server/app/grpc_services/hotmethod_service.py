@@ -201,6 +201,9 @@ def _has_analysis_result(artifacts: list[dict]) -> bool:
         "sys_metrics",
         "process_scan",
         "log_scan",
+        "runtime_metrics",
+        "actuation_result",
+        "connection_probe",
     } & artifact_types)
 
 
@@ -216,6 +219,12 @@ def _analysis_done_reason(artifacts: list[dict]) -> str:
         return "进程扫描清单已生成"
     if "log_scan" in artifact_types:
         return "日志扫描结果已生成"
+    if "runtime_metrics" in artifact_types:
+        return "运行时线程快照已生成"
+    if "connection_probe" in artifact_types:
+        return "下游连通性探测结果已生成"
+    if "actuation_result" in artifact_types:
+        return "受控处置结果已记录"
     if "continuous_summary" in artifact_types:
         return "连续采样窗口分析已生成"
     if "java_flamegraph_html" in artifact_types:

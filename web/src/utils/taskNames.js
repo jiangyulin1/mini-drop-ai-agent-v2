@@ -13,6 +13,16 @@ const LEGACY_NAME_RULES = [
   },
 ];
 
+const INTERNAL_TASK_SOURCES = new Set(["process_scan_api", "case_verification"]);
+
+/** Hide control-plane probes from user task lists; they remain available in diagnosis technical details. */
+export function isUserVisibleTask(task = {}) {
+  const options = task.request_params?.options || task.options || {};
+  return !INTERNAL_TASK_SOURCES.has(options.source)
+    && !options.diagnosis_step_id
+    && options.registered_probe !== true;
+}
+
 export function isUnreadableTaskName(value) {
   const name = String(value || "").trim();
   return !name

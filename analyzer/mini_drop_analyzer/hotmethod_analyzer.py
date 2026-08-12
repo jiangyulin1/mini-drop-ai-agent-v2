@@ -222,9 +222,14 @@ def _parse_top(collapsed: Path, limit: int = 20) -> list[dict]:
             except ValueError:
                 continue
             total += count
+            # Inclusive samples count a function once per sampled stack. A
+            # recursive stack may contain the same symbol many times; counting
+            # every frame makes a single function exceed 100% of all samples.
+            seen_in_stack: set[str] = set()
             for func in stack.split(";"):
                 func = func.strip()
-                if func:
+                if func and func not in seen_in_stack:
+                    seen_in_stack.add(func)
                     counter[func] = counter.get(func, 0) + count
 
     entries = sorted(counter.items(), key=lambda kv: kv[1], reverse=True)[:limit]

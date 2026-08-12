@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Checkbox,
@@ -30,14 +30,31 @@ export default function MultiAgentCollectionModal({
   const [duration, setDuration] = useState(30);
   const [targets, setTargets] = useState([]);
   const [creating, setCreating] = useState(false);
+  const initializedOpen = useRef(false);
+  const pendingCollectionId = useRef("");
 
   useEffect(() => {
-    if (!open) return;
-    setTargets(agents.map((agent) => ({
-      agent,
-      checked: agent.status === "ONLINE",
-      pid: null,
-    })));
+    if (!open) {
+      initializedOpen.current = false;
+      return;
+    }
+    if (!initializedOpen.current) {
+      initializedOpen.current = true;
+      pendingCollectionId.current = newCollectionId();
+      setTargets(agents.map((agent) => ({
+        agent,
+        checked: agent.status === "ONLINE",
+        pid: null,
+      })));
+      return;
+    }
+    setTargets((current) => {
+      const drafts = new Map(current.map((item) => [item.agent.id, item]));
+      return agents.map((agent) => {
+        const draft = drafts.get(agent.id);
+        return draft ? { ...draft, agent } : { agent, checked: false, pid: null };
+      });
+    });
   }, [agents, open]);
 
   function updateTarget(agentId, patch) {
@@ -52,12 +69,13 @@ export default function MultiAgentCollectionModal({
     if (selectedTargets.some((item) => !Number(item.pid))) return message.warning("请填写每个 Worker 的 PID");
     const unsupported = selectedTargets.find((item) => !(item.agent.capabilities || []).includes(collector));
     if (unsupported) return message.error(`${unsupported.agent.hostname || unsupported.agent.id} 不支持 ${collectorMeta(collector).label}`);
-    const collectionId = newCollectionId();
+    const collectionId = pendingCollectionId.current || newCollectionId();
+    pendingCollectionId.current = collectionId;
     const meta = collectorMeta(collector);
     const service = serviceId || "manual";
     setCreating(true);
     try {
-      await Promise.all(selectedTargets.map((item) => createTask({
+      const results = await Promise.allSettled(selectedTargets.map((item) => createTask({
         name: `${meta.label} · ${service} · ${item.agent.hostname || item.agent.id}`,
         agent_id: item.agent.id,
         target_pid: Number(item.pid),
@@ -70,10 +88,17 @@ export default function MultiAgentCollectionModal({
           case_id: caseId || "",
           service_id: service,
         },
-      })));
+      }, `collection-${collectionId}-${item.agent.id}-${collector}`)));
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failed = results.length - succeeded;
+      if (!succeeded) {
+        const reason = results.find((result) => result.status === "rejected")?.reason?.message || "请求失败";
+        throw new Error(reason);
+      }
       setCreating(false);
       onClose();
-      message.success(`已创建 ${selectedTargets.length} 个采集任务（会话 ${collectionId}）`);
+      if (failed) message.warning(`已创建 ${succeeded} 个任务，${failed} 个节点失败；已保留为部分采集批次`);
+      else message.success(`已创建 ${succeeded} 个采集任务（批次 ${collectionId}）`);
       onCreated?.(collectionId);
     } catch (error) {
       message.error(`创建失败：${error.message}`);

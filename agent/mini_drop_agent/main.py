@@ -29,6 +29,7 @@ import grpc
 
 from mini_drop_observability.tracing import configure_tracing, shutdown_tracing, start_span
 from agent.mini_drop_agent.collectors.base import CollectorTask
+from agent.mini_drop_agent.collectors.connection_probe import ConnectionProbeCollector
 from agent.mini_drop_agent.collectors.continuous import ContinuousCollector
 from agent.mini_drop_agent.collectors.ebpf import EBPFCollector
 from agent.mini_drop_agent.collectors.java_async import JavaAsyncProfilerCollector
@@ -38,6 +39,8 @@ from agent.mini_drop_agent.collectors.perf import PerfCollector
 from agent.mini_drop_agent.collectors.process_scan import ProcessScanCollector
 from agent.mini_drop_agent.collectors.pprof import PprofCollector
 from agent.mini_drop_agent.collectors.pyspy import PySpyCollector
+from agent.mini_drop_agent.collectors.runtime_snapshot import RuntimeSnapshotCollector
+from agent.mini_drop_agent.collectors.swarm_actuation import SwarmActuationCollector
 from agent.mini_drop_agent.collectors.sys_metrics import SysMetricsCollector
 from agent.mini_drop_agent.artifact_upload import maybe_upload_artifacts
 from agent.mini_drop_agent.connection import GrpcConnection
@@ -67,6 +70,9 @@ COLLECTORS = {
     "sys_metrics": SysMetricsCollector(),
     "process_scan": ProcessScanCollector(),
     "log_scan": LogScanCollector(),
+    "runtime_snapshot": RuntimeSnapshotCollector(),
+    "swarm_actuation": SwarmActuationCollector(),
+    "connection_probe": ConnectionProbeCollector(),
 }
 
 CAPABILITIES = sorted(COLLECTORS.keys())
@@ -75,7 +81,10 @@ CAPABILITIES = sorted(COLLECTORS.keys())
 def _detect_capabilities() -> list[str]:
     """Report only collectors that this Agent can execute locally."""
 
-    available = {"go_pprof", "memory_smaps", "sys_metrics", "process_scan", "log_scan"}
+    available = {
+        "go_pprof", "memory_smaps", "sys_metrics", "process_scan", "log_scan",
+        "runtime_snapshot", "connection_probe",
+    }
     if shutil.which("perf"):
         available.update({"perf_cpu", "continuous_perf"})
     if shutil.which("bpftrace"):
@@ -84,6 +93,11 @@ def _detect_capabilities() -> list[str]:
         available.add("pyspy")
     if JavaAsyncProfilerCollector._find_profiler():
         available.add("java_async")
+    if (
+        os.getenv("MINI_DROP_AGENT_ACTUATION_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+        and shutil.which("docker")
+    ):
+        available.add("swarm_actuation")
     return sorted(available & set(COLLECTORS))
 
 
@@ -254,6 +268,9 @@ def _heartbeat(
                     options = decoded_options
             except (json.JSONDecodeError, TypeError):
                 pass
+        exact_collector = str(options.pop("_collector_type", "") or "")
+        if exact_collector in COLLECTORS:
+            collector_type = exact_collector
         if resp.task_desc.sample_argv.callgraph:
             options["callgraph"] = resp.task_desc.sample_argv.callgraph
         if resp.task_desc.sample_argv.event:

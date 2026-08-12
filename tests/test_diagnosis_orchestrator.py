@@ -89,6 +89,34 @@ def test_live_effective_window_includes_bounded_collection_period(client: TestCl
     assert effective_end > requested_end
 
 
+def test_audit_bundle_persists_runtime_decisions_and_keeps_oracle_optional(
+    client: TestClient,
+):
+    payload = _payload()
+    payload["evaluation_oracle"] = {
+        "case_id": "hidden-cpu-case",
+        "expected_location_type": "self",
+        "expected_domain_type": "cpu",
+    }
+    created = client.post("/api/v1/diagnoses", json=payload).json()["data"]
+    diagnosis_id = created["diagnosis_id"]
+
+    public = client.get(
+        f"/api/v1/diagnoses/{diagnosis_id}/audit-bundle"
+    ).json()["data"]
+    private = client.get(
+        f"/api/v1/diagnoses/{diagnosis_id}/audit-bundle?include_oracle=true"
+    ).json()["data"]
+
+    assert public["trace_verification"]["status"] == "passed"
+    assert public["trace_verification"]["runtime_step_count"] >= 4
+    assert {item["stage"] for item in public["trace"]} >= {
+        "intent", "scope", "hypothesis", "probe_plan",
+    }
+    assert "evaluation_oracle" not in public
+    assert private["evaluation_oracle"]["case_id"] == "hidden-cpu-case"
+
+
 def test_non_blocking_model_note_does_not_stop_resolved_scope(
     client: TestClient,
     monkeypatch,
@@ -115,6 +143,41 @@ def test_missing_target_anchor_does_not_expand_to_other_service(client: TestClie
     data = client.post("/api/v1/diagnoses", json=payload).json()["data"]
     assert data["status"] == "NEEDS_SCOPE_CONFIRMATION"
     assert data["target_scope"]["scope_completeness"] == "unresolved"
+    assert data["child_task_ids"] == []
+
+
+def test_conflicting_instance_identity_abstains_instead_of_409(client: TestClient):
+    """同一 instance_id 声明多个进程身份是冲突证据：应拒绝作答而非 409。
+
+    ai_ops_v2 的 OB-ROBUST-CONFLICT-001 依赖这个行为拿到 abstention 命中；
+    此前 _build_target_scope 直接 raise ValueError 把请求拒成 409，评测轮次
+    永远无法创建诊断。
+    """
+    payload = _payload()
+    payload["context"]["instances"] = [
+        {
+            "service_id": "service-a",
+            "instance_id": "conflict-target",
+            "host_id": "host-1",
+            "agent_id": "a1",
+            "pid": 1234,
+            "environment": "production",
+        },
+        {
+            "service_id": "frontend",
+            "instance_id": "conflict-target",
+            "host_id": "host-1",
+            "agent_id": "a1",
+            "pid": 5678,
+            "environment": "production",
+        },
+    ]
+    response = client.post("/api/v1/diagnoses", json=payload)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "NEEDS_SCOPE_CONFIRMATION"
+    assert data["target_scope"]["scope_completeness"] == "unresolved"
+    assert data["target_scope"]["excluded_targets"]
     assert data["child_task_ids"] == []
 
 
@@ -224,6 +287,20 @@ def test_process_cpu_delta_detects_hot_process_on_non_saturated_host():
         "same_host_instance_ids": [],
     }, observations)
     assert assessment["domain_cause"]["subtype"] == "process_cpu_pressure"
+
+
+def test_log_enospc_is_a_disk_pressure_signal_for_log_collector():
+    flags = _pressure_flags({}, {
+        "log_scan": {
+            "log_files": [{
+                "level_counts": {},
+                "patterns": {"enospc": 1},
+                "error_lines": [{"text": "No space left on device"}],
+            }],
+        },
+    })
+
+    assert flags["disk_full"] is True
 
 
 def test_verifier_rejects_downstream_claim_without_evidence():

@@ -3,6 +3,7 @@ import { Empty, Skeleton, Space, Tag, Typography } from "antd";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import echarts from "../lib/echarts";
 import { COLORS } from "../theme";
+import { escapeHtml } from "../utils/html";
 
 /**
  * 解析 "\[start, end)" 格式的 histogram key，返回数值区间中点。
@@ -58,7 +59,7 @@ export default function EBPFHistogram({ data, loading = false, height = 340 }) {
           const item = params[0];
           if (!item) return "";
           const idx = item.dataIndex;
-          const label = labels[idx] || "";
+          const label = escapeHtml(labels[idx] || "");
           const count = values[idx] || 0;
           const pct =
             chartData.total > 0
@@ -181,7 +182,7 @@ export default function EBPFHistogram({ data, loading = false, height = 340 }) {
         type="secondary"
         style={{ fontSize: 10, display: "block", textAlign: "center", marginTop: 4 }}
       >
-        延迟越高颜色越红 — 绿色=正常 &nbsp;|&nbsp; 橙色=偏高 &nbsp;|&nbsp; 红色=异常抖动
+         颜色仅表示当前样本中从低延迟到高延迟的相对位置；是否异常需结合服务基线或 SLO 判断
       </Typography.Text>
     </div>
   );

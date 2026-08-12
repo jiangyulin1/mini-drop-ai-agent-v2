@@ -10,6 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -617,6 +618,149 @@ class InvestigationIterationModel(Base):
             "created_by": self.created_by,
             "created_at": self.created_at,
             "finished_at": self.finished_at,
+        }
+
+
+class ActionAttemptModel(Base):
+    """Durable record of one registered action attempt lifecycle.
+
+    Phases: dry_run / execute / verify / rollback. Idempotent per
+    (case_id, tenant_id, operation_key, phase) so Control restarts cannot
+    duplicate a logical action attempt.
+    """
+
+    __tablename__ = "action_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "operation_key", "phase",
+            name="uq_case_action_phase",
+        ),
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_action_attempt_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    action_id = Column(String(128), nullable=False, index=True)
+    operation_key = Column(String(256), nullable=False, index=True)
+    phase = Column(String(32), nullable=False, index=True)
+    parameters_json = Column(JSON, default=dict)
+    result_json = Column(JSON, default=dict)
+    row_version = Column(Integer, nullable=False, server_default="1")
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "attempt_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "action_id": self.action_id,
+            "operation_key": self.operation_key,
+            "phase": self.phase,
+            "parameters": self.parameters_json or {},
+            "result": self.result_json or {},
+            "row_version": self.row_version,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class CaseRuntimeLeaseModel(Base):
+    """Short-lived lease so only one Control copy advances a Case at a time."""
+
+    __tablename__ = "case_runtime_leases"
+    __table_args__ = (
+        UniqueConstraint("case_id", "tenant_id", name="uq_case_runtime_lease"),
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_lease_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    owner = Column(String(128), nullable=False)
+    lease_until = Column(DateTime(timezone=True), nullable=False, index=True)
+    row_version = Column(Integer, nullable=False, server_default="1")
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "lease_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "owner": self.owner,
+            "lease_until": self.lease_until,
+            "row_version": self.row_version,
+        }
+
+
+class CaseCommandModel(Base):
+    """Queued user/system command for a Case (pause/resume/stop/correction/approval)."""
+
+    __tablename__ = "case_commands"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "idempotency_key", name="uq_case_command_idem",
+        ),
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_command_case_tenant",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    command_type = Column(String(32), nullable=False)
+    idempotency_key = Column(String(256), nullable=False)
+    status = Column(String(16), nullable=False, default="PENDING", index=True)
+    payload_json = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "command_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "command_type": self.command_type,
+            "idempotency_key": self.idempotency_key,
+            "status": self.status,
+            "payload": self.payload_json or {},
+            "created_at": self.created_at,
+            "processed_at": self.processed_at,
+        }
+
+
+class SystemControlModel(Base):
+    """Global governance controls (Red Button, capability key rotation epoch)."""
+
+    __tablename__ = "system_controls"
+
+    control_name = Column(String(64), primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    value_json = Column(JSON, default=dict)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "control_name": self.control_name,
+            "enabled": bool(self.enabled),
+            "value": self.value_json or {},
+            "updated_at": self.updated_at,
         }
 
 

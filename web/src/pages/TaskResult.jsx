@@ -84,6 +84,10 @@ export default function TaskResult() {
   const { taskId } = useParams();
   const navigate = useNavigate();
   const flameRef = useRef(null);
+  const taskIdRef = useRef(taskId);
+  const requestSequenceRef = useRef(0);
+  const fullLoadInFlightRef = useRef(false);
+  taskIdRef.current = taskId;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -111,16 +115,23 @@ export default function TaskResult() {
   // ── 数据加载 ──────────────────────────────────────────
 
   const loadAll = useCallback(async () => {
+    const requestedTaskId = taskId;
+    const requestId = ++requestSequenceRef.current;
+    const isCurrent = () => (
+      requestSequenceRef.current === requestId && taskIdRef.current === requestedTaskId
+    );
+    fullLoadInFlightRef.current = true;
     setError("");
     try {
       const results = await Promise.allSettled([
-        getTask(taskId),
-        getTaskEvents(taskId),
-        getTaskArtifacts(taskId),
-        listTaskDiagnoses(taskId),
-        getTaskAttempts(taskId),
-        getTaskAnalysisJobs(taskId),
+        getTask(requestedTaskId),
+        getTaskEvents(requestedTaskId),
+        getTaskArtifacts(requestedTaskId),
+        listTaskDiagnoses(requestedTaskId),
+        getTaskAttempts(requestedTaskId),
+        getTaskAnalysisJobs(requestedTaskId),
       ]);
+      if (!isCurrent()) return;
       const [taskResp, eventResp, artifactResp, diagnosisList, attemptList, jobList] = results.map(
         (r) => (r.status === "fulfilled" ? r.value : null)
       );
@@ -157,16 +168,17 @@ export default function TaskResult() {
       };
       if (hasTop) {
         try {
-          next.top = await getTaskArtifactContent(taskId, "top_json");
+          next.top = await getTaskArtifactContent(requestedTaskId, "top_json");
           next.topSource = "top_json";
         } catch {
           next.top = [];
         }
+        if (!isCurrent()) return;
       }
       if (hasFlameJson) { next.hasFlameJson = true; }
       if (hasSvg && !hasFlameJson) {
         try {
-          const c = await getTaskArtifactContent(taskId, "flamegraph_svg");
+          const c = await getTaskArtifactContent(requestedTaskId, "flamegraph_svg");
           next.svg = c.text || "";
           next.derivedTree = extractFlamegraphTreeFromSvg(next.svg);
           if (next.top.length === 0) {
@@ -176,6 +188,7 @@ export default function TaskResult() {
         } catch {
           next.svg = "";
         }
+        if (!isCurrent()) return;
       }
       if (hasJavaHtml) { next.hasJavaHtml = true; }
       setAnalysis(next);
@@ -184,29 +197,67 @@ export default function TaskResult() {
       setDiagnoses(diagnosisList || []);
       if (diagnosisList?.[0]?.id) {
         try {
-          setDiagnosis(await getDiagnosis(diagnosisList[0].id));
+          const nextDiagnosis = await getDiagnosis(diagnosisList[0].id);
+          if (isCurrent()) setDiagnosis(nextDiagnosis);
         } catch {
-          setDiagnosis(null);
+          if (isCurrent()) setDiagnosis(null);
         }
       } else {
         setDiagnosis(null);
       }
     } catch (err) {
-      setError(err.message);
+      if (isCurrent()) setError(err.message);
     } finally {
-      setLoading(false);
-      setAnalysisLoading(false);
+      if (isCurrent()) {
+        fullLoadInFlightRef.current = false;
+        setLoading(false);
+        setAnalysisLoading(false);
+      }
     }
   }, [taskId]);
 
   useEffect(() => {
-    loadAll();
+    requestSequenceRef.current += 1;
+    fullLoadInFlightRef.current = false;
+    setLoading(true);
+    setAnalysisLoading(true);
+    setTask(null);
+    setEvents([]);
+    setArtifacts([]);
+    setAttempts([]);
+    setAnalysisJobs([]);
+    setDiagnoses([]);
+    setDiagnosis(null);
+    void loadAll();
+    return () => {
+      requestSequenceRef.current += 1;
+      fullLoadInFlightRef.current = false;
+    };
   }, [loadAll]);
+
+  const refreshActiveTask = useCallback(async () => {
+    if (fullLoadInFlightRef.current) return;
+    const requestedTaskId = taskId;
+    const requestId = ++requestSequenceRef.current;
+    const [taskResult, eventResult] = await Promise.allSettled([
+      getTask(requestedTaskId),
+      getTaskEvents(requestedTaskId),
+    ]);
+    if (requestSequenceRef.current !== requestId || taskIdRef.current !== requestedTaskId) return;
+    if (taskResult.status === "rejected") {
+      setError(taskResult.reason?.message || "任务状态刷新失败");
+      return;
+    }
+    const nextTask = taskResult.value;
+    setTask(nextTask);
+    if (eventResult.status === "fulfilled") setEvents(eventResult.value || []);
+    if (!isTaskActive(nextTask?.status)) await loadAll();
+  }, [loadAll, taskId]);
 
   // 任务活跃时每 5 秒自动刷新
   const isActive = isTaskActive(task?.status);
   const taskCollector = collectorMeta(task?.collector_type);
-  usePolling(loadAll, { interval: 5000, enabled: isActive });
+  usePolling(refreshActiveTask, { interval: 5000, enabled: isActive });
 
   // ── 诊断操作 ──────────────────────────────────────────
 

@@ -59,6 +59,10 @@ class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):
         task_desc.sample_argv.subprocess = task.request_params.get("options", {}).get("subprocess", False)
         options = task.request_params.get("options", {})
         if isinstance(options, dict):
+            # Preserve the exact collector name for collectors added after the
+            # protobuf profiler enum. The Agent validates this value against
+            # its local registry before using it.
+            options = {**options, "_collector_type": task.collector_type}
             options_json = json.dumps(
                 options,
                 ensure_ascii=False,

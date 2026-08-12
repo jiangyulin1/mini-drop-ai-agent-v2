@@ -13,6 +13,45 @@ import axios from "axios";
 
 const API_KEY_STORAGE_KEY = "mini-drop-api-key";
 
+function readableErrorDetail(detail, fallback = "请求失败") {
+  if (detail === null || detail === undefined || detail === "") return fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (typeof item === "string") return item;
+      const location = Array.isArray(item?.loc) ? item.loc.join(".") : "";
+      return [location, item?.msg || item?.message].filter(Boolean).join("：")
+        || JSON.stringify(item);
+    }).join("；");
+  }
+  if (typeof detail === "object") {
+    return detail.message || detail.msg || detail.code || JSON.stringify(detail);
+  }
+  return String(detail);
+}
+
+function createApiError(message, { status, code, detail } = {}) {
+  const error = new Error(message);
+  error.name = "ApiError";
+  error.status = status;
+  error.code = code;
+  error.detail = detail;
+  return error;
+}
+
+function normalizeAxiosError(error) {
+  const status = error.response?.status;
+  const detail = error.response?.data?.detail ?? error.response?.data?.message;
+  const message = status === 401
+    ? "访问认证失败：请在系统设置中配置 Mini-Drop API Key"
+    : readableErrorDetail(detail, error.message);
+  return createApiError(message, {
+    status,
+    code: error.response?.data?.code,
+    detail,
+  });
+}
+
 const api = axios.create({
   baseURL: "/api",
   timeout: 30000,
@@ -33,14 +72,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (resp) => {
     const body = resp.data;
-    if (body.code === 0) return body.data;
-    throw new Error(body.message || "未知错误");
+    if (body?.code === 0) return body.data;
+    throw createApiError(readableErrorDetail(body?.message || body?.detail, "未知错误"), {
+      status: resp.status,
+      code: body?.code,
+      detail: body?.detail,
+    });
   },
   (err) => {
-    const detail = err.response?.status === 401
-      ? "访问认证失败：请在右上角填写 Mini-Drop API Key 并点击保存"
-      : err.response?.data?.detail || err.message;
-    throw new Error(detail);
+    throw normalizeAxiosError(err);
   },
 );
 
@@ -69,12 +109,26 @@ export function setStoredApiKey(token) {
 
 /** 通过 HttpOnly cookie 设置 API Key（比 localStorage 更安全，XSS 无法读取）。*/
 export async function setCookieApiKey(token) {
-  await axios.post("/api/auth/set-cookie", { api_key: token });
+  try {
+    await axios.post("/api/auth/set-cookie", { api_key: token }, {
+      withCredentials: true,
+      timeout: 10000,
+    });
+  } catch (error) {
+    throw normalizeAxiosError(error);
+  }
 }
 
 /** 清除 HttpOnly cookie。*/
 export async function clearCookieApiKey() {
-  await axios.post("/api/auth/clear-cookie");
+  try {
+    await axios.post("/api/auth/clear-cookie", {}, {
+      withCredentials: true,
+      timeout: 10000,
+    });
+  } catch (error) {
+    throw normalizeAxiosError(error);
+  }
 }
 
 /**
@@ -83,32 +137,53 @@ export async function clearCookieApiKey() {
  */
 export async function saveApiKey(token) {
   const trimmed = (token || "").trim();
-  setStoredApiKey(trimmed);  // 降级方案
   if (trimmed) {
+    // Validate the candidate header before changing the current cookie/local
+    // fallback. A typo must not erase a previously working credential.
+    try {
+      await axios.get("/api/me", {
+        headers: { "X-API-Key": trimmed },
+        withCredentials: true,
+        timeout: 10000,
+      });
+    } catch (error) {
+      throw normalizeAxiosError(error);
+    }
     try {
       await setCookieApiKey(trimmed);
+      // HttpOnly cookie succeeded: remove the XSS-readable legacy copy.
+      setStoredApiKey("");
     } catch {
-      // cookie 设置失败时不影响 localStorage 降级
+      // Restricted cookie environments retain the legacy fallback.
+      setStoredApiKey(trimmed);
       console.warn("HttpOnly cookie 设置失败，使用 localStorage 降级方案");
     }
-    try {
-      await getCurrentUser();
-    } catch (error) {
-      setStoredApiKey("");
-      try {
-        await clearCookieApiKey();
-      } catch {
-        // The invalid header was already removed; cookie cleanup is best effort.
-      }
-      throw error;
-    }
+    await getCurrentUser();
   } else {
-    try {
-      await clearCookieApiKey();
-    } catch {
-      // ignore
-    }
+    // Do not report success while an HttpOnly credential remains active.
+    await clearCookieApiKey();
+    setStoredApiKey("");
   }
+}
+
+function safeDownloadFilename(disposition, fallback) {
+  const encoded = String(disposition || "").match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plain = String(disposition || "").match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i);
+  let filename = fallback;
+  if (encoded) {
+    try { filename = decodeURIComponent(encoded); } catch { filename = encoded; }
+  } else if (plain) {
+    filename = plain[1] || plain[2] || fallback;
+  }
+  const sanitized = Array.from(String(filename), (character) => {
+    const code = character.charCodeAt(0);
+    return character === "/" || character === "\\" || code < 32 || code === 127
+      ? "_"
+      : character;
+  }).join("");
+  return sanitized
+    .trim()
+    .slice(0, 255) || fallback;
 }
 
 export function healthz() {
@@ -217,11 +292,7 @@ export async function downloadTaskArtifact(taskId, artifactType, params = {}) {
     },
   );
   const disposition = response.headers["content-disposition"] || "";
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  let filename = `${artifactType}.bin`;
-  if (encoded) {
-    try { filename = decodeURIComponent(encoded); } catch { filename = encoded; }
-  }
+  const filename = safeDownloadFilename(disposition, `${artifactType}.bin`);
   return { blob: response.data, filename };
 }
 
@@ -236,11 +307,7 @@ export async function downloadDiagnosisEvidence(diagnosisId, evidenceId) {
     },
   );
   const disposition = response.headers["content-disposition"] || "";
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  let filename = `evidence-${evidenceId}.json`;
-  if (encoded) {
-    try { filename = decodeURIComponent(encoded); } catch { filename = encoded; }
-  }
+  const filename = safeDownloadFilename(disposition, `evidence-${evidenceId}.json`);
   return { blob: response.data, filename };
 }
 
@@ -255,11 +322,7 @@ export async function downloadDiagnosisEvidenceBundle(diagnosisId, evidenceId) {
     },
   );
   const disposition = response.headers["content-disposition"] || "";
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  let filename = `evidence-${evidenceId}-bundle.zip`;
-  if (encoded) {
-    try { filename = decodeURIComponent(encoded); } catch { filename = encoded; }
-  }
+  const filename = safeDownloadFilename(disposition, `evidence-${evidenceId}-bundle.zip`);
   return { blob: response.data, filename };
 }
 
@@ -339,6 +402,10 @@ export function startIncidentCaseDiagnosis(caseId, payload = {}) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/diagnoses`, payload);
 }
 
+export function advanceAutonomousCase(caseId) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/agent/step`, {});
+}
+
 export function listCaseContextPackets(caseId, params = {}) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/context-packets`, { params });
 }
@@ -406,6 +473,7 @@ export async function ensureEventSourceAuthCookie() {
   if (!token) return;
   try {
     await setCookieApiKey(token);
+    setStoredApiKey("");
   } catch {
     console.warn("SSE 认证 Cookie 写入失败，将使用轮询兜底");
   }
@@ -414,7 +482,12 @@ export async function ensureEventSourceAuthCookie() {
 // ── Prometheus 指标 ───────────────────────────────────────────────
 
 export function getMetrics() {
-  return api.get("/metrics");
+  const token = getStoredApiKey();
+  return axios.get("/api/metrics", {
+    responseType: "text",
+    withCredentials: true,
+    headers: token ? { "X-API-Key": token } : {},
+  }).then((response) => response.data);
 }
 
 // ── 受控修复动作（Actuation）─────────────────────────────────────
@@ -443,7 +516,8 @@ export function listRegisteredActions() {
 
 /** 触发一次验证采集，对比诊断基线判断是否恢复。 */
 export function verifyCaseRecovery(caseId, payload = {}) {
-  return api.post(`/v1/cases/${caseId}/verification`, payload);
+  // Server-side verification may collect several samples for up to 90s.
+  return api.post(`/v1/cases/${caseId}/verification`, payload, { timeout: 120000 });
 }
 
 /** 回填人工执行建议动作的结果。 */

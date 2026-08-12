@@ -21,6 +21,7 @@ from pathlib import Path as _Path
 from urllib.parse import quote as _url_quote
 
 from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
@@ -59,6 +60,7 @@ from server.app.nlp.intent_parser import parse_intent
 from server.app.nlp.process_resolver import resolve_pid
 from server.app.nlp.summarizer import summarize, suggest_followup
 from server.app.diagnosis import DiagnosisOrchestrator
+from server.app.diagnosis.audit_trace import build_audit_bundle
 from server.app.diagnosis.action_registry import (
     ActionEvaluationRequest,
     DEFAULT_ACTION_REGISTRY,
@@ -76,6 +78,19 @@ from server.app.diagnosis.authorization import (
     DEFAULT_SOURCE_REGISTRY,
     evaluate_source_access,
 )
+from server.app.diagnosis.autonomous_agent import AgentCallbacks, AutonomousIncidentAgent
+from server.app.diagnosis.case_supervisor import CaseSupervisor
+from server.app.diagnosis.governance import (
+    CAPABILITY_EPOCH,
+    RED_BUTTON,
+    issue_capability_key,
+)
+from server.app.diagnosis.verification_contract import (
+    build_verification_contract,
+    evaluate_verification,
+)
+from server.app.diagnosis.recovery_verifier import RecoveryCheckError, run_http_checks
+from server.app.diagnosis.distributed_actuation import DistributedActuationGateway
 from server.app.diagnosis.probe_registry import list_probes as list_registered_probes
 from server.app.diagnosis.source_gateway import SourceGateway, SourceGatewayError, SourceQueryRequest
 from server.app.diagnosis.investigation_planner import (
@@ -158,14 +173,26 @@ async def _lifespan(_app: FastAPI):
         raise RuntimeError("MINI_DROP_GRPC_PORT must be between 1 and 65535")
     _grpc = serve_in_background(repo, port=grpc_port)
     _offline_task = asyncio.create_task(_offline_sweeper())
+    _autonomy_task = (
+        asyncio.create_task(_autonomy_sweeper())
+        if os.getenv("MINI_DROP_AUTONOMY_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+        else None
+    )
     try:
         yield
     finally:
         _offline_task.cancel()
+        if _autonomy_task is not None:
+            _autonomy_task.cancel()
         try:
             await _offline_task
         except asyncio.CancelledError:
             pass
+        if _autonomy_task is not None:
+            try:
+                await _autonomy_task
+            except asyncio.CancelledError:
+                pass
         _grpc.stop(grace=None).wait(timeout=5)
         shutdown_tracing()
 
@@ -179,6 +206,34 @@ async def _offline_sweeper() -> None:
         # 事件循环，否则单 worker 下会阻塞全部 HTTP 请求（含 SSE）。
         await asyncio.to_thread(_run_offline_sweep_pass, timeout_sec, stale_task_timeout_sec)
         await asyncio.sleep(interval_sec)
+
+
+async def _autonomy_sweeper() -> None:
+    interval_sec = max(3, min(int(os.getenv("MINI_DROP_AUTONOMY_INTERVAL_SEC", "10")), 60))
+    while True:
+        await asyncio.to_thread(_run_autonomy_pass)
+        await asyncio.sleep(interval_sec)
+
+
+def _run_autonomy_pass() -> None:
+    tenant_id = _request_tenant()
+    try:
+        for outcome in CASE_SUPERVISOR.scan_and_advance(tenant_id, limit=200):
+            case_id = outcome["case_id"]
+            if outcome.get("outcome") == "BUSY":
+                continue
+            if outcome.get("outcome") in {"ESCALATED", "NOT_AUTONOMOUS"}:
+                repo.record_audit(
+                    event_type="AUTONOMOUS_AGENT_TICK",
+                    message=f"Case {case_id} 自主循环结果 {outcome.get('outcome')}",
+                    metadata={"case_id": case_id, "outcome": outcome.get("outcome")},
+                )
+    except Exception as exc:
+        repo.record_audit(
+            event_type="AUTONOMOUS_AGENT_TICK_FAILED",
+            message=f"Case Supervisor 推进失败",
+            metadata={"error": str(exc)[:500]},
+        )
 
 
 def _run_offline_sweep_pass(timeout_sec: int, stale_task_timeout_sec: int) -> None:
@@ -1270,6 +1325,43 @@ def get_diagnosis_session(diagnosis_id: str) -> APIResponse:
     return APIResponse(data=data)
 
 
+@app.get("/api/v1/diagnoses/{diagnosis_id}/audit-bundle")
+def get_diagnosis_audit_bundle(
+    diagnosis_id: str,
+    include_oracle: bool = False,
+) -> APIResponse:
+    """Return the evidence-backed decision trace for evaluation or review."""
+    data = diagnosis_orchestrator.get(diagnosis_id, advance=False)
+    if data is None:
+        raise HTTPException(status_code=404, detail="诊断会话不存在")
+    return APIResponse(data=build_audit_bundle(data, include_oracle=include_oracle))
+
+
+@app.get("/api/v1/diagnoses/{diagnosis_id}/audit-bundle/download")
+def download_diagnosis_audit_bundle(
+    diagnosis_id: str,
+    include_oracle: bool = False,
+) -> Response:
+    data = diagnosis_orchestrator.get(diagnosis_id, advance=False)
+    if data is None:
+        raise HTTPException(status_code=404, detail="诊断会话不存在")
+    content = _json.dumps(
+        build_audit_bundle(data, include_oracle=include_oracle),
+        ensure_ascii=False,
+        indent=2,
+        default=str,
+    ).encode("utf-8")
+    filename = _safe_download_filename(f"diagnosis-audit-{diagnosis_id}.json")
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{_url_quote(filename)}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 def _find_diagnosis_evidence(diagnosis_id: str, evidence_id: str) -> dict:
     evidence = next(
         (
@@ -1532,7 +1624,49 @@ def get_incident_case(case_id: str, request: Request) -> APIResponse:
     result = repo.get_incident_case(case_id, _request_tenant())
     if result is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
+    result = dict(result)
+    result["agent_progress"] = _case_agent_progress(result)
     return APIResponse(data=result)
+
+
+def _case_agent_progress(case: dict[str, Any]) -> dict[str, Any]:
+    """P6：Agent 当前阶段、预计等待与恢复进度（供持续会话首页展示）。"""
+    loop = ((case.get("recovery") or {}).get("agent_loop") or {})
+    phase = str(loop.get("phase") or "OBSERVING")
+    stable = int(loop.get("stable_verifications") or 0)
+    policy = ((case.get("target_scope") or {}).get("autonomy_policy") or {})
+    required = int(policy.get("stable_verification_count") or 2) if isinstance(policy, dict) else 2
+    actions = int(loop.get("actions_executed") or 0)
+    max_actions = int(policy.get("max_actions") or 3) if isinstance(policy, dict) else 3
+    diagnosis_id = case.get("diagnosis_session_id")
+    diagnosis_status = None
+    if diagnosis_id:
+        session = diagnosis_orchestrator.store.get_session(diagnosis_id)
+        if session is not None:
+            diagnosis_status = session.get("status")
+    phase_labels = {
+        "OBSERVING": "待启动诊断",
+        "STARTING_DIAGNOSIS": "启动诊断",
+        "DIAGNOSING": "调查中",
+        "ACTION_DISPATCHING": "执行恢复动作",
+        "ACTION_EXECUTED": "已执行，验证中",
+        "VERIFYING": "验证恢复",
+        "MONITORING": "稳定观察",
+        "ROLLBACK_DISPATCHING": "回滚中",
+        "ROLLED_BACK": "已回滚，重新调查",
+        "RESOLVED": "已解决",
+        "ESCALATED": "已升级人工",
+    }
+    return {
+        "phase": phase,
+        "phase_label": phase_labels.get(phase, phase),
+        "diagnosis_status": diagnosis_status,
+        "actions_executed": actions,
+        "max_actions": max_actions,
+        "stable_verifications": stable,
+        "required_stable_verifications": required,
+        "verification_progress": round(stable / max(required, 1), 2),
+    }
 
 
 @app.get("/api/v1/cases/{case_id}/events")
@@ -1651,11 +1785,18 @@ def start_case_diagnosis(
         tenant_id=tenant_id,
         include_inactive=False,
     )
+    prior_iterations = repo.list_investigation_iterations(
+        case_id, tenant_id, limit=500, offset=0,
+    ) or []
+    iteration_no = max(
+        (int(item.get("iteration_no", -1)) for item in prior_iterations),
+        default=-1,
+    ) + 1
     packet_payload, packet_stats, packet_hash = build_case_context_packet(
         case,
         recent_events=events,
         grants=grants,
-        iteration_no=0,
+        iteration_no=iteration_no,
         required_output_schema="normalized-diagnosis-intent.v1",
     )
     packet = repo.create_context_packet({
@@ -1663,7 +1804,7 @@ def start_case_diagnosis(
         "tenant_id": tenant_id,
         "schema_version": "case-context.v1",
         "purpose": "diagnosis_intent",
-        "iteration_no": 0,
+        "iteration_no": iteration_no,
         "payload": packet_payload,
         "projection_stats": packet_stats,
         "source_versions": {
@@ -1738,7 +1879,7 @@ def start_case_diagnosis(
         iteration = repo.create_investigation_iteration({
             "case_id": case_id,
             "tenant_id": tenant_id,
-            "iteration_no": 0,
+            "iteration_no": iteration_no,
             "context_packet_id": packet["context_packet_id"],
             "status": "COMPLETED",
             "hypothesis_changes": [
@@ -1826,17 +1967,32 @@ def _read_sys_metrics_artifact_keys(artifact_value: Any) -> dict[str, float]:
         return {}
     normalized = artifact_value.get("normalized")
     if not isinstance(normalized, dict):
-        return {}
+        normalized = artifact_value
     result: dict[str, float] = {}
     process = normalized.get("process") or {}
     cpu = process.get("cpu") or {}
     mem = process.get("memory") or {}
     host = normalized.get("host") or {}
     host_cpu = host.get("cpu") or {}
+    host_network = host.get("network") or {}
+    tcp = host_network.get("tcp") or {}
+    filesystems = host.get("filesystems") or {}
+    root_fs = filesystems.get("/") or {}
+    target_fs = filesystems.get("target_root") or {}
+    container = normalized.get("container") or {}
+    memory_events = container.get("memory_event_deltas") or {}
     try:
         result["process_cpu_cores"] = float(cpu.get("normalized_core_usage", 0.0) or 0.0)
         result["iowait_ratio"] = float(host_cpu.get("iowait_ratio", 0.0) or 0.0)
         result["rss_bytes"] = float(mem.get("rss_bytes", 0.0) or 0.0)
+        result["container_memory_usage_ratio"] = float(container.get("memory_usage_ratio", 0.0) or 0.0)
+        result["oom_kill_delta"] = float(memory_events.get("oom_kill", 0.0) or 0.0)
+        result["filesystem_used_ratio"] = max(
+            float(root_fs.get("used_ratio", 0.0) or 0.0),
+            float(target_fs.get("used_ratio", 0.0) or 0.0),
+        )
+        result["tcp_retransmit_ratio"] = float(tcp.get("retransmit_ratio", 0.0) or 0.0)
+        result["tcp_timeout_delta"] = float(tcp.get("TCPTimeouts", 0.0) or 0.0)
     except (TypeError, ValueError):
         return {}
     return result
@@ -1865,7 +2021,11 @@ def _judge_recovery(baseline: dict[str, float], current: dict[str, float]) -> di
     - not_recovered / indeterminate：无显著变化或缺少对比。
     """
     keys = [
-        key for key in ("process_cpu_cores", "iowait_ratio", "rss_bytes")
+        key for key in (
+            "process_cpu_cores", "iowait_ratio", "rss_bytes",
+            "container_memory_usage_ratio", "oom_kill_delta",
+            "filesystem_used_ratio", "tcp_retransmit_ratio", "tcp_timeout_delta",
+        )
         if baseline.get(key) is not None and current.get(key) is not None
     ]
     if not keys:
@@ -1875,7 +2035,17 @@ def _judge_recovery(baseline: dict[str, float], current: dict[str, float]) -> di
         b = float(baseline[key])
         c = float(current[key])
         ratio = (c / b) if b > 0 else (0.0 if c <= 0.02 else 1.0)
-        if b <= 0.02 and c <= 0.02:
+        if key == "oom_kill_delta":
+            verdict = "recovered" if c == 0 and b > 0 else "normal" if c == 0 else "degraded"
+        elif key == "filesystem_used_ratio":
+            verdict = "recovered" if b >= 0.95 and c < 0.90 else "normal" if c < 0.90 else "degraded"
+        elif key == "tcp_retransmit_ratio":
+            verdict = "recovered" if b >= 0.05 and c < 0.01 else "normal" if c < 0.01 else "degraded"
+        elif key == "tcp_timeout_delta":
+            verdict = "recovered" if b > 0 and c == 0 else "normal" if c == 0 else "degraded"
+        elif key == "container_memory_usage_ratio":
+            verdict = "recovered" if b >= 0.9 and c < 0.8 else "normal" if c < 0.8 else "degraded"
+        elif b <= 0.02 and c <= 0.02:
             verdict = "normal"
         elif ratio < 0.5:
             verdict = "recovered"
@@ -1885,9 +2055,19 @@ def _judge_recovery(baseline: dict[str, float], current: dict[str, float]) -> di
             verdict = "unchanged"
         metrics[key] = {"baseline": round(b, 4), "current": round(c, 4), "ratio": round(ratio, 2), "verdict": verdict}
     verdicts = [item["verdict"] for item in metrics.values()]
+    guard_keys = {
+        "container_memory_usage_ratio", "oom_kill_delta",
+        "filesystem_used_ratio", "tcp_retransmit_ratio", "tcp_timeout_delta",
+    }
+    guard_verdicts = [metrics[key]["verdict"] for key in guard_keys if key in metrics]
     if "degraded" in verdicts:
         status = "degraded"
     elif verdicts and all(item in ("recovered", "normal") for item in verdicts):
+        status = "recovered"
+    elif guard_verdicts and all(item in ("recovered", "normal") for item in guard_verdicts):
+        # An unchanged unbounded value such as RSS is not a regression when
+        # all absolute resource guards are healthy. Business probes decide
+        # service recovery; this result reports resource safety only.
         status = "recovered"
     elif "recovered" in verdicts:
         status = "partially_recovered"
@@ -1919,8 +2099,10 @@ def verify_case_recovery(
     if diagnosis is None:
         raise HTTPException(status_code=404, detail="诊断会话不存在")
     conclusion = diagnosis.get("latest_conclusion") or {}
-    instances = (diagnosis.get("target_scope") or {}).get("instances") or \
-        (case.get("target_scope") or {}).get("instances") or []
+    # Recovery actions may replace a process.  Prefer the Case's refreshed
+    # service→Agent→PID mapping over the immutable incident diagnosis scope.
+    instances = (case.get("target_scope") or {}).get("instances") or \
+        (diagnosis.get("target_scope") or {}).get("instances") or []
     if not instances:
         raise HTTPException(status_code=409, detail="缺少目标实例，无法验证")
     target = instances[0]
@@ -1932,7 +2114,7 @@ def verify_case_recovery(
         for artifact in repo.artifacts.get(baseline_task.id, []):
             if artifact.get("artifact_type") != "sys_metrics":
                 continue
-            value = _extract_artifact_json(repo.artifacts, baseline_task.id, "sys_metrics")
+            value = _extract_task_artifact_json(repo, baseline_task.id, "sys_metrics")
             if value is not None:
                 baseline = _read_sys_metrics_artifact_keys(value)
                 break
@@ -1966,7 +2148,7 @@ def verify_case_recovery(
         raise HTTPException(status_code=409, detail=f"验证采集未完成（{last_status}），请稍后重试")
 
     current: dict[str, float] = {}
-    value = _extract_artifact_json(repo.artifacts, task.id, "sys_metrics")
+    value = _extract_task_artifact_json(repo, task.id, "sys_metrics")
     if value is not None:
         current = _read_sys_metrics_artifact_keys(value)
 
@@ -2162,6 +2344,38 @@ def resolve_incident_case(
     return _transition_case_from_api(case_id, payload, request, "resolve")
 
 
+class SystemControlRequest(BaseModel):
+    enabled: bool = True
+    value: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/v1/controls")
+def list_controls(request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    return APIResponse(data=repo.list_system_controls())
+
+
+@app.post("/api/v1/controls/{control_name}")
+def set_control(control_name: str, payload: SystemControlRequest, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    allowed = {RED_BUTTON, CAPABILITY_EPOCH}
+    if control_name not in allowed:
+        raise HTTPException(status_code=400, detail="未知的控制项")
+    result = repo.set_system_control(control_name, enabled=payload.enabled, value=payload.value)
+    if control_name == CAPABILITY_EPOCH:
+        result["note"] = "Capability Key 轮换后，旧纪元 Key 已失效，需重新签发。"
+    return APIResponse(data=result)
+
+
+@app.post("/api/v1/controls/capability-key/issue")
+def issue_capability(request: Request, body: Optional[dict] = None) -> APIResponse:
+    _require_role(request, "operator")
+    body = body or {}
+    source_ids = body.get("source_ids") or []
+    key = issue_capability_key(repo, principal_id=_request_principal(request), source_ids=source_ids)
+    return APIResponse(data=key)
+
+
 @app.post("/api/v1/sources/{source_id}/query")
 def query_registered_source(
     source_id: str,
@@ -2293,13 +2507,182 @@ def evaluate_registered_action(
 # ── 受控修复执行（Actuation Gateway 首个实例） ────────────────────
 
 
-ACTUATION_GATEWAY = ActuationGateway(
+LOCAL_ACTUATION_GATEWAY = ActuationGateway(
     audit_callback=lambda detail: repo.record_audit(
         event_type=detail.pop("event_type", "ACTION_AUDIT"),
         message=detail.pop("message", ""),
         metadata=detail,
     ),
 )
+ACTUATION_GATEWAY = DistributedActuationGateway(
+    repo,
+    LOCAL_ACTUATION_GATEWAY,
+    audit_callback=lambda detail: repo.record_audit(
+        event_type=detail.pop("event_type", "ACTION_AUDIT"),
+        message=detail.pop("message", ""),
+        metadata=detail,
+    ),
+)
+
+
+def _internal_operator_request(path: str) -> Request:
+    request = Request({
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [],
+        "client": ("127.0.0.1", 0),
+        "server": ("127.0.0.1", 8191),
+    })
+    request.state.principal_id = "mini-drop-autonomy"
+    request.state.principal_roles = {"operator"}
+    request.state.request_id = f"autonomy-{int(time.time() * 1000)}"
+    request.state.traceparent = ""
+    return request
+
+
+def _autonomy_start_diagnosis(case: dict[str, Any]) -> dict[str, Any]:
+    current = repo.get_incident_case(case["case_id"], _request_tenant())
+    if current is None:
+        raise ValueError("CASE_NOT_FOUND")
+    response = start_case_diagnosis(
+        case["case_id"],
+        StartCaseDiagnosisRequest(
+            budget_profile="production_safe",
+            analysis_strategy="CONSTRAINED_HYBRID",
+            expected_row_version=current["row_version"],
+        ),
+        _internal_operator_request(f"/api/v1/cases/{case['case_id']}/diagnoses"),
+    )
+    return response.data
+
+
+def _autonomy_verify_recovery(case: dict[str, Any], diagnosis_id: str) -> dict[str, Any]:
+    current = repo.get_incident_case(case["case_id"], _request_tenant()) or case
+    scope = current.get("target_scope") or {}
+    swarm_service = (scope.get("orchestration") or {}).get("swarm_service")
+    if swarm_service:
+        for instance in scope.get("instances") or []:
+            try:
+                scan = scan_agent_processes(
+                    instance["agent_id"],
+                    {"query": swarm_service, "timeout_sec": 20, "max_results": 20},
+                    _internal_operator_request(f"/api/agents/{instance['agent_id']}/processes/scan"),
+                ).data
+            except Exception:
+                continue
+            matches = [
+                item for item in scan.get("processes", [])
+                if item.get("container_service") == swarm_service
+            ]
+            if len(matches) != 1:
+                continue
+            replacement = matches[0]
+            if int(replacement["pid"]) == int(instance["pid"]):
+                continue
+            repo.update_case_instance_pid(
+                case["case_id"], _request_tenant(), actor_id="mini-drop-autonomy",
+                agent_id=instance["agent_id"], previous_pid=int(instance["pid"]),
+                new_pid=int(replacement["pid"]), container_id=replacement.get("container_id"),
+            )
+    response = verify_case_recovery(
+        case["case_id"],
+        {"diagnosis_id": diagnosis_id},
+        _internal_operator_request(f"/api/v1/cases/{case['case_id']}/verification"),
+    )
+    metric_result = response.data
+    refreshed = repo.get_incident_case(case["case_id"], _request_tenant()) or current
+    checks = ((refreshed.get("target_scope") or {}).get("verification") or {}).get("http_checks") or []
+    if not checks:
+        return metric_result
+    allowed_hosts = {
+        item.strip()
+        for item in os.getenv("MINI_DROP_AUTONOMY_HTTP_HOSTS", "").split(",")
+        if item.strip()
+    }
+    try:
+        service_result = run_http_checks(checks, allowed_hosts=allowed_hosts)
+    except RecoveryCheckError as exc:
+        return {"status": "indeterminate", "reason": str(exc), "metrics": metric_result}
+    if service_result["status"] != "recovered":
+        result = {**service_result, "metrics": metric_result}
+    elif metric_result.get("status") == "degraded":
+        result = {"status": "degraded", "reason": "服务检查通过，但资源指标出现退化", "service": service_result, "metrics": metric_result}
+    else:
+        result = {"status": "recovered", "reason": "服务检查和资源回归检查通过", "service": service_result, "metrics": metric_result}
+    # P4：每个 Case 的 VerificationContract 评估（业务目标 + 保护指标）。
+    try:
+        contract = build_verification_contract(case["case_id"], refreshed.get("target_scope") or {})
+        check_metrics: dict[str, Any] = dict(metric_result or {})
+        if isinstance(service_result.get("checks"), list):
+            for item in service_result["checks"]:
+                url = str(item.get("url") or "")
+                if url and isinstance(item.get("status"), int):
+                    check_metrics[f"http:{url}"] = item["status"]
+        evaluation = evaluate_verification(contract, check_metrics)
+        result["verification_contract"] = {
+            "contract": contract.to_dict(),
+            "evaluation": evaluation,
+        }
+        if evaluation["recovered"]:
+            result["status"] = "recovered"
+        elif evaluation["status"] == "MITIGATED" and result.get("status") != "recovered":
+            result["status"] = "mitigated"
+    except Exception:
+        pass
+    return result
+
+
+def _autonomy_verify_service_outage(case: dict[str, Any]) -> dict[str, Any]:
+    """Run only explicitly configured service checks before a recovery action."""
+    checks = ((((case.get("target_scope") or {}).get("verification") or {}).get("http_checks")) or [])
+    if not checks:
+        return {"status": "indeterminate", "reason": "未配置服务级检查"}
+    allowed_hosts = {
+        item.strip()
+        for item in os.getenv("MINI_DROP_AUTONOMY_HTTP_HOSTS", "").split(",")
+        if item.strip()
+    }
+    try:
+        return run_http_checks(checks, allowed_hosts=allowed_hosts)
+    except RecoveryCheckError as exc:
+        return {"status": "indeterminate", "reason": str(exc)}
+
+
+AUTONOMOUS_AGENT = AutonomousIncidentAgent(
+    repo,
+    diagnosis_orchestrator,
+    ACTUATION_GATEWAY,
+    AgentCallbacks(
+        start_diagnosis=_autonomy_start_diagnosis,
+        verify_recovery=_autonomy_verify_recovery,
+        verify_service_outage=_autonomy_verify_service_outage,
+    ),
+)
+CASE_SUPERVISOR = CaseSupervisor(
+    repo,
+    AUTONOMOUS_AGENT,
+    diagnosis_orchestrator,
+    lease_ttl_seconds=max(10, min(int(os.getenv("MINI_DROP_CASE_LEASE_TTL_SECONDS", "120")), 600)),
+)
+
+
+@app.post("/api/v1/cases/{case_id}/agent/step")
+def advance_autonomous_case(case_id: str, request: Request) -> APIResponse:
+    """Manually trigger one idempotent autonomous-loop step for inspection."""
+    _require_role(request, "operator")
+    result = AUTONOMOUS_AGENT.step(
+        case_id,
+        _request_tenant(),
+        principal_id=_request_principal(request),
+    )
+    if result.get("outcome") == "NOT_FOUND":
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    return APIResponse(data=result)
 
 
 def _action_evaluation_allows(action_id: str, request: Request, payload: dict[str, Any]) -> None:
@@ -2427,6 +2810,11 @@ def _extract_artifact_json(artifacts: list[dict], artifact_type: str):
                 )
                 return None
     return None
+
+
+def _extract_task_artifact_json(repository, task_id: str, artifact_type: str):
+    """Read a JSON artifact from one task without leaking repository layout to callers."""
+    return _extract_artifact_json(repository.artifacts.get(task_id, []), artifact_type)
 
 
 def _extract_top_functions(artifacts: list[dict]) -> list[dict]:

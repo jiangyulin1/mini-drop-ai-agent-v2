@@ -5,8 +5,10 @@ import {
   Form,
   Input,
   Modal,
+  Radio,
   Select,
   Space,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -16,11 +18,13 @@ import {
   ExperimentOutlined,
   MessageOutlined,
   PlusOutlined,
+  QuestionCircleOutlined,
   RightOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import {
   appendIncidentCaseMessage,
+  advanceAutonomousCase,
   approveDiagnosisProbe,
   correctIncidentCase,
   createIncidentCase,
@@ -38,6 +42,7 @@ import {
 } from "../api/client";
 import { useSearchParams } from "react-router-dom";
 import styles from "./AIDiagnosis.module.css";
+import { isUserVisibleTask } from "../utils/taskNames";
 import CaseConversation, { LegacyConversation } from "./ai-workspace/CaseConversation";
 import DiagnosisDataConsole from "./ai-workspace/DiagnosisDataConsole";
 import DiagnosisTechnicalDrawer from "./ai-workspace/DiagnosisTechnicalDrawer";
@@ -82,19 +87,40 @@ export default function AIDiagnosisWorkspace() {
   const [actionLoading, setActionLoading] = useState(false);
   const [workerLoading, setWorkerLoading] = useState(false);
   const [validationLoading, setValidationLoading] = useState(false);
-  const [messageText, setMessageText] = useState("");
+  const [messageDrafts, setMessageDrafts] = useState({});
   const [searchText, setSearchText] = useState("");
   const [legacyOpen, setLegacyOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [scopeCase, setScopeCase] = useState(null);
   const [technicalOpen, setTechnicalOpen] = useState(false);
   const [focusCollectionId, setFocusCollectionId] = useState("");
   const [scopeAutoSearch, setScopeAutoSearch] = useState(false);
   const [newForm] = Form.useForm();
+  const newRunMode = Form.useWatch("run_mode", newForm);
   const [searchParams, setSearchParams] = useSearchParams();
   const handledFromTask = useRef("");
+  const listRequestSequence = useRef(0);
+  const selectionRequestSequence = useRef(0);
+  const selectedKeyRef = useRef(selectedKey);
+  selectedKeyRef.current = selectedKey;
+  const messageText = messageDrafts[selectedKey] || "";
+
+  const chooseSelection = useCallback((key) => {
+    selectedKeyRef.current = key;
+    setSelectedKey(key);
+  }, []);
+
+  const updateMessageText = useCallback((value) => {
+    const key = selectedKeyRef.current;
+    if (!key) return;
+    setMessageDrafts((drafts) => ({ ...drafts, [key]: value }));
+  }, []);
 
   const refreshLists = useCallback(async ({ quiet = false } = {}) => {
+    const requestId = listRequestSequence.current + 1;
+    listRequestSequence.current = requestId;
     if (!quiet) setLoading(true);
     const results = await Promise.allSettled([
       listAgents(),
@@ -102,33 +128,53 @@ export default function AIDiagnosisWorkspace() {
       listDiagnosisSessions({ limit: 50 }),
       listTasks({ limit: 200 }),
     ]);
+    if (listRequestSequence.current !== requestId) return;
     const [agentResult, caseResult, sessionResult, taskResult] = results;
     if (agentResult.status === "fulfilled") setAgents(agentResult.value || []);
     if (caseResult.status === "fulfilled") setCases(caseResult.value?.items || []);
     if (sessionResult.status === "fulfilled") setLegacySessions(sessionResult.value || []);
-    if (taskResult.status === "fulfilled") setTasks(taskResult.value || []);
+    if (taskResult.status === "fulfilled") setTasks((taskResult.value || []).filter(isUserVisibleTask));
     const firstError = results.find((item) => item.status === "rejected");
     if (firstError && !quiet) message.error(`加载失败：${firstError.reason?.message || "请求失败"}`);
 
-    const nextCases = caseResult.status === "fulfilled" ? caseResult.value?.items || [] : [];
-    const nextSessions = sessionResult.status === "fulfilled" ? sessionResult.value || [] : [];
+    const nextCases = caseResult.status === "fulfilled" ? caseResult.value?.items || [] : null;
+    const nextSessions = sessionResult.status === "fulfilled" ? sessionResult.value || [] : null;
     setSelectedKey((current) => {
-      if (current.startsWith("case:") && nextCases.some((item) => `case:${item.case_id}` === current)) return current;
-      if (current.startsWith("diagnosis:") && nextSessions.some((item) => `diagnosis:${item.diagnosis_id}` === current)) return current;
-      if (nextCases[0]) return `case:${nextCases[0].case_id}`;
-      return "";
+      let next = current;
+      if (current.startsWith("case:") && nextCases === null) return current;
+      if (current.startsWith("diagnosis:") && nextSessions === null) return current;
+      if (current.startsWith("case:") && nextCases?.some((item) => `case:${item.case_id}` === current)) return current;
+      if (current.startsWith("diagnosis:") && nextSessions?.some((item) => `diagnosis:${item.diagnosis_id}` === current)) return current;
+      if (nextCases?.[0]) next = `case:${nextCases[0].case_id}`;
+      else if (nextSessions?.[0]) next = `diagnosis:${nextSessions[0].diagnosis_id}`;
+      else if (nextCases !== null && nextSessions !== null) next = "";
+      selectedKeyRef.current = next;
+      return next;
     });
     if (!quiet) setLoading(false);
   }, []);
 
   const loadSelection = useCallback(async (key, { quiet = false } = {}) => {
+    const requestId = selectionRequestSequence.current + 1;
+    selectionRequestSequence.current = requestId;
+    const isCurrent = () => (
+      selectionRequestSequence.current === requestId
+      && selectedKeyRef.current === key
+    );
     if (!key) {
-      setCaseDetail(null);
-      setDiagnosis(null);
-      setEvents([]);
+      if (isCurrent()) {
+        setCaseDetail(null);
+        setDiagnosis(null);
+        setEvents([]);
+      }
       return;
     }
     if (!quiet) setDetailLoading(true);
+    if (!quiet && isCurrent()) {
+      setCaseDetail(null);
+      setEvents([]);
+      setDiagnosis(null);
+    }
     try {
       if (key.startsWith("case:")) {
         const caseId = key.slice(5);
@@ -136,35 +182,48 @@ export default function AIDiagnosisWorkspace() {
           getIncidentCase(caseId),
           listIncidentCaseEvents(caseId, { limit: 300 }),
         ]);
+        if (!isCurrent()) return;
+        let nextDiagnosis = null;
+        if (detail.diagnosis_session_id) {
+          nextDiagnosis = await getDiagnosisSession(detail.diagnosis_session_id);
+        }
+        if (!isCurrent()) return;
         setCaseDetail(detail);
         setEvents(eventResult.items || []);
-        if (detail.diagnosis_session_id) {
-          setDiagnosis(await getDiagnosisSession(detail.diagnosis_session_id));
-        } else {
-          setDiagnosis(null);
-        }
+        setDiagnosis(nextDiagnosis);
       } else {
+        const nextDiagnosis = await getDiagnosisSession(key.slice(10));
+        if (!isCurrent()) return;
         setCaseDetail(null);
         setEvents([]);
-        setDiagnosis(await getDiagnosisSession(key.slice(10)));
+        setDiagnosis(nextDiagnosis);
       }
     } catch (error) {
-      if (!quiet) message.error(`加载会话失败：${error.message}`);
+      if (!quiet && isCurrent()) message.error(`加载会话失败：${error.message}`);
     } finally {
-      if (!quiet) setDetailLoading(false);
+      if (!quiet && isCurrent()) setDetailLoading(false);
     }
   }, []);
 
   useEffect(() => { refreshLists(); }, [refreshLists]);
   useEffect(() => { loadSelection(selectedKey); }, [loadSelection, selectedKey]);
   useEffect(() => {
-    if (!selectedKey) return undefined;
-    const timer = window.setInterval(() => {
-      refreshLists({ quiet: true });
-      loadSelection(selectedKey, { quiet: true });
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [loadSelection, refreshLists, selectedKey]);
+    if (!selectedKey || actionLoading) return undefined;
+    let cancelled = false;
+    let timer;
+    const poll = async () => {
+      await Promise.allSettled([
+        refreshLists({ quiet: true }),
+        loadSelection(selectedKey, { quiet: true }),
+      ]);
+      if (!cancelled) timer = window.setTimeout(poll, 5000);
+    };
+    timer = window.setTimeout(poll, 5000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [actionLoading, loadSelection, refreshLists, selectedKey]);
 
   const filteredCases = useMemo(() => {
     const query = searchText.trim().toLowerCase();
@@ -189,8 +248,26 @@ export default function AIDiagnosisWorkspace() {
     try { setAgents(await listAgents()); } catch (error) { message.error(error.message); } finally { setWorkerLoading(false); }
   }
 
+  function openScopeEditor(base = caseDetail, { autoSearch = false } = {}) {
+    if (!base) return;
+    setScopeCase(base);
+    setScopeAutoSearch(autoSearch);
+    setScopeOpen(true);
+  }
+
+  function closeScopeEditor() {
+    setScopeOpen(false);
+    setScopeAutoSearch(false);
+    setScopeCase(null);
+  }
+
   async function createCase() {
-    const values = await newForm.validateFields();
+    let values;
+    try {
+      values = await newForm.validateFields();
+    } catch {
+      return;
+    }
     setActionLoading(true);
     try {
       const serviceId = values.service_id?.trim() || "";
@@ -198,19 +275,21 @@ export default function AIDiagnosisWorkspace() {
         title: createCaseTitle(values.problem_description, serviceId),
         problem_description: values.problem_description.trim(),
         recovery_goal: values.recovery_goal?.trim() || "确认原因并给出安全处置建议",
-        run_mode: "COLLABORATE",
+        run_mode: values.run_mode || "COLLABORATE",
         environment: values.environment || "production",
         target_scope: serviceId ? { service_id: serviceId, instances: [], dependencies: [] } : {},
       });
       setNewOpen(false);
       newForm.resetFields();
+      const key = `case:${created.case_id}`;
+      chooseSelection(key);
+      setCaseDetail(created);
+      setEvents([]);
+      setDiagnosis(null);
       await refreshLists({ quiet: true });
-      setSelectedKey(`case:${created.case_id}`);
       message.success("诊断会话已创建");
-      // 无实例时自动弹出范围选择并自动搜索进程，基础用户只需确认候选
       if (!caseHasInstances(created)) {
-        setScopeAutoSearch(true);
-        window.setTimeout(() => setScopeOpen(true), 150);
+        openScopeEditor(created, { autoSearch: Boolean(serviceId) });
       }
     } catch (error) {
       message.error(`创建失败：${error.message}`);
@@ -245,15 +324,17 @@ export default function AIDiagnosisWorkspace() {
         recovery_goal: "确认原因并给出可验证的处理建议",
         run_mode: "COLLABORATE",
         environment: "production",
+        source_task_id: taskId,
         target_scope: {
           service_id: instance.service_id,
           instances: [instance],
           dependencies: [],
+          evidence_task_ids: [taskId],
         },
       });
       await refreshLists({ quiet: true });
-      setSelectedKey(`case:${created.case_id}`);
-      message.success("已从采集任务创建诊断会话");
+      chooseSelection(`case:${created.case_id}`);
+      message.success("已用该采集目标创建诊断会话");
       return created;
     } catch (error) {
       message.error(`从任务创建诊断失败：${error.message}`);
@@ -263,23 +344,32 @@ export default function AIDiagnosisWorkspace() {
     }
   }
 
-  // 处理来自第一页的 ?fromTask= 上下文（人工点击“交给 AI 分析”）
+  // 处理来自采集页的显式跳转。等待首批列表加载完成，不使用固定延时。
   useEffect(() => {
     const fromTask = searchParams.get("fromTask") || "";
-    if (!fromTask || handledFromTask.current === fromTask) return;
+    if (!fromTask || loading || handledFromTask.current === fromTask) return undefined;
+    let cancelled = false;
     handledFromTask.current = fromTask;
-    setSearchParams({}, { replace: true });
-    // 等会话列表加载完成后再创建，避免与默认选中冲突
-    window.setTimeout(() => { createCaseFromTask(fromTask); }, 300);
+    void createCaseFromTask(fromTask).then((created) => {
+      if (cancelled) return;
+      if (!created) {
+        handledFromTask.current = "";
+        return;
+      }
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("fromTask");
+      setSearchParams(nextParams, { replace: true });
+    });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [loading, searchParams]);
 
   async function startDiagnosis(base = caseDetail) {
     if (!base) return;
     if (!caseHasInstances(base)) {
-      setScopeAutoSearch(true);
-      setScopeOpen(true);
-      message.info("请确认目标进程（已自动搜索候选）");
+      const canAutoSearch = Boolean(base.target_scope?.service_id);
+      openScopeEditor(base, { autoSearch: canAutoSearch });
+      message.info(canAutoSearch ? "请确认候选目标进程" : "请先搜索并确认目标进程");
       return;
     }
     setActionLoading(true);
@@ -300,17 +390,18 @@ export default function AIDiagnosisWorkspace() {
   }
 
   async function saveScope(values, startAfter) {
-    if (!caseDetail) return;
+    const base = scopeCase;
+    if (!base) return;
     setActionLoading(true);
     try {
-      const updated = await correctIncidentCase(caseDetail.case_id, {
+      const updated = await correctIncidentCase(base.case_id, {
         target_scope: values.targetScope,
         environment: values.environment,
         recovery_goal: values.recoveryGoal,
         reason: "用户确认诊断范围和服务关系",
-        expected_row_version: caseDetail.row_version,
+        expected_row_version: base.row_version,
       });
-      setScopeOpen(false);
+      closeScopeEditor();
       setCaseDetail(updated);
       await refreshLists({ quiet: true });
       if (startAfter) {
@@ -324,7 +415,7 @@ export default function AIDiagnosisWorkspace() {
       message.success(startAfter ? "范围已保存，诊断已开始" : "范围已保存");
     } catch (error) {
       message.error(`保存失败：${error.message}`);
-      await loadSelection(`case:${caseDetail.case_id}`, { quiet: true });
+      await loadSelection(`case:${base.case_id}`, { quiet: true });
     } finally {
       setActionLoading(false);
     }
@@ -336,14 +427,13 @@ export default function AIDiagnosisWorkspace() {
     setActionLoading(true);
     try {
       await appendIncidentCaseMessage(caseDetail.case_id, { content, kind: "answer" });
-      setMessageText("");
+      updateMessageText("");
       let current = await getIncidentCase(caseDetail.case_id);
       if (!caseHasInstances(current)) {
         setCaseDetail(current);
-        setScopeAutoSearch(true);
-        setScopeOpen(true);
+        openScopeEditor(current, { autoSearch: Boolean(current.target_scope?.service_id) });
         await loadSelection(`case:${current.case_id}`);
-        message.info("信息已保存。请确认目标进程（已自动搜索候选）");
+        message.info(current.target_scope?.service_id ? "信息已保存，请确认候选目标进程" : "信息已保存，请搜索并确认目标进程");
         return;
       }
       current = await correctIncidentCase(current.case_id, {
@@ -399,6 +489,20 @@ export default function AIDiagnosisWorkspace() {
     }
   }
 
+  async function advanceAgent() {
+    if (!caseDetail) return;
+    setActionLoading(true);
+    try {
+      const result = await advanceAutonomousCase(caseDetail.case_id);
+      message.success(result.outcome === "BUSY" ? "Agent 正在处理" : "已推进一步");
+      await loadSelection(`case:${caseDetail.case_id}`, { quiet: true });
+    } catch (error) {
+      message.error(`推进失败：${error.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function analyzeCollection(group) {
     if (!caseDetail) return message.warning("请先选择一个诊断会话");
     setActionLoading(true);
@@ -409,10 +513,13 @@ export default function AIDiagnosisWorkspace() {
       });
       let current = await getIncidentCase(caseDetail.case_id);
       const linkedInstances = buildInstancesFromTasks(group.tasks, agents, current);
+      const evidenceTaskIds = group.tasks.map((task) => task.id || task.task_id).filter(Boolean);
       current = await correctIncidentCase(current.case_id, {
         target_scope: {
           ...current.target_scope,
           instances: uniqueInstances([...(current.target_scope?.instances || []), ...linkedInstances]),
+          evidence_task_ids: [...new Set([...(current.target_scope?.evidence_task_ids || []), ...evidenceTaskIds])],
+          source_collection_ids: [...new Set([...(current.target_scope?.source_collection_ids || []), group.collectionId])],
         },
         reason: `关联采集会话 ${group.collectionId}`,
         expected_row_version: current.row_version,
@@ -424,7 +531,7 @@ export default function AIDiagnosisWorkspace() {
       });
       setMode("ai");
       await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${current.case_id}`)]);
-      message.success("采集数据已交给当前会话分析");
+      message.success("已关联该批次的目标与证据任务，并重新启动诊断");
     } catch (error) {
       message.error(`分析失败：${error.message}`);
       await loadSelection(`case:${caseDetail.case_id}`, { quiet: true });
@@ -458,7 +565,7 @@ export default function AIDiagnosisWorkspace() {
     const meta = CASE_STATE_META[item.state] || { label: item.state, tone: "idle" };
     const key = `case:${item.case_id}`;
     return (
-      <button type="button" className={`${styles.caseItem} ${selectedKey === key ? styles.caseItemActive : ""}`} key={key} onClick={() => setSelectedKey(key)}>
+      <button type="button" className={`${styles.caseItem} ${selectedKey === key ? styles.caseItemActive : ""}`} key={key} onClick={() => chooseSelection(key)}>
         <div className={styles.caseTitleRow}><span className={`${styles.statusDot} ${statusClass(meta.tone)}`} /><span className={styles.caseTitle}>{item.title}</span><span className={styles.caseTime}>{formatTime(item.updated_at)}</span></div>
         <div className={styles.caseMeta}>{meta.label} · {item.target_scope?.service_id || "服务未确认"}</div>
       </button>
@@ -474,7 +581,9 @@ export default function AIDiagnosisWorkspace() {
         </div>
         <span className={styles.toolbarHint}>{mode === "ai" ? "持续会话" : "人工采集与原始数据"}</span>
         <div className={styles.toolbarSpacer} />
-        <Button size="small" icon={<ExperimentOutlined />} loading={validationLoading} onClick={validateAIService}>服务检测</Button>
+        <Tooltip title="查看能力、准确率和适用范围">
+          <Button size="small" aria-label="能力与准确率" icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)} />
+        </Tooltip>
         <WorkerStatus agents={agents} loading={workerLoading} onRefresh={refreshWorkers} />
       </header>
 
@@ -497,7 +606,7 @@ export default function AIDiagnosisWorkspace() {
                   const key = `diagnosis:${item.diagnosis_id}`;
                   const meta = DIAGNOSIS_STATUS_META[item.status] || { label: item.status };
                   return (
-                    <button type="button" className={`${styles.caseItem} ${selectedKey === key ? styles.caseItemActive : ""}`} key={key} onClick={() => setSelectedKey(key)}>
+                    <button type="button" className={`${styles.caseItem} ${selectedKey === key ? styles.caseItemActive : ""}`} key={key} onClick={() => chooseSelection(key)}>
                       <div className={styles.caseTitleRow}><span className={`${styles.statusDot} ${TERMINAL_DIAGNOSIS.has(item.status) ? styles.statusOnline : styles.statusBusy}`} /><span className={styles.caseTitle}>{item.target_scope?.target_service || shortTitle(item.raw_query)}</span></div>
                       <div className={styles.caseMeta}>{meta.label} · 只读历史</div>
                     </button>
@@ -517,6 +626,7 @@ export default function AIDiagnosisWorkspace() {
             loading={loading}
             actionLoading={actionLoading}
             focusCollectionId={focusCollectionId}
+            onFocusConsumed={() => setFocusCollectionId("")}
             onRefresh={refreshAll}
             onAnalyze={analyzeCollection}
           />
@@ -528,15 +638,15 @@ export default function AIDiagnosisWorkspace() {
             loading={detailLoading}
             actionLoading={actionLoading}
             messageText={messageText}
-            onMessageChange={setMessageText}
+            onMessageChange={updateMessageText}
             onSend={sendAndAnalyze}
             onStart={() => startDiagnosis()}
-            onOpenScope={() => setScopeOpen(true)}
+            onOpenScope={() => openScopeEditor(caseDetail)}
             onOpenTechnical={() => setTechnicalOpen(true)}
-            onSwitchData={() => setMode("data")}
             onOpenCollection={openCollection}
             onDecision={decideProbe}
             onTransition={transition}
+            onAdvanceAgent={advanceAgent}
           />
         ) : diagnosis ? (
           <LegacyConversation
@@ -544,7 +654,6 @@ export default function AIDiagnosisWorkspace() {
             loading={detailLoading}
             onOpenScope={() => setNewOpen(true)}
             onOpenTechnical={() => setTechnicalOpen(true)}
-            onSwitchData={() => setMode("data")}
           />
         ) : (
           <div className={styles.emptyState}>
@@ -559,7 +668,7 @@ export default function AIDiagnosisWorkspace() {
       </div>
 
       <Modal title="新建诊断" open={newOpen} onCancel={() => setNewOpen(false)} onOk={createCase} okText="创建" confirmLoading={actionLoading} width={660} destroyOnHidden>
-        <Form form={newForm} layout="vertical" initialValues={{ environment: "production", recovery_goal: "确认原因并给出安全处置建议" }}>
+        <Form form={newForm} layout="vertical" initialValues={{ environment: "production", recovery_goal: "恢复服务并连续验证两次", run_mode: "COLLABORATE" }}>
           <Form.Item name="problem_description" label="发生了什么" rules={[{ required: true, min: 3, message: "请描述问题" }]}>
             <Input.TextArea rows={4} maxLength={2000} showCount placeholder="例如：service-x 从半小时前开始 CPU 持续超过 90%" autoFocus />
           </Form.Item>
@@ -568,10 +677,67 @@ export default function AIDiagnosisWorkspace() {
             <Form.Item name="environment" label="环境" style={{ width: 150 }}><Select options={[{ value: "production", label: "生产" }, { value: "staging", label: "预发布" }, { value: "development", label: "开发" }]} /></Form.Item>
           </Space>
           <Form.Item name="recovery_goal" label="完成条件"><Input placeholder="例如：确认原因并给出安全处置建议" /></Form.Item>
+          <Form.Item name="run_mode" label="处理方式">
+            <Radio.Group optionType="button" buttonStyle="solid" options={[
+              { value: "COLLABORATE", label: "协作诊断" },
+              { value: "AUTHORIZED_AUTONOMY", label: "持续接管" },
+            ]} />
+          </Form.Item>
+          {newRunMode === "AUTHORIZED_AUTONOMY" && (
+            <Alert
+              type="warning"
+              showIcon
+              message="Agent 会持续诊断、执行已授权动作并验证；未登记的动作不会执行。"
+            />
+          )}
         </Form>
       </Modal>
 
-      <ScopeEditorModal open={scopeOpen} detail={caseDetail} agents={agents} saving={actionLoading} autoSearch={scopeAutoSearch} onClose={() => { setScopeOpen(false); setScopeAutoSearch(false); }} onSave={saveScope} />
+      <Modal
+        title="AI 诊断能力与测试结果"
+        open={guideOpen}
+        onCancel={() => setGuideOpen(false)}
+        footer={<Space><Button icon={<ExperimentOutlined />} loading={validationLoading} onClick={validateAIService}>检测当前 AI 连接</Button><Button type="primary" onClick={() => setGuideOpen(false)}>关闭</Button></Space>}
+        width={720}
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="以下结果来自 10 个预先设定答案的虚拟机故障案例。样本较少，不能直接代表所有生产事故。"
+          style={{ marginBottom: 16 }}
+        />
+        <Typography.Title level={5}>测试结果怎么读</Typography.Title>
+        <Typography.Paragraph>
+          <strong>严格根因准确率 80%（8/10）</strong>：主要根因分类与故障注入前记录的答案完全一致。
+        </Typography.Paragraph>
+        <Typography.Paragraph>
+          <strong>可接受匹配率 90%（9/10）</strong>：其中 1 个案例虽然分类名称没有完全一致，但实例、问题位置和 CPU 故障域正确，仍可用于处理。
+        </Typography.Paragraph>
+        <Typography.Paragraph>
+          <strong>证据不足 10%（1/10）</strong>：支付服务停顿没有形成可靠根因。系统没有猜测，而是先用真实结算请求确认故障，再执行已授权的服务恢复动作。
+        </Typography.Paragraph>
+        <Typography.Paragraph>
+          <strong>安全处理覆盖率 100%（10/10）</strong>表示所有案例都得到明确结论、部分结论或安全停止；它不表示根因全部判断正确。自动恢复目前只有 1 个真实授权案例，结果为 1/1，样本不足以称为通用 100% 成功率。
+        </Typography.Paragraph>
+        <Typography.Title level={5}>适用流程</Typography.Title>
+        <ol>
+          <li>先确认服务、Worker、容器或 PID；范围不清楚时系统停止，不猜测目标。</li>
+          <li>补充服务调用关系，便于区分当前服务、同机干扰和下游依赖。</li>
+          <li>系统优先进行低风险采集，并对重复、过期、失败和相互冲突的数据进行清理。</li>
+          <li>结论同时展示“看到了什么、意味着什么、还缺什么”，置信分只表示本次证据强度。</li>
+          <li>只有已登记、已授权且通过预演的动作可以执行；未知命令不会执行。</li>
+          <li>修复后检查系统指标和真实业务请求，连续两次通过才判定恢复；失败则回滚并重新诊断。</li>
+        </ol>
+        <Typography.Title level={5}>当前适用范围</Typography.Title>
+        <Typography.Paragraph>
+          适合 Linux 进程、容器和 Docker Swarm 环境中的 CPU、内存增长、OOM、磁盘耗尽、网络重传与超时、Java/Go/Python 锁等待、下游依赖和复合故障。
+        </Typography.Paragraph>
+        <Typography.Paragraph>
+          不应直接用于未登记的数据库写操作、数据删除、跨集群流量切换或其他不可逆操作。当前也缺少完整的 Prometheus SLO、分布式 Trace、Java JFR、Go mutex pprof 和 Python GIL 深度分析。
+        </Typography.Paragraph>
+      </Modal>
+
+      <ScopeEditorModal open={scopeOpen} detail={scopeCase} agents={agents} saving={actionLoading} autoSearch={scopeAutoSearch} onClose={closeScopeEditor} onSave={saveScope} />
       <DiagnosisTechnicalDrawer open={technicalOpen} onClose={() => setTechnicalOpen(false)} diagnosis={diagnosis} onDecision={decideProbe} />
     </div>
   );

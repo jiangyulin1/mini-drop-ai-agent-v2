@@ -25,8 +25,9 @@ alembic upgrade head
 alembic check
 ```
 
-Application startup also runs `upgrade head`. A pre-Alembic database is stamped at
-`0001_baseline` and receives the conditional `0002_release` compatibility migration.
+Application startup also runs `upgrade head`. Legacy databases must be upgraded through the
+versioned migration chain; run `python scripts/check_migrations.py` before release and do not
+manually stamp a production database unless the schema has been independently verified.
 
 ## Database backup and restore rehearsal
 

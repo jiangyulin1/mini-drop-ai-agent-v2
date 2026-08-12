@@ -86,13 +86,12 @@
     }
   ],
   "expected": {
-    "classification": "downstream_dependency",
+    "classification": "network_degradation",
     "finding_types": [
       "packet_loss_or_latency",
-      "downstream_dependency"
+      "network_degradation"
     ],
     "knowledge_refs": [
-      "distributed.downstream_pressure",
       "linux.network.retransmit"
     ],
     "action_collectors": [

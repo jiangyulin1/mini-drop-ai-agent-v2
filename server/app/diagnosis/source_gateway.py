@@ -170,10 +170,21 @@ class SourceGateway:
     def __init__(self, repo, orchestrator):
         self.repo = repo
         self.orchestrator = orchestrator
+        # data_sources 连接器懒加载，避免与 source_gateway 循环导入。
+        from server.app.diagnosis.data_sources import (
+            LogTemplateConnector,
+            OpenTelemetryTraceConnector,
+            PrometheusConnector,
+            RuntimeProfileConnector,
+        )
         self._connectors: dict[str, SourceConnector] = {
             "mini-drop-agent-metrics": AgentMetricsConnector(repo),
             "mini-drop-diagnosis-evidence": DiagnosisEvidenceConnector(orchestrator),
             "mini-drop-topology-context": TopologyContextConnector(orchestrator),
+            "prometheus-metrics": PrometheusConnector(),
+            "log-template-query": LogTemplateConnector(repo),
+            "otel-traces": OpenTelemetryTraceConnector(),
+            "runtime-profile-parser": RuntimeProfileConnector(repo),
         }
 
     def query(

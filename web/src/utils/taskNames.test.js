@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isUnreadableTaskName, taskDisplayInfo, taskDisplayName } from "./taskNames";
+import {
+  isUnreadableTaskName,
+  isUserVisibleTask,
+  taskDisplayInfo,
+  taskDisplayName,
+} from "./taskNames";
 
 describe("task display names", () => {
   it("maps release smoke tasks to a readable Chinese name", () => {
@@ -41,5 +46,17 @@ describe("task display names", () => {
   it("detects replacement markers", () => {
     expect(isUnreadableTaskName("VM???? ebpf")).toBe(true);
     expect(isUnreadableTaskName("正常任务")).toBe(false);
+  });
+
+  it("keeps user collections but hides control-plane probe tasks", () => {
+    expect(isUserVisibleTask({
+      request_params: { options: { source: "multi_agent_collection" } },
+    })).toBe(true);
+    expect(isUserVisibleTask({
+      request_params: { options: { source: "process_scan_api" } },
+    })).toBe(false);
+    expect(isUserVisibleTask({
+      request_params: { options: { diagnosis_step_id: "probe-1", registered_probe: true } },
+    })).toBe(false);
   });
 });

@@ -261,6 +261,7 @@ class TestHealthCheck:
         )
 
         assert json.loads(resp.task_desc.options_json) == {
+            "_collector_type": "go_pprof",
             "port": 6061,
             "pprof_endpoint": "/debug/pprof/profile",
         }

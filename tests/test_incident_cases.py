@@ -173,6 +173,24 @@ def test_resolving_case_records_recovery_and_event(client: TestClient):
     assert events[-1]["event_type"] == "case_resolved"
 
 
+def test_task_artifact_reader_passes_only_the_task_artifact_list(monkeypatch):
+    import server.app.main as main_module
+
+    repository = type("Repository", (), {
+        "artifacts": {"task-1": [{"artifact_type": "sys_metrics", "value": 1}]},
+    })()
+    received = []
+
+    def fake_extract(artifacts, artifact_type):
+        received.append((artifacts, artifact_type))
+        return {"ok": True}
+
+    monkeypatch.setattr(main_module, "_extract_artifact_json", fake_extract)
+
+    assert main_module._extract_task_artifact_json(repository, "task-1", "sys_metrics") == {"ok": True}
+    assert received == [(repository.artifacts["task-1"], "sys_metrics")]
+
+
 def test_case_diagnosis_query_includes_recent_user_facts_only():
     query = build_case_diagnosis_query(
         {"problem_description": "checkout latency is high"},
@@ -331,6 +349,16 @@ def test_case_diagnosis_persists_context_and_model_attempt_audit(
     ).json()["data"]["hypotheses"]
     assert invalidated
     assert all(item["status"] in {"WEAKENED", "RULED_OUT"} for item in invalidated)
+
+    restarted = client.post(
+        f"/api/v1/cases/{case['case_id']}/diagnoses",
+        json={"expected_row_version": corrected.json()["data"]["row_version"]},
+    )
+    assert restarted.status_code == 200, restarted.text
+    iterations = client.get(
+        f"/api/v1/cases/{case['case_id']}/iterations",
+    ).json()["data"]["items"]
+    assert sorted(item["iteration_no"] for item in iterations) == [0, 1]
 
 
 def test_case_correction_cancels_and_detaches_superseded_diagnosis(client: TestClient):

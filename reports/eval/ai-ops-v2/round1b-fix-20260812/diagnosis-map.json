@@ -1,0 +1,23 @@
+{
+  "OB-SINGLE-PAYMENT-001": [
+    "diag_session_20260811_201118_8c804b0d"
+  ],
+  "OB-NEG-TRANSIENT-001": [
+    "diag_session_20260811_201319_87dd0def"
+  ],
+  "OB-COMPOUND-MEM-LOCK-001": [
+    "diag_session_20260811_201528_b1c12b70"
+  ],
+  "OB-ROBUST-DUPLICATE-001": [
+    "diag_session_20260811_201659_0414b75c"
+  ],
+  "OB-ROBUST-STALE-001": [
+    "diag_session_20260811_201906_44b17998"
+  ],
+  "OB-SINGLE-GO-LOCK-001": [
+    "diag_session_20260811_202114_eca2999c"
+  ],
+  "OB-NEG-HEALTHY-001": [
+    "diag_session_20260811_202323_64047154"
+  ]
+}

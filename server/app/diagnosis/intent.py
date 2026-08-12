@@ -125,6 +125,20 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
 def _fallback_symptom(query: str) -> str:
     """关键词规则推断 symptom 类别（确定性，供 fallback 与 AI 结果校正共用）。"""
     text = query.lower()
+    if any(key in text for key in (
+        "锁竞争", "死锁", "线程阻塞", "futex", "mutex", "lock contention",
+        "jvm", "java", "goroutine", "golang", "python", "gil",
+    )):
+        return "runtime_stall"
+    if any(key in text for key in (
+        "磁盘耗尽", "磁盘满", "空间不足", "no space left", "enospc", "disk full",
+    )):
+        return "disk_exhaustion"
+    if any(key in text for key in (
+        "丢包", "抖动", "网络分区", "局部断连", "packet loss", "jitter",
+        "network partition", "重传",
+    )):
+        return "network_degradation"
     if any(key in text for key in ("噪声邻居", "同机", "抢占", "争抢", "noisy neighbor")):
         return "noisy_neighbor"
     if any(key in text for key in ("连接拒绝", "拒绝", "refused", "连接失败", "连不上", "econnrefused")):

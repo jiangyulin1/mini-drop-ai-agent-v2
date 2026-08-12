@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -29,6 +29,7 @@ import {
 } from "../../api/client";
 import TaskVisualizationPreview from "../../components/TaskVisualizationPreview";
 import { COLLECTOR_OPTIONS, collectorMeta } from "../../utils/collectors";
+import { ACTIVE_TASK_STATUSES } from "../../utils/status";
 import styles from "../AIDiagnosis.module.css";
 import {
   downloadBlob,
@@ -39,12 +40,12 @@ import {
 } from "./workspaceUtils";
 
 const SUCCESS = new Set(["DONE"]);
-const RUNNING = new Set(["PENDING", "DISPATCHED", "RUNNING", "CANCEL_REQUESTED"]);
 
 function groupStatus(group) {
-  if (group.tasks.some((task) => RUNNING.has(task.status))) return { label: "进行中", color: "processing" };
+  if (group.tasks.some((task) => ACTIVE_TASK_STATUSES.has(task.status))) return { label: "进行中", color: "processing" };
   if (group.tasks.every((task) => SUCCESS.has(task.status))) return { label: "完整", color: "green" };
   if (group.tasks.some((task) => task.status === "FAILED")) return { label: "部分失败", color: "red" };
+  if (group.tasks.some((task) => task.status === "CANCELLED")) return { label: "部分取消", color: "orange" };
   return { label: "已结束", color: "default" };
 }
 
@@ -55,6 +56,7 @@ export default function DiagnosisDataConsole({
   loading,
   actionLoading,
   focusCollectionId,
+  onFocusConsumed,
   onRefresh,
   onAnalyze,
 }) {
@@ -66,6 +68,7 @@ export default function DiagnosisDataConsole({
   const [targets, setTargets] = useState([]);
   const [selectedId, setSelectedId] = useState("");
   const [caseOnly, setCaseOnly] = useState(Boolean(currentCase));
+  const pendingCollectionId = useRef("");
 
   const groups = useMemo(() => groupTasks(tasks), [tasks]);
   const visibleGroups = useMemo(() => (
@@ -77,8 +80,9 @@ export default function DiagnosisDataConsole({
     if (focusCollectionId && groups.some((item) => item.collectionId === focusCollectionId)) {
       setCaseOnly(false);
       setSelectedId(focusCollectionId);
+      onFocusConsumed?.();
     }
-  }, [focusCollectionId, groups]);
+  }, [focusCollectionId, groups, onFocusConsumed]);
 
   useEffect(() => {
     if (selected && selected.collectionId !== selectedId) setSelectedId(selected.collectionId);
@@ -91,6 +95,7 @@ export default function DiagnosisDataConsole({
       checked: agent.status === "ONLINE" && (scoped.size === 0 || scoped.has(agent.id)),
       pid: scoped.get(agent.id)?.pid || null,
     })));
+    pendingCollectionId.current = newCollectionId();
     setCreateOpen(true);
   }
 
@@ -104,12 +109,13 @@ export default function DiagnosisDataConsole({
     if (selectedTargets.some((item) => !Number(item.pid))) return message.warning("请填写每个 Worker 的 PID");
     const unsupported = selectedTargets.find((item) => !(item.agent.capabilities || []).includes(collector));
     if (unsupported) return message.error(`${unsupported.agent.hostname || unsupported.agent.id} 不支持 ${collectorMeta(collector).label}`);
-    const collectionId = newCollectionId();
+    const collectionId = pendingCollectionId.current || newCollectionId();
+    pendingCollectionId.current = collectionId;
     const serviceId = currentCase?.target_scope?.service_id || "manual";
     const meta = collectorMeta(collector);
     setCreating(true);
     try {
-      await Promise.all(selectedTargets.map((item) => createTask({
+      const results = await Promise.allSettled(selectedTargets.map((item) => createTask({
         name: `${meta.label} · ${serviceId} · ${item.agent.hostname || item.agent.id}`,
         agent_id: item.agent.id,
         target_pid: Number(item.pid),
@@ -122,11 +128,18 @@ export default function DiagnosisDataConsole({
           case_id: currentCase?.case_id || "",
           service_id: serviceId,
         },
-      })));
+      }, `collection-${collectionId}-${item.agent.id}-${collector}`)));
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failed = results.length - succeeded;
+      if (!succeeded) {
+        const reason = results.find((result) => result.status === "rejected")?.reason?.message || "请求失败";
+        throw new Error(reason);
+      }
       setCreateOpen(false);
       setCaseOnly(Boolean(currentCase));
       setSelectedId(collectionId);
-      message.success(`已创建 ${selectedTargets.length} 个采集任务`);
+      if (failed) message.warning(`已创建 ${succeeded} 个任务，${failed} 个节点失败；已保留为部分采集批次`);
+      else message.success(`已创建 ${succeeded} 个采集任务`);
       await onRefresh();
     } catch (error) {
       message.error(`创建失败：${error.message}`);
@@ -138,25 +151,31 @@ export default function DiagnosisDataConsole({
   async function downloadGroup(group) {
     setDownloading(group.collectionId);
     let count = 0;
-    try {
-      for (const task of group.tasks) {
-        const taskId = itemId(task);
+    let failed = 0;
+    for (const task of group.tasks) {
+      const taskId = itemId(task);
+      try {
         const artifacts = await getTaskArtifacts(taskId);
         for (const artifact of artifacts || []) {
-          if (artifact.available === false || artifact.availability === "UNAVAILABLE") continue;
-          const result = await downloadTaskArtifact(taskId, artifact.artifact_type, {
-            ...(artifact.metadata?.window_index !== undefined ? { artifact_index: artifact.metadata.window_index } : {}),
-          });
-          downloadBlob(result.blob, `${task.agent_id}-${result.filename}`);
-          count += 1;
+          const availability = String(artifact.availability || "").toLowerCase();
+          if (artifact.available === false || ["missing", "unavailable"].includes(availability)) continue;
+          try {
+            const result = await downloadTaskArtifact(taskId, artifact.artifact_type, {
+              ...(artifact.metadata?.window_index !== undefined ? { index: artifact.metadata.window_index } : {}),
+            });
+            downloadBlob(result.blob, `${task.agent_id}-${result.filename}`);
+            count += 1;
+          } catch {
+            failed += 1;
+          }
         }
+      } catch {
+        failed += 1;
       }
-      if (!count) message.info("没有可下载的产物");
-    } catch (error) {
-      message.error(`下载失败：${error.message}`);
-    } finally {
-      setDownloading("");
     }
+    if (!count && !failed) message.info("没有可下载的产物");
+    else if (failed) message.warning(`已下载 ${count} 个产物，${failed} 项获取失败，可稍后重试`);
+    setDownloading("");
   }
 
   const onlineAgents = agents.filter((agent) => agent.status === "ONLINE");
@@ -215,6 +234,12 @@ export default function DiagnosisDataConsole({
                   key={group.collectionId}
                   className={`${styles.sessionCard} ${selected?.collectionId === group.collectionId ? styles.sessionCardActive : ""}`}
                   onClick={() => setSelectedId(group.collectionId)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedId(group.collectionId);
+                    }
+                  }}
                   role="button"
                   tabIndex={0}
                 >
@@ -231,7 +256,7 @@ export default function DiagnosisDataConsole({
                       loading={actionLoading}
                       onClick={() => onAnalyze(group)}
                     >
-                      交给 AI 分析
+                      用该批次更新诊断
                     </Button>
                   </div>
                 </div>
@@ -251,7 +276,7 @@ export default function DiagnosisDataConsole({
                   <div className={styles.previewMeta}>{selected.tasks.length} 个任务 · 原始数据、图表和火焰图均从任务产物读取</div>
                 </div>
                 <Button icon={<DownloadOutlined />} loading={downloading === selected.collectionId} onClick={() => downloadGroup(selected)}>下载全部</Button>
-                <Button type="primary" icon={<RobotOutlined />} disabled={!currentCase || !selected.tasks.every((task) => SUCCESS.has(task.status))} loading={actionLoading} onClick={() => onAnalyze(selected)}>交给 AI 分析</Button>
+                <Button type="primary" icon={<RobotOutlined />} disabled={!currentCase || !selected.tasks.every((task) => SUCCESS.has(task.status))} loading={actionLoading} onClick={() => onAnalyze(selected)}>用该批次更新诊断</Button>
               </div>
               <Tabs items={selected.tasks.map((task) => ({
                 key: itemId(task),
@@ -263,7 +288,7 @@ export default function DiagnosisDataConsole({
                       <Typography.Text>PID {task.target_pid}</Typography.Text>
                       <Link to={`/task/${itemId(task)}`}>打开完整结果</Link>
                     </Space>
-                    <TaskVisualizationPreview taskId={itemId(task)} />
+                    <TaskVisualizationPreview taskId={itemId(task)} revision={task.updated_at || task.status} />
                   </Space>
                 ),
               }))} />

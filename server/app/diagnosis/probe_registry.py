@@ -87,6 +87,42 @@ _PROBES = {
             "SHARED_DEPENDENCY_FAILURE", "CONNECTION_POOL_EXHAUSTION",
         ],
     ),
+    "runtime_thread_snapshot": ProbeDefinition(
+        probe_id="runtime_thread_snapshot",
+        name="运行时与线程阻塞快照",
+        purpose="识别 Java、Go、Python 运行时以及 futex/monitor/park 等锁等待和进程停顿",
+        runner_task_kind="runtime_snapshot",
+        supported_platforms=["linux"],
+        required_capabilities=["runtime_snapshot"],
+        risk_level="R1",
+        requires_approval=False,
+        default_duration_seconds=15,
+        max_duration_seconds=30,
+        default_sample_rate=11,
+        estimated_overhead={"cpu_percent": "<2", "disk_mb": "<10"},
+        applicable_hypotheses=[
+            "LOCK_CONTENTION", "RUNTIME_STALL", "JVM_GC_PRESSURE",
+            "GOROUTINE_BLOCK", "PYTHON_GIL_CONTENTION",
+        ],
+    ),
+    "endpoint_connectivity_probe": ProbeDefinition(
+        probe_id="endpoint_connectivity_probe",
+        name="下游端点连通性探针",
+        purpose="受控 TCP/HTTP 探测下游服务可达性，区分下游故障与自身故障",
+        runner_task_kind="connection_probe",
+        supported_platforms=["linux"],
+        required_capabilities=["connection_probe"],
+        risk_level="R1",
+        requires_approval=False,
+        default_duration_seconds=10,
+        max_duration_seconds=30,
+        default_sample_rate=1,
+        estimated_overhead={"cpu_percent": "<1", "disk_mb": "<1"},
+        applicable_hypotheses=[
+            "DOWNSTREAM_LATENCY", "NETWORK_DEGRADATION",
+            "SHARED_DEPENDENCY_FAILURE", "CONNECTION_POOL_EXHAUSTION",
+        ],
+    ),
 }
 
 
@@ -110,6 +146,10 @@ def choose_probe_ids(symptom: str) -> list[str]:
         "noisy_neighbor": ["host_process_metrics", "process_io_latency"],
         "memory_pressure": ["process_memory_map", "host_process_metrics"],
         "error_increase": ["process_log_scan", "host_process_metrics"],
-        "connection_failure": ["process_log_scan", "host_process_metrics"],
+        "connection_failure": ["endpoint_connectivity_probe", "process_log_scan", "host_process_metrics"],
+        "runtime_stall": ["runtime_thread_snapshot", "host_process_metrics", "process_cpu_profile"],
+        "latency_increase": ["runtime_thread_snapshot", "host_process_metrics", "process_cpu_profile"],
+        "disk_exhaustion": ["host_process_metrics", "process_log_scan"],
+        "network_degradation": ["endpoint_connectivity_probe", "host_process_metrics", "process_log_scan"],
     }
     return mapping.get(symptom, ["host_process_metrics", "process_log_scan", "process_cpu_profile"])

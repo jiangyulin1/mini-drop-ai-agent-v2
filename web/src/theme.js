@@ -60,8 +60,8 @@ export const FONT_SIZES = {
 
 export const LAYOUT = {
   siderWidth: 200,
-  contentMaxWidth: 1400,
-  headerHeight: 48,
+  contentMaxWidth: 1440,
+  headerHeight: 56,
 };
 
 // ── 动画 ──────────────────────────────────────────────────

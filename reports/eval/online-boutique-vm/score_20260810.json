@@ -1,0 +1,28 @@
+{
+  "score": 100,
+  "maximum": 100,
+  "tier": "verified_vm",
+  "mandatory_gates_passed": true,
+  "dimensions": {
+    "deployment": {
+      "score": 20,
+      "maximum": 20
+    },
+    "fault_reproducibility": {
+      "score": 30,
+      "maximum": 30
+    },
+    "destructive_recovery": {
+      "score": 20,
+      "maximum": 20
+    },
+    "diagnosis_and_artifacts": {
+      "score": 20,
+      "maximum": 20
+    },
+    "stability": {
+      "score": 10,
+      "maximum": 10
+    }
+  }
+}

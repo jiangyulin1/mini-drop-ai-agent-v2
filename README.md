@@ -19,8 +19,8 @@
 - [环境要求](#环境要求)
 - [整体架构](#整体架构)
 - [核心流程](#核心流程)
-- [8 种采集器](#8-种采集器)
-- [智能归因——5 层引擎](#智能归因5-层引擎)
+- [采集器](#采集器)
+- [任务级智能归因](#任务级智能归因兼容路径)
 - [任务状态机](#任务状态机)
 - [Web 前端](#web-前端)
 - [自然语言采集](#自然语言采集)
@@ -33,7 +33,7 @@
 - [仓库结构](#仓库结构)
 - [设计原则](#设计原则)
 - [关键决策与取舍](#关键决策与取舍)
-- [更新日志](#更新日志)
+- [文档入口](docs/README.md)
 
 ---
 
@@ -72,7 +72,7 @@ python dev.py test        # 运行测试
 
 - **核心能力**：
   - Web UI 指定目标 PID、采样率、时长，通过 Server 下发任务给 Agent。
-  - Agent 在目标主机上执行 perf / eBPF / py-spy / memory / continuous 采集，产物上传 MinIO。
+  - Agent 在目标主机上执行 perf、eBPF、运行时快照、日志、内存和持续采样，产物上传 MinIO。
   - Analyzer 将 perf.data 转为 D3 交互式火焰图 + ECharts TopN 热点排行。
   - 5 层智能归因引擎，LLM 辅助推理但受 Schema 硬约束，每条 claim 可追溯到原始证据。
   - 自然语言采集——用户输入"mysqld CPU 飙高"，系统自动匹配进程、选采集器、定参数。
@@ -84,7 +84,7 @@ python dev.py test        # 运行测试
 - **gRPC 契约优先**：5 个 `.proto` 文件定义全部通信接口，强类型编译期发现字段不匹配，二进制序列化比 JSON 小 3-5 倍。
 - **采集器即插件**：所有采集器实现 `Collector(Protocol)` 协议——新增采集器只需实现 `collect(task) → CollectorResult`，Server 不绑定具体工具。
 - **工具驱动的 AI 归因**：LLM 不直接输出自由文本。5 层管线——证据采集 → 候选生成 → 五维置信度校准 → LLM 推理（Few-Shot + Schema 硬约束 + 自修复）→ 修复计划。`rules.json` 外部化，不开 IDE 即可扩展诊断场景。
-- **证据驱动诊断流水线 v2**：12 个可持久化节点、结构化 Action、CPU/IO/内存/网络/MySQL/JVM 确定性 Finding、静态 Knowledge 引用和报告 Verifier；完整设计见 [`docs/diagnosis_pipeline_v2.md`](docs/diagnosis_pipeline_v2.md)。
+- **持续事故 Case**：保存范围、候选、Evidence、调查迭代、Action、验证和回滚状态；当前能力、缺口和实施门禁见 [`docs/autonomous_ops_agent_implementation_plan.md`](docs/autonomous_ops_agent_implementation_plan.md)。
 - **自然语言采集**：用户描述意图 → LLM function calling 解析 → `/proc` PID 匹配 → 参数 clamp 安全范围 → 自动创建任务。
 - **可恢复执行流水线**：Task 保留兼容聚合状态，同时持久化 `collection_status` 与 `analysis_status`；每次下发创建唯一 `TaskAttempt`，采集成功后投递带租约的 `AnalysisJob`，结果重放不会重复写入。
 - **真实运行中取消**：Server 将取消指令通过心跳下发，Agent 终止采集进程组、持久化取消结果并安全重放；排队超时、Agent 失联和 Analyzer 租约过期均有确定性恢复路径。
@@ -156,7 +156,7 @@ flowchart LR
     Web -->|REST + SSE| Server["Server\nFastAPI :8191"]
     Server -->|任务下发 / 心跳| GRPC["gRPC :50051"]
     GRPC --> Agent["Agent\nprivileged + pid:host"]
-    Agent --> Collectors["8 种采集器\nperf / eBPF / py-spy\njava / pprof / memory\nsys_metrics / continuous"]
+    Agent --> Collectors["采集器\nperf / eBPF / runtime / logs\npy-spy / java / pprof / memory\nsys_metrics / process / continuous"]
     Agent --> Analyzer["Analyzer CLI\n火焰图 + TopN + 建议"]
     Agent -->|上传产物| MinIO["MinIO\n对象存储 + 预签名 URL"]
     Server -->|持久化| Postgres["PostgreSQL"]
@@ -217,7 +217,7 @@ Agent 启动 `bpftrace io_latency.bt -o io_latency.txt` → 脚本挂载 `kprobe
 
 ---
 
-## 8 种采集器
+## 采集器
 
 | 采集器 | 类型 key | 采集工具 | 产出物 | Web 可视化 |
 |--------|----------|----------|--------|------------|
@@ -229,6 +229,9 @@ Agent 启动 `bpftrace io_latency.bt -o io_latency.txt` → 脚本挂载 `kprobe
 | **Memory** | `memory_smaps` | /proc/PID/smaps | 内存分段 + RSS 趋势 | ECharts 内存时序折线图 |
 | **SysMetrics** | `sys_metrics` | /proc 多维 | CPU/线程/FD/网络/IO 时序 | ECharts 多维仪表盘 |
 | **Continuous** | `continuous_perf` | perf record（周期） | 多窗口火焰图 + 汇总 | 窗口选择器 + 时间轴回放 |
+| **Log Scan** | `log_scan` | 受控日志尾部扫描 | 错误簇、连接与超时模式 | 日志摘要与原文预览 |
+| **Process Scan** | `process_scan` | /proc 进程发现 | PID、命令、运行时和资源候选 | 多 Worker 进程选择器 |
+| **Runtime Snapshot** | `runtime_snapshot` | procfs / 运行时接口 | 线程状态、锁等待、前进状态 | 运行时诊断摘要 |
 
 所有采集器实现统一接口：
 
@@ -239,7 +242,7 @@ class Collector(Protocol):
 
 ---
 
-## 智能归因（5 层引擎）
+## 任务级智能归因（兼容路径）
 
 ```
 ┌──────────┐    ┌───────────┐    ┌──────────┐    ┌────────┐    ┌──────────┐
@@ -263,7 +266,7 @@ class Collector(Protocol):
 
 **约束：** 每条 claim 必须带 `evidence_refs`；未配置 AI Key 时 → 规则引擎独立输出降级报告，火焰图等核心功能不受影响。
 
-**如果重做：** 当前 5 层是线性管道（~8s 端到端）。若改为 DAG 并行模式（证据采集 + 候选生成同时启动，LLM 收到第一批证据就流式输出），预计降到 ~2s。另外 `rules.json` 目前是镜像固化的静态文件，可加 gRPC stream 推送通道——Server 更新规则后实时推给所有 Agent，本地热加载，不停机不重启。
+该路径保留用于单个已完成 Task 的事后归因。跨服务事故统一进入 Case 调查链路，不再在这条兼容路径上继续扩展自动处置能力。
 
 ### AI 集群诊断控制层
 
@@ -271,15 +274,15 @@ class Collector(Protocol):
 
 当前轻量版由请求上下文提供服务实例与宿主机映射；没有可靠映射时进入 `NEEDS_SCOPE_CONFIRMATION`，不会向 Agent 扩散采集。后台扫描器使用持久化状态和短租约恢复会话，完成的探针通过 `diagnosis_step_id` 幂等关联，避免重复下发。
 
-诊断结论包含 `cluster_assessment`，会把目标实例、同宿主机实例和一跳下游实例的系统指标放在同一证据平面比较，用于区分自身代码热点、噪声邻居、宿主机资源争抢和下游依赖问题。模糊输入不会被自动执行；系统只返回带审核注释的 `diagnostic_commands`，每条命令都有风险等级、`evidence_refs`、置信度和 `auto_execute=false`。
+诊断结论包含 `cluster_assessment` 和贡献原因，会把目标实例、同宿主机实例和一跳下游实例的证据放在同一时间与拓扑范围内比较。模糊输入不会扩大采集范围；模型只能选择 Registry 中的 Probe 或 Action，授权、执行和验证由确定性组件完成。
 
 产品目标是生产级、多租户、多集群服务；当前三节点 Hyper-V 集群只是首个实验 `EnvironmentProfile`。授权体系借鉴成熟编码 Agent 的“模型规划、Harness 控制、Sandbox 强制、越界审批”机制：AI 可在明确 Grant 内自动读取信息和执行经过注册、预检查、可回滚、可验证的低风险修复，任何越界或信息不足都会升级审批或拒绝。完整设计见 [`docs/ai_authorization_and_tooling.md`](docs/ai_authorization_and_tooling.md)。
 
-第二阶段代码已经提供 `/api/v1/identity`、`/api/v1/sources`、`/api/v1/sources/{source_id}/query`、`/api/v1/grants`、`/api/v1/policy/evaluate-source` 和 `/api/v1/actions`。Source Gateway 使用服务端派生主体、持久化 Grant、短期 Capability Token 和原子查询预算，输出带查询指纹、原始/投影哈希与策略轨迹的 EvidenceEnvelope；内置信息源能力不会返回凭据引用。RCA 和诊断意图调用 AI 前会程序化执行敏感字段脱敏、指标序列统计聚合、热点排序、日志/事件去重与优先级筛选，并在字符预算内生成投影；完整原始 Evidence 和 Artifact 保持不变。Action Registry 当前仅支持策略评估，`execution_enabled=false`，不会执行真实变更。企业级部署、治理、SLO 和发布门禁见 [`docs/ai_production_architecture_and_governance.md`](docs/ai_production_architecture_and_governance.md)。
+代码已经提供 `/api/v1/identity`、`/api/v1/sources`、`/api/v1/sources/{source_id}/query`、`/api/v1/grants`、`/api/v1/policy/evaluate-source` 和 `/api/v1/actions`。Source Gateway 使用服务端派生主体、持久化 Grant、短期 Capability Token 和原子查询预算，输出带查询指纹、原始/投影哈希与策略轨迹的 EvidenceEnvelope；内置信息源不会返回凭据引用。Action Registry 已包含少量受限执行动作，但只允许逐动作、逐环境晋级，不代表通用生产自治。授权与执行约束见 [`docs/ai_authorization_and_tooling.md`](docs/ai_authorization_and_tooling.md)。
 
 Case 协作层已经提供 `/api/v1/cases` 聚合对象、租户隔离的不可变时间线、五块首页摘要、消息与范围修正、乐观版本控制，以及 Pause/Resume/Stop。关联的 DiagnosisSession 会随 Case 暂停和恢复；Stop 会先取消关联诊断，再原子撤销该租户下绑定此 Case 的有效 Grant，避免后台调查或信息读取在用户停止后继续。Case 启动诊断前会持久化 `case-context.v1`；模型调用审计只保存 Provider、模型快照、Prompt/Schema 版本、Token、耗时、状态和响应哈希，不保存原始思维链。候选原因已规范化为租户级 HypothesisNode/Edge，保留开放集 `OTHER_UNKNOWN`，并通过 InvestigationIteration 记录候选变化、可行动作、确定性 Policy、成本、结果和停止判断；硬约束失败的动作不会进入信息增益排序。当前租户由服务端 `MINI_DROP_API_TENANT_ID` 绑定，客户端请求体不能自行切换租户。
 
-AI 的下一阶段定位是“可持续推进并验证恢复的故障 Case”，不是一次性快照报告。完整的用户功能、三级运行模式、Case 智能循环、模型逻辑角色、ContextPacket、候选图、知识记忆、RecoveryPlan 和开发拆分见 [`docs/ai_functional_design_v3.md`](docs/ai_functional_design_v3.md)；服务边界、协作状态、LLM 权限和评测体系见 [`docs/ai_case_resolution_evaluation_system.md`](docs/ai_case_resolution_evaluation_system.md)。在运行正式 AI 对比实验前，可先检查统一测试集是否存在答案泄漏、不可执行 Fixture 或当前环境缺失的数据源：
+AI 的目标是持续推进并验证恢复的事故 Case。当前 90 轮正式评测的运行级严格根因命中为 48.9%，正确拒答、证据引用和运行轨迹较完整，但持续补证、根因实体、复合故障和自主恢复仍需按实施方案推进。完整设计和分阶段门禁见 [`docs/autonomous_ops_agent_implementation_plan.md`](docs/autonomous_ops_agent_implementation_plan.md)。在运行正式对比实验前，可先检查测试集是否存在答案泄漏、不可执行 Fixture 或环境缺失的数据源：
 
 ```bash
 python scripts/audit_diagnosis_dataset.py /path/to/dataset \
@@ -479,8 +482,7 @@ docker compose --env-file deploy/env/worker.env -f docker-compose.worker.yml up 
 sudo bash deploy/scripts/install-worker.sh "$PWD"
 ```
 
-完整步骤、证书分发、端口矩阵和验收命令见
-[三机 VM 部署与联调指南](docs/three-node-vm-deployment.md)。SSH 自动化不包含在当前阶段。
+生产或虚拟机部署前必须根据目标环境单独确认地址、证书、身份、存储和防火墙策略；仓库不再维护绑定某次实验 IP 和发布目录的部署快照。
 
 ### 离线 / 本地 Docker（SQLite，无需拉取外部镜像）
 
@@ -592,9 +594,9 @@ Provider 账户/模型/对话、自然语言任务解析、集群诊断意图与
 
 ## 开发命令
 
-发布基线的完整质量门禁、数据库迁移、备份恢复和对象对账步骤见
-[`docs/release-baseline-runbook.md`](docs/release-baseline-runbook.md)；最近一次三节点
-验证结果见 [`docs/release_baseline_report.md`](docs/release_baseline_report.md)。
+发布基线的质量门禁、数据库迁移、备份恢复和对象对账步骤见
+[`docs/release-baseline-runbook.md`](docs/release-baseline-runbook.md)。一次性验证结果保存在
+`reports/` 或发布记录中，不再作为长期文档维护。
 
 ```bash
 # Makefile（Linux / macOS / Git Bash）
@@ -633,7 +635,7 @@ mini-drop/
 ├── server/app/           FastAPI + gRPC + RCA + NLP + Prometheus
 │   ├── main.py           FastAPI 入口 + 全量 API 路由
 │   ├── grpc_server.py    gRPC 后台线程启动（共进程）
-│   ├── grpc_services/    4 个 gRPC 服务实现（Init/HealthCheck/Hotmethod/Control）
+│   ├── grpc_services/    gRPC 服务实现
 │   ├── nlp/              自然语言意图解析 + 进程 PID 匹配 + AI 总结 + 追问
 │   ├── rca/              5 层归因引擎（evidence → candidates → calibrator → LLM → repair）
 │   ├── diagnosis/        集群诊断会话（intent → topology → hypotheses → probes → evidence）
@@ -644,7 +646,7 @@ mini-drop/
 │   └── schemas.py        Pydantic 请求/响应模型 + 参数边界常量
 ├── agent/mini_drop_agent/ Agent 采集端（gRPC 长连接 + 指数退避重试）
 │   ├── main.py           Agent 主循环（注册 → 心跳 → 拉任务 → 执行 → 上报）
-│   ├── collectors/       8 种采集器（perf/eBPF/py-spy/java/pprof/memory/sys/continuous）
+│   ├── collectors/       perf/eBPF/运行时/日志/内存/进程等采集器
 │   │   └── scripts/      bpftrace 内核探针脚本
 │   ├── config.py         环境变量加载 + 参数边界校验
 │   └── connection.py     gRPC 连接管理 + 认证拦截器 + 重试逻辑
@@ -655,8 +657,8 @@ mini-drop/
 ├── proto/                5 个 gRPC 契约文件（common/init/healthcheck/hotmethod/control）
 ├── demo/                 演示脚本 & 15 种负载场景生成器
 ├── deploy/               Dockerfiles + nginx 配置
-├── tests/                33 个测试文件（单元 + 集成 + E2E）
-└── docs/                 设计文档 + 智能归因评测报告
+├── tests/                单元、集成和 E2E 测试
+└── docs/                 当前设计、运行与安全文档
 ```
 
 ---
@@ -693,67 +695,3 @@ bpftrace 对演示场景足够——Shell 一行命令即可挂载内核探针�
 ### 为什么 AI 不直接接入火焰图全量数据？
 
 火焰图 JSON 树可能有数千个节点，直接送 LLM Token 消耗巨大且容易产生幻觉。证据采集层提取 TopN + 结构化指标，既能被规则引擎处理，也能高效喂给 LLM。这是"人肉分析→结构化证据→LLM 推理"的工程化思路。
-
----
-
-## 更新日志
-
-### 2026-08-06 — 三节点真实评测通过（4/4 场景）
-
-- **部署**：本地最新代码（两页前端 + 10 采集器 + 诊断闭环）部署到 Hyper-V 三节点集群（control/worker1/worker2），复用集群现有 venv，前端构建产物更新到 nginx，server + analyzer + 两个 agent 全部切换新代码。
-- **评测环境**：因原 checkoutservice 方案不可行（tag 不存在 / 依赖 Kafka / Docker Hub 与 Go proxy 不可达），改用 otel-demo tag 2.2.0 `product-catalog`（Go + PostgreSQL 下游）+ 本地交叉编译静态二进制 + apt PostgreSQL + 自研 gRPC 压测器 eval-load。
-- **实测结果**：4 场景全部通过（CPU 热点→self/cpu；PG 停→downstream/network；磁盘写→same_host/io；无故障→无误报）。
-- **真实评测暴露并修复**：profiler_type 映射缺失、analyzer 结果类型白名单缺失、report_verifier 未注册 log_analyzer + evidence 域缺失、intent 规则分类缺失关键词、sys_metrics 跨场景复用污染、虚拟化写缓存下 IO 信号改用宿主 system CPU 归因。
-- **验证**：后端 523 passed；前端 32 passed；构建通过。
-
-### 2026-08-05 — 多轮引导 + 恢复验证闭环（No-Regression 判定）
-
-- **多轮引导（next_best_action）**：每条结论附带"下一步最值得做什么"——证据不足时建议区分性探针（CPU Profile / I/O 延迟需用户确认、日志扫描自动执行）；已有根因时建议验证恢复。前端结论卡直接展示引导卡片。
-- **恢复验证闭环**：`POST /api/v1/cases/{id}/verification` 用相同采集器与目标实例重新采集 sys_metrics（10s），与诊断基线对比 process_cpu_cores / iowait / rss，确定性判定 recovered / partially_recovered / not_recovered / degraded / indeterminate（No-Regression）；`POST /api/v1/cases/{id}/manual-actions` 支持人工动作回填（completed/failed/skipped）；结果写入 Case 时间线与审计日志。
-- **前端**：结论卡的"建议的下一步"支持"触发验证采集"按钮并展示指标对比（基线 → 当前 → 判定）。
-- **验证**：后端 523 passed（新增 recovery_verification 9 项）；前端 32 passed；构建通过。
-
-### 2026-08-05 — 单服务多轮诊断补全 + 日志探针 + GitHub 真实项目评测集
-
-- **服务→进程自动发现（面向服务的第一步）**：创建诊断会话后自动弹出范围选择并自动扫描匹配服务名的进程候选，基础用户只需勾选确认，无需知道 PID。
-- **日志探针（log_scan）**：Agent 通过 `/proc/PID/fd` 发现进程日志文件并读取尾部，提取日志级别、错误行与连接/超时模式；新增 `log_analyzer.v1` 确定性 Finding（error_pattern / connectivity_errors / timeout_errors），接入 12 步流水线的证据归一化与分析；`error_increase` / `connection_failure` 症状默认选择日志探针。
-- **GitHub 真实项目评测集**：`benchmarks/github_cases/`——使用 OpenTelemetry Demo `checkoutservice`（真实 Go 服务）+ Redis 依赖 + hey 真实负载，在三节点 VM 上可跑；4 个场景（CPU 热点 / 下游 Redis 不可达 / 宿主机 IO 争抢 / 无故障对照）；setup/inject/cleanup/run_eval 脚本；oracle 不进模型上下文，评分（root_location / domain_cause / evidence 有效性 / 无故障误报 / 危险执行数）为可单测纯函数。
-- **验证**：后端 514 passed（新增 log_scan 8 项、github_eval 6 项）；前端 32 passed；构建通过。
-
-### 2026-08-05 — 最终用户导向前端重构 + 进程发现 + 首个可执行修复动作
-
-- **前端两页 + 设置**：导航收敛为「采集与监控」（`/`）·「AI 诊断」（`/ai-diagnosis`）·「设置」（`/settings`）；诊断历史与审计日志收进设置页归档；两页可互动——第一页任务/进程可「交给 AI 分析」（`?fromTask=` 上下文自动建会话并预填范围）。
-- **采集与监控工作台**：左栏 Agent 节点状态 + 任务列表（状态筛选/搜索），右栏内嵌任务详情（状态时间线 + 火焰图/TopN/eBPF 可视化预览 + 交给 AI 分析）；「多机采集」并入第一页（同一 collection_session_id 跨节点采集，供 AI 会话关联）。
-- **进程发现（选进程而非填 PID）**：Agent 新增 `process_scan` 采集器（R0 级只读 `/proc` 扫描，输出 pid/comm/cmdline/CPU/内存候选）；新增 `POST /api/agents/{id}/processes/scan` 同步扫描 API；范围选择器改为“输入进程名 → 并行扫描在线 Worker → 勾选候选”，唯一候选自动选中，手动 PID 仅作兜底。
-- **受控修复闭环（Actuation Gateway 首个实例）**：`mini-drop.cleanup-expired-cache`（清理自身过期诊断缓存）与 `mini-drop.restore-cache-quarantine`（回滚）两个动作标记为可执行；实现 dry-run → 人工批准 → 执行（移动而非删除）→ 幂等重放 → 回滚完整闭环；`POST /api/v1/actions/{id}/dry-run|execute|rollback`；策略硬拒绝（环境/目标/冗余/未注册）不可绕过；所有操作写审计日志。设置页新增「存储维护」界面（dry-run 清单 → 批准执行 → 回滚）。
-- **验证**：后端 504 passed（新增 process_scan 7 项、Actuation 8 项）；前端 32 passed；lint 与 Vite 生产构建通过。
-
-### 2026-06-21 — Web 前端业务逻辑完善
-
-- **Dashboard 任务管理**：新增搜索（按名称/ID 模糊匹配）、排序（按字段 + 升/降序）、删除（确认弹窗 + 进行中任务保护 + 级联删除事件/产物/诊断/审计日志）。
-- **AuditLogs**：新增事件类型下拉筛选、自由文本搜索、时间倒序、复制 task_id。
-- **Settings**：新增内联 API Key 输入框 + 保存/清除按钮、AI 连通性测试按钮。
-- **AgentDetail**：新增关联任务搜索过滤、ECharts 实例正确 dispose 重建修复内存泄漏。
-- **NLPTaskInput**：Agent 选择优先匹配对应采集器能力的在线 Agent。
-- **ErrorBoundary**：全局渲染异常捕获，降级为友好错误页（重试/回首页），不白屏。
-- **EBPFHistogram**：eBPF IO 延迟分布 ECharts 柱状图——绿→红渐变着色、P50/P95/P99 分位估算、hint 提示。满足 题目要求 "eBPF 必须在 Web 上有自己的可视化形态"。
-
-### 2026-06-21 — eBPF bpftrace 兼容性修复
-
-- **io_latency.bt**：移除 `BEGIN`/`END` 特殊探针（bpftrace 0.14 + 内核 5.15 无法解析符号），改用 `interval:s:1` 定时打印 histogram。`blk_update_request` → `blk_account_io_done`（内核 5.15 兼容）。
-- **ebpf.py**：退出码放宽（`-9`/`-15`/`255` 均视为信号终止），interval 模式解析器取最后一次 histogram 值。
-- **验证**：Linux VM 裸机 root Agent，eBPF IO 延迟采集 DONE，163 samples，7 个延迟区间 [32μs ~ 4ms]。
-
-### 2026-06-21 — 分体部署支持
-
-- **init_service.py**：`FetchConfig` 下发 `MINIO_PUBLIC_ENDPOINT` 而非 Docker 内部地址 `minio:9000`，修复分体部署下 VM Agent 产物上传持续失败。
-- **demo.sh**：新增 `SPLIT_HOST` 环境变量支持远程 API 模式。
-### 更早版本
-
-- **2026-06-20** — 演示体系完善、`make demo` 6 场景一键跑通。
-- **2026-06-18** — SSE 实时事件流、NLP 自然语言采集。
-- **2026-06-17** — 5 层智能归因引擎（DeepSeek + Few-Shot + 自修复）、Continuous Profiling。
-- **2026-06-16** — eBPF IO 延迟 + py-spy Python 采样 + 8 种采集器完备。
-- **2026-06-15** — D3 交互式火焰图 + ECharts TopN 联动、Web 前后端打通。
-- **2026-06-14** — gRPC 四项服务 + Agent 主循环 + perf CPU 采集器。
-- **2026-06-13** — 项目骨架：Proto 契约 + 状态机 + FastAPI + SQLAlchemy。

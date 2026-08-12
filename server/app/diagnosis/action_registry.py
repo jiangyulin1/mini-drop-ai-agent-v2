@@ -78,6 +78,36 @@ class ActionRegistry:
 
 DEFAULT_ACTION_REGISTRY = ActionRegistry([
     ActionDefinition(
+        action_id="swarm.restart-stateless-service",
+        title="以 start-first 方式重启单个已授权无状态 Swarm 服务",
+        base_impact_level=ImpactLevel.I2,
+        allowed_environments=["staging", "production"],
+        max_targets=1,
+        min_healthy_replicas=1,
+        reversible=True,
+        dry_run_supported=True,
+        preflight_checks=[
+            "deployment_allowlist", "autonomy_label", "stateless_proof",
+            "service_version", "remaining_capacity", "change_freeze", "rollback_route",
+        ],
+        rollback_action_id="swarm.rollback-service",
+        implementation_status="executable",
+    ),
+    ActionDefinition(
+        action_id="swarm.rollback-service",
+        title="回滚 Swarm 服务最近一次更新",
+        base_impact_level=ImpactLevel.I2,
+        allowed_environments=["staging", "production"],
+        max_targets=1,
+        min_healthy_replicas=1,
+        reversible=False,
+        dry_run_supported=True,
+        preflight_checks=[
+            "deployment_allowlist", "autonomy_label", "stateless_proof", "change_freeze",
+        ],
+        implementation_status="executable",
+    ),
+    ActionDefinition(
         action_id="mini-drop.cleanup-expired-cache",
         title="清理 Mini-Drop 自身过期诊断缓存",
         base_impact_level=ImpactLevel.I1,

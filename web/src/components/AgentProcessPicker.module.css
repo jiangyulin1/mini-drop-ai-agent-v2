@@ -1,0 +1,61 @@
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.searchRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  align-items: start;
+  gap: 8px;
+}
+
+.pidInput {
+  width: 100%;
+}
+
+.feedback {
+  padding-block: 6px;
+}
+
+.results {
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 9px;
+  background: var(--app-surface-subtle);
+}
+
+.option {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.option strong,
+.option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.option small {
+  color: var(--app-text-secondary);
+  font-size: 10px;
+}
+
+.safetyHint {
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  .searchRow,
+  .results {
+    grid-template-columns: 1fr;
+  }
+}

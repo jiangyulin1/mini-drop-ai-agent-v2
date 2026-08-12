@@ -15,7 +15,7 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -39,6 +39,10 @@ from server.app.models import (
     DiagnosisRunModel,
     DiagnosisSessionModel,
     DiagnosisToolResultModel,
+    ActionAttemptModel,
+    CaseCommandModel,
+    CaseRuntimeLeaseModel,
+    SystemControlModel,
     IncidentCaseModel,
     InvestigationIterationModel,
     ModelAttemptModel,
@@ -601,6 +605,105 @@ class SqlRepository:
             })
             return case.to_dict()
 
+    def update_case_agent_loop(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        actor_id: str,
+        loop: dict[str, Any],
+        event_type: str,
+        detail: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Persist autonomous loop progress in the Case recovery envelope."""
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if case.state in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
+                return case.to_dict()
+            case.recovery_json = {**(case.recovery_json or {}), "agent_loop": loop}
+            case.current_activity_json = {
+                "status": str(loop.get("phase") or "unknown").lower(),
+                "message": event_type,
+                "diagnosis_session_id": loop.get("diagnosis_id"),
+            }
+            case.updated_at = now
+            case.row_version += 1
+            session.add(CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type=event_type,
+                actor_id=actor_id,
+                payload_json={"agent_loop": loop, **detail},
+                created_at=now,
+            ))
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+                "agent_phase": loop.get("phase"),
+            })
+            return case.to_dict()
+
+    def update_case_instance_pid(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        actor_id: str,
+        agent_id: str,
+        previous_pid: int,
+        new_pid: int,
+        container_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Refresh a replaced process identity without invalidating diagnosis history."""
+        if new_pid <= 0:
+            raise ValueError("INVALID_PID")
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            scope = dict(case.target_scope_json or {})
+            instances = [dict(item) for item in scope.get("instances") or []]
+            matched = False
+            for item in instances:
+                if item.get("agent_id") != agent_id or int(item.get("pid") or 0) != int(previous_pid):
+                    continue
+                item["pid"] = int(new_pid)
+                if container_id:
+                    item["container_id"] = container_id
+                matched = True
+            if not matched:
+                return case.to_dict()
+            scope["instances"] = instances
+            case.target_scope_json = scope
+            case.updated_at = now
+            case.row_version += 1
+            session.add(CaseEventModel(
+                case_id=case.id,
+                tenant_id=case.tenant_id,
+                event_type="agent_target_refreshed",
+                actor_id=actor_id,
+                payload_json={
+                    "agent_id": agent_id,
+                    "previous_pid": previous_pid,
+                    "new_pid": new_pid,
+                    "container_id": container_id,
+                },
+                created_at=now,
+            ))
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+            })
+            return case.to_dict()
+
     def attach_case_diagnosis(
         self,
         case_id: str,
@@ -1025,6 +1128,287 @@ class SqlRepository:
                 InvestigationIterationModel.case_id == case_id,
                 InvestigationIterationModel.tenant_id == tenant_id,
             ).order_by(InvestigationIterationModel.iteration_no.desc()).offset(offset).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    # ------------------------------------------------------------------
+    # Action attempts (durable registered-action lifecycle)
+    # ------------------------------------------------------------------
+
+    def record_action_attempt(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        attempt_id: str,
+        action_id: str,
+        operation_key: str,
+        phase: str,
+        parameters: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        actor_id: str = "mini-drop-autonomy",
+    ) -> dict[str, Any]:
+        """Upsert one action-attempt phase by (case, operation_key, phase).
+
+        幂等：Control 重启后重放同一操作键的同一阶段不会产生重复行。
+        """
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            existing = session.query(ActionAttemptModel).filter(
+                ActionAttemptModel.case_id == case_id,
+                ActionAttemptModel.tenant_id == tenant_id,
+                ActionAttemptModel.operation_key == operation_key,
+                ActionAttemptModel.phase == phase,
+            ).first()
+            if existing is not None:
+                existing.action_id = action_id
+                existing.parameters_json = parameters or existing.parameters_json or {}
+                existing.result_json = result or existing.result_json or {}
+                existing.row_version += 1
+                existing.updated_at = now
+                row = existing
+            else:
+                row = ActionAttemptModel(
+                    id=attempt_id or f"act_{uuid4().hex[:16]}",
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    action_id=action_id,
+                    operation_key=operation_key,
+                    phase=phase,
+                    parameters_json=parameters or {},
+                    result_json=result or {},
+                    row_version=1,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            session.flush()
+            session.add(CaseEventModel(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                event_type=f"action_attempt_{phase}",
+                actor_id=actor_id,
+                payload_json={
+                    "attempt_id": row.id,
+                    "action_id": action_id,
+                    "operation_key": operation_key,
+                },
+                created_at=now,
+            ))
+            return row.to_dict()
+
+    def list_action_attempts(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(ActionAttemptModel).filter(
+                ActionAttemptModel.case_id == case_id,
+                ActionAttemptModel.tenant_id == tenant_id,
+            ).order_by(ActionAttemptModel.created_at.asc()).offset(offset).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    # ------------------------------------------------------------------
+    # Case Supervisor: runtime leases + queued commands
+    # ------------------------------------------------------------------
+
+    def acquire_case_lease(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        owner: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """CAS 获取 Case 短租约；已被他人持有且未过期时返回 False。"""
+        now = now_utc()
+        until = now + timedelta(seconds=ttl_seconds)
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None or case.state in {"STOPPED", "RESOLVED"}:
+                return False
+            lease = session.query(CaseRuntimeLeaseModel).filter(
+                CaseRuntimeLeaseModel.case_id == case_id,
+                CaseRuntimeLeaseModel.tenant_id == tenant_id,
+            ).first()
+            if lease is not None:
+                held_until = lease.lease_until
+                if held_until.tzinfo is None:
+                    held_until = held_until.replace(tzinfo=timezone.utc)
+                if held_until >= now and lease.owner != owner:
+                    return False
+                # 过期或被同一 owner 重新竞争 → 更新持有。
+                lease.owner = owner
+                lease.lease_until = until
+                lease.row_version += 1
+                lease.updated_at = now
+            else:
+                session.add(CaseRuntimeLeaseModel(
+                    id=f"lease_{uuid4().hex}",
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    owner=owner,
+                    lease_until=until,
+                    row_version=1,
+                    created_at=now,
+                    updated_at=now,
+                ))
+            session.commit()
+            return True
+
+    def renew_case_lease(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        owner: str,
+        ttl_seconds: int,
+    ) -> bool:
+        now = now_utc()
+        with self._write_session() as session:
+            lease = session.query(CaseRuntimeLeaseModel).filter(
+                CaseRuntimeLeaseModel.case_id == case_id,
+                CaseRuntimeLeaseModel.tenant_id == tenant_id,
+                CaseRuntimeLeaseModel.owner == owner,
+            ).first()
+            if lease is None:
+                return False
+            lease.lease_until = now + timedelta(seconds=ttl_seconds)
+            lease.row_version += 1
+            lease.updated_at = now
+            session.commit()
+            return True
+
+    def release_case_lease(self, case_id: str, tenant_id: str, owner: str) -> None:
+        with self._write_session() as session:
+            session.query(CaseRuntimeLeaseModel).filter(
+                CaseRuntimeLeaseModel.case_id == case_id,
+                CaseRuntimeLeaseModel.tenant_id == tenant_id,
+                CaseRuntimeLeaseModel.owner == owner,
+            ).delete(synchronize_session=False)
+            session.commit()
+
+    def list_unleased_cases(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """返回可被推进的非终态自治 Case（未被有效租约持有）。"""
+        now = now_utc()
+        with self._read_session() as session:
+            held = {
+                row[0] for row in session.query(CaseRuntimeLeaseModel.case_id).filter(
+                    CaseRuntimeLeaseModel.tenant_id == tenant_id,
+                    CaseRuntimeLeaseModel.lease_until >= now,
+                ).all()
+            }
+            rows = session.query(IncidentCaseModel).filter(
+                IncidentCaseModel.tenant_id == tenant_id,
+                IncidentCaseModel.run_mode == "AUTHORIZED_AUTONOMY",
+                IncidentCaseModel.state.notin_(
+                    {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"},
+                ),
+            ).order_by(IncidentCaseModel.updated_at.asc()).offset(offset).limit(limit).all()
+            return [row.to_dict() for row in rows if row.id not in held]
+
+    def enqueue_case_command(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        command_type: str,
+        idempotency_key: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            existing = session.query(CaseCommandModel).filter(
+                CaseCommandModel.case_id == case_id,
+                CaseCommandModel.tenant_id == tenant_id,
+                CaseCommandModel.idempotency_key == idempotency_key,
+            ).first()
+            if existing is not None:
+                return existing.to_dict()
+            row = CaseCommandModel(
+                id=f"cmd_{uuid4().hex}",
+                case_id=case_id,
+                tenant_id=tenant_id,
+                command_type=command_type,
+                idempotency_key=idempotency_key,
+                status="PENDING",
+                payload_json=payload or {},
+                created_at=now,
+            )
+            session.add(row)
+            session.commit()
+            return row.to_dict()
+
+    def list_pending_case_commands(
+        self, case_id: str, tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(CaseCommandModel).filter(
+                CaseCommandModel.case_id == case_id,
+                CaseCommandModel.tenant_id == tenant_id,
+                CaseCommandModel.status == "PENDING",
+            ).order_by(CaseCommandModel.created_at.asc()).all()
+            return [row.to_dict() for row in rows]
+
+    def complete_case_command(self, command_id: str) -> None:
+        with self._write_session() as session:
+            row = session.get(CaseCommandModel, command_id)
+            if row is not None:
+                row.status = "DONE"
+                row.processed_at = now_utc()
+                session.commit()
+
+    # ------------------------------------------------------------------
+    # Global governance controls (Red Button, capability rotation epoch)
+    # ------------------------------------------------------------------
+
+    def get_system_control(self, control_name: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.get(SystemControlModel, control_name)
+            return row.to_dict() if row is not None else None
+
+    def set_system_control(
+        self,
+        control_name: str,
+        *,
+        enabled: bool,
+        value: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._write_session() as session:
+            row = session.get(SystemControlModel, control_name)
+            if row is None:
+                row = SystemControlModel(
+                    control_name=control_name, enabled=enabled,
+                    value_json=value or {}, updated_at=now_utc(),
+                )
+                session.add(row)
+            else:
+                row.enabled = enabled
+                row.value_json = value if value is not None else row.value_json or {}
+                row.updated_at = now_utc()
+            session.commit()
+            return row.to_dict()
+
+    def list_system_controls(self) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(SystemControlModel).order_by(
+                SystemControlModel.control_name.asc(),
+            ).all()
             return [row.to_dict() for row in rows]
 
     # ------------------------------------------------------------------
