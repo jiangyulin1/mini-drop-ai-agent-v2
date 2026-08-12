@@ -18,6 +18,7 @@ services:
       SQLITE_PATH: /data/mini_drop.db
       MINI_DROP_ARTIFACT_ROOT: /tmp/mini-drop
       MINIO_AUTO_CREATE_BUCKET: "0"
+      MINI_DROP_REQUIRE_STORAGE: "0"
       MINI_DROP_GRPC_AUTH_ENABLED: "0"
     depends_on: !reset []
     volumes:

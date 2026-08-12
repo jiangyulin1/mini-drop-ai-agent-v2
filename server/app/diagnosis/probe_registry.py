@@ -141,7 +141,6 @@ def choose_probe_ids(symptom: str) -> list[str]:
     """确定性策略先查低风险指标，再选择一个可区分假设的深度探针。"""
     mapping = {
         "cpu_saturation": ["host_process_metrics", "process_cpu_profile"],
-        "latency_increase": ["host_process_metrics", "process_cpu_profile"],
         "io_degradation": ["host_process_metrics", "process_io_latency"],
         "noisy_neighbor": ["host_process_metrics", "process_io_latency"],
         "memory_pressure": ["process_memory_map", "host_process_metrics"],

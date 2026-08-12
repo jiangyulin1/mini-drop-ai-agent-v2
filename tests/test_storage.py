@@ -27,6 +27,15 @@ class TestEnsureBucket:
 
             mock_minio.make_bucket.assert_not_called()
 
+    def test_availability_probe_is_read_only(self):
+        with mock.patch.object(store, "_client") as mock_client:
+            mock_client.return_value.bucket_exists.return_value = True
+
+            assert store.bucket_available("existing-bucket") is True
+
+            mock_client.return_value.bucket_exists.assert_called_once_with("existing-bucket")
+            mock_client.return_value.make_bucket.assert_not_called()
+
 
 class TestUploadFile:
     def test_upload_returns_size(self, tmp_path):

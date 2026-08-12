@@ -23,3 +23,20 @@ def test_server_warning_log_uses_stderr(capsys):
 
     assert record["level"] == "warning"
     assert record["event"] == "slow_request"
+
+
+def test_server_log_redacts_credentials(capsys):
+    log_event(
+        "error",
+        "dependency_failed",
+        api_key="should-not-appear",
+        error="postgresql://user:db-password@db.internal/app Bearer token-value",
+        nested={"access_token": "nested-secret", "status": "failed"},
+    )
+
+    record = json.loads(capsys.readouterr().err)
+
+    assert record["api_key"] == "[REDACTED]"
+    assert record["nested"] == {"access_token": "[REDACTED]", "status": "failed"}
+    assert "db-password" not in record["error"]
+    assert "token-value" not in record["error"]

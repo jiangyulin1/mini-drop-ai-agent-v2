@@ -72,6 +72,19 @@ def ensure_bucket(bucket: str) -> None:
         client.make_bucket(bucket)
 
 
+def bucket_available(bucket: str) -> bool:
+    """Return whether the configured bucket is reachable and exists.
+
+    Unlike :func:`ensure_bucket`, this probe is deliberately read-only so it
+    is safe to call from liveness/readiness endpoints at a high frequency.
+    Connectivity and authorization errors are allowed to propagate so callers
+    can distinguish them from a genuinely missing bucket.
+    """
+    if not bucket:
+        raise ValueError("bucket must not be empty")
+    return bool(_client().bucket_exists(bucket))
+
+
 def upload_file(
     local_path: str,
     bucket: str,

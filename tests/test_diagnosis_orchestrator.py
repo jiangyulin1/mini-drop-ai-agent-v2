@@ -136,6 +136,38 @@ def test_non_blocking_model_note_does_not_stop_resolved_scope(
     assert data["child_task_ids"]
 
 
+def test_zero_model_budget_forces_deterministic_intent(client: TestClient, monkeypatch):
+    monkeypatch.setattr(orchestrator_module, "is_feature_enabled", lambda feature: feature == "nlp")
+
+    def fail_if_model_is_used(*args, **kwargs):
+        raise AssertionError("model-backed intent parser must not run with zero model budget")
+
+    monkeypatch.setattr(orchestrator_module, "parse_diagnosis_intent", fail_if_model_is_used)
+    payload = _payload()
+    payload["budget"] = {"max_model_calls": 0}
+
+    response = client.post("/api/v1/diagnoses", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["budget_used"]["model_calls"] == 0
+
+
+def test_case_path_disables_global_feedback_priors_by_default(
+    client: TestClient,
+    monkeypatch,
+):
+    monkeypatch.delenv("MINI_DROP_CASE_FEEDBACK_PRIORS_ENABLED", raising=False)
+
+    def fail_if_global_priors_are_read():
+        raise AssertionError("Case diagnosis must not consume global feedback priors by default")
+
+    monkeypatch.setattr(repo, "get_feedback_priors", fail_if_global_priors_are_read)
+
+    response = client.post("/api/v1/diagnoses", json=_payload())
+
+    assert response.status_code == 200
+
+
 def test_missing_target_anchor_does_not_expand_to_other_service(client: TestClient):
     payload = _payload()
     payload["context"]["instances"][0]["service_id"] = "service-b"

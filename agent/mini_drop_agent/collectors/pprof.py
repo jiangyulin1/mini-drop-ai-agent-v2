@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
-import time
 from typing import Any
 
 from agent.mini_drop_agent.collectors.base import CollectorResult, CollectorTask

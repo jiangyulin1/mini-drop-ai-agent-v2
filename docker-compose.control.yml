@@ -57,8 +57,10 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
       MINIO_AUTO_CREATE_BUCKET: "1"
+      MINI_DROP_REQUIRE_STORAGE: "1"
       MINI_DROP_API_AUTH_ENABLED: "1"
       MINI_DROP_API_KEY: ${MINI_DROP_API_KEY:?set MINI_DROP_API_KEY}
+      MINI_DROP_AUTH_COOKIE_SECURE: "1"
       MINI_DROP_GRPC_AUTH_ENABLED: "1"
       MINI_DROP_GRPC_TOKEN: ${MINI_DROP_GRPC_TOKEN:?set MINI_DROP_GRPC_TOKEN}
       MINI_DROP_GRPC_SECURE: "1"
@@ -89,7 +91,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8191/api/healthz?core_only=true' >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8191/api/readyz?core_only=true' >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

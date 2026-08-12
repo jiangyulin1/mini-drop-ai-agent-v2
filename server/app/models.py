@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -15,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -284,6 +283,10 @@ class IncidentCaseModel(Base):
         String(128), ForeignKey("diagnosis_sessions.id"), nullable=True, index=True,
     )
     source_task_id = Column(String(128), ForeignKey("tasks.id"), nullable=True, index=True)
+    initial_task_ids = Column(JSON, nullable=True)
+    target_session_id = Column(
+        String(128), ForeignKey("diagnostic_target_sessions.id"), nullable=True, index=True,
+    )
     title = Column(String(256), nullable=False)
     problem_description = Column(Text, nullable=False)
     recovery_goal = Column(Text, nullable=False)
@@ -312,6 +315,8 @@ class IncidentCaseModel(Base):
             "created_by": self.created_by,
             "diagnosis_session_id": self.diagnosis_session_id,
             "source_task_id": self.source_task_id,
+            "initial_task_ids": self.initial_task_ids or [],
+            "target_session_id": self.target_session_id,
             "title": self.title,
             "problem_description": self.problem_description,
             "recovery_goal": self.recovery_goal,
@@ -648,7 +653,7 @@ class ActionAttemptModel(Base):
     tenant_id = Column(String(128), nullable=False, index=True)
     action_id = Column(String(128), nullable=False, index=True)
     operation_key = Column(String(256), nullable=False, index=True)
-    phase = Column(String(32), nullable=False, index=True)
+    phase = Column(String(32), nullable=False)
     parameters_json = Column(JSON, default=dict)
     result_json = Column(JSON, default=dict)
     row_version = Column(Integer, nullable=False, server_default="1")
@@ -723,7 +728,7 @@ class CaseCommandModel(Base):
 
     id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
-    tenant_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False)
     command_type = Column(String(32), nullable=False)
     idempotency_key = Column(String(256), nullable=False)
     status = Column(String(16), nullable=False, default="PENDING", index=True)
@@ -762,6 +767,154 @@ class SystemControlModel(Base):
             "value": self.value_json or {},
             "updated_at": self.updated_at,
         }
+
+
+# These compatibility models keep the ORM metadata aligned with the durable
+# schema introduced by migrations 0011-0014.  The corresponding services are
+# deliberately optional today, but omitting their tables from Base.metadata
+# makes Alembic propose destructive drops during every release check.
+class ServiceChangeModel(Base):
+    __tablename__ = "service_changes"
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_service_change_tenant"),
+        Index("ix_service_changes_tenant_service", "tenant_id", "service_id", "changed_at"),
+    )
+
+    id = Column(String(128), primary_key=True)
+    tenant_id = Column(String(128), nullable=False)
+    service_id = Column(String(128), nullable=False)
+    environment = Column(String(64), nullable=False)
+    change_type = Column(String(32), nullable=False)
+    title = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    changed_at = Column(DateTime(timezone=True), nullable=False)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class CaseRecoveryPlanModel(Base):
+    __tablename__ = "case_recovery_plans"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "tenant_id"],
+            ["incident_cases.id", "incident_cases.tenant_id"],
+            name="fk_recovery_plan_case_tenant",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("dry_run_attempt_id", name="uq_case_recovery_plans_dry_run_attempt_id"),
+        Index("ix_recovery_plan_case_status", "case_id", "tenant_id", "status"),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False)
+    tenant_id = Column(String(128), nullable=False)
+    diagnosis_session_id = Column(String(128), nullable=True, index=True)
+    action_id = Column(String(128), nullable=False, index=True)
+    parameters_json = Column(JSON, nullable=True)
+    value_after_fix = Column(Text, nullable=True)
+    verification_method = Column(Text, nullable=True)
+    status = Column(String(40), nullable=False, index=True)
+    policy_json = Column(JSON, nullable=True)
+    dry_run_attempt_id = Column(String(128), nullable=True)
+    dry_run_json = Column(JSON, nullable=True)
+    execution_json = Column(JSON, nullable=True)
+    verification_json = Column(JSON, nullable=True)
+    rollback_json = Column(JSON, nullable=True)
+    requires_approval = Column(Integer, nullable=False, server_default="1")
+    approved_by = Column(String(128), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    row_version = Column(Integer, nullable=False, server_default="0")
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class DiagnosticTargetSessionModel(Base):
+    __tablename__ = "diagnostic_target_sessions"
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_target_session_tenant"),
+        UniqueConstraint(
+            "tenant_id", "environment", "service_id",
+            name="uq_target_session_tenant_environment_service",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    service_id = Column(String(128), nullable=False, index=True)
+    environment = Column(String(64), nullable=False, index=True)
+    display_name = Column(String(256), nullable=False)
+    target_scope_json = Column(JSON, nullable=True)
+    baseline_json = Column(JSON, nullable=True)
+    signal_policy_json = Column(JSON, nullable=True)
+    status = Column(String(24), nullable=False, index=True)
+    row_version = Column(Integer, nullable=False, server_default="0")
+    latest_signal_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class TargetSignalModel(Base):
+    __tablename__ = "target_signals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["target_session_id", "tenant_id"],
+            ["diagnostic_target_sessions.id", "diagnostic_target_sessions.tenant_id"],
+            name="fk_target_signal_session_tenant",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("target_session_id", "dedupe_key", name="uq_target_signal_dedupe"),
+    )
+
+    id = Column(String(128), primary_key=True)
+    target_session_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    signal_type = Column(String(64), nullable=False, index=True)
+    severity = Column(String(16), nullable=False, index=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    payload_json = Column(JSON, nullable=True)
+    dedupe_key = Column(String(128), nullable=False)
+    status = Column(String(24), nullable=False)
+    triggered_case_id = Column(String(128), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    profile_window_ids_json = Column(JSON, nullable=True)
+
+
+class ProfileWindowModel(Base):
+    __tablename__ = "profile_windows"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["target_session_id", "tenant_id"],
+            ["diagnostic_target_sessions.id", "diagnostic_target_sessions.tenant_id"],
+            name="fk_profile_window_session_tenant",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "target_session_id", "task_id", "window_index",
+            name="uq_profile_window_target_task_index",
+        ),
+        Index(
+            "ix_profile_window_target_time",
+            "target_session_id", "tenant_id", "window_start", "window_end",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    target_session_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    task_id = Column(String(128), ForeignKey("tasks.id"), nullable=False, index=True)
+    agent_id = Column(String(128), nullable=False, index=True)
+    target_pid = Column(Integer, nullable=False)
+    window_index = Column(Integer, nullable=False)
+    window_start = Column(DateTime(timezone=True), nullable=False, index=True)
+    window_end = Column(DateTime(timezone=True), nullable=False, index=True)
+    granularity = Column(String(24), nullable=False)
+    artifact_refs_json = Column(JSON, nullable=True)
+    meta_json = Column("metadata", JSON, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
 
 
 # ── 产物 ───────────────────────────────────────────────────────
@@ -1093,6 +1246,8 @@ class DiagnosisSessionModel(Base):
     evaluation_oracle_json = Column(JSON, default=dict)
     child_task_ids_json = Column(JSON, default=list)
     conclusion_versions_json = Column(JSON, default=list)
+    initial_evidence_loaded_json = Column(JSON, nullable=True)
+    initial_evidence_count = Column(Integer, nullable=True)
     model_version = Column(String(128), nullable=False)
     planner_version = Column(String(64), nullable=False)
     lease_owner = Column(String(128), nullable=True)
@@ -1123,6 +1278,8 @@ class DiagnosisSessionModel(Base):
             "evaluation_oracle": self.evaluation_oracle_json or {},
             "child_task_ids": self.child_task_ids_json or [],
             "conclusion_versions": self.conclusion_versions_json or [],
+            "initial_evidence_loaded": self.initial_evidence_loaded_json or [],
+            "initial_evidence_count": self.initial_evidence_count or 0,
             "model_version": self.model_version,
             "planner_version": self.planner_version,
             "lease_owner": self.lease_owner,

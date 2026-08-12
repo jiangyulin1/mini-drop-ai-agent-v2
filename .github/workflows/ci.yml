@@ -25,10 +25,14 @@ jobs:
           python -m compileall -q server/app/generated
       - name: Check repository hygiene
         run: python scripts/check_repo_hygiene.py
+      - name: Run backend static checks
+        run: python -m ruff check server agent analyzer
       - name: Check migration history and schema drift
         run: python scripts/check_migrations.py
       - name: Run backend tests
         run: python -m pytest -q
+      - name: Run deterministic AI evaluation smoke
+        run: python scripts/run_lightweight_ai_eval.py --profile smoke --output-dir /tmp/mini-drop-eval-smoke
 
   web:
     runs-on: ubuntu-24.04

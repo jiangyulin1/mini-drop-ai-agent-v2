@@ -5,9 +5,6 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-
 from server.app.ai_provider import get_ai_settings
 from server.app.rca.calibrator import calibrate, format_for_llm
 from server.app.rca.candidates import generate_candidates
@@ -15,10 +12,7 @@ from server.app.rca.evidence import collect_evidence
 from server.app.rca.llm_client import diagnose
 from server.app.rca.models import (
     DiagnosisOutcome,
-    DiagnosisReport,
-    EvidenceInput,
     FeedbackPrior,
-    RCAFeedback,
     ValidatedReport,
 )
 from server.app.rca.repair import build_repair_plan, execute_safe_actions

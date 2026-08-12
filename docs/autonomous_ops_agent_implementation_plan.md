@@ -73,7 +73,7 @@
 
 ### 30 案例 VM 最终评测（round4-final-20260812，含全部修复）
 
-30/30 完成、0 失败、0 回滚失败（runner 续跑处理了两次网络抖动）。
+30/30 完成、0 运行失败；机器摘要记录 `rollback_failures: 1`，最终健康检查通过。后续结论以该轮 `summary.json` 为准。
 
 **严格根因精确命中：15/30 → 17/30（+2）**，且关键目标案例全部提升：
 
@@ -103,7 +103,7 @@ NEG/ROBUST 拒答案例全部保持正确（含 NEG-HEALTHY、NEG-TRANSIENT、RO
 
 - **P5 数据源全量**（`data_sources.py` 扩展 + `service_baseline.py`）：OpenTelemetry Trace 连接器（服务 span/错误边，失败优雅降级）、运行时 Profile 结构化解析连接器（消费已有 JFR/pprof/py-spy 产物）、服务级历史基线（分位基线 + 多窗口 + 异常检测 ratio/severity）。
 - **P7 生产治理**（`governance.py` + 迁移 `0017_system_controls`）：全局 **Red Button**（`system_controls` 表，CaseSupervisor 推进前检查，激活即停止所有自治）、**影子模式**（Case 只诊断不执行动作，autonomous_agent 在动作前跳过并记录）、**Capability Key 轮换纪元**（`capability_key_epoch` 控制项，轮换后旧 Key 失效）、控制 API（`GET/POST /api/v1/controls` + `/capability-key/issue`）。韧性测试覆盖连接器失败降级、命令队列积压排空、Agent 离线分区排除。
-- **P6 后端支撑**：Case 详情新增 `agent_progress`（agent 阶段/诊断状态/动作进度/连续稳定验证进度/恢复进度百分比），供持续会话首页展示。
+- **P6 持续会话前端**：Case 详情新增 `agent_progress`（agent 阶段/诊断状态/动作进度/连续稳定验证进度/恢复进度百分比）；React 工作区已提供持续会话首页、单一主操作、暂停/继续/停止/纠正、技术数据台、证据工作台、任务产物视图和 SSE 断线续传。
 
 本地 `pytest tests/` **681 passed**（新增 Trace/Profile/基线/治理/韧性/P6 测试）。已部署 VM（迁移至 **0017**），控制 API 与三案例冒烟（GO-LOCK/PAYMENT/RUNTIME-STALL 分类 + causal_graph coverage）全部正常。
 
@@ -116,11 +116,11 @@ NEG/ROBUST 拒答案例全部保持正确（含 NEG-HEALTHY、NEG-TRANSIENT、RO
 | P2 Case Supervisor 后台持续推进 | ✅ |
 | P3 拓扑身份图 + 因果图 | ✅ |
 | P4 真实自动恢复 + VerificationContract | ✅ |
-| P5 数据源（Prometheus/OTel/Profile/日志模板/基线） | ✅（OTel/JFR 深度可视化等 web 侧待 P6） |
-| P6 前端 | ⚠️ 后端支撑就绪，React 界面增强待做 |
+| P5 数据源（Prometheus/OTel/Profile/日志模板/基线） | ✅（结构化证据已进入技术工作台；更深的 OTel/JFR 专用可视化可继续增强） |
+| P6 前端 | ✅ 持续会话、Agent 进度、授权/纠正、技术数据台、证据与产物视图、SSE 续传 |
 | P7 生产治理 | ✅ 服务端（红按钮/影子/密钥轮换/韧性）；OIDC 外部 IdP 集成待生产接入 |
 
-服务端主干全部完成并测试（**681 passed**、VM 迁移至 0017）。剩余为纯前端 React 增强（P6 界面）与外部 IdP 集成（P7 OIDC），属部署/UI 工程。
+服务端和 P6 前端主干均已完成。2026-08-12 当前本地验证为后端 **714 passed**、前端 **49 passed**，前端 ESLint 与生产构建通过；完整发布门禁仍以 CI 和 release run 的机器结果为准。剩余生产接入项主要是外部 IdP/OIDC、多 Control 高可用环境验收，以及 OTel/JFR 等专用深度可视化增强。
 
 ## 1. 目标和完成定义
 

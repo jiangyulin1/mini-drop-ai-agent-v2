@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import queue
 import threading
 import weakref
@@ -98,6 +96,12 @@ class EventBus:
             for index, event in enumerate(self._history):
                 if event["id"] == since:
                     return list(self._history[index + 1 :])
+            # Numeric cursors are process-local sequence IDs. If the requested
+            # ID has fallen out of the bounded history or the server restarted,
+            # replay everything still retained rather than silently dropping
+            # events by comparing an ID with an ISO timestamp.
+            if since.isdigit():
+                return list(self._history)
             return [e for e in self._history if e["timestamp"] > since]
 
 

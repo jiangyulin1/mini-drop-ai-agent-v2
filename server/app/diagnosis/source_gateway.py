@@ -21,6 +21,8 @@ from server.app.diagnosis.authorization import (
     AuthorizationDecision,
     AuthorizationEvaluationRequest,
     DEFAULT_SOURCE_REGISTRY,
+    SourceDefinition,
+    SourceRegistry,
     evaluate_source_access,
 )
 from server.app.diagnosis.schemas import StrictModel
@@ -167,7 +169,14 @@ class TopologyContextConnector:
 
 
 class SourceGateway:
-    def __init__(self, repo, orchestrator):
+    def __init__(
+        self,
+        repo,
+        orchestrator,
+        *,
+        extra_connectors: dict[str, SourceConnector] | None = None,
+        extra_source_definitions: list[SourceDefinition] | None = None,
+    ):
         self.repo = repo
         self.orchestrator = orchestrator
         # data_sources 连接器懒加载，避免与 source_gateway 循环导入。
@@ -186,6 +195,17 @@ class SourceGateway:
             "otel-traces": OpenTelemetryTraceConnector(),
             "runtime-profile-parser": RuntimeProfileConnector(repo),
         }
+        extras = extra_connectors or {}
+        collisions = set(extras).intersection(self._connectors)
+        if collisions:
+            raise ValueError(f"duplicate source connector ids: {sorted(collisions)}")
+        self._connectors.update(extras)
+
+        definitions = DEFAULT_SOURCE_REGISTRY.list() + list(extra_source_definitions or [])
+        self.registry = SourceRegistry(definitions)
+
+    def list_sources(self) -> list[SourceDefinition]:
+        return self.registry.list()
 
     def query(
         self,
@@ -220,7 +240,7 @@ class SourceGateway:
             tenant_id=request.tenant_id,
             include_inactive=True,
         )
-        decision = evaluate_source_access(evaluation, grants)
+        decision = evaluate_source_access(evaluation, grants, registry=self.registry)
         if decision.decision != AuthorizationDecision.AUTO_GRANTED or not decision.matched_grant_id:
             self.repo.record_source_access_denied(
                 principal_id=principal_id,
@@ -264,7 +284,7 @@ class SourceGateway:
 
         raw = self._connectors[source_id].execute(request)
         raw_size = len(json.dumps(raw, ensure_ascii=False, default=str).encode("utf-8"))
-        source = DEFAULT_SOURCE_REGISTRY.get(source_id)
+        source = self.registry.get(source_id)
         if source is None:
             raise SourceGatewayError("SOURCE_NOT_REGISTERED", 500)
         projection = optimize_evidence_context(

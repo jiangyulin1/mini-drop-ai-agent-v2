@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0",
+  "dataset": "mini-drop-lightweight-ai-eval",
+  "version": "1.0.0",
+  "purpose": "Fast deterministic diagnosis regression plus VM-first release sampling",
+  "scenario_file": "scenarios/scenarios.json",
+  "sources": [
+    {
+      "name": "OpenTelemetry Demo feature flags",
+      "url": "https://opentelemetry.io/docs/demo/feature-flags/",
+      "use": "Application failure, dependency outage, CPU, memory growth, queue and latency patterns"
+    },
+    {
+      "name": "Microsoft AIOpsLab",
+      "url": "https://github.com/microsoft/AIOpsLab",
+      "use": "Detection/localization/analysis/mitigation task separation and reproducible fault lifecycle"
+    },
+    {
+      "name": "DeathStarBench",
+      "url": "https://github.com/delimitrou/DeathStarBench",
+      "use": "Multi-service topology, contention and downstream propagation patterns"
+    },
+    {
+      "name": "Model Context Protocol tool specification",
+      "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+      "use": "Treat tool metadata as untrusted and keep human authorization in the loop"
+    }
+  ],
+  "profiles": {
+    "smoke": {
+      "mode": "offline",
+      "description": "Eight high-signal deterministic cases; intended for every local edit.",
+      "scenario_ids": [
+        "otel_payment_unreachable",
+        "otel_recommendation_cache_growth",
+        "otel_ad_high_cpu",
+        "aiopslab_target_port_misconfig",
+        "aiopslab_runtime_lock",
+        "robust_timeout_is_not_connectivity",
+        "counterfactual_neighbor_not_self",
+        "compound_disk_and_network"
+      ],
+      "pytest_targets": []
+    },
+    "quick": {
+      "mode": "offline",
+      "description": "All compact scenarios plus MCP, authorization, action and governance guardrails.",
+      "scenario_ids": "all",
+      "pytest_targets": [
+        "tests/test_mcp_integration.py",
+        "tests/test_source_gateway.py",
+        "tests/test_actuation.py",
+        "tests/test_governance.py",
+        "tests/test_recovery_verification.py"
+      ]
+    },
+    "vm-smoke": {
+      "mode": "vm",
+      "description": "Hyper-V three-node discriminating sample; the preferred pre-merge environment gate.",
+      "case_ids": [
+        "OB-SINGLE-CPU-001",
+        "OB-SINGLE-REDIS-001",
+        "OB-SINGLE-PAYMENT-001",
+        "OB-SINGLE-NOISY-CPU-001",
+        "OB-SINGLE-PARTITION-001",
+        "OB-COMPOUND-CROSS-WORKER-001",
+        "OB-NEG-HEALTHY-001"
+      ],
+      "repetitions": 1,
+      "seed": 20260812
+    },
+    "vm-release": {
+      "mode": "vm",
+      "description": "Authoritative Hyper-V release run using all ai_ops_v2 cases.",
+      "case_ids": "all",
+      "repetitions": 3,
+      "seed": 20260811
+    }
+  }
+}

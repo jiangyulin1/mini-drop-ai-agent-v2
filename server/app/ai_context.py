@@ -195,7 +195,10 @@ def optimize_evidence_context(
 
     prepared: dict[str, Any] = {}
     for key, value in payload.items():
-        if key == "top_functions" and isinstance(value, list):
+        if _SENSITIVE_KEY.search(str(key)):
+            prepared[key] = "[REDACTED]"
+            stats.redacted_fields += 1
+        elif key == "top_functions" and isinstance(value, list):
             prepared[key] = _compact_top_functions(value, effective_budget, stats)
         elif key == "sys_metrics" and isinstance(value, dict):
             prepared[key] = _compact_metrics(value, effective_budget, stats)

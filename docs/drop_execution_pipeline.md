@@ -34,8 +34,13 @@
 ## 健康检查
 
 - `/api/livez`：只表示 Server 进程存活，不因依赖故障触发无意义重启。
-- `/api/readyz`：检查数据库、对象存储，以及启用时的 Analyzer Worker；未就绪返回 HTTP 503。
-- `/api/healthz?core_only=true`：容器启动阶段使用，避免 Server 与 Analyzer 互相等待。
+- `/api/readyz`：以只读方式检查数据库、对象存储，以及启用时的 Analyzer Worker；未就绪返回 HTTP 503，适合作为流量接入和发布激活门槛。
+- `/api/readyz?core_only=true`：容器启动阶段使用，仍严格检查数据库与所需存储，但忽略 Analyzer，避免相互等待。
+- `/api/livez`：只检查 Server 进程是否存活；依赖故障不会触发重启风暴。
+
+对象存储 Bucket 只在启动阶段按 `MINIO_AUTO_CREATE_BUCKET` 初始化。健康探针不会创建或修改 Bucket；公开响应只返回稳定错误码，底层连接错误进入结构化日志，避免泄露凭据、主机名或内部拓扑。后台 Agent 离线检测、僵尸任务恢复、指标快照和诊断推进按步骤隔离失败，并通过 `mini_drop_maintenance_runs_total` 与 `mini_drop_maintenance_last_success_unixtime` 暴露运行状态，单个步骤失败不会让整个维护协程永久退出。
+
+完整和 Control 部署设置 `MINI_DROP_REQUIRE_STORAGE=1`，对象存储异常会阻止流量接入；`docker-compose.local.yml` 使用共享本地卷并设置为 `0`，健康报告显示 `storage=disabled`，不会错误等待一个未启动的 MinIO。
 
 ## OpenTelemetry Trace
 

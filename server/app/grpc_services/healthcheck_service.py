@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from mini_drop_observability.tracing import start_span
-from server.app.generated import healthcheck_pb2, healthcheck_pb2_grpc, hotmethod_pb2
+from server.app.generated import healthcheck_pb2, healthcheck_pb2_grpc
 
 
 class HealthCheckService(healthcheck_pb2_grpc.HealthCheckServicer):

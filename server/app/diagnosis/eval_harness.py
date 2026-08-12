@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from server.app.diagnosis.actions import collect_action, inspect_session_action
-from server.app.diagnosis.domain_analyzers import analyze_observations, assess_cluster, cluster_finding
+from server.app.diagnosis.domain_analyzers import analyze_observations, cluster_finding
 from server.app.diagnosis.knowledge import retrieve_knowledge
+from server.app.diagnosis.reasoner import DEFAULT_REASONER, Reasoner, assess_with_reasoner
 from server.app.diagnosis.report_verifier import verify_report
 
 
@@ -16,14 +17,33 @@ DEFAULT_SCENARIO_ROOT = Path(__file__).resolve().parents[3] / "golden_scenarios"
 
 
 def load_scenarios(root: Path | None = None) -> list[dict[str, Any]]:
+    """Load standalone scenarios and compact scenario-pack JSON arrays."""
     root = root or DEFAULT_SCENARIO_ROOT
-    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(root.glob("*.json"))]
+    scenarios: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            scenarios.extend(payload)
+        else:
+            scenarios.append(payload)
+    return scenarios
 
 
-def evaluate_scenario(scenario: dict[str, Any]) -> dict[str, Any]:
+def evaluate_scenario(
+    scenario: dict[str, Any],
+    *,
+    reasoner: Reasoner = DEFAULT_REASONER,
+) -> dict[str, Any]:
     observations = scenario["observations"]
     findings = analyze_observations(observations)
-    assessment = assess_cluster(scenario["scope"], observations)
+    decision = assess_with_reasoner(
+        scenario["scope"],
+        observations,
+        reasoner=reasoner,
+        intent={"query": scenario.get("query", "")},
+        versions={"feature_builder": "golden-observation.v1"},
+    )
+    assessment = decision.assessment or {}
     findings.append(cluster_finding(assessment))
     knowledge = retrieve_knowledge(scenario.get("query", ""), findings)
     knowledge_refs = [item["knowledge_id"] for item in knowledge]
@@ -61,8 +81,23 @@ def evaluate_scenario(scenario: dict[str, Any]) -> dict[str, Any]:
     actual_finding_types = {item["finding_type"] for item in findings}
     actual_collectors = {item.get("collector_type") for item in actions if item.get("collector_type")}
     checks = {
-        "classification": assessment["classification"] == expected["classification"],
+        "classification": _matches(expected["classification"], assessment["classification"]),
+        "root_location": _matches(
+            expected.get("root_location", assessment["root_location"]["type"]),
+            assessment["root_location"]["type"],
+        ),
+        "domain_cause": _matches(
+            expected.get("domain_cause", assessment["domain_cause"]["type"]),
+            assessment["domain_cause"]["type"],
+        ),
+        "compound": expected.get("is_compound", assessment["is_compound"])
+        == assessment["is_compound"],
+        "contributing_domains": set(expected.get("contributing_domains", [])).issubset({
+            item["domain"] for item in assessment.get("contributing_causes", [])
+        }),
         "finding_types": set(expected.get("finding_types", [])).issubset(actual_finding_types),
+        "forbidden_finding_types": not set(expected.get("forbidden_finding_types", []))
+        .intersection(actual_finding_types),
         "knowledge_refs": set(expected.get("knowledge_refs", [])).issubset(set(knowledge_refs)),
         "action_collectors": set(expected.get("action_collectors", [])).issubset(actual_collectors),
         "report_verification": verification["status"] == "passed",
@@ -74,6 +109,11 @@ def evaluate_scenario(scenario: dict[str, Any]) -> dict[str, Any]:
         "checks": checks,
         "expected": expected,
         "actual": {
+            "reasoner": {
+                "strategy_id": decision.strategy_id,
+                "strategy_version": decision.strategy_version,
+                "decision_type": decision.decision_type,
+            },
             "classification": assessment["classification"],
             "confidence_level": assessment["confidence_level"],
             "finding_types": sorted(actual_finding_types),
@@ -84,13 +124,26 @@ def evaluate_scenario(scenario: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_evaluation(root: Path | None = None) -> dict[str, Any]:
-    results = [evaluate_scenario(item) for item in load_scenarios(root)]
+def run_evaluation(
+    root: Path | None = None,
+    *,
+    scenario_ids: set[str] | None = None,
+    suite: str = "mini-drop-diagnosis-golden-v1",
+    reasoner: Reasoner = DEFAULT_REASONER,
+) -> dict[str, Any]:
+    scenarios = load_scenarios(root)
+    if scenario_ids is not None:
+        scenarios = [item for item in scenarios if item["scenario_id"] in scenario_ids]
+    results = [evaluate_scenario(item, reasoner=reasoner) for item in scenarios]
     total = len(results)
     passed = sum(1 for item in results if item["passed"])
     classification_hits = sum(1 for item in results if item["checks"]["classification"])
     return {
-        "suite": "mini-drop-diagnosis-golden-v1",
+        "suite": suite,
+        "reasoner": {
+            "strategy_id": reasoner.strategy_id,
+            "strategy_version": reasoner.strategy_version,
+        },
         "total": total,
         "passed": passed,
         "failed": total - passed,
@@ -103,6 +156,8 @@ def run_evaluation(root: Path | None = None) -> dict[str, Any]:
             "unsafe_auto_execute_count": sum(
                 1 for item in results if not item["checks"]["no_auto_execute"]
             ),
+            "root_location_accuracy": _optional_check_rate(results, "root_location", "root_location"),
+            "domain_cause_accuracy": _optional_check_rate(results, "domain_cause", "domain_cause"),
         },
         "results": results,
     }
@@ -162,10 +217,24 @@ def _evaluation_actions(
 
 def _observation_domains(observation: dict[str, Any]) -> list[str]:
     collector = observation.get("collector_type")
-    if collector == "database_metrics":
+    if collector in {"connection_probe", "database_metrics"}:
         return ["dependency"]
     if collector in {"perf_cpu", "jvm_metrics"}:
         return ["host", "process"]
     if collector == "network_metrics":
         return ["host"]
     return ["host", "process", "container"]
+
+
+def _matches(expected: Any, actual: Any) -> bool:
+    values = expected if isinstance(expected, list) else [expected]
+    return actual in values
+
+
+def _optional_check_rate(
+    results: list[dict[str, Any]], expected_key: str, check_key: str,
+) -> float | None:
+    specified = [item for item in results if expected_key in item["expected"]]
+    if not specified:
+        return None
+    return round(sum(1 for item in specified if item["checks"][check_key]) / len(specified), 4)

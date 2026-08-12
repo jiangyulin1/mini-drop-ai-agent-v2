@@ -20,7 +20,7 @@ COPY analyzer/ ./analyzer/
 COPY mini_drop_observability/ ./mini_drop_observability/
 COPY migrations/ ./migrations/
 
-RUN pip install --no-cache-dir -e . "grpcio-tools>=1.80,<1.81"
+RUN pip install --no-cache-dir -e ".[mcp]" "grpcio-tools>=1.80,<1.81"
 
 COPY proto/ ./proto/
 RUN cd proto && bash compile.sh
@@ -28,7 +28,7 @@ RUN cd proto && bash compile.sh
 COPY deploy/scripts/server-entrypoint.sh /usr/local/bin/server-entrypoint
 RUN chmod 0755 /usr/local/bin/server-entrypoint
 
-EXPOSE 8191 50051
+EXPOSE 8191 8192 50051
 
 ENTRYPOINT ["server-entrypoint"]
 CMD ["python", "-m", "server.app.main"]

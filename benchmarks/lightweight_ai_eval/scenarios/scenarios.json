@@ -1,0 +1,288 @@
+[
+  {
+    "scenario_id": "otel_payment_unreachable",
+    "query": "结算失败，支付服务当前不可达，请判断故障位置。",
+    "scope": {
+      "target_service": "checkoutservice",
+      "same_host_instance_ids": [],
+      "downstream_service_ids": ["paymentservice"],
+      "instances": [
+        {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 2101},
+        {"service_id": "paymentservice", "instance_id": "payment-1", "host_id": "worker2", "agent_id": "a2", "pid": 2201}
+      ]
+    },
+    "observations": [
+      {
+        "task_id": "payment-probe", "collector_type": "connection_probe", "source_family": "active_probe", "evidence_weight": 0.95,
+        "target": {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 2101},
+        "facts": {"endpoint.reachable": false, "endpoint.unreachable_count": 3, "endpoint.downstream_service": "paymentservice", "endpoint.container_state": "paused"},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-payment-probe"]
+      }
+    ],
+    "expected": {
+      "classification": "downstream_dependency", "root_location": "downstream", "domain_cause": "network",
+      "finding_types": ["endpoint_unreachable", "downstream_dependency"], "knowledge_refs": ["distributed.downstream_pressure"],
+      "action_collectors": ["sys_metrics"]
+    }
+  },
+  {
+    "scenario_id": "otel_recommendation_cache_growth",
+    "query": "推荐服务缓存不断增长，RSS 和容器内存持续上升。",
+    "scope": {
+      "target_service": "recommendationservice", "same_host_instance_ids": [], "downstream_service_ids": [],
+      "instances": [{"service_id": "recommendationservice", "instance_id": "recommendation-1", "host_id": "worker1", "agent_id": "a1", "pid": 3101}]
+    },
+    "observations": [
+      {
+        "task_id": "recommendation-memory", "collector_type": "sys_metrics", "source_family": "procfs_metrics", "evidence_weight": 0.95,
+        "target": {"service_id": "recommendationservice", "instance_id": "recommendation-1", "host_id": "worker1", "agent_id": "a1", "pid": 3101},
+        "facts": {"vmrss_mb": 780, "vmrss_mb_max": 920, "vmrss_trend": "increasing", "vmrss_slope_bytes_per_second": 3145728, "container_memory_usage_ratio": 0.78},
+        "top_function": {"name": "", "percent": 0}, "pressure": {"memory": true}, "evidence_refs": ["ev-recommendation-memory"]
+      }
+    ],
+    "expected": {
+      "classification": "self_code_or_process_pressure", "root_location": "self", "domain_cause": "memory",
+      "finding_types": ["rss_growth"], "knowledge_refs": ["linux.memory.process_growth"],
+      "action_collectors": ["sys_metrics", "perf_cpu"]
+    }
+  },
+  {
+    "scenario_id": "otel_ad_high_cpu",
+    "query": "广告服务 CPU 持续升高，并出现稳定代码热点。",
+    "scope": {
+      "target_service": "adservice", "same_host_instance_ids": [], "downstream_service_ids": [],
+      "instances": [{"service_id": "adservice", "instance_id": "ad-1", "host_id": "worker1", "agent_id": "a1", "pid": 3201}]
+    },
+    "observations": [
+      {
+        "task_id": "ad-cpu", "collector_type": "perf_cpu", "source_family": "profile", "evidence_weight": 0.95,
+        "target": {"service_id": "adservice", "instance_id": "ad-1", "host_id": "worker1", "agent_id": "a1", "pid": 3201},
+        "facts": {"avg_cpu_user_pct": 91, "avg_cpu_sys_pct": 3, "process_cpu_core_usage": 2.8},
+        "top_function": {"name": "generateAds", "percent": 68}, "pressure": {"cpu": true}, "evidence_refs": ["ev-ad-cpu", "ev-ad-profile"]
+      }
+    ],
+    "expected": {
+      "classification": "self_code_or_process_pressure", "root_location": "self", "domain_cause": "cpu",
+      "finding_types": ["userland_hotspot"], "knowledge_refs": ["linux.cpu.process_pressure"],
+      "action_collectors": ["sys_metrics", "perf_cpu"]
+    }
+  },
+  {
+    "scenario_id": "otel_image_slow_load_network_delay",
+    "query": "前端图片加载持续变慢，链路出现高延迟和重传。",
+    "scope": {
+      "target_service": "frontend", "same_host_instance_ids": [], "downstream_service_ids": ["imageprovider"],
+      "instances": [{"service_id": "frontend", "instance_id": "frontend-1", "host_id": "worker1", "agent_id": "a1", "pid": 3301}]
+    },
+    "observations": [
+      {
+        "task_id": "image-network", "collector_type": "network_metrics", "source_family": "network", "evidence_weight": 0.95,
+        "target": {"service_id": "frontend", "instance_id": "frontend-1", "host_id": "worker1", "agent_id": "a1", "pid": 3301},
+        "facts": {"tcp_retransmit_pct": 7.5, "network_latency_p95_ms": 820, "tcp_timeout_delta": 6},
+        "top_function": {"name": "", "percent": 0}, "pressure": {"network": true}, "evidence_refs": ["ev-image-network"]
+      }
+    ],
+    "expected": {
+      "classification": "network_degradation", "root_location": "downstream", "domain_cause": "network",
+      "finding_types": ["packet_loss_or_latency"], "knowledge_refs": ["linux.network.retransmit"],
+      "action_collectors": ["sys_metrics"]
+    }
+  },
+  {
+    "scenario_id": "otel_ad_intermittent_failure_insufficient",
+    "query": "广告接口偶发失败，但当前只有少量错误日志，没有资源或端点证据。",
+    "scope": {
+      "target_service": "adservice", "same_host_instance_ids": [], "downstream_service_ids": [],
+      "instances": [{"service_id": "adservice", "instance_id": "ad-1", "host_id": "worker1", "agent_id": "a1", "pid": 3401}]
+    },
+    "observations": [
+      {
+        "task_id": "ad-log", "collector_type": "log_scan", "source_family": "logs", "evidence_weight": 0.9,
+        "target": {"service_id": "adservice", "instance_id": "ad-1", "host_id": "worker1", "agent_id": "a1", "pid": 3401},
+        "facts": {}, "log": {"log_files": 1, "error_count": 1, "patterns": {"application_error": 1}, "top_errors": [{"text": "ad request failed"}]},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-ad-log"]
+      }
+    ],
+    "expected": {
+      "classification": "insufficient_evidence", "root_location": "unknown", "domain_cause": "unknown",
+      "finding_types": ["error_pattern", "insufficient_evidence"], "knowledge_refs": [],
+      "action_collectors": ["sys_metrics", "perf_cpu", "ebpf_io"]
+    }
+  },
+  {
+    "scenario_id": "aiopslab_target_port_misconfig",
+    "query": "应用进程健康，但下游 Service 端点持续不可达，怀疑端口配置错误。",
+    "scope": {
+      "target_service": "frontend", "same_host_instance_ids": [], "downstream_service_ids": ["catalogservice"],
+      "instances": [{"service_id": "frontend", "instance_id": "frontend-1", "host_id": "worker1", "agent_id": "a1", "pid": 3501}]
+    },
+    "observations": [
+      {
+        "task_id": "target-port-probe", "collector_type": "connection_probe", "source_family": "active_probe", "evidence_weight": 0.95,
+        "target": {"service_id": "frontend", "instance_id": "frontend-1", "host_id": "worker1", "agent_id": "a1", "pid": 3501},
+        "facts": {"endpoint.reachable": false, "endpoint.unreachable_count": 5, "endpoint.downstream_service": "catalogservice", "endpoint.container_state": "running"},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-target-port"]
+      }
+    ],
+    "expected": {
+      "classification": "downstream_dependency", "root_location": "downstream", "domain_cause": "network",
+      "finding_types": ["endpoint_unreachable"], "knowledge_refs": ["distributed.downstream_pressure"],
+      "action_collectors": ["sys_metrics"]
+    }
+  },
+  {
+    "scenario_id": "aiopslab_runtime_lock",
+    "query": "服务仍存活但吞吐停止，运行时快照显示绝大多数线程在等待锁。",
+    "scope": {
+      "target_service": "orderservice", "same_host_instance_ids": [], "downstream_service_ids": [],
+      "instances": [{"service_id": "orderservice", "instance_id": "order-1", "host_id": "worker1", "agent_id": "a1", "pid": 3601}]
+    },
+    "observations": [
+      {
+        "task_id": "order-runtime", "collector_type": "runtime_snapshot", "source_family": "runtime", "evidence_weight": 0.95,
+        "target": {"service_id": "orderservice", "instance_id": "order-1", "host_id": "worker1", "agent_id": "a1", "pid": 3601},
+        "facts": {"runtime_type": "java", "thread_count_max": 32, "lock_waiter_count_max": 29, "blocked_thread_ratio_max": 0.96, "uninterruptible_thread_count_max": 0, "cpu_tick_delta": 1},
+        "top_function": {"name": "", "percent": 0}, "pressure": {"runtime": true}, "evidence_refs": ["ev-order-runtime"]
+      }
+    ],
+    "expected": {
+      "classification": "runtime_lock_contention", "root_location": "self", "domain_cause": "runtime",
+      "finding_types": ["lock_contention"], "knowledge_refs": [], "action_collectors": ["sys_metrics"]
+    }
+  },
+  {
+    "scenario_id": "robust_timeout_is_not_connectivity",
+    "query": "调用日志里有 timeout，但端点探针可达，当前没有其他异常。",
+    "scope": {
+      "target_service": "checkoutservice", "same_host_instance_ids": [], "downstream_service_ids": ["paymentservice"],
+      "instances": [{"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 3701}]
+    },
+    "observations": [
+      {
+        "task_id": "timeout-log", "collector_type": "log_scan", "source_family": "logs", "evidence_weight": 0.95,
+        "target": {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 3701},
+        "facts": {}, "log": {"log_files": 1, "error_count": 12, "patterns": {"timeout": 12, "downstream_endpoint": 12}, "top_errors": [{"text": "payment timeout"}]},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-timeout-log"]
+      },
+      {
+        "task_id": "reachable-probe", "collector_type": "connection_probe", "source_family": "active_probe", "evidence_weight": 0.95,
+        "target": {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 3701},
+        "facts": {"endpoint.reachable": true, "endpoint.unreachable_count": 0, "endpoint.downstream_service": "paymentservice", "endpoint.container_state": "running"},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-reachable-probe"]
+      }
+    ],
+    "expected": {
+      "classification": "insufficient_evidence", "root_location": "unknown", "domain_cause": "unknown",
+      "finding_types": ["timeout_errors", "endpoint_reachable"], "forbidden_finding_types": ["connectivity_errors"],
+      "knowledge_refs": [], "action_collectors": ["sys_metrics", "perf_cpu", "ebpf_io"]
+    }
+  },
+  {
+    "scenario_id": "counterfactual_neighbor_not_self",
+    "query": "结算服务变慢；自身指标正常，同宿主批处理进程 CPU 饱和。",
+    "scope": {
+      "target_service": "checkoutservice", "same_host_instance_ids": ["batch-1"], "downstream_service_ids": [],
+      "instances": [
+        {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 3801},
+        {"service_id": "batch", "instance_id": "batch-1", "host_id": "worker2", "agent_id": "a2", "pid": 3802}
+      ]
+    },
+    "observations": [
+      {
+        "task_id": "checkout-normal", "collector_type": "sys_metrics", "source_family": "procfs_metrics", "evidence_weight": 0.95,
+        "target": {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 3801},
+        "facts": {"avg_cpu_user_pct": 18, "avg_cpu_sys_pct": 4, "process_cpu_core_usage": 0.2},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-checkout-normal"]
+      },
+      {
+        "task_id": "batch-hot", "collector_type": "sys_metrics", "source_family": "procfs_metrics", "evidence_weight": 0.95,
+        "target": {"service_id": "batch", "instance_id": "batch-1", "host_id": "worker2", "agent_id": "a2", "pid": 3802},
+        "facts": {"avg_cpu_user_pct": 96, "avg_cpu_sys_pct": 2, "process_cpu_core_usage": 3.7},
+        "top_function": {"name": "", "percent": 0}, "pressure": {"cpu": true}, "evidence_refs": ["ev-batch-hot"]
+      }
+    ],
+    "expected": {
+      "classification": "same_host_noisy_neighbor", "root_location": "same_host", "domain_cause": "cpu",
+      "finding_types": ["same_host_noisy_neighbor"], "knowledge_refs": ["distributed.same_host_noisy_neighbor"],
+      "action_collectors": ["sys_metrics", "ebpf_io"]
+    }
+  },
+  {
+    "scenario_id": "counterfactual_self_not_neighbor",
+    "query": "结算服务自身有明确 CPU 热点，同宿主实例正常。",
+    "scope": {
+      "target_service": "checkoutservice", "same_host_instance_ids": ["batch-1"], "downstream_service_ids": [],
+      "instances": [
+        {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 3901},
+        {"service_id": "batch", "instance_id": "batch-1", "host_id": "worker2", "agent_id": "a2", "pid": 3902}
+      ]
+    },
+    "observations": [
+      {
+        "task_id": "checkout-hot", "collector_type": "perf_cpu", "source_family": "profile", "evidence_weight": 0.95,
+        "target": {"service_id": "checkoutservice", "instance_id": "checkout-1", "host_id": "worker2", "agent_id": "a2", "pid": 3901},
+        "facts": {"avg_cpu_user_pct": 92, "process_cpu_core_usage": 2.9},
+        "top_function": {"name": "calculateTax", "percent": 71}, "pressure": {"cpu": true}, "evidence_refs": ["ev-checkout-hot"]
+      },
+      {
+        "task_id": "batch-normal", "collector_type": "sys_metrics", "source_family": "procfs_metrics", "evidence_weight": 0.95,
+        "target": {"service_id": "batch", "instance_id": "batch-1", "host_id": "worker2", "agent_id": "a2", "pid": 3902},
+        "facts": {"avg_cpu_user_pct": 10, "process_cpu_core_usage": 0.1},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-batch-normal"]
+      }
+    ],
+    "expected": {
+      "classification": "self_code_or_process_pressure", "root_location": "self", "domain_cause": "cpu",
+      "finding_types": ["userland_hotspot"], "knowledge_refs": ["linux.cpu.process_pressure"],
+      "action_collectors": ["sys_metrics", "perf_cpu"]
+    }
+  },
+  {
+    "scenario_id": "compound_disk_and_network",
+    "query": "订单服务同时无法写入并出现远程调用丢包，请保留多个根因。",
+    "scope": {
+      "target_service": "orderservice", "same_host_instance_ids": [], "downstream_service_ids": [],
+      "instances": [{"service_id": "orderservice", "instance_id": "order-1", "host_id": "worker1", "agent_id": "a1", "pid": 4001}]
+    },
+    "observations": [
+      {
+        "task_id": "order-disk", "collector_type": "sys_metrics", "source_family": "procfs_metrics", "evidence_weight": 0.95,
+        "target": {"service_id": "orderservice", "instance_id": "order-1", "host_id": "worker1", "agent_id": "a1", "pid": 4001},
+        "facts": {"target_fs_used_pct": 99.4, "target_fs_available_bytes": 0, "enospc_count": 4},
+        "top_function": {"name": "", "percent": 0}, "pressure": {"disk_full": true}, "evidence_refs": ["ev-order-disk"]
+      },
+      {
+        "task_id": "order-network", "collector_type": "network_metrics", "source_family": "network", "evidence_weight": 0.95,
+        "target": {"service_id": "orderservice", "instance_id": "order-1", "host_id": "worker1", "agent_id": "a1", "pid": 4001},
+        "facts": {"tcp_retransmit_pct": 16, "network_latency_p95_ms": 540, "tcp_timeout_delta": 8},
+        "top_function": {"name": "", "percent": 0}, "pressure": {"network": true}, "evidence_refs": ["ev-order-network"]
+      }
+    ],
+    "expected": {
+      "classification": "compound_incident", "is_compound": true, "contributing_domains": ["io", "network"],
+      "finding_types": ["filesystem_exhaustion", "packet_loss_or_latency", "compound_incident"],
+      "knowledge_refs": [], "action_collectors": ["sys_metrics"]
+    }
+  },
+  {
+    "scenario_id": "healthy_baseline_no_fault",
+    "query": "首页偶尔感觉慢，但当前所有结构化指标均在基线内。",
+    "scope": {
+      "target_service": "frontend", "same_host_instance_ids": [], "downstream_service_ids": [],
+      "instances": [{"service_id": "frontend", "instance_id": "frontend-1", "host_id": "worker1", "agent_id": "a1", "pid": 4101}]
+    },
+    "observations": [
+      {
+        "task_id": "frontend-healthy", "collector_type": "sys_metrics", "source_family": "procfs_metrics", "evidence_weight": 0.95,
+        "target": {"service_id": "frontend", "instance_id": "frontend-1", "host_id": "worker1", "agent_id": "a1", "pid": 4101},
+        "facts": {"avg_cpu_user_pct": 12, "avg_cpu_sys_pct": 3, "avg_cpu_iowait_pct": 0.4, "process_cpu_core_usage": 0.15, "vmrss_mb": 130, "container_memory_usage_ratio": 0.31, "tcp_retransmit_pct": 0.1},
+        "top_function": {"name": "", "percent": 0}, "pressure": {}, "evidence_refs": ["ev-frontend-healthy"]
+      }
+    ],
+    "expected": {
+      "classification": "insufficient_evidence", "root_location": "unknown", "domain_cause": "unknown",
+      "finding_types": ["insufficient_evidence"], "knowledge_refs": [],
+      "action_collectors": ["sys_metrics", "perf_cpu", "ebpf_io"]
+    }
+  }
+]

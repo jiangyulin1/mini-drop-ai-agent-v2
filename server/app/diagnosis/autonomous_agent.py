@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from server.app.diagnosis.action_registry import ActionEvaluationRequest, evaluate_action
 from server.app.diagnosis.actuation import ActuationError, ActuationGateway, is_executable
-from server.app.diagnosis.authorization import AuthorizationDecision, ImpactLevel
+from server.app.diagnosis.authorization import AuthorizationDecision
 from server.app.diagnosis.governance import is_shadow_mode
 from server.app.diagnosis.schemas import ApprovalRequest, TERMINAL_DIAGNOSIS_STATUSES
 

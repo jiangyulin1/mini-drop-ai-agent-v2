@@ -57,6 +57,7 @@ perf.data.*
 
 # VM 评测原始诊断 bundle（可从 runner 复现，体积大不入库）
 reports/eval/**/bundles/
+reports/eval/lightweight/
 
 # Secrets
 *.pem

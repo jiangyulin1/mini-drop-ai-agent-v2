@@ -46,3 +46,12 @@ def test_event_bus_history_resumes_after_event_cursor():
     resumed = bus.get_history(first["id"])
 
     assert [event["data"]["task_id"] for event in resumed] == ["task_2"]
+
+
+def test_event_bus_replays_retained_history_for_unknown_numeric_cursor():
+    bus = EventBus()
+    bus.publish("task_changed", {"task_id": "task_after_restart"})
+
+    resumed = bus.get_history("999")
+
+    assert [event["data"]["task_id"] for event in resumed] == ["task_after_restart"]

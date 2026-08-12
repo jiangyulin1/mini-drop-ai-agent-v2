@@ -443,7 +443,9 @@ GET    /api/storage/presign?key=...        # MinIO 预签名 URL
 GET    /api/tasks/{id}/artifacts/{type}/download  # 经 Server 流式下载产物
 GET    /api/metrics                        # Prometheus 指标
 GET    /api/events/stream                  # SSE 实时事件流
-GET    /api/healthz                        # 健康检查（含 DB + 存储检测）
+GET    /api/livez                         # 进程存活检查（不检查依赖）
+GET    /api/readyz                        # 发布/流量就绪门槛；失败返回 503
+GET    /api/healthz                       # 依赖诊断报告；请读取 healthy 字段
 ```
 
 ---
@@ -585,6 +587,19 @@ MINI_DROP_AI_ENABLED=full      → nlp=on,  rca=on,  summarize=on
 
 不配 API Key 时核心采集/火焰图功能不受影响，AI 功能自动降级为规则引擎。
 
+### MCP 能力接入
+
+Mini-Drop 可作为 MCP Server 向 Codex、IDE 或其他 AI Host 提供受控 Case、Evidence、
+诊断和 dry-run 能力，也可将外部 MCP Server 注册为 SourceGateway 数据源。外部 MCP
+调用仍强制经过 Grant、Capability Token、脱敏、结果预算、EvidenceEnvelope 和审计；
+生产动作执行不会作为模型工具暴露。安装与配置见
+[`docs/mcp_integration.md`](docs/mcp_integration.md)。
+
+```bash
+python -m pip install -e '.[mcp]'
+MINI_DROP_MCP_AUTH_ENABLED=0 make mcp  # 仅本机 stdio 联调
+```
+
 启动 Web 后，可通过“AI 集群诊断”标题区的“AI 服务检测”按钮主动运行完整套件。验证覆盖
 Provider 账户/模型/对话、自然语言任务解析、集群诊断意图与安全约束、AI 总结、RCA
 证据引用校验。弹窗不会返回 API Key、余额金额或原始思维链；并发运行会被拒绝，避免
@@ -602,6 +617,7 @@ Provider 账户/模型/对话、自然语言任务解析、集群诊断意图与
 # Makefile（Linux / macOS / Git Bash）
 make proto          # 编译 gRPC stub
 make server         # 启动 Server
+make mcp            # 启动独立 MCP Server（需安装 .[mcp]）
 make agent          # 启动 Agent
 make test           # 运行测试
 make eval           # 运行诊断 golden scenarios，生成 JSON/Markdown 报告

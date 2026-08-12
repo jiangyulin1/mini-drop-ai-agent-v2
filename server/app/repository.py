@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from server.app.schemas import AgentRegistration, CreateTaskRequest
+from server.app.schemas import CreateTaskRequest
 from server.app.prometheus_metrics import record_task_transition
 from server.app.state_machine import (
     Actor,

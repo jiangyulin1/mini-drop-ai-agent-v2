@@ -15,8 +15,11 @@ from uuid import uuid4
 
 from server.app import storage
 from server.app.ai_provider import get_ai_settings, is_feature_enabled
-from server.app.common_utils import status_value
-from server.app.diagnosis.intent import parse_diagnosis_intent
+from server.app.common_utils import env_bool, status_value
+from server.app.diagnosis.intent import (
+    parse_diagnosis_intent,
+    parse_diagnosis_intent_deterministic,
+)
 from server.app.diagnosis.actions import collect_action, inspect_command_action, inspect_session_action
 from server.app.diagnosis.adaptive_planner import (
     build_probe_candidates,
@@ -33,6 +36,7 @@ from server.app.diagnosis.evidence_guard import curate_observations
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe, list_probes
 from server.app.diagnosis.report_verifier import evidence_integrity_hash, verify_report
+from server.app.diagnosis.reasoner import assess_with_reasoner
 from server.app.diagnosis.root_entity_resolver import resolve_root_entity
 from server.app.diagnosis.schemas import (
     ApprovalRequest,
@@ -145,9 +149,14 @@ class DiagnosisOrchestrator:
         )
 
     def create(self, request: CreateDiagnosisRequest, creator_id: str = "demo_user") -> dict[str, Any]:
-        intent = parse_diagnosis_intent(request)
-        self._enforce_service_scope(intent.target_service)
         budget = self._effective_budget(request.budget_profile, request.budget)
+        nlp_enabled = is_feature_enabled("nlp")
+        model_enabled = nlp_enabled and budget.max_model_calls > 0
+        if nlp_enabled and not model_enabled:
+            intent = parse_diagnosis_intent_deterministic(request)
+        else:
+            intent = parse_diagnosis_intent(request)
+        self._enforce_service_scope(intent.target_service)
         diagnosis_id = f"diag_session_{utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
         snapshot = self._build_topology_snapshot(request, intent)
         self.store.create_topology_snapshot(snapshot)
@@ -155,7 +164,7 @@ class DiagnosisOrchestrator:
         target_scope = self._build_target_scope(request, intent, budget)
         hypotheses = self._build_hypotheses(intent.symptom, target_scope)
         budget_usage = self._empty_budget_usage()
-        budget_usage["model_calls"] = 1 if is_feature_enabled("nlp") else 0
+        budget_usage["model_calls"] = 1 if model_enabled else 0
         self.store.create_session({
             "diagnosis_id": diagnosis_id,
             "creator_id": creator_id,
@@ -1344,8 +1353,15 @@ class DiagnosisOrchestrator:
                 failure_events=[event.get("reason", "") for event in task_events if event.get("reason")],
                 agent_stats=self.repo.agent_metrics.get(task.agent_id, {}),
             )
-            candidates = generate_candidates(evidence, self.repo.get_feedback_priors())
-            calibrated = calibrate(candidates, evidence, self.repo.get_feedback_priors())
+            # Global feedback priors mix services, environments and strategy versions.
+            # Keep them disabled on the Case path until scoped priors are available.
+            feedback_priors = (
+                self.repo.get_feedback_priors()
+                if env_bool("MINI_DROP_CASE_FEEDBACK_PRIORS_ENABLED", False)
+                else None
+            )
+            candidates = generate_candidates(evidence, feedback_priors)
+            calibrated = calibrate(candidates, evidence, feedback_priors)
             for candidate in calibrated:
                 if candidate.candidate_id == "insufficient_data":
                     continue
@@ -1791,7 +1807,25 @@ class DiagnosisOrchestrator:
     ) -> dict[str, Any]:
         session = self.store.get_session(diagnosis_id) or {}
         scope = session.get("target_scope", {})
-        return assess_cluster(scope, observations)
+        decision = assess_with_reasoner(
+            scope,
+            observations,
+            intent=session.get("normalized_intent") or {},
+            hypotheses=(session.get("hypothesis_graph") or {}).get("hypotheses") or [],
+            policy=session.get("risk_budget") or {},
+            remaining_budget=session.get("resource_budget") or {},
+            versions={
+                "planner": str(session.get("planner_version") or PLANNER_VERSION),
+                "feature_builder": "normalized-observation.v1",
+            },
+        )
+        assessment = decision.assessment or assess_cluster(scope, observations)
+        assessment["reasoner"] = {
+            "strategy_id": decision.strategy_id,
+            "strategy_version": decision.strategy_version,
+            "decision_type": decision.decision_type,
+        }
+        return assessment
 
     def _build_reviewable_commands(
         self,
@@ -1851,12 +1885,6 @@ class DiagnosisOrchestrator:
         missing_text = " ".join(missing or [])
         budget = (session or {}).get("risk_budget") or {}
         r2_left = int(budget.get("max_medium_risk_probes", 0) or 0) > 0
-        r2_used = any(
-            item.get("risk_level") == "R2"
-            for item in (self.store.list_probes(assessment.get("diagnosis_id", "")) if False else [])
-        )
-        del r2_used  # 探针使用量由风险预算与审批流程控制，此处只负责建议
-
         unresolved = classification in ("insufficient_evidence", "scope_unresolved") or location in ("unknown", "downstream")
         if unresolved:
             candidates: list[dict[str, Any]] = []

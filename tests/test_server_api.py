@@ -15,7 +15,12 @@ from fastapi.testclient import TestClient
 
 from server.app import storage as store
 from server.app.database import init_db, reset_engine
-from server.app.main import _ensure_minio_bucket_with_retry, app, repo
+from server.app.main import (
+    _ensure_minio_bucket_with_retry,
+    _run_offline_sweep_pass,
+    app,
+    repo,
+)
 from server.app.models import Base
 from server.app.prometheus_metrics import REGISTRY
 from server.app.state_machine import Actor, TaskStatus
@@ -28,7 +33,9 @@ def _reset_repo(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("MINI_DROP_API_AUTH_ENABLED", raising=False)
     monkeypatch.delenv("MINI_DROP_API_KEY", raising=False)
+    monkeypatch.setenv("MINI_DROP_REQUIRE_STORAGE", "1")
     monkeypatch.setattr(store, "ensure_bucket", lambda _bucket: None)
+    monkeypatch.setattr(store, "bucket_available", lambda _bucket: True)
     REGISTRY.clear()
     reset_engine()
     init_db()
@@ -85,10 +92,81 @@ class TestHealthz:
         assert ready.status_code == 503
         assert ready.json()["data"]["healthy"] is False
 
-    def test_me_returns_demo_user(self, client: TestClient):
+    def test_core_readiness_ignores_only_analyzer(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_REQUIRE_ANALYZER", "1")
+        ready = client.get("/api/readyz?core_only=true")
+        assert ready.status_code == 200
+        assert ready.json()["data"]["healthy"] is True
+
+    def test_health_storage_probe_is_read_only_and_redacts_internal_errors(
+        self, client: TestClient, monkeypatch,
+    ):
+        probe = mock.Mock(side_effect=RuntimeError("secret storage hostname"))
+        monkeypatch.setattr(store, "bucket_available", probe)
+
+        response = client.get("/api/readyz")
+
+        assert response.status_code == 503
+        storage = response.json()["data"]["checks"]["storage"]
+        assert storage == {
+            "status": "unavailable",
+            "error_code": "dependency_unavailable",
+        }
+        assert "secret storage hostname" not in response.text
+        probe.assert_called_once_with("mini-drop")
+
+    def test_local_storage_mode_does_not_require_minio(
+        self, client: TestClient, monkeypatch,
+    ):
+        monkeypatch.setenv("MINI_DROP_REQUIRE_STORAGE", "0")
+        probe = mock.Mock(side_effect=AssertionError("MinIO must not be probed"))
+        monkeypatch.setattr(store, "bucket_available", probe)
+
+        response = client.get("/api/readyz?core_only=true")
+
+        assert response.status_code == 200
+        assert response.json()["data"]["checks"]["storage"] == {"status": "disabled"}
+        probe.assert_not_called()
+
+    def test_health_redacts_database_and_analyzer_errors(
+        self, client: TestClient, monkeypatch,
+    ):
+        monkeypatch.setenv("MINI_DROP_REQUIRE_ANALYZER", "1")
+        monkeypatch.setattr(
+            "server.app.main.new_session",
+            mock.Mock(side_effect=RuntimeError("postgresql://user:password@secret-db")),
+        )
+        monkeypatch.setattr(
+            repo,
+            "analysis_health",
+            mock.Mock(side_effect=RuntimeError("secret analyzer topology")),
+        )
+
+        response = client.get("/api/readyz")
+
+        assert response.status_code == 503
+        checks = response.json()["data"]["checks"]
+        assert checks["database"] == {
+            "status": "unavailable",
+            "error_code": "dependency_unavailable",
+        }
+        assert checks["analyzer"] == {
+            "status": "unavailable",
+            "error_code": "dependency_unavailable",
+        }
+        assert "password" not in response.text
+        assert "secret analyzer topology" not in response.text
+
+    def test_me_returns_server_derived_identity(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_API_PRINCIPAL_ID", "operator-a")
+        monkeypatch.setenv("MINI_DROP_API_TENANT_ID", "tenant-a")
+        monkeypatch.setenv("MINI_DROP_API_ROLES", "operator,authorization_admin")
         resp = client.get("/api/me")
         assert resp.status_code == 200
-        assert resp.json()["data"]["user_id"] == "demo_user"
+        data = resp.json()["data"]
+        assert data["user_id"] == "operator-a"
+        assert data["tenant_id"] == "tenant-a"
+        assert data["roles"] == ["authorization_admin", "operator"]
 
     def test_ai_config_never_returns_key(self, client: TestClient, monkeypatch):
         monkeypatch.setenv("MINI_DROP_AI_API_KEY", "secret-must-not-leak")
@@ -178,10 +256,55 @@ class TestStartupMinio:
             _ensure_minio_bucket_with_retry("mini-drop")
 
 
+class TestMaintenanceLoop:
+    def test_one_failed_step_does_not_starve_the_remaining_steps(self, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr(
+            repo,
+            "mark_offline_agents",
+            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db glitch")),
+        )
+        monkeypatch.setattr(
+            repo,
+            "recover_stale_tasks",
+            lambda **_kwargs: calls.append("recover"),
+        )
+        monkeypatch.setattr(
+            repo,
+            "persist_agent_metric_snapshots",
+            lambda: calls.append("metrics"),
+        )
+        monkeypatch.setattr(
+            "server.app.main.diagnosis_orchestrator.advance_active",
+            lambda: calls.append("diagnosis"),
+        )
+
+        _run_offline_sweep_pass(timeout_sec=30, stale_task_timeout_sec=900)
+
+        assert calls == ["recover", "metrics", "diagnosis"]
+        metrics = REGISTRY.generate()
+        assert (
+            'mini_drop_maintenance_runs_total{outcome="failure",step="agent_offline_detection"}'
+            in metrics
+        )
+        assert (
+            'mini_drop_maintenance_runs_total{outcome="success",step="stale_task_recovery"}'
+            in metrics
+        )
+
+
 class TestApiAuth:
     def test_auth_disabled_by_default(self, client: TestClient):
         resp = client.get("/api/tasks")
         assert resp.status_code == 200
+
+    def test_invalid_request_id_is_replaced(self, client: TestClient):
+        response = client.get("/api/tasks", headers={"X-Request-ID": "bad id\nvalue"})
+
+        assert response.status_code == 200
+        generated = response.headers["x-request-id"]
+        assert generated != "bad id\nvalue"
+        assert len(generated) == 12
 
     def test_auth_enabled_rejects_missing_token(self, client: TestClient, monkeypatch):
         monkeypatch.setenv("MINI_DROP_API_AUTH_ENABLED", "1")
@@ -200,6 +323,24 @@ class TestApiAuth:
         monkeypatch.setenv("MINI_DROP_API_KEY", "secret-token")
         resp = client.get("/api/tasks", headers={"X-API-Key": "secret-token"})
         assert resp.status_code == 200
+
+    def test_cookie_endpoint_validates_key_server_side(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_API_AUTH_ENABLED", "1")
+        monkeypatch.setenv("MINI_DROP_API_KEY", "secret-token")
+
+        rejected = client.post("/api/auth/set-cookie", json={"api_key": "wrong"})
+        accepted = client.post(
+            "/api/auth/set-cookie",
+            json={"api_key": "secret-token"},
+            headers={"X-Forwarded-Proto": "https"},
+        )
+
+        assert rejected.status_code == 401
+        assert accepted.status_code == 200
+        cookie = accepted.headers["set-cookie"]
+        assert "HttpOnly" in cookie
+        assert "Secure" in cookie
+        assert "SameSite=lax" in cookie
 
     def test_healthz_stays_public_when_auth_enabled(self, client: TestClient, monkeypatch):
         monkeypatch.setenv("MINI_DROP_API_AUTH_ENABLED", "1")

@@ -130,8 +130,6 @@ def build_probe_candidates(
     if not active_types:
         active_types = {item.mechanism for item in contracts}
 
-    total_missing = {fact for _, missing in contract_missing for fact in missing}
-
     candidates: list[InvestigationActionCandidate] = []
     for contract, missing in contract_missing:
         for probe_id in contract.candidate_probes:

@@ -13,6 +13,7 @@ import server.app._env  # noqa: F401 — 自动加载 .env
 import hashlib
 import io
 import os
+import re
 import secrets
 import time
 import zipfile
@@ -37,7 +38,7 @@ import json as _json
 import queue as _queue
 from typing import Any, Optional
 
-from server.app.common_utils import status_value
+from server.app.common_utils import env_bool, status_value
 from server.app.artifact_service import (
     evidence_artifact_links,
     inspect_artifact,
@@ -52,6 +53,7 @@ from server.app.prometheus_metrics import (
     REGISTRY,
     record_diagnosis,
     record_http_request,
+    record_maintenance_step,
     record_source_access,
 )
 from server.app.grpc_server import serve_in_background
@@ -75,7 +77,6 @@ from server.app.diagnosis.authorization import (
     AuthorizationDecision,
     AuthorizationEvaluationRequest,
     CreateAuthorizationGrantRequest,
-    DEFAULT_SOURCE_REGISTRY,
     evaluate_source_access,
 )
 from server.app.diagnosis.autonomous_agent import AgentCallbacks, AutonomousIncidentAgent
@@ -93,6 +94,7 @@ from server.app.diagnosis.recovery_verifier import RecoveryCheckError, run_http_
 from server.app.diagnosis.distributed_actuation import DistributedActuationGateway
 from server.app.diagnosis.probe_registry import list_probes as list_registered_probes
 from server.app.diagnosis.source_gateway import SourceGateway, SourceGatewayError, SourceQueryRequest
+from server.app.mcp_integration import MCPClientManager
 from server.app.diagnosis.investigation_planner import (
     InvestigationActionCandidate,
     evaluate_investigation_stop,
@@ -130,7 +132,16 @@ from server.app import storage as store
 configure_tracing("mini-drop-server")
 repo = SqlRepository()
 diagnosis_orchestrator = DiagnosisOrchestrator(repo)
-source_gateway = SourceGateway(repo, diagnosis_orchestrator)
+try:
+    mcp_client_manager = MCPClientManager()
+except ValueError as exc:
+    raise RuntimeError(f"invalid MCP connector configuration: {exc}") from exc
+source_gateway = SourceGateway(
+    repo,
+    diagnosis_orchestrator,
+    extra_connectors=mcp_client_manager.connectors,
+    extra_source_definitions=mcp_client_manager.source_definitions(),
+)
 
 
 def _warn_on_insecure_defaults() -> None:
@@ -204,14 +215,38 @@ async def _offline_sweeper() -> None:
     while True:
         # 同步阻塞调用（DB 读写 + MinIO 对象读取 + JSON 解析）必须移出
         # 事件循环，否则单 worker 下会阻塞全部 HTTP 请求（含 SSE）。
-        await asyncio.to_thread(_run_offline_sweep_pass, timeout_sec, stale_task_timeout_sec)
+        try:
+            await asyncio.to_thread(_run_offline_sweep_pass, timeout_sec, stale_task_timeout_sec)
+        except Exception as exc:
+            # _run_offline_sweep_pass isolates every known step. This final
+            # guard keeps a future regression from permanently killing the
+            # long-lived maintenance coroutine.
+            record_maintenance_step("offline_sweep", "failure")
+            log_event(
+                "error",
+                "maintenance_loop_failed",
+                loop="offline_sweep",
+                error_type=type(exc).__name__,
+                error=str(exc)[:500],
+            )
         await asyncio.sleep(interval_sec)
 
 
 async def _autonomy_sweeper() -> None:
     interval_sec = max(3, min(int(os.getenv("MINI_DROP_AUTONOMY_INTERVAL_SEC", "10")), 60))
     while True:
-        await asyncio.to_thread(_run_autonomy_pass)
+        try:
+            await asyncio.to_thread(_run_autonomy_pass)
+            record_maintenance_step("autonomy", "success")
+        except Exception as exc:
+            record_maintenance_step("autonomy", "failure")
+            log_event(
+                "error",
+                "maintenance_loop_failed",
+                loop="autonomy",
+                error_type=type(exc).__name__,
+                error=str(exc)[:500],
+            )
         await asyncio.sleep(interval_sec)
 
 
@@ -231,17 +266,42 @@ def _run_autonomy_pass() -> None:
     except Exception as exc:
         repo.record_audit(
             event_type="AUTONOMOUS_AGENT_TICK_FAILED",
-            message=f"Case Supervisor 推进失败",
+            message="Case Supervisor 推进失败",
             metadata={"error": str(exc)[:500]},
         )
+        raise
 
 
 def _run_offline_sweep_pass(timeout_sec: int, stale_task_timeout_sec: int) -> None:
-    repo.mark_offline_agents(timeout_sec=timeout_sec)
-    repo.recover_stale_tasks(timeout_sec=stale_task_timeout_sec)
+    _run_maintenance_step(
+        "agent_offline_detection",
+        lambda: repo.mark_offline_agents(timeout_sec=timeout_sec),
+    )
+    _run_maintenance_step(
+        "stale_task_recovery",
+        lambda: repo.recover_stale_tasks(timeout_sec=stale_task_timeout_sec),
+    )
     if hasattr(repo, "persist_agent_metric_snapshots"):
-        repo.persist_agent_metric_snapshots()
-    diagnosis_orchestrator.advance_active()
+        _run_maintenance_step("agent_metric_snapshot", repo.persist_agent_metric_snapshots)
+    _run_maintenance_step("diagnosis_advance", diagnosis_orchestrator.advance_active)
+
+
+def _run_maintenance_step(step: str, operation) -> bool:
+    """Run one periodic step without allowing it to starve sibling steps."""
+    try:
+        operation()
+    except Exception as exc:
+        record_maintenance_step(step, "failure")
+        log_event(
+            "error",
+            "maintenance_step_failed",
+            step=step,
+            error_type=type(exc).__name__,
+            error=str(exc)[:500],
+        )
+        return False
+    record_maintenance_step(step, "success")
+    return True
 
 
 def _ensure_minio_bucket_with_retry(bucket: str) -> None:
@@ -286,7 +346,12 @@ app.add_middleware(
 @app.middleware("http")
 async def _request_id(request: Request, call_next):
     import uuid
-    rid = request.headers.get("x-request-id", uuid.uuid4().hex[:12])
+    requested_id = request.headers.get("x-request-id", "").strip()
+    rid = (
+        requested_id
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", requested_id)
+        else uuid.uuid4().hex[:12]
+    )
     with start_span(
         f"{request.method} {request.url.path}",
         traceparent=request.headers.get("traceparent"),
@@ -531,14 +596,48 @@ def healthz(core_only: bool = False) -> APIResponse:
             session.close()
         checks["database"] = {"status": "ok"}
     except Exception as exc:
-        checks["database"] = {"status": "unavailable", "error": str(exc)[:200]}
+        log_event(
+            "warning",
+            "health_dependency_failed",
+            dependency="database",
+            error_type=type(exc).__name__,
+            error=str(exc)[:500],
+        )
+        checks["database"] = {
+            "status": "unavailable",
+            "error_code": "dependency_unavailable",
+        }
 
-    # 对象存储连通性检查
-    try:
-        store.ensure_bucket(os.getenv("MINIO_BUCKET", "mini-drop"))
-        checks["storage"] = {"status": "ok"}
-    except Exception as exc:
-        checks["storage"] = {"status": "unavailable", "error": str(exc)[:200]}
+    storage_required = env_bool(
+        "MINI_DROP_REQUIRE_STORAGE",
+        env_bool("MINIO_AUTO_CREATE_BUCKET"),
+    )
+    if not storage_required:
+        checks["storage"] = {"status": "disabled"}
+    else:
+        # 对象存储只读检查。Bucket 创建只允许发生在启动阶段，避免高频
+        # readiness 探针意外执行写操作或掩盖部署配置错误。
+        try:
+            bucket = os.getenv("MINIO_BUCKET", "mini-drop")
+            if store.bucket_available(bucket):
+                checks["storage"] = {"status": "ok"}
+            else:
+                checks["storage"] = {
+                    "status": "unavailable",
+                    "error_code": "bucket_missing",
+                }
+        except Exception as exc:
+            log_event(
+                "warning",
+                "health_dependency_failed",
+                dependency="storage",
+                error_type=type(exc).__name__,
+                error=str(exc)[:500],
+            )
+            checks["storage"] = {
+                "status": "unavailable",
+                "error_code": "dependency_unavailable",
+            }
 
     analyzer_required = os.getenv("MINI_DROP_REQUIRE_ANALYZER", "0").strip().lower() in {
         "1", "true", "yes", "on",
@@ -551,9 +650,16 @@ def healthz(core_only: bool = False) -> APIResponse:
             analyzer["status"] = "disabled"
         checks["analyzer"] = analyzer
     except Exception as exc:
+        log_event(
+            "warning",
+            "health_dependency_failed",
+            dependency="analyzer",
+            error_type=type(exc).__name__,
+            error=str(exc)[:500],
+        )
         checks["analyzer"] = {
             "status": "unavailable" if analyzer_required else "disabled",
-            "error": str(exc)[:200],
+            "error_code": "dependency_unavailable",
         }
 
     effective_checks = {
@@ -581,10 +687,10 @@ def livez() -> APIResponse:
 
 
 @app.get("/api/readyz")
-def readyz(response: Response) -> APIResponse:
+def readyz(response: Response, core_only: bool = False) -> APIResponse:
     """Dependency-aware readiness probe with a conventional 503 failure."""
 
-    report = healthz(core_only=False)
+    report = healthz(core_only=core_only)
     if not report.data["healthy"]:
         response.status_code = 503
     return report
@@ -619,11 +725,15 @@ def run_ai_validation() -> APIResponse:
 
 
 @app.get("/api/me")
-def current_user() -> APIResponse:
+def current_user(request: Request) -> APIResponse:
+    principal_id = _request_principal(request)
+    roles = sorted(getattr(request.state, "principal_roles", set()))
     return APIResponse(data={
-        "user_id": "demo_user",
-        "name": "Mini-Drop Demo User",
-        "role": "admin",
+        "user_id": principal_id,
+        "name": principal_id,
+        "role": roles[0] if roles else "operator",
+        "roles": roles,
+        "tenant_id": _request_tenant(),
     })
 
 
@@ -641,13 +751,28 @@ def auth_set_cookie(request: Request, body: dict) -> APIResponse:
     api_key = (body or {}).get("api_key", "").strip()
     if not api_key:
         return APIResponse(code=400, message="api_key 不能为空")
+    if len(api_key) > 4096:
+        raise HTTPException(status_code=400, detail="api_key 长度超过限制")
+    if env_bool("MINI_DROP_API_AUTH_ENABLED"):
+        expected = os.getenv("MINI_DROP_API_KEY", "")
+        if not expected:
+            raise HTTPException(status_code=503, detail="API 认证配置不完整")
+        if not secrets.compare_digest(api_key, expected):
+            raise HTTPException(status_code=401, detail="无效 API Key")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    secure_override = os.getenv("MINI_DROP_AUTH_COOKIE_SECURE", "").strip()
+    secure_cookie = (
+        secure_override.lower() in {"1", "true", "yes", "on", "enabled"}
+        if secure_override
+        else request.url.scheme == "https" or forwarded_proto == "https"
+    )
     resp = _JsonResp(content={"code": 0, "message": "ok", "data": None})
     resp.set_cookie(
         key="mini_drop_api_key",
         value=api_key,
         httponly=True,
         samesite="lax",
-        secure=False,  # 开发环境 HTTP；生产环境应设为 True 配合 HTTPS
+        secure=secure_cookie,
         max_age=7 * 24 * 3600,  # 7 天
         path="/api",
     )
@@ -1550,7 +1675,24 @@ def list_source_definitions() -> APIResponse:
     """List registered AI-readable sources without exposing credential references."""
     return APIResponse(data={
         "schema_version": "source-registry.v1",
-        "items": [source.public_dict() for source in DEFAULT_SOURCE_REGISTRY.list()],
+        "items": [source.public_dict() for source in source_gateway.list_sources()],
+    })
+
+
+@app.get("/api/v1/mcp/status")
+def get_mcp_status(request: Request) -> APIResponse:
+    """Expose deployment-safe MCP configuration state; never return endpoints with credentials."""
+    _require_role(request, "operator")
+    return APIResponse(data={
+        "server": {
+            "enabled": os.getenv("MINI_DROP_MCP_ENABLED", "0").strip().lower()
+            in {"1", "true", "yes", "on"},
+            "transport": os.getenv("MINI_DROP_MCP_TRANSPORT", "stdio"),
+            "authentication_enabled": os.getenv("MINI_DROP_MCP_AUTH_ENABLED", "1").strip().lower()
+            in {"1", "true", "yes", "on"},
+            "change_execution_exposed": False,
+        },
+        "external_connectors": mcp_client_manager.status(),
     })
 
 
@@ -2415,7 +2557,7 @@ def create_authorization_grant(payload: CreateAuthorizationGrantRequest, request
         raise HTTPException(status_code=403, detail="GRANT_TENANT_MISMATCH")
     selected = []
     for source_id in payload.source_ids:
-        source = DEFAULT_SOURCE_REGISTRY.get(source_id)
+        source = source_gateway.registry.get(source_id)
         if source is None:
             raise HTTPException(status_code=400, detail=f"未注册的信息源: {source_id}")
         if not source.enabled:
@@ -2472,7 +2614,7 @@ def evaluate_source_authorization(payload: AuthorizationEvaluationRequest, reque
         tenant_id=payload.tenant_id,
         include_inactive=True,
     )
-    result = evaluate_source_access(payload, grants)
+    result = evaluate_source_access(payload, grants, registry=source_gateway.registry)
     return APIResponse(data=result.model_dump(mode="json"))
 
 

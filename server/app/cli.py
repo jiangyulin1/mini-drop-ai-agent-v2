@@ -625,7 +625,6 @@ def _cmd_status(args) -> int:
 def _cmd_perf_top(args) -> int:
     """本地 perf TopN：直接在本地执行 perf record + analyzer。"""
     import subprocess
-    import sys
     import shutil
 
     perf = shutil.which("perf")

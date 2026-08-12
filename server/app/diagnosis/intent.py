@@ -23,9 +23,13 @@ SYSTEM_PROMPT = """你是性能诊断意图解析器，只提取结构化字段�
 """
 
 
-def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
+def parse_diagnosis_intent(
+    request: CreateDiagnosisRequest,
+    *,
+    allow_model: bool = True,
+) -> NormalizedIntent:
     fallback = _fallback_intent(request)
-    if not is_feature_enabled("nlp"):
+    if not allow_model or not is_feature_enabled("nlp"):
         return fallback
 
     settings = get_ai_settings()
@@ -120,6 +124,12 @@ def parse_diagnosis_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
         return intent
     except Exception:
         return fallback
+
+
+def parse_diagnosis_intent_deterministic(request: CreateDiagnosisRequest) -> NormalizedIntent:
+    """Parse intent without consulting any model provider."""
+
+    return _fallback_intent(request)
 
 
 def _fallback_symptom(query: str) -> str:

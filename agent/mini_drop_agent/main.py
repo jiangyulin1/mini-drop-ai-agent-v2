@@ -412,7 +412,7 @@ _should_exit = False
 _signal_count = 0  # 信号计数器：第一次优雅退出，第二次强制终止
 
 
-def _on_signal(signum, frame):
+def _on_signal(_signum, _frame):
     global _should_exit, _signal_count
     _signal_count += 1
     if _signal_count >= 2:
@@ -553,7 +553,7 @@ def main() -> None:
 
         try:
             task = conn.call_with_retry(
-                lambda: _heartbeat(
+                lambda active_task=active_task: _heartbeat(
                     healthcheck_pb2_grpc.HealthCheckStub(conn.channel),
                     config,
                     sampler,

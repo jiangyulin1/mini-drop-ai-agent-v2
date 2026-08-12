@@ -15,7 +15,7 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from typing import Any
 from uuid import uuid4
 

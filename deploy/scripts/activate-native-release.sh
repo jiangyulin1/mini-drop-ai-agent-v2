@@ -70,7 +70,7 @@ healthy=0
 for _ in $(seq 1 30); do
   if curl --fail --silent --show-error --insecure \
     -H "X-API-Key: ${MINI_DROP_API_KEY}" \
-    https://127.0.0.1/api/healthz >/dev/null 2>&1; then
+    https://127.0.0.1/api/readyz >/dev/null 2>&1; then
     healthy=1
     break
   fi

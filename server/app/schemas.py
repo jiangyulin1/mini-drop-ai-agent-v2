@@ -10,7 +10,6 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from server.app.state_machine import TaskStatus
 
 CollectorType = Literal[
     "perf_cpu",

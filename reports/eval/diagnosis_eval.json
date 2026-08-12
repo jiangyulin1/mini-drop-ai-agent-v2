@@ -1,5 +1,9 @@
 {
   "suite": "mini-drop-diagnosis-golden-v1",
+  "reasoner": {
+    "strategy_id": "rules_only",
+    "strategy_version": "rules-only.v1"
+  },
   "total": 7,
   "passed": 7,
   "failed": 0,
@@ -7,7 +11,9 @@
     "scenario_pass_rate": 1.0,
     "classification_accuracy": 1.0,
     "evidence_reference_integrity": 1.0,
-    "unsafe_auto_execute_count": 0
+    "unsafe_auto_execute_count": 0,
+    "root_location_accuracy": null,
+    "domain_cause_accuracy": null
   },
   "results": [
     {
@@ -15,7 +21,12 @@
       "passed": true,
       "checks": {
         "classification": true,
+        "root_location": true,
+        "domain_cause": true,
+        "compound": true,
+        "contributing_domains": true,
         "finding_types": true,
+        "forbidden_finding_types": true,
         "knowledge_refs": true,
         "action_collectors": true,
         "report_verification": true,
@@ -35,6 +46,11 @@
         ]
       },
       "actual": {
+        "reasoner": {
+          "strategy_id": "rules_only",
+          "strategy_version": "rules-only.v1",
+          "decision_type": "conclusion"
+        },
         "classification": "downstream_dependency",
         "confidence_level": "中",
         "finding_types": [
@@ -62,7 +78,12 @@
       "passed": true,
       "checks": {
         "classification": true,
+        "root_location": true,
+        "domain_cause": true,
+        "compound": true,
+        "contributing_domains": true,
         "finding_types": true,
+        "forbidden_finding_types": true,
         "knowledge_refs": true,
         "action_collectors": true,
         "report_verification": true,
@@ -82,8 +103,13 @@
         ]
       },
       "actual": {
+        "reasoner": {
+          "strategy_id": "rules_only",
+          "strategy_version": "rules-only.v1",
+          "decision_type": "conclusion"
+        },
         "classification": "self_code_or_process_pressure",
-        "confidence_level": "中",
+        "confidence_level": "高",
         "finding_types": [
           "rss_growth",
           "self_code_or_process_pressure"
@@ -110,7 +136,12 @@
       "passed": true,
       "checks": {
         "classification": true,
+        "root_location": true,
+        "domain_cause": true,
+        "compound": true,
+        "contributing_domains": true,
         "finding_types": true,
+        "forbidden_finding_types": true,
         "knowledge_refs": true,
         "action_collectors": true,
         "report_verification": true,
@@ -131,6 +162,11 @@
         ]
       },
       "actual": {
+        "reasoner": {
+          "strategy_id": "rules_only",
+          "strategy_version": "rules-only.v1",
+          "decision_type": "abstain"
+        },
         "classification": "insufficient_evidence",
         "confidence_level": "低",
         "finding_types": [
@@ -159,7 +195,12 @@
       "passed": true,
       "checks": {
         "classification": true,
+        "root_location": true,
+        "domain_cause": true,
+        "compound": true,
+        "contributing_domains": true,
         "finding_types": true,
+        "forbidden_finding_types": true,
         "knowledge_refs": true,
         "action_collectors": true,
         "report_verification": true,
@@ -179,6 +220,11 @@
         ]
       },
       "actual": {
+        "reasoner": {
+          "strategy_id": "rules_only",
+          "strategy_version": "rules-only.v1",
+          "decision_type": "conclusion"
+        },
         "classification": "self_code_or_process_pressure",
         "confidence_level": "中",
         "finding_types": [
@@ -207,7 +253,12 @@
       "passed": true,
       "checks": {
         "classification": true,
+        "root_location": true,
+        "domain_cause": true,
+        "compound": true,
+        "contributing_domains": true,
         "finding_types": true,
+        "forbidden_finding_types": true,
         "knowledge_refs": true,
         "action_collectors": true,
         "report_verification": true,
@@ -228,6 +279,11 @@
         ]
       },
       "actual": {
+        "reasoner": {
+          "strategy_id": "rules_only",
+          "strategy_version": "rules-only.v1",
+          "decision_type": "conclusion"
+        },
         "classification": "same_host_noisy_neighbor",
         "confidence_level": "高",
         "finding_types": [
@@ -256,7 +312,12 @@
       "passed": true,
       "checks": {
         "classification": true,
+        "root_location": true,
+        "domain_cause": true,
+        "compound": true,
+        "contributing_domains": true,
         "finding_types": true,
+        "forbidden_finding_types": true,
         "knowledge_refs": true,
         "action_collectors": true,
         "report_verification": true,
@@ -276,8 +337,13 @@
         ]
       },
       "actual": {
+        "reasoner": {
+          "strategy_id": "rules_only",
+          "strategy_version": "rules-only.v1",
+          "decision_type": "conclusion"
+        },
         "classification": "self_code_or_process_pressure",
-        "confidence_level": "中",
+        "confidence_level": "高",
         "finding_types": [
           "self_code_or_process_pressure",
           "userland_hotspot"
@@ -303,7 +369,12 @@
       "passed": true,
       "checks": {
         "classification": true,
+        "root_location": true,
+        "domain_cause": true,
+        "compound": true,
+        "contributing_domains": true,
         "finding_types": true,
+        "forbidden_finding_types": true,
         "knowledge_refs": true,
         "action_collectors": true,
         "report_verification": true,
@@ -324,6 +395,11 @@
         ]
       },
       "actual": {
+        "reasoner": {
+          "strategy_id": "rules_only",
+          "strategy_version": "rules-only.v1",
+          "decision_type": "conclusion"
+        },
         "classification": "host_resource_contention",
         "confidence_level": "高",
         "finding_types": [

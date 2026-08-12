@@ -147,7 +147,6 @@ class OpenTelemetryTraceConnector:
         # traces.read：返回服务最近 span 的错误边摘要（聚合）。
         spans = payload.get("data", []) if isinstance(payload.get("data"), list) else []
         error_count = 0
-        latency_samples: list[float] = []
         for operation_name in spans[:20]:
             error_count += 1 if "error" in str(operation_name).lower() else 0
         return {

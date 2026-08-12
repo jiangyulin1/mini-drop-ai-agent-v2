@@ -70,6 +70,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-mini_drop_secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
       MINIO_AUTO_CREATE_BUCKET: ${MINIO_AUTO_CREATE_BUCKET:-1}
+      MINI_DROP_REQUIRE_STORAGE: ${MINI_DROP_REQUIRE_STORAGE:-1}
       MINI_DROP_API_AUTH_ENABLED: ${MINI_DROP_API_AUTH_ENABLED:-0}
       MINI_DROP_API_KEY: ${MINI_DROP_API_KEY:-}
       MINI_DROP_GRPC_AUTH_ENABLED: ${MINI_DROP_GRPC_AUTH_ENABLED:-0}
@@ -84,7 +85,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8191/api/healthz?core_only=true' >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:8191/api/readyz?core_only=true' >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -95,6 +96,41 @@ services:
         limits:
           memory: 1g
           cpus: "2.0"
+
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: deploy/dockerfiles/server.Dockerfile
+    command: ["python", "-m", "server.app.mcp_integration.server"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mini_drop:mini_drop@postgres:5432/mini_drop}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-mini_drop}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-mini_drop_secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
+      MINI_DROP_GRPC_SECURE: "0"
+      MINI_DROP_MCP_ENABLED: "1"
+      MINI_DROP_MCP_TRANSPORT: streamable-http
+      MINI_DROP_MCP_HOST: 0.0.0.0
+      MINI_DROP_MCP_PORT: 8192
+      MINI_DROP_MCP_AUTH_ENABLED: "1"
+      MINI_DROP_MCP_TOKEN: ${MINI_DROP_MCP_TOKEN:-}
+      MINI_DROP_MCP_ISSUER_URL: ${MINI_DROP_MCP_ISSUER_URL:-http://localhost:8192}
+      MINI_DROP_MCP_RESOURCE_URL: ${MINI_DROP_MCP_RESOURCE_URL:-http://localhost:8192/mcp}
+    ports:
+      - "${MINI_DROP_MCP_PORT:-8192}:8192"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
 
   analyzer:
     build:

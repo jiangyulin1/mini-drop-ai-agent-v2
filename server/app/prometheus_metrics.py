@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import threading
 import time
+import math
 from collections import defaultdict
-from typing import Any
 
 
 class MetricsRegistry:
@@ -68,20 +68,19 @@ class MetricsRegistry:
             for name, values in sorted(self._histograms.items()):
                 if not values:
                     continue
-                lines.append(f"# HELP {name} Histogram")
-                lines.append(f"# TYPE {name} histogram")
+                # We retain raw observations and expose client-side quantiles,
+                # which is Prometheus's Summary data model (not Histogram;
+                # histograms require cumulative ``le`` buckets).
+                lines.append(f"# HELP {name} Summary")
+                lines.append(f"# TYPE {name} summary")
                 sorted_vals = sorted(values)
                 lines.append(f"{name}_count {len(sorted_vals)} {ts}")
                 lines.append(f"{name}_sum {sum(sorted_vals)} {ts}")
-                if sorted_vals:
-                    lines.append(f"{name}_min {sorted_vals[0]} {ts}")
-                    lines.append(f"{name}_max {sorted_vals[-1]} {ts}")
-                    p50 = sorted_vals[int(len(sorted_vals) * 0.5)]
-                    p95 = sorted_vals[int(len(sorted_vals) * 0.95)]
-                    p99 = sorted_vals[int(len(sorted_vals) * 0.99)]
-                    lines.append(f"{name}_p50 {p50} {ts}")
-                    lines.append(f"{name}_p95 {p95} {ts}")
-                    lines.append(f"{name}_p99 {p99} {ts}")
+                for quantile in (0.5, 0.95, 0.99):
+                    rank = max(0, math.ceil(quantile * len(sorted_vals)) - 1)
+                    lines.append(
+                        f'{name}{{quantile="{quantile:g}"}} {sorted_vals[rank]} {ts}'
+                    )
         lines.append("")
         return "\n".join(lines)
 
@@ -89,7 +88,14 @@ class MetricsRegistry:
 def _labels_key(labels: dict[str, str] | None) -> str:
     if not labels:
         return ""
-    return ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
+    return ",".join(
+        f'{key}="{_escape_label_value(str(value))}"'
+        for key, value in sorted(labels.items())
+    )
+
+
+def _escape_label_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
 # 全局单例
@@ -150,3 +156,15 @@ def set_agent_count(online: int, offline: int) -> None:
 def set_task_count_by_status(status: str, count: int) -> None:
     """设置各状态任务数。"""
     REGISTRY.gauge_set("mini_drop_tasks_by_status", float(count), {"status": status})
+
+
+def record_maintenance_step(step: str, outcome: str) -> None:
+    """Record bounded maintenance-loop outcomes and the latest success time."""
+    labels = {"step": step, "outcome": outcome}
+    REGISTRY.counter_inc("mini_drop_maintenance_runs_total", labels)
+    if outcome == "success":
+        REGISTRY.gauge_set(
+            "mini_drop_maintenance_last_success_unixtime",
+            time.time(),
+            {"step": step},
+        )

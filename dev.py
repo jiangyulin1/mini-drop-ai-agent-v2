@@ -4,6 +4,7 @@
 用法:
     python dev.py proto         编译 gRPC stub
     python dev.py server        启动 Server
+    python dev.py mcp           启动 MCP Server
     python dev.py agent         启动 Agent
     python dev.py test          运行全部测试
     python dev.py test -k xxx   按关键字筛选测试
@@ -14,8 +15,6 @@
 所有命令在各平台（Linux / macOS / Windows）行为一致。
 """
 
-import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +39,11 @@ def cmd_server():
 def cmd_agent():
     """启动 Agent，采集器类型由 COLLECTORS 注册决定。"""
     subprocess.check_call([sys.executable, "-m", "agent.mini_drop_agent.main"], cwd=ROOT)
+
+
+def cmd_mcp():
+    """启动独立 MCP Server（需要 pip install -e '.[mcp]'）。"""
+    subprocess.check_call([sys.executable, "-m", "server.app.mcp_integration.server"], cwd=ROOT)
 
 
 def cmd_analyzer_worker():
@@ -77,6 +81,7 @@ def cmd_install():
 COMMANDS = {
     "proto":   cmd_proto,
     "server":  cmd_server,
+    "mcp":     cmd_mcp,
     "agent":   cmd_agent,
     "analyzer-worker": cmd_analyzer_worker,
     "test":    cmd_test,

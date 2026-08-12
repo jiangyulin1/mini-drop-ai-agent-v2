@@ -82,7 +82,7 @@ class LogScanCollector:
             return CollectorResult(
                 ok=True,
                 reason=f"未发现目标进程 {pid} 的日志文件（可能是容器化或日志输出到 stdout）",
-                artifacts=[self._build_artifact(task.id, pid, "", [])],
+                artifacts=[self._build_artifact(task.id, pid, [])],
             )
 
         parsed: list[dict[str, Any]] = []
@@ -93,10 +93,10 @@ class LogScanCollector:
             ok=True,
             reason=f"日志扫描完成: {len(parsed)} 个日志文件，"
                    f"错误行 {sum(len(item['error_lines']) for item in parsed)} 条",
-            artifacts=[self._build_artifact(task.id, pid, log_files[0], parsed)],
+            artifacts=[self._build_artifact(task.id, pid, parsed)],
         )
 
-    def _build_artifact(self, task_id: str, pid: int, first_path: str, parsed: list[dict[str, Any]]) -> dict[str, Any]:
+    def _build_artifact(self, task_id: str, pid: int, parsed: list[dict[str, Any]]) -> dict[str, Any]:
         output_dir = os.path.join(OUTPUT_BASE, task_id)
         os.makedirs(output_dir, exist_ok=True)
         output = {
