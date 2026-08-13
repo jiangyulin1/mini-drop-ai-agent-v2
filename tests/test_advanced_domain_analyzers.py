@@ -1,4 +1,4 @@
-from server.app.diagnosis.domain_analyzers import analyze_observations, assess_cluster
+from server.app.diagnosis.domain_analyzers import analyze_observations, assess_cluster, _domain_cause
 
 
 def _obs(task_id, facts, pressure=None, collector="sys_metrics"):
@@ -144,6 +144,23 @@ def test_memory_growth_and_runtime_lock_form_compound_incident_at_normal_quality
     assert {item["domain"] for item in result["contributing_causes"][:2]} == {
         "memory", "runtime",
     }
+
+
+def test_slow_memory_growth_is_classified_as_memory_domain():
+    # A slow leak (slope >= 1MB/s) but RSS still below 256MB: the memory
+    # pressure flag does not fire (needs rss >= 256), yet the growth slope is a
+    # strong memory-domain signal. domain_cause must not fall through to unknown.
+    observation = _obs("slow-leak", {
+        "vmrss_mb": 96.0,
+        "vmrss_trend": "increasing",
+        "vmrss_slope_bytes_per_second": 2 * 1024 * 1024,
+        "container_memory_usage_ratio": 0.3,
+    })
+
+    domain, subtype = _domain_cause([observation])
+
+    assert domain == "memory"
+    assert subtype == "process_memory_growth"
 
 
 def test_small_rss_drift_does_not_create_a_memory_cause():

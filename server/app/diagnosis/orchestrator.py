@@ -2999,8 +2999,13 @@ def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str
             "unreachable", "econnrefused",
         )
     )
+    container_cpu_cores = _num(summary.get("container_cpu_core_usage"))
     return {
-        "cpu": process_cpu_cores >= 0.75 or cpu_user + cpu_sys >= 75 or top_percent >= 45,
+        # 容器目标用 cgroup 聚合 CPU（含容器内独立燃烧进程）；纯宿主进程无 cgroup
+        # CPU 值时回退到主进程 CPU。进程与容器取较大值避免漏报容器内 CPU 热点。
+        "cpu": max(process_cpu_cores, container_cpu_cores) >= 0.75
+        or cpu_user + cpu_sys >= 75
+        or top_percent >= 45,
         "io_wait": cpu_iowait >= 20 or _has_ebpf_latency(values.get("ebpf_metrics")),
         "host_iowait_high": cpu_iowait >= 10,
         "block_latency_high": _has_ebpf_latency(values.get("ebpf_metrics")),

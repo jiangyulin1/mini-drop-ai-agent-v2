@@ -867,8 +867,33 @@ def _domain_cause(observations: list[dict[str, Any]]) -> tuple[str, str]:
     if _log_connectivity_count(observations) > 0:
         return "network", "connectivity_errors"
     facts = [_facts(obs) for obs in observations]
+    # fd/句柄耗尽：socket 持有、连接泄漏等通常表现为 fd 持续增长或突破阈值，
+    # 属于 network 域（与 connection_probe/进程日志的连接类错误并列）。
+    if any(
+        _num(item.get("fd_count")) >= 1000
+        or (
+            str(item.get("fd_trend") or item.get("fd_growth") or "").lower()
+            in {"increasing", "growing"}
+            and _num(item.get("fd_count")) >= 200
+        )
+        for item in facts
+    ):
+        return "network", "fd_or_socket_exhaustion"
     if any(_num(item.get("container_oom_kill_delta")) > 0 for item in facts):
         return "memory", "cgroup_oom_kill"
+    # 与 memory_pressure_analyzer.v2 的 rss_growth 判定对齐：斜率 >= 1MB/s，
+    # 或趋势递增且 RSS >= 256MB。慢速泄漏在诊断窗口内 RSS 可能未到 256MB，
+    # 仅靠 pressure.memory 会漏判为 unknown；增长趋势本身就是内存域强信号。
+    if any(
+        _num(item.get("vmrss_slope_bytes_per_second")) >= 1024 * 1024
+        or (
+            str(item.get("vmrss_trend") or item.get("memory_trend") or "").lower()
+            in {"increasing", "growing"}
+            and _num(item.get("vmrss_mb")) >= 256
+        )
+        for item in facts
+    ):
+        return "memory", "process_memory_growth"
     if any(max(_num(item.get("root_fs_used_pct")), _num(item.get("target_fs_used_pct"))) >= 95 for item in facts):
         return "io", "filesystem_exhaustion"
     if any(_num(item.get("lock_waiter_count_max")) >= 15 and _num(item.get("blocked_thread_ratio_max")) >= 0.9 for item in facts):

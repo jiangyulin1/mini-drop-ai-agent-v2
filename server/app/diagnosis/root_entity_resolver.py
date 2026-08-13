@@ -92,7 +92,16 @@ def resolve_root_entity(
         candidates = _downstream_services(target_service, dependencies) or set(downstream_services)
         return _pick_downstream(candidates, observed)
 
+    if classification == "same_host_noisy_neighbor":
+        # 同宿主噪声的根因是共享宿主资源被邻居抢占：root_entity 应指向宿主
+        # （host_id）而非目标服务，便于区分"目标自身问题"与"宿主资源被占"。
+        instances = scope.get("instances") or []
+        for item in instances:
+            if item.get("service_id") == target_service and item.get("host_id"):
+                return str(item["host_id"])
+        return str(target_service) if target_service else None
+
     if not target_service:
         return None
-    # 自身 / 同宿主 / 共享资源 → 稳定服务 ID。
+    # 自身 / 共享资源 → 稳定服务 ID。
     return str(target_service)

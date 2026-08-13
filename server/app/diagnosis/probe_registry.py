@@ -145,7 +145,10 @@ def choose_probe_ids(symptom: str) -> list[str]:
     mapping = {
         "cpu_saturation": ["host_process_metrics", "process_cpu_profile"],
         "io_degradation": ["host_process_metrics", "process_io_latency"],
-        "noisy_neighbor": ["host_process_metrics", "process_io_latency"],
+        # noisy_neighbor 必须带 process_cpu_profile：判断"自身热点 vs 同宿主噪声
+        # 邻居"的唯一区分证据是目标进程是否有高占比代码热点。sys_metrics 只测主
+        # 线程 CPU，Go/Python 进程热点常在子线程，会漏报成 insufficient_evidence。
+        "noisy_neighbor": ["host_process_metrics", "process_cpu_profile", "process_io_latency"],
         "memory_pressure": ["process_memory_map", "host_process_metrics"],
         "error_increase": ["process_log_scan", "host_process_metrics"],
         "connection_failure": ["endpoint_connectivity_probe", "process_log_scan", "host_process_metrics"],

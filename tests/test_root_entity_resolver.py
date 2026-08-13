@@ -210,6 +210,24 @@ def test_self_case_resolves_to_target_service():
     assert resolve_root_entity(assessment, scope, []) == "productcatalogservice"
 
 
+def test_same_host_noise_resolves_to_host():
+    assessment = {
+        "classification": "same_host_noisy_neighbor",
+        "root_location": {"type": "same_host"},
+    }
+    scope = {
+        "target_service": "productcatalogservice",
+        "dependencies": [],
+        "downstream_service_ids": [],
+        "instances": [{
+            "service_id": "productcatalogservice",
+            "instance_id": "productcatalogservice-worker1-1",
+            "host_id": "worker1",
+        }],
+    }
+    assert resolve_root_entity(assessment, scope, []) == "worker1"
+
+
 def test_endpoint_probe_facts_point_to_downstream():
     assessment = {
         "classification": "downstream_dependency",

@@ -238,6 +238,15 @@ class SysMetricsCollector:
             result["memory_events"] = memory_events
             quota, period = read("cpu.max").split()[:2]
             result["cpu_quota_cores"] = None if quota == "max" else int(quota) / int(period)
+            try:
+                cpu_usage = 0
+                for line in read("cpu.stat").splitlines():
+                    name, raw = line.split()[:2]
+                    if name == "usage_usec":
+                        cpu_usage = int(raw)
+                result["cpu_usage_usec"] = cpu_usage
+            except (FileNotFoundError, ValueError):
+                result["cpu_usage_usec"] = None
             io_totals = {"rbytes": 0, "wbytes": 0}
             for line in read("io.stat").splitlines():
                 for token in line.split()[1:]:
@@ -405,6 +414,15 @@ class SysMetricsCollector:
             if isinstance(limit, int) and limit > 0 and isinstance(current, int)
             else None
         )
+        # 容器 cgroup 实际 CPU 使用速率（usage_usec 差分 / 墙钟）。覆盖容器内
+        # 独立进程（yes/stress 等）燃烧但主进程自身 CPU 低的情况；对容器目标，
+        # cgroup 聚合 CPU 才是"该服务消耗多少 CPU"的真实信号。
+        first_usage = (first.get("container", {}) or {}).get("cpu_usage_usec")
+        last_usage = container.get("cpu_usage_usec")
+        if dt > 0 and isinstance(first_usage, int) and isinstance(last_usage, int):
+            container["cpu_core_usage"] = max(0.0, (last_usage - first_usage) / 1e6 / dt)
+        else:
+            container["cpu_core_usage"] = None
         return {"host": host, "process": process, "container": container}
 
     @staticmethod
@@ -475,6 +493,7 @@ class SysMetricsCollector:
             "target_fs_used_pct": round(float(fullest.get("used_ratio", 0) or 0) * 100, 2),
             "target_fs_available_bytes": int(fullest.get("available_bytes", 0) or 0),
             "target_fs_path": str(fullest.get("path", ""))[:512],
+            "container_cpu_core_usage": container.get("cpu_core_usage"),
             "container_memory_current_bytes": container.get("memory_current_bytes"),
             "container_memory_limit_bytes": container.get("memory_limit_bytes"),
             "container_memory_usage_ratio": container.get("memory_usage_ratio"),

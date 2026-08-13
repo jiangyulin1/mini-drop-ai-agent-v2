@@ -73,3 +73,8 @@ deploy/napcat/bootmain/
 deploy/napcat/NapCat.*/
 !deploy/napcat/README.md
 !deploy/napcat/start.cmd
+
+# VM 评测/测试集运行产物（生成数据，不提交）
+testsets/real/online-boutique/runs/
+testsets/real/online-boutique/ground_truth/
+reports/eval/ai-ops-v2/live-vm-*/

@@ -490,6 +490,18 @@ def main() -> int:
             print(f"[{ordinal}/{len(jobs)}] {case_id} repetition={repetition}", flush=True)
             baseline = previous_rollback
             record["baseline"] = baseline
+            # 瞬时前端超时会让 baseline 偶发不干净；重试几次再放弃，避免单个
+            # 瞬态波动中止整个 90 轮评测。
+            retries = 0
+            while (
+                baseline["errors"] or baseline["unhealthy_services"]
+                or not baseline["frontend"]["ok"]
+            ) and retries < 4:
+                print(f"  unclean baseline (attempt {retries + 1}), re-cleaning...", flush=True)
+                time.sleep(10)
+                baseline = clean_environment(ssh, remote_scripts)
+                retries += 1
+            record["baseline"] = baseline
             if baseline["errors"] or baseline["unhealthy_services"] or not baseline["frontend"]["ok"]:
                 raise RuntimeError(f"unclean baseline for {case_id}: {baseline}")
             started_at = time.monotonic()

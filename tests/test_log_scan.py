@@ -33,6 +33,14 @@ def test_choose_probe_ids_includes_log_for_errors():
     assert "process_log_scan" in ids2
 
 
+def test_choose_probe_ids_noisy_neighbor_includes_cpu_profile():
+    # Distinguishing "self hotspot vs same-host noisy neighbor" needs the perf
+    # profile (top function), not just host metrics. Without it the target's own
+    # process CPU (main-thread only) can be near zero and the diagnosis abstains.
+    ids = choose_probe_ids("noisy_neighbor")
+    assert "process_cpu_profile" in ids
+
+
 def test_parse_log_extracts_levels_patterns_errors(tmp_path):
     log_file = tmp_path / "service.log"
     _write_log(log_file, [
