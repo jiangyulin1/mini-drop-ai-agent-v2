@@ -46,6 +46,7 @@ vi.mock("../api/client", () => ({
   listTargetSessions: vi.fn(),
   listTasks: vi.fn(),
   runAIValidation: vi.fn(),
+  runIncidentCaseAgentTurn: vi.fn(),
   startIncidentCaseDiagnosis: vi.fn(),
   transitionIncidentCase: vi.fn(),
   verifyCaseRecoveryPlan: vi.fn(),

@@ -52,6 +52,7 @@ import {
   transitionIncidentCase,
   verifyCaseRecoveryPlan,
   rollbackCaseRecoveryPlan,
+  runIncidentCaseAgentTurn,
 } from "../api/client";
 import { useSearchParams } from "react-router-dom";
 import styles from "./AIDiagnosis.module.css";
@@ -588,27 +589,17 @@ export default function AIDiagnosisWorkspace() {
     if (!content || !caseDetail) return;
     setActionLoading(true);
     try {
-      await appendIncidentCaseMessage(caseDetail.case_id, { content, kind: "answer" });
+      const turn = await runIncidentCaseAgentTurn(caseDetail.case_id, {
+        message: content,
+        execute_safe_tools: true,
+      });
       updateMessageText("");
-      let current = await getIncidentCase(caseDetail.case_id);
-      if (!caseHasInstances(current)) {
+      await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${caseDetail.case_id}`)]);
+      if (turn.status === "needs_user" && !caseHasInstances(caseDetail)) {
+        const current = await getIncidentCase(caseDetail.case_id);
         setCaseDetail(current);
         openScopeEditor(current, { autoSearch: Boolean(current.target_scope?.service_id) });
-        await loadSelection(`case:${current.case_id}`);
-        message.info(current.target_scope?.service_id ? "信息已保存，请确认候选目标进程" : "信息已保存，请搜索并确认目标进程");
-        return;
       }
-      current = await correctIncidentCase(current.case_id, {
-        target_scope: current.target_scope,
-        reason: "用户补充信息，重新分析",
-        expected_row_version: current.row_version,
-      });
-      await startIncidentCaseDiagnosis(current.case_id, {
-        expected_row_version: current.row_version,
-        analysis_strategy: "CONSTRAINED_HYBRID",
-        budget_profile: "production_safe",
-      });
-      await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${current.case_id}`)]);
     } catch (error) {
       message.error(`发送失败：${error.message}`);
       await loadSelection(`case:${caseDetail.case_id}`, { quiet: true });

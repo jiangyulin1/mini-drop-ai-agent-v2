@@ -390,6 +390,10 @@ export function appendIncidentCaseMessage(caseId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/messages`, payload);
 }
 
+export function runIncidentCaseAgentTurn(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/agent/turn`, payload);
+}
+
 export function correctIncidentCase(caseId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/corrections`, payload);
 }

@@ -19,6 +19,9 @@
 | 目标级长期会话 | 已实现 | tenant 隔离；暂停/恢复/归档；幂等信号；严重度策略与冷却窗口；自动孵化并关联 Case；Web 可创建与复用 |
 | profiling 历史窗口 | 已实现检索地基 | 已完成 `continuous_perf` Task 可按明确实例范围建索引、按事故时间检索并自动关联信号/Case；7 天/90 天降采样层尚未实现 |
 | VM 测试集评分 | 已实现 | 重复次数、Top-1/3、证据域、时限、双节点 Linux、安全、恢复、Oracle 隔离和 Jaccard 稳定性共同控制 `verified_vm` 晋级 |
+| 对话式 Agent Runtime | 已实现首版 | `case-agent-turn.v1` 统一自然语言回合；解释/纠错/调查/状态/部署评估；决策摘要与证据链，不保存私有思维链 |
+| MCP 工具编排 | 已实现首版 | Planner 只从 Source Registry 选择；MCP 继续经过租户、Grant、Capability Token、脱敏与结果预算 |
+| 部署承载力预测 | 已实现保守基线 | 结构化需求 + allocatable 容量 + 安全余量；缺容量时返回 `insufficient_data`，不以瞬时利用率替代容量 |
 
 数据库迁移链为 `0001` 至 `0014`；新增恢复方案、目标会话/信号和 profiling 窗口索引均有 Alembic 迁移与漂移检查。
 
@@ -26,13 +29,13 @@
 
 | 门禁 | 结果 |
 |---|---|
-| Python 全量测试 | 571 passed |
+| Python 全量测试 | 769 passed（含对话式 Agent Runtime 与容量评估回归） |
 | Python 覆盖率 | 78%（13,502 statements）；新增 Agent/Analyzer 失败分支回归 |
 | Golden 诊断集 | 7/7 passed；分类、证据引用、安全动作全部通过 |
 | 数据库迁移 | 空库升级通过；Alembic schema drift 为 0 |
 | 仓库卫生 | passed |
 | 测试集静态契约 | 8/8 manifest、采集器、生命周期脚本、shell 语法通过 |
-| Web | lint passed；34 tests passed；production build passed |
+| Web | lint passed；51 tests passed；production build passed |
 | Web 生产依赖审计 | 0 vulnerabilities |
 | 三节点发布 | Control/worker1/worker2 已切换到 `mini-drop-release-20260810-ai-agent-v1`；服务健康，旧版本保留可回滚 |
 | VM 运行态冒烟 | 两个 `sys_metrics` 采集与分析完成；`continuous_perf` 1/1 窗口成功，产物上传、索引和信号关联通过 |

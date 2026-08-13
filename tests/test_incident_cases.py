@@ -108,6 +108,41 @@ def test_case_message_pause_resume_and_optimistic_version(client: TestClient):
     assert resumed.json()["data"]["state"] == "OPEN"
 
 
+def test_agent_turn_answers_status_and_persists_both_sides(client: TestClient):
+    case = client.post("/api/v1/cases", json=_case_payload()).json()["data"]
+    response = client.post(
+        f"/api/v1/cases/{case['case_id']}/agent/turn",
+        json={"message": "现在进度和状态是什么？"},
+    )
+    assert response.status_code == 200
+    turn = response.json()["data"]
+    assert turn["schema_version"] == "case-agent-turn.v1"
+    assert turn["intent"] == "status"
+    assert turn["status"] == "answered"
+    assert "当前阶段" in turn["assistant_message"]
+
+    events = client.get(f"/api/v1/cases/{case['case_id']}/events").json()["data"]["items"]
+    assert [item["event_type"] for item in events][-2:] == ["user_message", "agent_turn_completed"]
+    assert events[-1]["payload"]["turn_id"] == turn["turn_id"]
+
+
+def test_agent_turn_capacity_is_honest_without_inventory(client: TestClient):
+    case = client.post("/api/v1/cases", json=_case_payload()).json()["data"]
+    response = client.post(
+        f"/api/v1/cases/{case['case_id']}/agent/turn",
+        json={
+            "message": "部署 2 个副本，每个 CPU 2 核、内存 4GB，评估是否承载",
+            "execute_safe_tools": False,
+        },
+    )
+    assert response.status_code == 200
+    turn = response.json()["data"]
+    assert turn["intent"] == "deployment_assessment"
+    assert turn["status"] == "insufficient_data"
+    assert turn["deployment_assessment"]["verdict"] == "insufficient_data"
+    assert turn["deployment_assessment"]["requirements"]["memory_mb_per_replica"] == 4096
+
+
 def test_case_access_is_tenant_scoped(client: TestClient, monkeypatch):
     case_id = client.post("/api/v1/cases", json=_case_payload()).json()["data"]["case_id"]
 

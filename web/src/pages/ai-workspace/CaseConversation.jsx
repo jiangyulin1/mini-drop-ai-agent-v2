@@ -493,6 +493,20 @@ export default function CaseConversation({
                   </Message>
                 );
               }
+              if (event.event_type === "agent_turn_completed") {
+                const payload = event.payload || {};
+                return (
+                  <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
+                    <p className={styles.messageText}>{payload.assistant_message || "本轮处理完成。"}</p>
+                    {(payload.evidence_chain || []).length > 0 && (
+                      <div className={styles.cardDescription}>引用 {payload.evidence_chain.length} 条受控证据</div>
+                    )}
+                    {(payload.limitations || []).length > 0 && (
+                      <div className={styles.cardDescription}>仍缺：{payload.limitations.slice(0, 3).join("；")}</div>
+                    )}
+                  </Message>
+                );
+              }
               const text = eventText(event);
               return text ? <div className={styles.systemEvent} key={event.event_id}>{formatTime(event.created_at)} · {text}</div> : null;
             })}

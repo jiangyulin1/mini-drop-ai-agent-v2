@@ -81,6 +81,18 @@ from server.app.diagnosis.authorization import (
     evaluate_source_access,
 )
 from server.app.diagnosis.autonomous_agent import AgentCallbacks, AutonomousIncidentAgent
+from server.app.diagnosis.agent_runtime import (
+    AgentTurnIntent,
+    AgentTurnRequest,
+    AgentTurnResult,
+    assess_deployment_capacity,
+    build_case_evidence_chain,
+    build_observability_tool_plan,
+    classify_turn,
+    execute_tool_plan,
+    parse_deployment_requirements,
+    render_understanding_answer,
+)
 from server.app.diagnosis.case_supervisor import CaseSupervisor
 from server.app.diagnosis.governance import (
     CAPABILITY_EPOCH,
@@ -102,7 +114,11 @@ from server.app.diagnosis.investigation_planner import (
     rank_investigation_actions,
 )
 from server.app.diagnosis.proposal_card import build_proposal_cards
-from server.app.diagnosis.schemas import ApprovalRequest, CreateDiagnosisRequest
+from server.app.diagnosis.schemas import (
+    ApprovalRequest,
+    CreateDiagnosisRequest,
+    TERMINAL_DIAGNOSIS_STATUSES,
+)
 from server.app.case_collaboration import (
     CaseCorrectionRequest,
     CaseMessageRequest,
@@ -2378,6 +2394,224 @@ def append_incident_case_message(
     if result is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
     return APIResponse(data=result)
+
+
+@app.post("/api/v1/cases/{case_id}/agent/turn")
+def run_incident_case_agent_turn(
+    case_id: str,
+    payload: AgentTurnRequest,
+    request: Request,
+) -> APIResponse:
+    """Run one conversation-first Agent turn over the durable Case.
+
+    The response exposes an auditable decision/evidence chain, never hidden
+    model reasoning.  Every external read is selected from SourceRegistry and
+    executed through SourceGateway, so MCP data receives the same scope,
+    redaction, result-budget and grant controls as native sources.
+    """
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    if case["state"] in {"STOPPED", "RESOLVED"}:
+        raise HTTPException(status_code=409, detail="CASE_TERMINAL")
+
+    intent = classify_turn(payload.message, payload.intent)
+    message_kind = "explanation_request" if intent in {
+        AgentTurnIntent.EXPLAIN,
+        AgentTurnIntent.STATUS,
+    } else "answer"
+    repo.append_case_message(
+        case_id,
+        tenant_id,
+        actor_id=principal_id,
+        content=payload.message,
+        kind=message_kind,
+    )
+    case = repo.get_incident_case(case_id, tenant_id) or case
+    graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
+    diagnosis_id = case.get("diagnosis_session_id")
+    diagnosis = (
+        diagnosis_orchestrator.store.get_detail(diagnosis_id)
+        if diagnosis_id else {}
+    ) or {}
+    evidence = diagnosis.get("evidence") or []
+    understanding = build_case_context_packet(
+        case,
+        diagnosis={"hypothesis_graph": graph},
+        evidence=evidence,
+        required_output_schema="case-agent-turn.v1",
+    )[0]["current_understanding"]
+    assistant_message, decisions, evidence_chain = render_understanding_answer(understanding)
+    evidence_chain = build_case_evidence_chain(graph, evidence) or evidence_chain
+    contradictions = list(understanding.get("contradictions") or [])
+    limitations = list(understanding.get("missing") or [])
+    next_actions: list[dict[str, Any]] = []
+    tool_calls = []
+    deployment_assessment = None
+    status = "answered"
+
+    if intent == AgentTurnIntent.DEPLOYMENT_ASSESSMENT:
+        requirements = payload.deployment_requirements or parse_deployment_requirements(payload.message)
+        plan = build_observability_tool_plan(
+            case,
+            intent=intent,
+            max_tool_calls=payload.max_tool_calls,
+            source_definitions=source_gateway.list_sources(),
+        )
+        tool_evidence: list[dict[str, Any]] = []
+        if payload.execute_safe_tools:
+            tool_calls, tool_evidence = execute_tool_plan(
+                source_gateway,
+                plan,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                principal_id=principal_id,
+            )
+        else:
+            tool_calls = plan
+        deployment_assessment = assess_deployment_capacity(
+            requirements,
+            target_scope=case.get("target_scope") or {},
+            tool_evidence=tool_evidence,
+        )
+        assistant_message = deployment_assessment.summary
+        decisions = [
+            f"承载力判定：{deployment_assessment.verdict}",
+            *deployment_assessment.assumptions,
+        ]
+        evidence_chain = [
+            {
+                "evidence_id": item["evidence_id"],
+                "source_id": item["source_id"],
+                "content_hash": item["content_hash"],
+                "projection_hash": item["projection_hash"],
+            }
+            for item in tool_evidence
+        ]
+        limitations = deployment_assessment.missing_inputs
+        if any(item.status == "approval_required" for item in tool_calls):
+            status = "tool_approval_required"
+        elif deployment_assessment.verdict == "insufficient_data":
+            status = "insufficient_data"
+        next_actions = _deployment_next_actions(deployment_assessment.model_dump(mode="json"), tool_calls)
+    elif intent == AgentTurnIntent.STATUS:
+        progress = _case_agent_progress(case)
+        assistant_message = (
+            f"当前阶段：{progress['phase_label']}。"
+            f"诊断状态：{progress.get('diagnosis_status') or '尚未启动'}；"
+            f"已执行 {progress['actions_executed']}/{progress['max_actions']} 个恢复动作。"
+        )
+        decisions = [assistant_message]
+        if case.get("summary", {}).get("need_you", {}).get("required"):
+            status = "needs_user"
+            next_actions.append({
+                "type": "need_user",
+                "description": case["summary"]["need_you"].get("question") or "请补充调查范围",
+            })
+    elif intent == AgentTurnIntent.EXPLAIN:
+        if not graph.get("hypotheses"):
+            assistant_message = "当前还没有可解释的诊断假设。请先启动调查或补充目标范围。"
+            status = "needs_user" if case["state"] == "NEEDS_SCOPE_CONFIRMATION" else "insufficient_data"
+        if understanding.get("next"):
+            next_actions.append({"type": "investigate", "description": understanding["next"]})
+    else:
+        if case["state"] == "NEEDS_SCOPE_CONFIRMATION":
+            assistant_message = "我已记录补充信息，但还不能安全选择探针：请先确认目标服务、Worker 和 PID。"
+            status = "needs_user"
+            next_actions.append({"type": "confirm_scope", "description": "确认服务实例、宿主机或 PID 范围"})
+        else:
+            current_status = str(diagnosis.get("status") or "")
+            if (
+                diagnosis_id
+                and current_status not in TERMINAL_DIAGNOSIS_STATUSES
+                and intent != AgentTurnIntent.CORRECT
+            ):
+                assistant_message = f"我已把这条信息加入证据上下文，当前诊断仍在推进（{current_status}）。"
+                status = "diagnosis_in_progress"
+            else:
+                if diagnosis_id:
+                    try:
+                        diagnosis_orchestrator.cancel(diagnosis_id, "用户发起新一轮 Agent 调查")
+                    except ValueError:
+                        pass
+                    case = repo.correct_incident_case(
+                        case_id,
+                        tenant_id,
+                        actor_id=principal_id,
+                        changes={"target_scope": case.get("target_scope") or {}},
+                        reason="用户补充或纠正事实，启动新一轮 Agent 调查",
+                        expected_row_version=case.get("row_version"),
+                    ) or case
+                if case.get("run_mode") == "ASSIST":
+                    assistant_message = "当前 Case 是辅助模式，我已记录事实但不会自动启动探针；切换到协作或授权自治模式后可继续。"
+                    status = "needs_user"
+                    next_actions.append({"type": "change_run_mode", "description": "将 Case 切换为 COLLABORATE 或 AUTHORIZED_AUTONOMY"})
+                else:
+                    try:
+                        started = start_case_diagnosis(
+                            case_id,
+                            StartCaseDiagnosisRequest(expected_row_version=case.get("row_version")),
+                            request,
+                        ).data
+                    except HTTPException as exc:
+                        assistant_message = f"我已记录本轮信息，但自动调查暂未启动：{exc.detail}。"
+                        status = "needs_user"
+                        limitations = [str(exc.detail)]
+                        next_actions.append({"type": "resolve_blocker", "description": str(exc.detail)})
+                    else:
+                        started_diagnosis = started.get("diagnosis") or {}
+                        assistant_message = "我已基于当前对话、范围、变更记录和已有证据启动新一轮调查。"
+                        status = "diagnosis_requested"
+                        next_actions.append({
+                            "type": "diagnosis",
+                            "diagnosis_id": started_diagnosis.get("diagnosis_id"),
+                            "status": started_diagnosis.get("status"),
+                        })
+
+    result = AgentTurnResult(
+        turn_id=f"turn_{secrets.token_hex(12)}",
+        intent=intent,
+        status=status,
+        assistant_message=assistant_message,
+        decision_summary=decisions,
+        evidence_chain=evidence_chain,
+        contradictions=contradictions,
+        limitations=limitations,
+        next_actions=next_actions,
+        tool_calls=tool_calls,
+        deployment_assessment=deployment_assessment,
+    )
+    repo.record_case_event(
+        case_id,
+        tenant_id,
+        event_type="agent_turn_completed",
+        payload=result.model_dump(mode="json"),
+        actor_id="mini-drop-agent-runtime",
+    )
+    return APIResponse(data=result.model_dump(mode="json"))
+
+
+def _deployment_next_actions(assessment: dict[str, Any], tool_calls: list[Any]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for call in tool_calls:
+        if call.status == "approval_required":
+            actions.append({
+                "type": "approve_source",
+                "source_id": call.source_id,
+                "operation": call.operation,
+                "reason": call.reason,
+            })
+    if assessment.get("missing_inputs"):
+        actions.append({
+            "type": "provide_capacity_data",
+            "fields": assessment["missing_inputs"],
+        })
+    if assessment.get("verdict") == "conditional":
+        actions.append({"type": "adjust_capacity_or_requirements", "description": "扩容、降低单副本需求或调整调度约束后重新评估"})
+    return actions
 
 
 # ── 恢复验证与人工动作回填（多轮诊断闭环） ────────────────────

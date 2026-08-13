@@ -6,6 +6,7 @@
 
 | 文档 | 用途 | 状态 |
 |---|---|---|
+| [`ai_agent_runtime_integration_plan.md`](ai_agent_runtime_integration_plan.md) | 供执行 AI 持续实现的总任务提示词：第二页持续诊断、Pi Runtime、集群/VM、Skill 与逐项验收 | 当前实施与验收真源 |
 | [`drop_ai_exploration_roadmap.md`](drop_ai_exploration_roadmap.md) | 当前项目审核、AI 探索定位、多路线优先级、12 周计划与晋级门槛 | 当前路线决策基线 |
 | [`autonomous_ops_agent_implementation_plan.md`](autonomous_ops_agent_implementation_plan.md) | 持续事故接管、准确率提升、自动处置闭环和分阶段验收 | 当前实施基线 |
 | [`ai_authorization_and_tooling.md`](ai_authorization_and_tooling.md) | Source、Probe、Grant、Policy、Action 和安全执行约束 | 当前安全规范 |
