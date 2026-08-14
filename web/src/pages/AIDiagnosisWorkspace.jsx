@@ -26,6 +26,7 @@ import {
   appendIncidentCaseMessage,
   advanceAutonomousCase,
   approveDiagnosisProbe,
+  attachCaseResources,
   correctIncidentCase,
   createCaseRecoveryPlan,
   createIncidentCase,
@@ -62,6 +63,7 @@ import DiagnosisDataConsole from "./ai-workspace/DiagnosisDataConsole";
 import DiagnosisTechnicalDrawer from "./ai-workspace/DiagnosisTechnicalDrawer";
 import ScopeEditorModal from "./ai-workspace/ScopeEditorModal";
 import WorkerStatus from "./ai-workspace/WorkerStatus";
+import InvestigationWorkbench from "../components/InvestigationWorkbench";
 import {
   CASE_STATE_META,
   DIAGNOSIS_STATUS_META,
@@ -491,7 +493,6 @@ export default function AIDiagnosisWorkspace() {
           service_id: instance.service_id,
           instances: [instance],
           dependencies: [],
-          evidence_task_ids: [taskId],
         },
         initial_tasks: [taskId],
       });
@@ -671,12 +672,25 @@ export default function AIDiagnosisWorkspace() {
         target_scope: {
           ...current.target_scope,
           instances: uniqueInstances([...(current.target_scope?.instances || []), ...linkedInstances]),
-          evidence_task_ids: [...new Set([...(current.target_scope?.evidence_task_ids || []), ...evidenceTaskIds])],
-          source_collection_ids: [...new Set([...(current.target_scope?.source_collection_ids || []), group.collectionId])],
         },
         reason: `关联采集会话 ${group.collectionId}`,
         expected_row_version: current.row_version,
       });
+      // E1 统一数据入口：批次 Task 经统一 Attachment API 绑定，不再写 evidence_task_ids
+      const attachResult = await attachCaseResources(current.case_id, {
+        references: [{
+          type: "collection",
+          id: group.collectionId,
+          source: "collection_batch",
+          member_task_ids: evidenceTaskIds,
+        }],
+        purpose: `关联采集批次 ${group.collectionId}`,
+      });
+      const rejected = attachResult.items.filter((item) => item.result !== "ACCEPTED");
+      if (rejected.length) {
+        message.warning(`批次 ${group.collectionId} 有 ${rejected.length} 项未接受：` +
+          rejected.map((item) => item.rejection_reason || item.result).join(", "));
+      }
       await startIncidentCaseDiagnosis(current.case_id, {
         expected_row_version: current.row_version,
         analysis_strategy: "CONSTRAINED_HYBRID",
@@ -790,28 +804,31 @@ export default function AIDiagnosisWorkspace() {
             onAnalyze={analyzeCollection}
           />
         ) : caseDetail ? (
-          <CaseConversation
-            detail={caseDetail}
-            events={events}
-            diagnosis={diagnosis}
-            currentUnderstanding={currentUnderstanding}
-            proposals={proposals}
-            recoveryPlans={recoveryPlans}
-            loading={detailLoading}
-            actionLoading={actionLoading}
-            messageText={messageText}
-            onMessageChange={updateMessageText}
-            onSend={sendAndAnalyze}
-            onStart={() => startDiagnosis()}
-            onOpenScope={() => openScopeEditor(caseDetail)}
-            onOpenTechnical={() => setTechnicalOpen(true)}
-            onOpenCollection={openCollection}
-            onDecision={decideProbe}
-            onTransition={transition}
-            onAdvanceAgent={advanceAgent}
-            onOpenRecovery={openRecoveryPlan}
-            onRecoveryAction={recoveryPlanAction}
-          />
+          <>
+            <CaseConversation
+              detail={caseDetail}
+              events={events}
+              diagnosis={diagnosis}
+              currentUnderstanding={currentUnderstanding}
+              proposals={proposals}
+              recoveryPlans={recoveryPlans}
+              loading={detailLoading}
+              actionLoading={actionLoading}
+              messageText={messageText}
+              onMessageChange={updateMessageText}
+              onSend={sendAndAnalyze}
+              onStart={() => startDiagnosis()}
+              onOpenScope={() => openScopeEditor(caseDetail)}
+              onOpenTechnical={() => setTechnicalOpen(true)}
+              onOpenCollection={openCollection}
+              onDecision={decideProbe}
+              onTransition={transition}
+              onAdvanceAgent={advanceAgent}
+              onOpenRecovery={openRecoveryPlan}
+              onRecoveryAction={recoveryPlanAction}
+            />
+            <InvestigationWorkbench caseId={caseDetail.case_id} />
+          </>
         ) : diagnosis ? (
           <LegacyConversation
             diagnosis={diagnosis}

@@ -15,20 +15,32 @@ import random
 import shlex
 import ssl
 import statistics
+import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import paramiko
 
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.vm_environment import (  # noqa: E402
+    VMNode,
+    VMTopology,
+    api_base_from_control,
+    default_known_hosts,
+    load_topology,
+    record_host_keys,
+)
 PUBLIC_CASES = ROOT / "benchmarks" / "ai_ops_v2" / "public" / "cases.json"
 FAULTCTL = ROOT / "benchmarks" / "ai_ops_v2" / "vm_faultctl.sh"
+DEFAULT_PROFILE = ROOT / "benchmarks" / "environments" / "hyperv_online_boutique_verified_vm.json"
 TERMINAL = {
     "COMPLETED", "INSUFFICIENT_EVIDENCE", "PARTIAL_COMPLETED",
     "BUDGET_EXHAUSTED", "TOPOLOGY_UNAVAILABLE", "USER_CANCELED", "FAILED",
@@ -37,20 +49,6 @@ TERMINAL = {
     # refusal to guess as its terminal observation.
     "NEEDS_SCOPE_CONFIRMATION",
 }
-
-
-@dataclass(frozen=True)
-class Node:
-    name: str
-    ip: str
-    user: str
-    agent_id: str
-
-
-CONTROL = Node("control", "192.168.10.10", "control", "")
-WORKER1 = Node("worker1", "192.168.10.11", "worker1", "linux-worker-1")
-WORKER2 = Node("worker2", "192.168.10.12", "worker2", "linux-worker-2")
-WORKERS = {node.name: node for node in (WORKER1, WORKER2)}
 
 
 @dataclass(frozen=True)
@@ -168,13 +166,17 @@ SPECS: dict[str, Spec] = {
 
 
 class SSH:
-    def __init__(self, password: str):
-        self.password = password
+    def __init__(self, password: str, known_hosts: Path):
+        from scripts.vm_environment import SSHGate
 
-    def run(self, node: Node, command: str, *, timeout: int = 180) -> str:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(node.ip, username=node.user, password=self.password, timeout=15)
+        self.password = password
+        self._gate = SSHGate(password, known_hosts=known_hosts)
+
+    def _connect(self, node: VMNode) -> paramiko.SSHClient:
+        return self._gate.connect(node)
+
+    def run(self, node: VMNode, command: str, *, timeout: int = 180) -> str:
+        client = self._connect(node)
         try:
             _, stdout, stderr = client.exec_command(command, timeout=timeout)
             out = stdout.read().decode("utf-8", "replace")
@@ -186,14 +188,12 @@ class SSH:
         finally:
             client.close()
 
-    def sudo(self, node: Node, command: str, *, timeout: int = 240) -> str:
+    def sudo(self, node: VMNode, command: str, *, timeout: int = 240) -> str:
         password = shlex.quote(self.password)
         return self.run(node, f"printf '%s\\n' {password} | sudo -S {command}", timeout=timeout)
 
-    def deploy_faultctl(self, node: Node) -> str:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(node.ip, username=node.user, password=self.password, timeout=15)
+    def deploy_faultctl(self, node: VMNode) -> str:
+        client = self._connect(node)
         remote_dir = f"/home/{node.user}/mini-drop-active/benchmarks/ai_ops_v2"
         remote = f"{remote_dir}/vm_faultctl.sh"
         try:
@@ -201,7 +201,10 @@ class SSH:
             if stdout.channel.recv_exit_status():
                 raise RuntimeError(f"cannot create {remote_dir}")
             sftp = client.open_sftp()
-            sftp.put(str(FAULTCTL), remote)
+            # Windows 工作树 CRLF 会在 Linux bash 上破坏脚本；上传前规范化 LF。
+            normalized = FAULTCTL.read_bytes().replace(b"\r\n", b"\n")
+            with sftp.open(remote, "wb") as handle:
+                handle.write(normalized)
             sftp.chmod(remote, 0o755)
             sftp.close()
             _, stdout, stderr = client.exec_command(f"bash -n {remote}")
@@ -213,9 +216,9 @@ class SSH:
 
 
 class API:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, base: str):
         self.api_key = api_key
-        self.base = "https://192.168.10.10"
+        self.base = base
         self.context = ssl.create_default_context()
         self.context.check_hostname = False
         self.context.verify_mode = ssl.CERT_NONE
@@ -242,8 +245,8 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def service_pid(ssh: SSH, target: Target) -> tuple[int, str | None]:
-    node = WORKERS[target.node]
+def service_pid(ssh: SSH, topology: VMTopology, target: Target) -> tuple[int, str | None]:
+    node = topology.worker(target.node)
     if target.source == "pid":
         return int(target.value), None
     if target.source == "unit":
@@ -262,13 +265,13 @@ def service_pid(ssh: SSH, target: Target) -> tuple[int, str | None]:
     return int(pid_text), container_id
 
 
-def resolve_scope(ssh: SSH, spec: Spec, run_key: str) -> dict[str, Any]:
+def resolve_scope(ssh: SSH, topology: VMTopology, spec: Spec, run_key: str) -> dict[str, Any]:
     if spec.no_scope:
         return {"service_id": spec.service, "instances": [], "dependencies": []}
     instances: list[dict[str, Any]] = []
     for index, target in enumerate(spec.targets):
-        pid, container_id = service_pid(ssh, target)
-        node = WORKERS[target.node]
+        pid, container_id = service_pid(ssh, topology, target)
+        node = topology.worker(target.node)
         instance_id = target.instance_id or f"{target.service}-{node.name}-{pid}-{run_key}-{index}"
         item = {
             "service_id": target.service,
@@ -289,9 +292,9 @@ def resolve_scope(ssh: SSH, spec: Spec, run_key: str) -> dict[str, Any]:
     return {"service_id": spec.service, "instances": instances, "dependencies": dependencies}
 
 
-def frontend_probe(timeout: float = 5.0) -> dict[str, Any]:
+def frontend_probe(worker: VMNode, timeout: float = 5.0) -> dict[str, Any]:
     started = time.monotonic()
-    request = urllib.request.Request("http://192.168.10.11:8080/", method="GET")
+    request = urllib.request.Request(f"http://{worker.ip}:8080/", method="GET")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(request, timeout=timeout) as response:
@@ -303,16 +306,19 @@ def frontend_probe(timeout: float = 5.0) -> dict[str, Any]:
                 "latency_ms": round((time.monotonic() - started) * 1000, 1)}
 
 
-def clean_environment(ssh: SSH, remote_scripts: dict[str, str]) -> dict[str, Any]:
+def clean_environment(ssh: SSH, topology: VMTopology,
+                      remote_scripts: dict[str, str]) -> dict[str, Any]:
     errors: list[str] = []
-    for node in (WORKER1, WORKER2):
+    workers = list(topology.workers.values())
+    for node in workers:
         try:
             ssh.sudo(node, f"bash {remote_scripts[node.name]} clean", timeout=180)
         except Exception as exc:
             errors.append(f"{node.name}: {exc}")
-    services = ssh.sudo(WORKER1, "docker service ls --format '{{.Name}}|{{.Replicas}}'")
+    services = ssh.sudo(workers[0], "docker service ls --format '{{.Name}}|{{.Replicas}}'")
     unhealthy = [line for line in services.splitlines() if not line.endswith("|1/1")]
-    return {"errors": errors, "unhealthy_services": unhealthy, "frontend": frontend_probe()}
+    return {"errors": errors, "unhealthy_services": unhealthy,
+            "frontend": frontend_probe(workers[0])}
 
 
 def create_and_run(api: API, case_id: str, query: str, scope: dict[str, Any],
@@ -362,7 +368,7 @@ def create_and_run(api: API, case_id: str, query: str, scope: dict[str, Any],
     return diagnosis_id, last
 
 
-def install_no_reuse_override(ssh: SSH) -> None:
+def install_no_reuse_override(ssh: SSH, control: VMNode) -> None:
     password = shlex.quote(ssh.password)
     command = (
         "install -d /run/systemd/system/mini-drop-server.service.d; "
@@ -371,16 +377,16 @@ def install_no_reuse_override(ssh: SSH) -> None:
         "systemctl daemon-reload; systemctl restart mini-drop-server; "
         "for i in $(seq 1 30); do curl -kfsS https://127.0.0.1/api/healthz >/dev/null && exit 0; sleep 1; done; exit 1"
     )
-    ssh.run(CONTROL, f"printf '%s\\n' {password} | sudo -S /bin/bash -c {shlex.quote(command)}", timeout=90)
+    ssh.run(control, f"printf '%s\\n' {password} | sudo -S /bin/bash -c {shlex.quote(command)}", timeout=90)
 
 
-def remove_no_reuse_override(ssh: SSH) -> None:
+def remove_no_reuse_override(ssh: SSH, control: VMNode) -> None:
     password = shlex.quote(ssh.password)
     command = (
         "rm -f /run/systemd/system/mini-drop-server.service.d/ai-ops-v2-eval.conf; "
         "systemctl daemon-reload; systemctl restart mini-drop-server"
     )
-    ssh.run(CONTROL, f"printf '%s\\n' {password} | sudo -S /bin/bash -c {shlex.quote(command)}", timeout=90)
+    ssh.run(control, f"printf '%s\\n' {password} | sudo -S /bin/bash -c {shlex.quote(command)}", timeout=90)
 
 
 def load_queries() -> dict[str, str]:
@@ -418,6 +424,14 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=20260811)
     parser.add_argument("--output-dir", type=Path,
                         default=ROOT / "reports" / "eval" / "ai-ops-v2" / "live-vm-20260811")
+    parser.add_argument("--env-profile", type=Path, default=DEFAULT_PROFILE,
+                        help="approved Environment Profile JSON (E0 gate)")
+    parser.add_argument("--ssh-known-hosts", type=Path, default=None,
+                        help="known-hosts lockfile; defaults to deploy/ssh/mini-drop_vm_known_hosts")
+    parser.add_argument("--record-host-keys", action="store_true",
+                        help="one-time explicit capture of current VM host keys into the lockfile")
+    parser.add_argument("--control-env-file", default="/home/control/mini-drop-active/deploy/env/control-native.env",
+                        help="path to control VM native env file holding MINI_DROP_API_KEY")
     parser.add_argument("--keep-reuse-policy", action="store_true")
     parser.add_argument("--resume", action="store_true", help="skip completed case/repetition pairs in output")
     parser.add_argument("--cleanup-only", action="store_true", help="remove benchmark faults and restore control policy")
@@ -427,6 +441,12 @@ def main() -> int:
         parser.error("MINI_DROP_VM_PASSWORD is required")
     if not 1 <= args.repetitions <= 10:
         parser.error("--repetitions must be between 1 and 10")
+
+    topology = load_topology(args.env_profile)
+    known_hosts = args.ssh_known_hosts or default_known_hosts()
+    if args.record_host_keys:
+        print(f"recording host keys for profile {topology.environment_id}...", flush=True)
+        return record_host_keys(topology, password, known_hosts)
 
     queries = load_queries()
     wanted = [item.strip() for item in args.cases.split(",") if item.strip()] or list(SPECS)
@@ -460,25 +480,26 @@ def main() -> int:
             ],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    ssh = SSH(password)
-    remote_scripts = {node.name: ssh.deploy_faultctl(node) for node in (WORKER1, WORKER2)}
+    ssh = SSH(password, known_hosts=known_hosts)
+    workers = list(topology.workers.values())
+    remote_scripts = {node.name: ssh.deploy_faultctl(node) for node in workers}
     if args.cleanup_only:
-        health = clean_environment(ssh, remote_scripts)
-        remove_no_reuse_override(ssh)
+        health = clean_environment(ssh, topology, remote_scripts)
+        remove_no_reuse_override(ssh, topology.control)
         print(json.dumps({"cleanup": "completed", "health": health}, ensure_ascii=False, indent=2))
         return 0 if not health["errors"] and not health["unhealthy_services"] and health["frontend"]["ok"] else 1
-    for node in (WORKER1, WORKER2):
+    for node in workers:
         ssh.sudo(node, f"bash {remote_scripts[node.name]} prepare", timeout=180)
-    key = ssh.run(CONTROL,
-        "grep '^MINI_DROP_API_KEY=' /home/control/mini-drop-active/deploy/env/control-native.env | cut -d= -f2-").strip()
+    key = ssh.run(topology.control,
+        f"grep '^MINI_DROP_API_KEY=' {shlex.quote(args.control_env_file)} | cut -d= -f2-").strip()
     if not key:
         raise RuntimeError("control API key is empty")
-    api = API(key)
+    api = API(key, base=api_base_from_control(topology.control))
     if not args.keep_reuse_policy:
-        install_no_reuse_override(ssh)
+        install_no_reuse_override(ssh, topology.control)
 
     records: list[dict[str, Any]] = list(existing_records)
-    previous_rollback = clean_environment(ssh, remote_scripts)
+    previous_rollback = clean_environment(ssh, topology, remote_scripts)
     try:
         for ordinal, (case_id, repetition) in enumerate(jobs, 1):
             spec = SPECS[case_id]
@@ -499,7 +520,7 @@ def main() -> int:
             ) and retries < 4:
                 print(f"  unclean baseline (attempt {retries + 1}), re-cleaning...", flush=True)
                 time.sleep(10)
-                baseline = clean_environment(ssh, remote_scripts)
+                baseline = clean_environment(ssh, topology, remote_scripts)
                 retries += 1
             record["baseline"] = baseline
             if baseline["errors"] or baseline["unhealthy_services"] or not baseline["frontend"]["ok"]:
@@ -507,12 +528,12 @@ def main() -> int:
             started_at = time.monotonic()
             try:
                 for node_name, fixture in spec.inject:
-                    node = WORKERS[node_name]
+                    node = topology.worker(node_name)
                     ssh.sudo(node, f"bash {remote_scripts[node_name]} inject {shlex.quote(fixture)}", timeout=180)
                 time.sleep(spec.settle_sec)
-                scope = resolve_scope(ssh, spec, run_key)
+                scope = resolve_scope(ssh, topology, spec, run_key)
                 record["target_count"] = len(scope.get("instances") or [])
-                record["fault_probe"] = frontend_probe()
+                record["fault_probe"] = frontend_probe(workers[0])
                 diagnosis_id, detail = create_and_run(
                     api, case_id, queries[case_id], scope, repetition,
                 )
@@ -533,7 +554,7 @@ def main() -> int:
                 record.update({"phase": "failed", "error": f"{type(exc).__name__}: {exc}"})
                 print(f"  failed: {record['error']}", flush=True)
             finally:
-                record["rollback"] = clean_environment(ssh, remote_scripts)
+                record["rollback"] = clean_environment(ssh, topology, remote_scripts)
                 previous_rollback = record["rollback"]
                 record["elapsed_sec"] = round(time.monotonic() - started_at, 2)
                 record["finished_at"] = utcnow()
@@ -541,9 +562,9 @@ def main() -> int:
                 append_jsonl(records_path, record)
                 print(f"  {record['phase']} status={record.get('diagnosis_status')} elapsed={record['elapsed_sec']}s", flush=True)
     finally:
-        final_health = clean_environment(ssh, remote_scripts)
+        final_health = clean_environment(ssh, topology, remote_scripts)
         if not args.keep_reuse_policy:
-            remove_no_reuse_override(ssh)
+            remove_no_reuse_override(ssh, topology.control)
         summary = summarize(records)
         summary["final_health"] = final_health
         summary["finished_at"] = utcnow()

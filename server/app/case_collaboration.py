@@ -147,6 +147,75 @@ class CaseMessageRequest(StrictModel):
     kind: Literal["message", "answer", "explanation_request"] = "message"
 
 
+class ResourceRefRequest(StrictModel):
+    """结构化 @ 引用（plan 5.1），前端不传显示名当 ID。"""
+    type: str = Field(min_length=1, max_length=40)
+    id: str = Field(min_length=1, max_length=128)
+    revision: Optional[int] = None
+    label: str = Field(default="", max_length=256)
+    source: str = Field(default="user_mention", max_length=40)
+    member_task_ids: list[str] = Field(default_factory=list, max_length=64)
+
+
+class AttachResourcesRequest(StrictModel):
+    references: list[ResourceRefRequest] = Field(min_length=1, max_length=64)
+    purpose: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ExcludeAttachmentRequest(StrictModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReferenceSearchRequest(StrictModel):
+    query: str = Field(default="", max_length=256)
+    type: Optional[str] = Field(default=None, max_length=40)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class PlanStepRequest(StrictModel):
+    step_id: Optional[str] = None
+    kind: str = "COLLECTION"
+    collector_id: Optional[str] = None
+    target_refs: list[str] = Field(default_factory=list)
+    purpose: str = Field(default="", max_length=500)
+    hypothesis_refs: list[str] = Field(default_factory=list)
+    expected_information: str = Field(default="", max_length=500)
+    priority: int = Field(default=0, ge=0, le=1000)
+    priority_source: str = "AI"
+    user_locked: bool = False
+    depends_on: list[str] = Field(default_factory=list)
+    risk: str = "READ_LOW"
+    # E3.5/E4：集群 Step 声明选择策略（ALL_IN_SCOPE/REPRESENTATIVE/OUTLIERS/...）
+    selection_strategy: Optional[str] = Field(default=None, max_length=40)
+    status: str = "QUEUED"
+
+
+class PlanUpdateRequest(StrictModel):
+    goal: str = Field(default="定位根因", min_length=1, max_length=500)
+    steps: list[PlanStepRequest] = Field(default_factory=list, max_length=100)
+    expected_case_row_version: int = 0
+    expected_scope_revision: int = 0
+    expected_plan_revision: int = 0
+    source: str = "deterministic"
+
+
+class ReprioritizeStepRequest(StrictModel):
+    priority: int = Field(ge=0, le=1000)
+    user_locked: bool = True
+
+
+class RetargetStepRequest(StrictModel):
+    target_refs: Optional[list[str]] = None
+    collector_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class EvidenceReviewRequest(StrictModel):
+    evidence_id: str = Field(min_length=1, max_length=128)
+    decision: str = Field(min_length=1, max_length=20)
+    reason_code: Optional[str] = Field(default=None, max_length=64)
+    reason: Optional[str] = Field(default=None, max_length=1000)
+
+
 class CaseCorrectionRequest(StrictModel):
     problem_description: Optional[str] = Field(default=None, min_length=3, max_length=4000)
     recovery_goal: Optional[str] = Field(default=None, min_length=3, max_length=2000)

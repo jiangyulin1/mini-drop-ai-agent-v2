@@ -326,10 +326,6 @@ export async function downloadDiagnosisEvidenceBundle(diagnosisId, evidenceId) {
   return { blob: response.data, filename };
 }
 
-export function triggerDiagnose(taskId) {
-  return api.post(`/tasks/${taskId}/diagnose`);
-}
-
 export function listTaskDiagnoses(taskId) {
   return api.get(`/tasks/${taskId}/diagnoses`);
 }
@@ -406,8 +402,87 @@ export function startIncidentCaseDiagnosis(caseId, payload = {}) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/diagnoses`, payload);
 }
 
+// ── E1 统一数据入口：ResourceRef + EvidenceAttachment ────────────────
+
+/** `@` 自动补全：按稳定 ResourceRef 候选搜索。 */
+export function searchCaseReferences(payload = {}) {
+  return api.post('/v1/references/search', payload);
+}
+
+/** 将结构化 ResourceRef 绑定到 Case（统一 Attachment API）。 */
+export function attachCaseResources(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/attachments`, payload);
+}
+
+/** 列出 Case 已绑定的附件。 */
+export function listCaseAttachments(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/attachments`);
+}
+
+/** 排除证据（不物理删除，后续 Prompt 不再包含）。 */
+export function excludeCaseAttachment(caseId, attachmentId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/attachments/${encodeURIComponent(attachmentId)}/exclude`, payload);
+}
+
 export function advanceAutonomousCase(caseId) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/agent/step`, {});
+}
+
+// ── E2/E3.5/E4 调查工作台：计划、步骤状态机、证据审查、扇出 ──────────
+
+/** 读取当前 Plan Revision 及其步骤。 */
+export function getCaseInvestigationPlan(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/plans/current`);
+}
+
+/** 写入新 Plan Revision（乐观锁，携带 revision/scope/row_version）。 */
+export function updateCaseInvestigationPlan(caseId, payload) {
+  return api.put(`/v1/cases/${encodeURIComponent(caseId)}/plans`, payload);
+}
+
+/** 取消一个步骤（RUNNING → CANCEL_REQUESTED；QUEUED → CANCELLED）。 */
+export function cancelCasePlanStep(caseId, stepId, payload = {}) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}/cancel`, payload);
+}
+
+/** 删除（移除）一个尚未运行的步骤。 */
+export function removeCasePlanStep(caseId, stepId, payload = {}) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}/remove`, payload);
+}
+
+/** 拖拽排序：重设步骤优先级并锁定为 USER。 */
+export function reprioritizeCasePlanStep(caseId, stepId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}/reprioritize`, payload);
+}
+
+/** 改目标：重设 target_refs / collector_id。 */
+export function retargetCasePlanStep(caseId, stepId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}/retarget`, payload);
+}
+
+/** 证据信任/排除审查。 */
+export function reviewCaseEvidence(caseId, evidenceId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/reviews`, payload);
+}
+
+/** 列出证据审查记录。 */
+export function listCaseEvidenceReviews(caseId, params = {}) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence-reviews`, { params });
+}
+
+/** E3.5：冻结成员快照并按策略展开逻辑 Step（集群扇出）。 */
+export function createCaseFanout(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/fanout`, payload);
+}
+
+/** 列出 Case 的 Fanout 运行。 */
+export function listCaseFanoutRuns(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/fanout`);
+}
+
+/** E4：手动触发一次 PlanDriver 调度。 */
+export function advanceCasePlanDriver(caseId) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/agent/plan-driver`, {});
 }
 
 export function listCaseContextPackets(caseId, params = {}) {

@@ -48,11 +48,10 @@ from server.app.artifact_service import (
 from server.app.ai_provider import get_ai_settings, model_audit_scope
 from server.app.ai_validation import AIValidationBusy, run_ai_validation_suite
 from server.app.database import init_db, new_session
-from server.app.event_bus import BUS, notify_diagnosis_complete
+from server.app.event_bus import BUS
 from server.app.flamegraph_parser import extract_top_functions_from_svg
 from server.app.prometheus_metrics import (
     REGISTRY,
-    record_diagnosis,
     record_http_request,
     record_maintenance_step,
     record_source_access,
@@ -93,7 +92,29 @@ from server.app.diagnosis.agent_runtime import (
     parse_deployment_requirements,
     render_understanding_answer,
 )
+from server.app.diagnosis.evidence_attachments import EvidenceAttachmentService
+from server.app.diagnosis.cluster_scope import (
+    EnvironmentProfile,
+    MembershipSnapshot,
+    TargetResolver,
+)
+from server.app.diagnosis.fanout import FanoutCollectionRun, FanoutCollectionService
+from server.app.diagnosis.investigation_plan import (
+    EvidenceReviewInput,
+    InvestigationPlanService,
+    PlanUpdateInput,
+)
+from server.app.diagnosis.mcp_fact_resolver import McpEvidenceService, McpFactResolver
+from server.app.diagnosis.reference_resolver import ReferenceResolver, ResourceRef
+from server.app.agent_runtime.config import agent_flags, agent_max_active_cases
+from server.app.agent_runtime.dispatcher import active_runtime_info
+from server.app.agent_runtime.shadow import (
+    build_deterministic_plan,
+    compare_plans,
+    request_shadow_plan,
+)
 from server.app.diagnosis.case_supervisor import CaseSupervisor
+from server.app.diagnosis.plan_driver import PlanDriver
 from server.app.diagnosis.governance import (
     CAPABILITY_EPOCH,
     RED_BUTTON,
@@ -120,6 +141,7 @@ from server.app.diagnosis.schemas import (
     TERMINAL_DIAGNOSIS_STATUSES,
 )
 from server.app.case_collaboration import (
+    AttachResourcesRequest,
     CaseCorrectionRequest,
     CaseMessageRequest,
     CaseState,
@@ -129,16 +151,21 @@ from server.app.case_collaboration import (
     CreateRecoveryPlanRequest,
     CreateTargetSessionRequest,
     CreateTargetSignalRequest,
+    EvidenceReviewRequest,
+    ExcludeAttachmentRequest,
     IndexProfileTaskRequest,
+    PlanUpdateRequest,
     RecoveryPlanDecisionRequest,
     RecoveryPlanExecuteRequest,
+    ReferenceSearchRequest,
+    ReprioritizeStepRequest,
+    RetargetStepRequest,
     TargetSessionTransitionRequest,
     StartCaseDiagnosisRequest,
     build_case_diagnosis_query,
     build_case_context_packet,
     serialize_time_range,
 )
-from server.app.rca.report import run_diagnosis_context
 from server.app.schemas import (
     APIResponse,
     CancelTaskRequest,
@@ -167,6 +194,21 @@ source_gateway = SourceGateway(
     diagnosis_orchestrator,
     extra_connectors=mcp_client_manager.connectors,
     extra_source_definitions=mcp_client_manager.source_definitions(),
+)
+reference_resolver = ReferenceResolver(repo)
+evidence_attachment_service = EvidenceAttachmentService(repo, reference_resolver)
+investigation_plan_service = InvestigationPlanService(repo)
+target_resolver = TargetResolver()
+fanout_service = FanoutCollectionService(repo)
+mcp_fact_resolver = McpFactResolver(
+    native_collectors={"sys_metrics", "log_scan", "perf_cpu", "connection_probe"},
+    registered_sources={item.source_id for item in mcp_client_manager.source_definitions()},
+)
+mcp_evidence_service = McpEvidenceService(
+    mcp_fact_resolver,
+    query_fn=lambda source_id, request, principal_id: source_gateway.query(
+        source_id, request, principal_id=principal_id,
+    ),
 )
 
 
@@ -215,12 +257,21 @@ async def _lifespan(_app: FastAPI):
         if os.getenv("MINI_DROP_AUTONOMY_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
         else None
     )
+    _task_wake_task = asyncio.create_task(_task_wake_loop())
+    _plan_driver_task = (
+        asyncio.create_task(_plan_driver_sweeper())
+        if os.getenv("MINI_DROP_PLAN_DRIVER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+        else None
+    )
     try:
         yield
     finally:
         _offline_task.cancel()
         if _autonomy_task is not None:
             _autonomy_task.cancel()
+        _task_wake_task.cancel()
+        if _plan_driver_task is not None:
+            _plan_driver_task.cancel()
         try:
             await _offline_task
         except asyncio.CancelledError:
@@ -228,6 +279,15 @@ async def _lifespan(_app: FastAPI):
         if _autonomy_task is not None:
             try:
                 await _autonomy_task
+            except asyncio.CancelledError:
+                pass
+        try:
+            await _task_wake_task
+        except asyncio.CancelledError:
+            pass
+        if _plan_driver_task is not None:
+            try:
+                await _plan_driver_task
             except asyncio.CancelledError:
                 pass
         _grpc.stop(grace=None).wait(timeout=5)
@@ -255,6 +315,18 @@ async def _offline_sweeper() -> None:
                 error_type=type(exc).__name__,
                 error=str(exc)[:500],
             )
+        await asyncio.sleep(interval_sec)
+
+
+async def _plan_driver_sweeper() -> None:
+    interval_sec = max(3, min(int(os.getenv("MINI_DROP_PLAN_DRIVER_INTERVAL_SEC", "8")), 60))
+    while True:
+        try:
+            await asyncio.to_thread(_run_plan_driver_pass)
+        except Exception as exc:
+            record_maintenance_step("plan_driver", "failure")
+            log_event("error", "plan_driver_loop_failed", error_type=type(exc).__name__,
+                      error=str(exc)[:500])
         await asyncio.sleep(interval_sec)
 
 
@@ -296,6 +368,68 @@ def _run_autonomy_pass() -> None:
             metadata={"error": str(exc)[:500]},
         )
         raise
+
+
+def _run_plan_driver_pass() -> None:
+    """E4：扫描非终态 Case，自动调度 READ_LOW 计划步骤（Supervisor 自动调度）。"""
+    tenant_id = _request_tenant()
+    try:
+        for case in repo.list_incident_cases(tenant_id=tenant_id, limit=200):
+            case_id = str(case.get("case_id") or "")
+            state = str(case.get("state") or "")
+            if state in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
+                continue
+            if repo.get_investigation_plan(case_id, tenant_id) is None:
+                continue
+            try:
+                PLAN_DRIVER.dispatch_case_ready_steps(case_id, tenant_id)
+            except Exception:  # noqa: BLE001 — 单 Case 失败不阻断其它 Case
+                repo.record_audit(
+                    event_type="PLAN_DRIVER_TICK_FAILED",
+                    message=f"Case {case_id} 计划调度失败",
+                    metadata={"case_id": case_id},
+                )
+    except Exception as exc:
+        repo.record_audit(
+            event_type="PLAN_DRIVER_PASS_FAILED",
+            message="计划驱动扫描失败",
+            metadata={"error": str(exc)[:500]},
+        )
+
+
+async def _task_wake_loop() -> None:
+    """E4：Task 完成唤醒 —— 订阅 task_changed，DONE/FAILED 立即推进 Case。"""
+    queue = BUS.subscribe()
+    try:
+        while True:
+            event = await asyncio.to_thread(queue.get)
+            if event.get("event") != "task_changed":
+                continue
+            data = event.get("data") or {}
+            to_status = str(data.get("to_status") or "")
+            if to_status not in {"DONE", "FAILED", "CANCELLED"}:
+                continue
+            task_id = str(data.get("task_id") or "")
+            if not task_id:
+                continue
+            try:
+                _wake_case_from_task(task_id, to_status)
+            except Exception:  # noqa: BLE001 — 唤醒失败不阻断事件流
+                pass
+    finally:
+        BUS.unsubscribe(queue)
+
+
+def _wake_case_from_task(task_id: str, to_status: str) -> None:
+    task = repo.tasks.get(task_id)
+    if task is None:
+        return
+    options = (task.request_params or {}).get("options") or {}
+    case_id = str(options.get("case_id") or "")
+    tenant_id = str(options.get("tenant_id") or _request_tenant())
+    if not case_id:
+        return
+    PLAN_DRIVER.on_task_done(case_id, tenant_id, task_id, status=to_status)
 
 
 def _run_offline_sweep_pass(timeout_sec: int, stale_task_timeout_sec: int) -> None:
@@ -1284,98 +1418,22 @@ def presign_url(bucket: str = "mini-drop", key: str = "", expires: int = 3600) -
 
 @app.post("/api/tasks/{task_id}/diagnose")
 def diagnose_task(task_id: str) -> APIResponse:
+    """E9：旧「一次性诊断」编排已退役。
+
+    Task 结果页的入口已收敛为「创建调查 Case」（POST /api/v1/cases，initial_tasks
+    携带本 Task 作为初始证据），由持续调查管线产出结论。保留本端点仅返回 410，
+    明确指向替代路径，避免旧前端/脚本静默失效。
+    """
     task = repo.tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
-
-    # 收集已有 artifacts 中的结构化数据
-    artifacts = repo.artifacts.get(task_id, [])
-    top_functions = _extract_top_functions(artifacts)
-    ebpf_metrics = _extract_artifact_json(artifacts, "ebpf_metrics")
-    sys_metrics = _extract_artifact_json(artifacts, "sys_metrics")
-
-    task_events = [repo.as_dict(e) for e in repo.events if e.task_id == task_id]
-    agent_record = repo.agents.get(task.agent_id)
-    model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-    diagnosis_id = repo.create_diagnosis_run(task_id, model_name)
-
-    outcome = run_diagnosis_context(
-        task_id=task_id,
-        task_record=task,
-        top_functions=top_functions,
-        ebpf_metrics=ebpf_metrics,
-        sys_metrics=sys_metrics,
-        failure_events=[event.get("reason", "") for event in task_events if event.get("reason")],
-        feedback_priors=repo.get_feedback_priors(),
-        task_events=task_events,
-        agent_record=agent_record,
-        repo=repo,
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "旧一次性诊断已退役；请创建调查 Case 走持续调查管线："
+            "POST /api/v1/cases，initial_tasks=[task_id]"
+        ),
     )
-    report = outcome.report
-    ranked_causes = [c.model_dump() for c in report.report.ranked_causes]
-    confidence = ranked_causes[0]["confidence"] if ranked_causes else 0.0
-
-    for tool_result in outcome.tool_results:
-        repo.add_diagnosis_tool_result(
-            diagnosis_id=diagnosis_id,
-            tool_name=tool_result.tool_name,
-            status=tool_result.status,
-            evidence_ref=tool_result.evidence_ref,
-            input_json=tool_result.input,
-            output_json=tool_result.output,
-            error_message=tool_result.error_message,
-        )
-
-    report_id = repo.add_diagnosis_report(
-        diagnosis_id=diagnosis_id,
-        report_json=report.report.model_dump(),
-        ranked_causes=ranked_causes,
-        confidence=confidence,
-        not_enough_evidence=report.report.not_enough_evidence,
-    )
-
-    repair_plan_data = None
-    if outcome.repair_plan is not None:
-        repair_plan_data = outcome.repair_plan.model_dump()
-        repo.add_repair_plan(
-            diagnosis_id=diagnosis_id,
-            plan_id=outcome.repair_plan.plan_id,
-            cause_id=outcome.repair_plan.cause_id,
-            risk_level=outcome.repair_plan.risk_level,
-            actions=[action.model_dump() for action in outcome.repair_plan.actions],
-            executed_actions=[
-                action.model_dump() for action in outcome.repair_plan.actions
-                if action.status == "executed"
-            ],
-            requires_user_confirm=outcome.repair_plan.requires_user_confirm,
-            status=outcome.repair_plan.status,
-        )
-
-    diag_status = "DONE" if report.validated else "FAILED"
-    repo.finish_diagnosis_run(
-        diagnosis_id=diagnosis_id,
-        status=diag_status,
-        summary=report.report.summary,
-        validated=report.validated,
-        retry_count=report.retry_count,
-    )
-    record_diagnosis(diag_status)
-
-    notify_diagnosis_complete(task_id, diagnosis_id, diag_status)
-
-    return APIResponse(data={
-        "diagnosis_id": diagnosis_id,
-        "report_id": report_id,
-        "task_id": task_id,
-        "model": report.model_name,
-        "validated": report.validated,
-        "summary": report.report.summary,
-        "ranked_causes": ranked_causes,
-        "facts": report.report.facts,
-        "not_enough_evidence": report.report.not_enough_evidence,
-        "tool_results": [item.model_dump() for item in outcome.tool_results],
-        "repair_plan": repair_plan_data,
-    })
 
 
 @app.get("/api/tasks/{task_id}/diagnoses")
@@ -1722,6 +1780,57 @@ def get_mcp_status(request: Request) -> APIResponse:
     })
 
 
+@app.post("/api/v1/mcp/facts")
+def resolve_missing_fact(payload: dict[str, Any], request: Request) -> APIResponse:
+    """E6：Missing Fact → REUSE_NATIVE / CALL_MCP / INSUFFICIENT 确定性判定。"""
+    _require_role(request, "operator")
+    missing_fact = str(payload.get("missing_fact") or "")
+    if not missing_fact:
+        raise HTTPException(status_code=422, detail="缺少 missing_fact")
+    resolution = mcp_evidence_service.resolve(
+        missing_fact,
+        native_collectors=[str(x) for x in (payload.get("native_collectors") or [])],
+    )
+    return APIResponse(data=resolution.model_dump(mode="json"))
+
+
+@app.post("/api/v1/mcp/facts/query")
+def query_mcp_for_fact(payload: dict[str, Any], request: Request) -> APIResponse:
+    """E6：按 Missing Fact 走受控 MCP 补证（注入清洗 + 成本台账）。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    missing_fact = str(payload.get("missing_fact") or "")
+    if not missing_fact:
+        raise HTTPException(status_code=422, detail="缺少 missing_fact")
+    query = SourceQueryRequest(
+        tenant_id=tenant_id,
+        operation=str(payload.get("operation") or "evidence.list"),
+        resource=payload.get("resource") or {},
+        parameters=payload.get("parameters") or {},
+        case_id=str(payload.get("case_id") or "") or None,
+    )
+    result = mcp_evidence_service.query_for_fact(
+        missing_fact,
+        request=query,
+        principal_id=_request_principal(request),
+        native_collectors=[str(x) for x in (payload.get("native_collectors") or [])],
+    )
+    return APIResponse(data=result)
+
+
+@app.get("/api/v1/mcp/ledger")
+def get_mcp_ledger(request: Request) -> APIResponse:
+    """E6：MCP 调用成本与新鲜度台账。"""
+    _require_role(request, "operator")
+    source_ids = sorted(mcp_evidence_service._resolver._ledger._calls.keys())
+    return APIResponse(data={
+        "sources": {
+            source_id: mcp_evidence_service.ledger_summary(source_id)
+            for source_id in source_ids
+        },
+    })
+
+
 @app.get("/api/v1/identity")
 def get_current_identity(request: Request) -> APIResponse:
     return APIResponse(data={
@@ -1735,6 +1844,25 @@ def get_current_identity(request: Request) -> APIResponse:
             if _extract_api_token(request)
             else "local_development"
         ),
+    })
+
+
+@app.get("/api/v1/agent-runtime/config")
+def get_agent_runtime_config(request: Request) -> APIResponse:
+    """Expose the active investigator runtime mode and feature flags.
+
+    Reveals no secrets: pi runtime URL presence is reported as a boolean, never
+    the URL itself, and model credentials never appear here.
+    """
+    _require_role(request, "operator")
+    info = active_runtime_info()
+    return APIResponse(data={
+        "runtime_type": info["runtime_type"],
+        "runtime_version": info["runtime_version"],
+        "mode": info["mode"],
+        "ready": info.get("ready", True),
+        "ready_error": info.get("error"),
+        "flags": agent_flags(),
     })
 
 
@@ -1911,21 +2039,40 @@ def create_incident_case(payload: CreateCaseRequest, request: Request) -> APIRes
             raise HTTPException(status_code=404, detail="TARGET_SESSION_NOT_FOUND")
         if target["status"] == "ARCHIVED":
             raise HTTPException(status_code=409, detail="TARGET_SESSION_ARCHIVED")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
     trusted = {
         **payload.model_dump(mode="json", exclude={"time_range"}),
         "time_range": serialize_time_range(payload.time_range),
-        "tenant_id": _request_tenant(),
-        "created_by": _request_principal(request),
+        "tenant_id": tenant_id,
+        "created_by": principal_id,
     }
     if target is not None:
         trusted["environment"] = target["environment"]
         trusted["target_scope"] = target["target_scope"]
+    # E1：target_scope.evidence_task_ids 不再持久化依赖，改由附件统一消费
+    legacy_task_ids = list(dict.fromkeys(
+        (trusted.get("target_scope") or {}).get("evidence_task_ids") or []
+    ))
+    if legacy_task_ids and isinstance(trusted.get("target_scope"), dict):
+        trusted["target_scope"].pop("evidence_task_ids", None)
     try:
         result = repo.create_incident_case(trusted)
     except ValueError as exc:
         detail = str(exc)
         status_code = 404 if detail.endswith("_NOT_FOUND") else 409
         raise HTTPException(status_code=status_code, detail=detail) from exc
+    # 统一数据入口：initial_tasks 与遗留 evidence_task_ids 一并投影为 Attachment
+    initial_tasks = list(dict.fromkeys((result.get("initial_task_ids") or []) + legacy_task_ids))
+    if initial_tasks:
+        evidence_attachment_service.attach_resources(
+            result,
+            tenant_id,
+            [ResourceRef(type="task", id=str(task_id)) for task_id in initial_tasks],
+            actor_id=principal_id,
+            purpose="创建 Case 时的初始任务证据",
+            source="from_task",
+        )
     return APIResponse(data=result)
 
 
@@ -2056,6 +2203,256 @@ def list_incident_case_events(
     )
     if items is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
+    return APIResponse(data={"items": items, "total": len(items)})
+
+
+@app.post("/api/v1/references/search")
+def search_references(
+    payload: ReferenceSearchRequest,
+    request: Request,
+) -> APIResponse:
+    """`@` 自动补全：返回稳定 ResourceRef 候选，不返回模型猜测。"""
+    _require_role(request, "operator")
+    candidates = reference_resolver.search(
+        payload.query,
+        _request_tenant(),
+        ref_type=payload.type,
+        limit=payload.limit,
+    )
+    return APIResponse(data={
+        "items": [item.model_dump(mode="json") for item in candidates],
+        "total": len(candidates),
+    })
+
+
+@app.post("/api/v1/cases/{case_id}/attachments")
+def attach_case_resources(
+    case_id: str,
+    payload: AttachResourcesRequest,
+    request: Request,
+) -> APIResponse:
+    """统一数据入口：将结构化 ResourceRef 绑定到 Case（E1）。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    refs = [
+        ResourceRef(**item.model_dump(mode="json"))
+        for item in payload.references
+    ]
+    results = evidence_attachment_service.attach_resources(
+        case,
+        tenant_id,
+        refs,
+        actor_id=principal_id,
+        purpose=payload.purpose,
+        source="user_mention",
+    )
+    repo.record_case_event(
+        case_id, tenant_id, event_type="resource_attached",
+        payload={"results": results, "actor_id": principal_id}, actor_id=principal_id,
+    )
+    return APIResponse(data={"items": results})
+
+
+@app.get("/api/v1/cases/{case_id}/attachments")
+def list_case_attachments(
+    case_id: str,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    items = evidence_attachment_service.list_attachments(case_id, tenant_id)
+    return APIResponse(data={"items": items, "total": len(items)})
+
+
+@app.post("/api/v1/cases/{case_id}/attachments/{attachment_id}/exclude")
+def exclude_case_attachment(
+    case_id: str,
+    attachment_id: str,
+    payload: ExcludeAttachmentRequest,
+    request: Request,
+) -> APIResponse:
+    """排除证据：不物理删除，后续 Prompt 不再包含。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    attachment = evidence_attachment_service.exclude(
+        attachment_id, tenant_id, actor_id=principal_id, reason=payload.reason,
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment 不存在")
+    repo.record_case_event(
+        case_id, tenant_id, event_type="attachment_excluded",
+        payload={"attachment_id": attachment_id, "reason": payload.reason, "actor_id": principal_id},
+        actor_id=principal_id,
+    )
+    return APIResponse(data=attachment)
+
+
+# ── E2 持久化调查计划与双通道控制 ────────────────────────────────
+
+
+@app.get("/api/v1/cases/{case_id}/plans/current")
+def get_case_investigation_plan(case_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    plan = investigation_plan_service.read_plan(case_id, tenant_id)
+    return APIResponse(data=plan if plan else {"plan_id": None, "steps": []})
+
+
+@app.put("/api/v1/cases/{case_id}/plans")
+def update_case_investigation_plan(
+    case_id: str,
+    payload: PlanUpdateRequest,
+    request: Request,
+) -> APIResponse:
+    """写入新 Plan Revision（乐观锁）。旧修订的延迟调用返回 STALE_PLAN。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    try:
+        plan = investigation_plan_service.update_plan(
+            case_id,
+            tenant_id,
+            PlanUpdateInput(**payload.model_dump(mode="json")),
+            actor_id=principal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    repo.record_case_event(
+        case_id, tenant_id, event_type="plan_updated",
+        payload={"plan_revision": plan["plan_revision"], "actor_id": principal_id},
+        actor_id=principal_id,
+    )
+    return APIResponse(data=plan)
+
+
+@app.post("/api/v1/cases/{case_id}/steps/{step_id}/cancel")
+def cancel_case_plan_step(case_id: str, step_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    try:
+        step = investigation_plan_service.cancel_step(
+            case_id, tenant_id, step_id, actor_id=principal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    repo.record_case_event(
+        case_id, tenant_id, event_type="step_cancelled",
+        payload={"step_id": step_id, "status": step.get("status"), "actor_id": principal_id},
+        actor_id=principal_id,
+    )
+    return APIResponse(data=step)
+
+
+@app.post("/api/v1/cases/{case_id}/steps/{step_id}/remove")
+def remove_case_plan_step(case_id: str, step_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    try:
+        step = investigation_plan_service.remove_step(
+            case_id, tenant_id, step_id, actor_id=principal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    repo.record_case_event(
+        case_id, tenant_id, event_type="step_removed",
+        payload={"step_id": step_id, "status": step.get("status"), "actor_id": principal_id},
+        actor_id=principal_id,
+    )
+    return APIResponse(data=step)
+
+
+@app.post("/api/v1/cases/{case_id}/steps/{step_id}/reprioritize")
+def reprioritize_case_plan_step(
+    case_id: str,
+    step_id: str,
+    payload: ReprioritizeStepRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    try:
+        step = investigation_plan_service.reprioritize_step(
+            case_id, tenant_id, step_id, payload.priority,
+            actor_id=principal_id, user_locked=payload.user_locked,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=step)
+
+
+@app.post("/api/v1/cases/{case_id}/steps/{step_id}/retarget")
+def retarget_case_plan_step(
+    case_id: str,
+    step_id: str,
+    payload: RetargetStepRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    try:
+        step = investigation_plan_service.retarget_step(
+            case_id, tenant_id, step_id,
+            target_refs=payload.target_refs,
+            collector_id=payload.collector_id,
+            actor_id=principal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=step)
+
+
+@app.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews")
+def review_case_evidence(
+    case_id: str,
+    evidence_id: str,
+    payload: EvidenceReviewRequest,
+    request: Request,
+) -> APIResponse:
+    """评价证据（LOW_TRUST/EXCLUDED），随后重算受影响假设。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    review_payload = payload.model_copy(update={"evidence_id": evidence_id})
+    try:
+        review = investigation_plan_service.review_evidence(
+            case_id, tenant_id,
+            EvidenceReviewInput(**review_payload.model_dump(mode="json")),
+            actor_id=principal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    repo.record_case_event(
+        case_id, tenant_id, event_type="evidence_reviewed",
+        payload={"evidence_id": evidence_id, "decision": review["decision"], "actor_id": principal_id},
+        actor_id=principal_id,
+    )
+    return APIResponse(data=review)
+
+
+@app.get("/api/v1/cases/{case_id}/evidence-reviews")
+def list_case_evidence_reviews(
+    case_id: str,
+    request: Request,
+    evidence_id: str | None = None,
+) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    items = investigation_plan_service.list_reviews(
+        case_id, tenant_id, evidence_id=evidence_id,
+    )
     return APIResponse(data={"items": items, "total": len(items)})
 
 
@@ -2229,10 +2626,16 @@ def start_case_diagnosis(
             output_schema="normalized-diagnosis-intent.v1",
             recorder=repo.record_model_attempt,
         ):
+            # E1：诊断消费入口统一——initial_task_ids + ACCEPTED task 附件
+            # 一起作为初始证据；target_scope.evidence_task_ids 旧字段不再单独读取。
+            attachment_task_ids = evidence_attachment_service.active_task_ids(case_id, tenant_id)
+            initial_task_ids = list(dict.fromkeys(
+                (case.get("initial_task_ids") or []) + attachment_task_ids
+            ))
             diagnosis = diagnosis_orchestrator.create(
                 diagnosis_request,
                 creator_id=principal_id,
-                initial_task_ids=case.get("initial_task_ids") or [],
+                initial_task_ids=initial_task_ids,
             )
         graph = repo.sync_case_hypothesis_graph(
             case_id,
@@ -2735,6 +3138,371 @@ def _judge_recovery(baseline: dict[str, float], current: dict[str, float]) -> di
     return {"status": status, "reason": f"对比 {len(keys)} 项关键指标", "metrics": metrics}
 
 
+# ── E3 内部 Tool Gateway（仅 Pi Sidecar 经内部 Token 调用）───────────
+# 模型只能通过这些只读投影与受控计划写入触达 Mini-Drop；不能构造 URL/SQL/Shell。
+
+
+def _require_internal_token(request: Request) -> None:
+    expected = os.getenv("MINI_DROP_PI_INTERNAL_TOKEN", "")
+    supplied = request.headers.get("X-Internal-Token", "")
+    if not expected or supplied != expected:
+        raise HTTPException(status_code=401, detail="INTERNAL_TOKEN_REQUIRED")
+
+
+@app.post("/internal/agent/tools/case-snapshot")
+def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    plan = investigation_plan_service.read_plan(case_id, tenant_id) or {"plan_id": None, "steps": []}
+    attachments = evidence_attachment_service.list_attachments(case_id, tenant_id)
+    return APIResponse(data={
+        "case_id": case_id,
+        "goal": case.get("problem_description", "")[:500],
+        "target_scope": (case.get("target_scope") or {}).get("service_id"),
+        "plan_revision": plan.get("plan_revision"),
+        "plan": plan,
+        "attachments": [
+            {"type": item.get("resource_ref", {}).get("type"),
+             "id": item.get("resource_ref", {}).get("id"),
+             "status": item.get("status")}
+            for item in attachments
+        ],
+        "budget": {"active_cases": agent_max_active_cases()},
+    })
+
+
+@app.post("/internal/agent/tools/reusable-evidence")
+def internal_tool_reusable_evidence(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    task_ids = evidence_attachment_service.active_task_ids(case_id, tenant_id)
+    return APIResponse(data={
+        "case_id": case_id,
+        "reusable_task_ids": task_ids,
+        "note": "先复用已有证据，仅当 Missing Fact 无法覆盖时才补采。",
+    })
+
+
+@app.post("/internal/agent/tools/plan")
+def internal_tool_upsert_plan(payload: dict[str, Any], request: Request) -> APIResponse:
+    """模型提出新 Plan Revision。必须携带当前 revision，否则 STALE_PLAN 拒绝。"""
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    principal_id = "mini-drop-pi-runtime"
+    plan_payload = {key: value for key, value in payload.items() if key != "case_id"}
+    try:
+        plan = investigation_plan_service.update_plan(
+            case_id,
+            tenant_id,
+            PlanUpdateInput(**plan_payload),
+            actor_id=principal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=plan)
+
+
+@app.post("/internal/agent/tools/evaluate-hypotheses")
+def internal_tool_evaluate_hypotheses(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
+    return APIResponse(data={
+        "hypotheses": [
+            {"hypothesis_id": item.get("hypothesis_id"), "status": item.get("status")}
+            for item in (graph.get("hypotheses") or [])
+        ],
+        "note": "确定性假设评估结果；模型不得凭直觉覆盖。",
+    })
+
+
+@app.post("/internal/agent/tools/rca-analysis")
+def internal_tool_rca_analysis(payload: dict[str, Any], request: Request) -> APIResponse:
+    """E9：把 rca 候选归因分析器作为只读 Tool 暴露，模型不能越过它自创原因。
+
+    规则引擎（candidates）是确定性白名单匹配；返回候选时同时给出缺失证据，
+    绝不凭空捏造证据引用。本工具不创建任何 Task。
+    """
+    _require_internal_token(request)
+    from server.app.rca.candidates import generate_candidates
+    from server.app.rca.models import EvidenceInput
+    list_fields = (
+        "task_metadata", "top_functions", "tool_results", "suggestions", "failure_events",
+    )
+    dict_fields = ("ebpf_metrics", "sys_metrics", "baseline_diff", "agent_stats")
+    evidence = EvidenceInput(**{
+        **{key: payload.get(key) or [] for key in list_fields},
+        **{key: payload.get(key) for key in dict_fields},
+    })
+    candidates = generate_candidates(evidence)
+    return APIResponse(data={
+        "candidates": [
+            {
+                "candidate_id": item.candidate_id,
+                "description": item.description,
+                "evidence_refs": item.evidence_refs,
+                "rule_score": item.rule_score,
+                "missing_evidence": item.missing_evidence,
+            }
+            for item in candidates
+        ],
+        "note": "确定性规则候选；模型可在其内排序/挑选，但不得新增候选或证据引用。",
+    })
+
+
+@app.post("/internal/agent/tools/finish")
+def internal_tool_finish(payload: dict[str, Any], request: Request) -> APIResponse:
+    """结构化结论提交；必须引用真实存在的 Evidence ID。"""
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    evidence_ids = [str(item) for item in (payload.get("evidence_ids") or [])]
+    if not evidence_ids:
+        raise HTTPException(status_code=400, detail="NO_EVIDENCE_REFS")
+    return APIResponse(data={
+        "accepted": True,
+        "case_id": case_id,
+        "evidence_refs": evidence_ids,
+        "verifier": "pending_report_verifier",
+    })
+
+
+@app.get("/internal/agent/tools/health")
+def internal_tool_health(request: Request) -> APIResponse:
+    _require_internal_token(request)
+    return APIResponse(data={"ok": True, "service": "mini-drop-tool-gateway"})
+
+
+@app.post("/api/v1/cases/{case_id}/agent/shadow-plan")
+async def run_case_shadow_plan(case_id: str, request: Request) -> APIResponse:
+    """E3 Shadow Plan：Pi 生成计划但不创建 Task，与确定性计划配对比较。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
+    from server.app.diagnosis.probe_registry import list_probes
+    probe_candidates = [
+        {"collector_id": probe.probe_id, "rationale": probe.purpose,
+         "risk": "READ_LOW" if probe.risk_level in {"R0", "R1"} else "READ_ELEVATED",
+         "priority": 60}
+        for probe in list_probes()
+        if probe.risk_level in {"R0", "R1"}
+    ]
+    deterministic = build_deterministic_plan(
+        case,
+        active_hypotheses=graph.get("hypotheses") or [],
+        probe_candidates=probe_candidates,
+    )
+    shadow, shadow_status = await request_shadow_plan(
+        case,
+        sidecar_url=os.getenv("MINI_DROP_PI_RUNTIME_URL", "") or None,
+        deterministic_plan=deterministic,
+    )
+    comparison = compare_plans(deterministic, shadow)
+    comparison["shadow_status"] = shadow_status
+    return APIResponse(data=comparison)
+
+
+# ── E3.5 集群范围与采集扇出 ─────────────────────────────────────────
+
+
+def _fanout_step(case_id: str, tenant_id: str, step_id: str) -> dict[str, Any]:
+    plan = investigation_plan_service.read_plan(case_id, tenant_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Case 尚无调查计划")
+    for step in plan.get("steps") or []:
+        if step.get("step_id") == step_id:
+            return step
+    raise HTTPException(status_code=404, detail=f"PlanStep 不存在: {step_id}")
+
+
+@app.post("/api/v1/cases/{case_id}/fanout")
+def create_case_fanout(case_id: str, payload: dict[str, Any], request: Request) -> APIResponse:
+    """E3.5：冻结成员快照，按选择策略展开一个逻辑 Step 为单目标 Task 扇出。
+
+    请求体：
+      step_id（必须）、strategy（默认 REPRESENTATIVE）、profile（EnvironmentProfile）、
+      可选 target_refs / metric_scores / canary_labels / control_labels / max_targets。
+    """
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    step_id = str(payload.get("step_id") or "")
+    if not step_id:
+        raise HTTPException(status_code=422, detail="缺少 step_id")
+    step = _fanout_step(case_id, tenant_id, step_id)
+    profile = EnvironmentProfile(**payload.get("profile") or {})
+    # 集群 Step 的策略优先用 Step 声明，其次请求覆盖，默认 REPRESENTATIVE 分层采样。
+    strategy = str(payload.get("strategy") or step.get("selection_strategy") or "REPRESENTATIVE")
+    environment_id = str(payload.get("environment_id") or profile.environment_id)
+    cluster_id = str(payload.get("cluster_id") or profile.cluster)
+    snapshot = fanout_service.build_membership_snapshot(
+        environment_id=environment_id,
+        cluster_id=cluster_id,
+        scope_revision=int(case.get("scope_revision") or 1),
+    )
+    repo.create_membership_snapshot(case_id, tenant_id, snapshot.model_dump(mode="json"))
+    resolution = target_resolver.resolve_collection_targets(
+        snapshot,
+        strategy,
+        profile=profile,
+        target_refs=payload.get("target_refs") or step.get("target_refs") or None,
+        metric_scores=payload.get("metric_scores"),
+        canary_labels=set(payload.get("canary_labels") or []),
+        control_labels=set(payload.get("control_labels") or []),
+        change_cohort_version=str(payload.get("change_cohort_version") or ""),
+        max_targets=int(payload.get("max_targets") or 0),
+    )
+    step_ctx = dict(step)
+    plan = investigation_plan_service.read_plan(case_id, tenant_id) or {}
+    step_ctx["plan_revision"] = int(plan.get("plan_revision") or 0)
+    step_ctx["scope_revision"] = int(case.get("scope_revision") or 1)
+    run = fanout_service.create_fanout_run(
+        case_id=case_id,
+        tenant_id=tenant_id,
+        step=step_ctx,
+        profile=profile,
+        environment_id=environment_id,
+        cluster_id=cluster_id,
+        snapshot=snapshot,
+        resolution=resolution,
+    )
+    repo.record_case_event(
+        case_id, tenant_id, event_type="fanout_created",
+        payload={
+            "run_id": run["run_id"], "strategy": strategy,
+            "targets": len(resolution.targets), "excluded": len(resolution.excluded),
+        },
+        actor_id=_request_principal(request),
+    )
+    return APIResponse(data={
+        "run": run,
+        "snapshot": snapshot.model_dump(mode="json"),
+        "resolution": {
+            "strategy": resolution.strategy,
+            "targets": [t.member.agent_id for t in resolution.targets],
+            "selection_notes": resolution.selection_notes,
+            "rejected": resolution.rejected,
+        },
+    })
+
+
+@app.get("/api/v1/cases/{case_id}/fanout")
+def list_case_fanout_runs(case_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    return APIResponse(data={"items": repo.list_fanout_runs(case_id, tenant_id)})
+
+
+@app.get("/api/v1/cases/{case_id}/fanout/{run_id}")
+def get_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    run = repo.get_fanout_run(case_id, tenant_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="FanoutRun 不存在")
+    return APIResponse(data=run)
+
+
+@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/cancel")
+def cancel_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIResponse:
+    """取消传播：未完成 Task 全部转 CANCELLED，已 DONE 不动。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    run = repo.get_fanout_run(case_id, tenant_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="FanoutRun 不存在")
+    updated = fanout_service.cancel_run(FanoutCollectionRun(**run))
+    repo.record_case_event(
+        case_id, tenant_id, event_type="fanout_cancelled",
+        payload={"run_id": run_id}, actor_id=_request_principal(request),
+    )
+    return APIResponse(data=updated)
+
+
+@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/resume")
+def resume_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIResponse:
+    """恢复：已取消的未终态 Task 重新进入 PENDING，run 回到 RUNNING。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    run = repo.get_fanout_run(case_id, tenant_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="FanoutRun 不存在")
+    return APIResponse(data=fanout_service.resume_run(FanoutCollectionRun(**run)))
+
+
+@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/task-outcome")
+def report_fanout_task_outcome(case_id: str, run_id: str, payload: dict[str, Any],
+                               request: Request) -> APIResponse:
+    """记录单个 Task 结果；scope_revision 不匹配的迟到结果被隔离。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    run = repo.get_fanout_run(case_id, tenant_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="FanoutRun 不存在")
+    task_id = str(payload.get("task_id") or "")
+    status = str(payload.get("status") or "")
+    scope_revision = int(payload.get("scope_revision") or 0)
+    if task_id not in run.get("task_ids") or []:
+        raise HTTPException(status_code=422, detail="task_id 不属于该 FanoutRun")
+    return APIResponse(data=fanout_service.update_task_outcome(
+        FanoutCollectionRun(**run), task_id, status, scope_revision=scope_revision,
+    ))
+
+
+@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/aggregate")
+def aggregate_case_fanout(case_id: str, run_id: str, payload: dict[str, Any],
+                          request: Request) -> APIResponse:
+    """coverage-aware Evidence 聚合：只以成功成员作结论来源，覆盖率不足只出局部结论。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    run = repo.get_fanout_run(case_id, tenant_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="FanoutRun 不存在")
+    snapshot = repo.get_membership_snapshot(case_id, tenant_id, run.get("snapshot_id") or "")
+    if snapshot is None:
+        raise HTTPException(status_code=409, detail="MembershipSnapshot 不存在")
+    # repo 存储带 case_id/tenant_id；StrictModel 拒绝未知字段，只取模型字段。
+    snapshot_obj = MembershipSnapshot(**{
+        key: value for key, value in snapshot.items()
+        if key in MembershipSnapshot.model_fields
+    })
+    report = fanout_service.aggregate(
+        FanoutCollectionRun(**run),
+        snapshot_obj,
+        time_aligned=bool(payload.get("time_aligned", True)),
+        artifact_signals=payload.get("artifact_signals"),
+    )
+    repo.record_case_event(
+        case_id, tenant_id, event_type="fanout_aggregated",
+        payload={
+            "run_id": run_id,
+            "conclusion": report.conclusion,
+            "coverage": report.coverage,
+        },
+        actor_id=_request_principal(request),
+    )
+    return APIResponse(data={
+        "coverage": report.model_dump(mode="json"),
+        "run": repo.get_fanout_run(case_id, tenant_id, run_id),
+    })
+
+
 @app.post("/api/v1/cases/{case_id}/verification")
 def verify_case_recovery(
     case_id: str,
@@ -2907,6 +3675,12 @@ def correct_incident_case(
         exclude_none=True,
         exclude={"reason", "expected_row_version"},
     )
+    # E1：correction 里 target_scope.evidence_task_ids 不再落入 target_scope，
+    # 抽出后投影为 Attachment，由诊断统一消费（修复 G-01 断链）。
+    legacy_task_ids: list[str] = []
+    scope_change = changes.get("target_scope")
+    if isinstance(scope_change, dict) and scope_change.get("evidence_task_ids"):
+        legacy_task_ids = list(dict.fromkeys(scope_change.pop("evidence_task_ids")))
     try:
         result = repo.correct_incident_case(
             case_id,
@@ -2920,6 +3694,15 @@ def correct_incident_case(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
+    if legacy_task_ids:
+        evidence_attachment_service.attach_resources(
+            result,
+            tenant_id,
+            [ResourceRef(type="task", id=str(task_id)) for task_id in legacy_task_ids],
+            actor_id=_request_principal(request),
+            purpose="批次关联（原 target_scope.evidence_task_ids）",
+            source="collection_batch",
+        )
     return APIResponse(data=result)
 
 
@@ -3328,6 +4111,12 @@ CASE_SUPERVISOR = CaseSupervisor(
     diagnosis_orchestrator,
     lease_ttl_seconds=max(10, min(int(os.getenv("MINI_DROP_CASE_LEASE_TTL_SECONDS", "120")), 600)),
 )
+PLAN_DRIVER = PlanDriver(
+    repo,
+    investigation_plan_service,
+    fanout_service,
+    target_resolver,
+)
 
 
 @app.post("/api/v1/cases/{case_id}/agent/step")
@@ -3342,6 +4131,16 @@ def advance_autonomous_case(case_id: str, request: Request) -> APIResponse:
     if result.get("outcome") == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Case 不存在")
     return APIResponse(data=result)
+
+
+@app.post("/api/v1/cases/{case_id}/agent/plan-driver")
+def advance_case_plan_driver(case_id: str, request: Request) -> APIResponse:
+    """E4：手动触发一次 PlanDriver 调度（自动调度 READ_LOW 步骤 / Task 唤醒）。"""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    return APIResponse(data=PLAN_DRIVER.dispatch_case_ready_steps(case_id, tenant_id))
 
 
 def _action_evaluation_allows(action_id: str, request: Request, payload: dict[str, Any]) -> None:

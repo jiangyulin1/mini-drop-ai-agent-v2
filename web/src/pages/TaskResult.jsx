@@ -34,6 +34,7 @@ import {
 import { useParams, useNavigate } from "react-router-dom";
 import {
   cancelTask,
+  createIncidentCase,
   downloadTaskArtifact,
   getDiagnosis,
   getTask,
@@ -45,7 +46,6 @@ import {
   listTaskDiagnoses,
   retryTask,
   submitDiagnosisFeedback,
-  triggerDiagnose,
 } from "../api/client";
 import FlamegraphViewer from "../components/FlamegraphViewer";
 import TopNChart from "../components/TopNChart";
@@ -101,7 +101,7 @@ export default function TaskResult() {
   const [analysisJobs, setAnalysisJobs] = useState([]);
   const [diagnoses, setDiagnoses] = useState([]);
   const [diagnosis, setDiagnosis] = useState(null);
-  const [diagnosing, setDiagnosing] = useState(false);
+  const [creatingCase, setCreatingCase] = useState(false);
   const [analysis, setAnalysis] = useState({
     top: [],
     topSource: "",
@@ -262,22 +262,31 @@ export default function TaskResult() {
   const taskCollector = collectorMeta(task?.collector_type);
   usePolling(refreshActiveTask, { interval: 5000, enabled: isActive });
 
-  // ── 诊断操作 ──────────────────────────────────────────
-
-  async function runDiagnosis() {
-    setDiagnosing(true);
+  // E9：一次性诊断入口收敛为「创建调查 Case」，把本 Task 作为初始证据交给
+  // AI 持续调查（复用统一 ResourceRef + EvidenceAttachment 数据入口）。
+  async function createInvestigationCase() {
+    setCreatingCase(true);
     setError("");
     try {
-      const result = await triggerDiagnose(taskId);
-      const detail = await getDiagnosis(result.diagnosis_id);
-      const list = await listTaskDiagnoses(taskId);
-      setDiagnosis(detail);
-      setDiagnoses(list || []);
-      message.success("诊断完成");
+      const current = task || {};
+      const result = await createIncidentCase({
+        title: `调查：${current.name || `Task ${taskId}`}`.slice(0, 256),
+        problem_description: `基于 Task ${taskId} 的采集数据定位根因`,
+        recovery_goal: "定位根因并给出可验证建议",
+        run_mode: "COLLABORATE",
+        environment: current.environment || "production",
+        target_scope: {
+          service_id: current.request_params?.service_id,
+          instances: current.request_params?.instances || [],
+        },
+        initial_tasks: [taskId],
+      });
+      message.success("已创建调查 Case，进入持续调查工作台");
+      navigate(`/ai-diagnosis?case_id=${encodeURIComponent(result.data.case_id)}`);
     } catch (err) {
       setError(err.message);
     } finally {
-      setDiagnosing(false);
+      setCreatingCase(false);
     }
   }
 
@@ -1044,12 +1053,11 @@ export default function TaskResult() {
             {diagnoses.length > 0 && <Tag>{diagnoses.length} 次诊断</Tag>}
             <Button
               icon={<ExperimentOutlined />}
-              loading={diagnosing}
-              onClick={runDiagnosis}
-              type="primary"
+              loading={creatingCase}
+              onClick={createInvestigationCase}
               size="small"
             >
-              运行诊断
+              创建调查 Case
             </Button>
             <Tooltip title="刷新诊断报告">
               <Button
@@ -1064,15 +1072,9 @@ export default function TaskResult() {
       >
         {!diagnosis ? (
           <Empty
-            description={
-              diagnosing
-                ? "诊断进行中…"
-                : "暂无诊断报告，点击「运行诊断」基于当前证据进行 AI 归因分析"
-            }
+            description="暂无诊断报告，点击「创建调查 Case」基于当前证据进入 AI 持续调查"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-          >
-            {diagnosing && <Spin />}
-          </Empty>
+          />
         ) : (
           <Space direction="vertical" size={SPACING.lg} style={{ width: "100%" }}>
             {/* 诊断元数据 */}

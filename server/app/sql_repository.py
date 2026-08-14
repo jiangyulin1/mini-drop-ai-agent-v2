@@ -31,6 +31,12 @@ from server.app.models import (
     ArtifactModel,
     AuditLogModel,
     AuthorizationGrantModel,
+    CaseResourceAttachmentModel,
+    EvidenceReviewModel,
+    FanoutCollectionRunModel,
+    InvestigationPlanModel,
+    InvestigationPlanStepModel,
+    MembershipSnapshotModel,
     CaseHypothesisEdgeModel,
     CaseHypothesisNodeModel,
     CaseEventModel,
@@ -887,6 +893,389 @@ class SqlRepository:
                 CaseEventModel.tenant_id == tenant_id,
                 CaseEventModel.id > after_id,
             ).order_by(CaseEventModel.id.asc()).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    # ── Case Resource Attachments（E1 统一数据入口）────────────────────
+    def upsert_case_attachment(self, case_id: str, tenant_id: str,
+                               payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            existing = session.query(CaseResourceAttachmentModel).filter(
+                CaseResourceAttachmentModel.id == payload["attachment_id"],
+                CaseResourceAttachmentModel.tenant_id == tenant_id,
+            ).first()
+            if existing is not None:
+                existing.resource_type = payload.get("resource_type") or existing.resource_type
+                existing.resource_id = payload.get("resource_id") or existing.resource_id
+                existing.resource_revision = payload.get("resource_revision") or existing.resource_revision
+                existing.label = payload.get("label") or existing.label
+                existing.source = payload.get("source") or existing.source
+                existing.purpose = payload.get("purpose") or existing.purpose
+                existing.attached_by = payload.get("attached_by") or existing.attached_by
+                existing.status = payload.get("status") or existing.status
+                existing.scope_match = payload.get("scope_match") or existing.scope_match
+                existing.time_match = payload.get("time_match") or existing.time_match
+                existing.freshness = payload.get("freshness") or existing.freshness
+                existing.quality = payload.get("quality") or existing.quality
+                existing.evidence_ids_json = payload.get("evidence_ids") or existing.evidence_ids_json or []
+                existing.rejection_reason = payload.get("rejection_reason") or existing.rejection_reason
+                existing.supersedes_json = payload.get("supersedes") or existing.supersedes_json or []
+                existing.updated_at = now
+                session.flush()
+                return existing.to_dict()
+            session.add(CaseResourceAttachmentModel(
+                id=payload["attachment_id"],
+                case_id=case_id,
+                tenant_id=tenant_id,
+                resource_type=payload.get("resource_type") or "task",
+                resource_id=payload.get("resource_id") or "",
+                resource_revision=payload.get("resource_revision"),
+                label=payload.get("label") or payload.get("resource_id") or "",
+                source=payload.get("source") or "user_mention",
+                purpose=payload.get("purpose"),
+                attached_by=payload.get("attached_by") or "unknown",
+                status=payload.get("status") or "PENDING_VALIDATION",
+                scope_match=payload.get("scope_match") or "UNKNOWN",
+                time_match=payload.get("time_match") or "UNKNOWN",
+                freshness=payload.get("freshness") or "UNKNOWN",
+                quality=payload.get("quality") or "UNKNOWN",
+                evidence_ids_json=payload.get("evidence_ids") or [],
+                rejection_reason=payload.get("rejection_reason"),
+                supersedes_json=payload.get("supersedes") or [],
+                row_version=0,
+                created_at=now,
+                updated_at=now,
+            ))
+            session.flush()
+            return session.query(CaseResourceAttachmentModel).filter(
+                CaseResourceAttachmentModel.id == payload["attachment_id"],
+            ).first().to_dict()
+
+    def list_case_attachments(self, case_id: str, tenant_id: str) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(CaseResourceAttachmentModel).filter(
+                CaseResourceAttachmentModel.case_id == case_id,
+                CaseResourceAttachmentModel.tenant_id == tenant_id,
+            ).order_by(CaseResourceAttachmentModel.created_at.asc()).all()
+            return [row.to_dict() for row in rows]
+
+    def get_case_attachment(self, attachment_id: str, tenant_id: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(CaseResourceAttachmentModel).filter(
+                CaseResourceAttachmentModel.id == attachment_id,
+                CaseResourceAttachmentModel.tenant_id == tenant_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def update_case_attachment(self, attachment_id: str, tenant_id: str,
+                               updates: dict[str, Any]) -> dict[str, Any] | None:
+        with self._write_session() as session:
+            row = session.query(CaseResourceAttachmentModel).filter(
+                CaseResourceAttachmentModel.id == attachment_id,
+                CaseResourceAttachmentModel.tenant_id == tenant_id,
+            ).first()
+            if row is None:
+                return None
+            for key, value in updates.items():
+                if key == "status":
+                    row.status = value
+                elif key == "rejection_reason":
+                    row.rejection_reason = value
+                elif key == "evidence_ids":
+                    row.evidence_ids_json = value or []
+                elif key == "supersedes":
+                    row.supersedes_json = value or []
+                elif key == "purpose":
+                    row.purpose = value
+            row.row_version += 1
+            row.updated_at = now_utc()
+            session.flush()
+            return row.to_dict()
+
+    # ── Investigation Plans / Steps / Evidence Reviews（E2）────────────────
+    def create_investigation_plan(self, case_id: str, tenant_id: str,
+                                  payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            if case.state == "STOPPED":
+                raise ValueError("CASE_STOPPED")
+            plan = InvestigationPlanModel(
+                plan_id=payload["plan_id"],
+                case_id=case_id,
+                tenant_id=tenant_id,
+                plan_revision=payload.get("plan_revision") or 1,
+                scope_revision=case.scope_revision,
+                goal=payload.get("goal") or "定位根因",
+                status=payload.get("status") or "ACTIVE",
+                source=payload.get("source") or "deterministic",
+                created_by=payload.get("created_by") or "unknown",
+                row_version=0,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(plan)
+            for step_payload in payload.get("steps") or []:
+                session.add(InvestigationPlanStepModel(
+                    step_id=step_payload["step_id"],
+                    plan_id=plan.plan_id,
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    plan_revision=plan.plan_revision,
+                    scope_revision=case.scope_revision,
+                    kind=step_payload.get("kind") or "COLLECTION",
+                    collector_id=step_payload.get("collector_id"),
+                    target_refs_json=step_payload.get("target_refs") or [],
+                    purpose=step_payload.get("purpose"),
+                    hypothesis_refs_json=step_payload.get("hypothesis_refs") or [],
+                    expected_information=step_payload.get("expected_information"),
+                    priority=step_payload.get("priority") or 0,
+                    priority_source=step_payload.get("priority_source") or "AI",
+                    user_locked=bool(step_payload.get("user_locked")),
+                    depends_on_json=step_payload.get("depends_on") or [],
+                    risk=step_payload.get("risk") or "READ_LOW",
+                    selection_strategy=step_payload.get("selection_strategy"),
+                    status=step_payload.get("status") or "DRAFT",
+                    task_ids_json=step_payload.get("task_ids") or [],
+                    version=1,
+                    created_at=now,
+                    updated_at=now,
+                ))
+            session.flush()
+            # 在写事务内直接构造返回，避免嵌套 _read_session 污染共享连接事务
+            steps_out = session.query(InvestigationPlanStepModel).filter(
+                InvestigationPlanStepModel.plan_id == plan.plan_id,
+            ).order_by(
+                InvestigationPlanStepModel.priority.desc(),
+                InvestigationPlanStepModel.created_at.asc(),
+            ).all()
+            return {**plan.to_dict(), "steps": [step.to_dict() for step in steps_out]}
+
+    def get_investigation_plan(self, case_id: str, tenant_id: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            plan = session.query(InvestigationPlanModel).filter(
+                InvestigationPlanModel.case_id == case_id,
+                InvestigationPlanModel.tenant_id == tenant_id,
+            ).order_by(InvestigationPlanModel.plan_revision.desc()).first()
+            if plan is None:
+                return None
+            steps = session.query(InvestigationPlanStepModel).filter(
+                InvestigationPlanStepModel.plan_id == plan.plan_id,
+            ).order_by(
+                InvestigationPlanStepModel.priority.desc(),
+                InvestigationPlanStepModel.created_at.asc(),
+            ).all()
+            return {**plan.to_dict(), "steps": [step.to_dict() for step in steps]}
+
+    def supersede_plan_steps(self, plan_id: str, *, to_status: str = "SUPERSEDED") -> None:
+        with self._write_session() as session:
+            session.query(InvestigationPlanStepModel).filter(
+                InvestigationPlanStepModel.plan_id == plan_id,
+                InvestigationPlanStepModel.status.notin_(["COMPLETED", "CANCELLED"]),
+            ).update({
+                InvestigationPlanStepModel.status: to_status,
+                InvestigationPlanStepModel.updated_at: now_utc(),
+            }, synchronize_session=False)
+
+    def update_plan_step(self, case_id: str, tenant_id: str, step_id: str,
+                         updates: dict[str, Any]) -> dict[str, Any] | None:
+        with self._write_session() as session:
+            step = session.query(InvestigationPlanStepModel).filter(
+                InvestigationPlanStepModel.step_id == step_id,
+                InvestigationPlanStepModel.case_id == case_id,
+                InvestigationPlanStepModel.tenant_id == tenant_id,
+            ).first()
+            if step is None:
+                return None
+            for key, value in updates.items():
+                if key == "status":
+                    step.status = value
+                elif key == "priority":
+                    step.priority = int(value)
+                elif key == "priority_source":
+                    step.priority_source = value
+                elif key == "user_locked":
+                    step.user_locked = bool(value)
+                elif key == "target_refs":
+                    step.target_refs_json = value or []
+                elif key == "collector_id":
+                    step.collector_id = value
+                elif key == "selection_strategy":
+                    step.selection_strategy = value or None
+                elif key == "task_ids":
+                    step.task_ids_json = value or []
+            step.version += 1
+            step.updated_at = now_utc()
+            session.flush()
+            return step.to_dict()
+
+    def list_plan_steps(self, case_id: str, tenant_id: str,
+                        plan_revision: int | None = None) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(InvestigationPlanStepModel).filter(
+                InvestigationPlanStepModel.case_id == case_id,
+                InvestigationPlanStepModel.tenant_id == tenant_id,
+            )
+            if plan_revision is not None:
+                query = query.filter(InvestigationPlanStepModel.plan_revision == plan_revision)
+            rows = query.order_by(
+                InvestigationPlanStepModel.priority.desc(),
+                InvestigationPlanStepModel.created_at.asc(),
+            ).all()
+            return [row.to_dict() for row in rows]
+
+    # ── E3.5 集群范围：Membership Snapshot + FanoutCollectionRun ─────────
+
+    def create_membership_snapshot(self, case_id: str, tenant_id: str,
+                                   payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            snapshot = MembershipSnapshotModel(
+                snapshot_id=payload["snapshot_id"],
+                case_id=case_id,
+                tenant_id=tenant_id,
+                environment_id=payload.get("environment_id") or "",
+                cluster_id=payload.get("cluster_id") or "",
+                topology_version=payload.get("topology_version") or "",
+                scope_revision=payload.get("scope_revision") or 1,
+                members_json=payload.get("members") or [],
+                captured_at=now,
+            )
+            session.add(snapshot)
+            session.flush()
+            return snapshot.to_dict()
+
+    def get_membership_snapshot(self, case_id: str, tenant_id: str,
+                                snapshot_id: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(MembershipSnapshotModel).filter(
+                MembershipSnapshotModel.case_id == case_id,
+                MembershipSnapshotModel.tenant_id == tenant_id,
+                MembershipSnapshotModel.snapshot_id == snapshot_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def create_fanout_run(self, case_id: str, tenant_id: str,
+                          payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            run = FanoutCollectionRunModel(
+                run_id=payload["run_id"],
+                case_id=case_id,
+                tenant_id=tenant_id,
+                plan_step_id=payload.get("plan_step_id") or "",
+                plan_revision=payload.get("plan_revision") or 0,
+                scope_revision=payload.get("scope_revision") or 1,
+                snapshot_id=payload.get("snapshot_id") or "",
+                strategy=payload.get("strategy") or "ALL_IN_SCOPE",
+                collector_id=payload.get("collector_id") or "sys_metrics",
+                target_members_json=payload.get("target_members") or [],
+                task_ids_json=payload.get("task_ids") or [],
+                member_task_map_json=payload.get("member_task_map") or {},
+                task_statuses_json=payload.get("task_statuses") or {},
+                status=payload.get("status") or "RUNNING",
+                coverage=float(payload.get("coverage") or 0.0),
+                failed_count=int(payload.get("failed_count") or 0),
+                quorum_met=bool(payload.get("quorum_met")),
+                aggregate_json=payload.get("aggregate") or {},
+                late_result_isolated_json=payload.get("late_result_isolated") or [],
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(run)
+            session.flush()
+            return run.to_dict()
+
+    def get_fanout_run(self, case_id: str, tenant_id: str,
+                       run_id: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(FanoutCollectionRunModel).filter(
+                FanoutCollectionRunModel.case_id == case_id,
+                FanoutCollectionRunModel.tenant_id == tenant_id,
+                FanoutCollectionRunModel.run_id == run_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def update_fanout_run(self, case_id: str, tenant_id: str, run_id: str,
+                          updates: dict[str, Any]) -> dict[str, Any]:
+        with self._write_session() as session:
+            run = session.query(FanoutCollectionRunModel).filter(
+                FanoutCollectionRunModel.case_id == case_id,
+                FanoutCollectionRunModel.tenant_id == tenant_id,
+                FanoutCollectionRunModel.run_id == run_id,
+            ).first()
+            if run is None:
+                raise ValueError(f"FANOUT_RUN_NOT_FOUND:{run_id}")
+            for key, value in updates.items():
+                if key == "status":
+                    run.status = value
+                elif key == "task_statuses":
+                    run.task_statuses_json = value or {}
+                elif key == "member_task_map":
+                    run.member_task_map_json = value or {}
+                elif key == "coverage":
+                    run.coverage = float(value or 0.0)
+                elif key == "failed_count":
+                    run.failed_count = int(value or 0)
+                elif key == "quorum_met":
+                    run.quorum_met = bool(value)
+                elif key == "aggregate":
+                    run.aggregate_json = value or {}
+                elif key == "late_result_isolated":
+                    run.late_result_isolated_json = value or []
+            run.updated_at = now_utc()
+            session.flush()
+            return run.to_dict()
+
+    def list_fanout_runs(self, case_id: str, tenant_id: str) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(FanoutCollectionRunModel).filter(
+                FanoutCollectionRunModel.case_id == case_id,
+                FanoutCollectionRunModel.tenant_id == tenant_id,
+            ).order_by(FanoutCollectionRunModel.created_at.desc()).all()
+            return [row.to_dict() for row in rows]
+
+    def add_evidence_review(self, case_id: str, tenant_id: str,
+                            payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            previous = session.query(EvidenceReviewModel).filter(
+                EvidenceReviewModel.case_id == case_id,
+                EvidenceReviewModel.tenant_id == tenant_id,
+                EvidenceReviewModel.evidence_id == payload["evidence_id"],
+            ).order_by(EvidenceReviewModel.review_revision.desc()).first()
+            revision = (previous.review_revision if previous else 0) + 1
+            review = EvidenceReviewModel(
+                review_id=payload["review_id"],
+                case_id=case_id,
+                tenant_id=tenant_id,
+                evidence_id=payload["evidence_id"],
+                decision=payload["decision"],
+                reason_code=payload.get("reason_code"),
+                reason=payload.get("reason"),
+                actor_id=payload.get("actor_id") or "unknown",
+                review_revision=revision,
+                created_at=now,
+            )
+            session.add(review)
+            session.flush()
+            return review.to_dict()
+
+    def list_evidence_reviews(self, case_id: str, tenant_id: str,
+                              evidence_id: str | None = None) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(EvidenceReviewModel).filter(
+                EvidenceReviewModel.case_id == case_id,
+                EvidenceReviewModel.tenant_id == tenant_id,
+            )
+            if evidence_id:
+                query = query.filter(EvidenceReviewModel.evidence_id == evidence_id)
+            rows = query.order_by(EvidenceReviewModel.created_at.desc()).all()
             return [row.to_dict() for row in rows]
 
     def append_case_message(

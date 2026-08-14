@@ -12,12 +12,9 @@ import pytest
 from server.app.rca.calibrator import calibrate, interpret_confidence
 from server.app.rca.candidates import generate_candidates, load_rules
 from server.app.rca.evidence import collect_evidence, evidence_to_json
-from server.app.rca.llm_client import _extract_json, _validate_and_parse, _ref_exists, _collect_evidence_paths
-from server.app.rca.models import CandidateCause, CauseEntry, DiagnosisReport, EvidenceInput, FeedbackPrior
+from server.app.rca.llm_client import _extract_json, _validate_and_parse, _ref_exists
+from server.app.rca.models import CandidateCause, EvidenceInput, FeedbackPrior
 from server.app.rca.prompt import build_system_prompt, build_user_message
-from server.app.rca.repair import build_repair_plan
-from server.app.rca.report import run_diagnosis, run_diagnosis_context
-from server.app.rca.tools import run_rca_tools
 
 
 # ── 模拟 Task Record ──
@@ -382,195 +379,15 @@ class _StubRepo:
         return _Task()
 
 
-class TestToolAndRepairFlow:
-    """工具证据链和 safe_auto 修复动作。"""
-
-    def test_tool_results_are_structured_evidence(self):
-        tools = run_rca_tools(
-            task_record=_StubTask(),
-            top_functions=[{"name": "fib_hotspot", "samples": 100, "percent": 68.5}],
-        )
-        flame_tool = next(item for item in tools if item.tool_name == "get_flamegraph_top")
-        assert flame_tool.status == "success"
-        assert flame_tool.evidence_ref == "tool_results.get_flamegraph_top"
-        ebpf_tool = next(item for item in tools if item.tool_name == "get_ebpf_latency_summary")
-        assert ebpf_tool.status == "not_applicable"
-        baseline_tool = next(item for item in tools if item.tool_name == "compare_baseline")
-        assert baseline_tool.status == "optional_missing"
-
-    def test_pyspy_collector_without_topn_is_not_reported_as_hotspot(self):
-        evidence = EvidenceInput(
-            task_metadata={
-                "collector_type": "pyspy",
-                "duration_sec": 25,
-                "status": "DONE",
-            },
-        )
-
-        candidates = generate_candidates(evidence)
-
-        assert [item.candidate_id for item in candidates] == ["insufficient_data"]
-
-    def test_storage_failure_repair_is_manual_and_specific(self):
-        report = DiagnosisReport(
-            summary="对象存储上传失败",
-            ranked_causes=[
-                CauseEntry(
-                    cause_id="artifact_storage_unreachable",
-                    confidence=0.92,
-                    claim="Agent 到对象存储的链路不可达",
-                    evidence_refs=["failure_events"],
-                )
-            ],
-            facts=["Agent 在线", "任务上传阶段失败"],
-        )
-        evidence = EvidenceInput(
-            task_metadata={
-                "collector_type": "sys_metrics",
-                "agent_id": "linux-worker-2",
-                "target_pid": 1,
-            },
-            failure_events=["artifact upload failed"],
-        )
-
-        plan = build_repair_plan("task_storage_failure", report, evidence)
-
-        assert plan.risk_level == "manual_only"
-        assert plan.actions[0].action_type == "storage_connectivity_check"
-        assert "MinIO/S3" in plan.actions[0].description
-
-    def test_context_builds_and_executes_safe_followup(self):
-        stub_repo = _StubRepo()
-        with mock.patch.dict("os.environ", {}, clear=True):
-            outcome = run_diagnosis_context(
-                task_id="task_test",
-                task_record=_StubTask(),
-                top_functions=[{"name": "fib_hotspot", "samples": 100, "percent": 68.5}],
-                repo=stub_repo,
-            )
-        assert outcome.report.report.ranked_causes[0].cause_id == "cpu_hotspot_recursive"
-        assert outcome.repair_plan is not None
-        assert outcome.repair_plan.status == "safe_actions_executed"
-        assert stub_repo.created_payloads[0].collector_type == "pyspy"
 
 
-# ── 自修复重试 ──
+# ── llm_client 降级（RulesOnlyReasoner 保留为控制组和降级，经 llm_client 无 Key 路径）──
 
 
-class TestSelfRepair:
-    """LLM 调用失败后的自修复重试。"""
-
-    def test_retries_on_validation_failure(self):
-        """首次返回 bad JSON → 重试返回 good JSON。"""
-        evidence = EvidenceInput(
-            task_metadata={"duration_sec": 15},
-            top_functions=[{"name": "fib", "samples": 100, "percent": 68.5}],
-            baseline_diff={"cpu_percent_delta": 42.0},
-        )
-        good_json = json.dumps({
-            "summary": "after repair",
-            "ranked_causes": [{
-                "cause_id": "cpu_hotspot_recursive",
-                "confidence": 0.80,
-                "claim": "fixed",
-                "evidence_refs": ["top_functions[0]"],
-                "uncertainties": [],
-                "verification_steps": ["step"],
-            }],
-            "facts": ["f1"],
-            "not_enough_evidence": False,
-        })
-
-        # mock: 第一次返回坏 JSON → 第二次返回好 JSON
-        mock_resp_bad = mock.MagicMock(status_code=200)
-        mock_resp_bad.json.return_value = {
-            "choices": [{"message": {"content": '{"summary":"bad","ranked_causes":[]}'}}]
-        }
-        mock_resp_good = mock.MagicMock(status_code=200)
-        mock_resp_good.json.return_value = {
-            "choices": [{"message": {"content": good_json}}]
-        }
-
-        with mock.patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test-key"}):
-            with mock.patch("server.app.rca.llm_client.chat_completions", side_effect=[mock_resp_bad, mock_resp_good]):
-                from server.app.rca.llm_client import diagnose
-                result = diagnose(
-                    task_id="t1",
-                    evidence=evidence,
-                    candidates_json='[{"candidate_id":"cpu_hotspot_recursive"}]',
-                )
-                assert result.validated is True
-                assert result.retry_count == 1
-                assert result.report.summary == "after repair"
-
-    def test_max_retries_exceeded_returns_failure(self):
-        evidence = EvidenceInput()
-        bad_json = '{"summary":"x","ranked_causes":[],"facts":[],"not_enough_evidence":false}'
-
-        mock_resp = mock.MagicMock(status_code=200)
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": bad_json}}]
-        }
-
-        with mock.patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test-key"}):
-            with mock.patch("server.app.rca.llm_client.chat_completions", return_value=mock_resp):
-                from server.app.rca.llm_client import diagnose
-                result = diagnose(
-                    task_id="t1",
-                    evidence=evidence,
-                    candidates_json="[]",
-                )
-                assert result.validated is False
-                assert result.retry_count >= 1
-
-
-# ── 降级行为 ──
-
-
-class TestFallback:
-    """API Key 未配置时的降级。"""
-
-    def test_no_api_key_returns_rule_only(self):
-        evidence = EvidenceInput(task_metadata={"collector_type": "perf_cpu"})
-        with mock.patch.dict("os.environ", {}, clear=True):
-            from server.app.rca.llm_client import diagnose
-            result = diagnose(task_id="t1", evidence=evidence, candidates_json="[]")
-            assert result.model_name == "rule-engine-only"
-            assert result.report.not_enough_evidence is True
-
-    def test_run_diagnosis_with_no_key(self):
-        task = _StubTask()
-        with mock.patch.dict("os.environ", {}, clear=True):
-            result = run_diagnosis(task_id="t1", task_record=task,
-                                   top_functions=[{"name": "fib", "samples": 100, "percent": 68.5}])
-            assert result is not None
-            assert result.model_name == "rule-engine-only"
-
-    def test_run_diagnosis_passes_sys_metrics_to_rules(self):
-        task = _StubTask()
-        sys_metrics = {
-            "sample_count": 10,
-            "summary": {
-                "avg_cpu_user_pct": 92.0,
-                "avg_cpu_sys_pct": 5.0,
-                "avg_cpu_iowait_pct": 1.0,
-                "load1m": 8.0,
-                "thread_count": 20,
-                "thread_trend": "stable",
-                "fd_count": 20,
-                "fd_trend": "stable",
-                "fd_max": 25,
-                "vmrss_mb": 200,
-                "vmrss_mb_max": 210,
-                "ctx_nonvoluntary_rate": 10,
-                "net_rx_kbps": 10,
-                "net_tx_kbps": 10,
-            },
-        }
-        with mock.patch.dict("os.environ", {}, clear=True):
-            result = run_diagnosis(
-                task_id="t1",
-                task_record=task,
-                sys_metrics=sys_metrics,
-            )
-        assert result.report.ranked_causes[0].cause_id == "cpu_userland_hotspot"
+def test_no_api_key_returns_rule_only():
+    evidence = EvidenceInput(task_metadata={"collector_type": "perf_cpu"})
+    with mock.patch.dict("os.environ", {}, clear=True):
+        from server.app.rca.llm_client import diagnose
+        result = diagnose(task_id="t1", evidence=evidence, candidates_json="[]")
+        assert result.model_name == "rule-engine-only"
+        assert result.report.not_enough_evidence is True

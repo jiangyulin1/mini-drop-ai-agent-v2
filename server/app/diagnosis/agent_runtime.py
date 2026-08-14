@@ -9,6 +9,7 @@ user-facing decision summary.  Source execution remains behind SourceGateway.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Optional
 from uuid import uuid4
@@ -68,6 +69,12 @@ class AgentToolCall(StrictModel):
 
 
 class DeploymentAssessment(StrictModel):
+    """部署承载评估（E7）：每个容量结论都携带可审计的出处。
+
+    时间窗口 / 资源范围 / 数据新鲜度 / Evidence 引用来自工具证据投影；
+    缺少关键数据时必须 ``insufficient_data`` 明确拒答而不是猜测。
+    """
+
     verdict: Literal["ready", "conditional", "not_ready", "insufficient_data"]
     summary: str
     requirements: Optional[DeploymentRequirements] = None
@@ -75,6 +82,12 @@ class DeploymentAssessment(StrictModel):
     rejected_nodes: list[dict[str, Any]] = Field(default_factory=list)
     missing_inputs: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+    # E7 出处字段
+    time_window: dict[str, Any] = Field(default_factory=dict)
+    resource_scope: dict[str, str] = Field(default_factory=dict)
+    data_freshness: float = 0.0
+    evidence_refs: list[str] = Field(default_factory=list)
+    scheduling_constraints: list[str] = Field(default_factory=list)
 
 
 class AgentTurnResult(StrictModel):
@@ -275,13 +288,16 @@ def assess_deployment_capacity(
     tool_evidence: list[dict[str, Any]] | None = None,
 ) -> DeploymentAssessment:
     """Evaluate declared allocatable capacity; utilization-only data is never treated as capacity."""
+    evidence = tool_evidence or []
+    provenance = _provenance_from_evidence(evidence, target_scope)
     if requirements is None:
         return DeploymentAssessment(
             verdict="insufficient_data",
             summary="还不能判断是否可部署：缺少每副本 CPU、内存或磁盘需求。",
             missing_inputs=["replicas", "cpu_cores_per_replica / memory_mb_per_replica / disk_mb_per_replica"],
+            **provenance,
         )
-    inventory = target_scope.get("deployment_inventory") or _inventory_from_tool_evidence(tool_evidence or [])
+    inventory = target_scope.get("deployment_inventory") or _inventory_from_tool_evidence(evidence)
     if not inventory:
         return DeploymentAssessment(
             verdict="insufficient_data",
@@ -292,7 +308,8 @@ def assess_deployment_capacity(
                 "deployment_inventory[].allocatable_memory_mb",
                 "deployment_inventory[].allocatable_disk_mb",
             ],
-            assumptions=[f"已取得 {len(tool_evidence or [])} 份运行指标投影，仅用于趋势佐证"],
+            assumptions=[f"已取得 {len(evidence)} 份运行指标投影，仅用于趋势佐证"],
+            **provenance,
         )
 
     margin = 1 + requirements.safety_margin_ratio
@@ -340,7 +357,126 @@ def assess_deployment_capacity(
         eligible_nodes=eligible,
         rejected_nodes=rejected,
         assumptions=[f"按 {int(requirements.safety_margin_ratio * 100)}% 安全余量评估", "未评估业务依赖、配额与反亲和规则时不得直接上线"],
+        **provenance,
     )
+
+
+def _provenance_from_evidence(
+    evidence: list[dict[str, Any]],
+    target_scope: dict[str, Any],
+) -> dict[str, Any]:
+    """从工具证据投影提取出处：时间窗口 / Evidence 引用 / 数据新鲜度。
+
+    data_freshness ∈ [0,1]：最近一条证据 observed_at 距今越近分越高；无观测为 0。
+    """
+    scope = target_scope or {}
+    evidence_refs: list[str] = []
+    starts: list[Any] = []
+    ends: list[Any] = []
+    latest_observed: Optional[Any] = None
+    for item in evidence:
+        evidence_id = str(item.get("evidence_id") or "")
+        if evidence_id:
+            evidence_refs.append(evidence_id)
+        valid_time = item.get("valid_time") or {}
+        if valid_time.get("start"):
+            starts.append(valid_time["start"])
+        if valid_time.get("end"):
+            ends.append(valid_time["end"])
+        observed = item.get("observed_at")
+        if observed is not None and (latest_observed is None or str(observed) > str(latest_observed)):
+            latest_observed = observed
+    freshness = 0.0
+    if latest_observed is not None:
+        try:
+            observed_dt = datetime.fromisoformat(str(latest_observed))
+            age_seconds = max(0.0, (datetime.now(timezone.utc) - observed_dt).total_seconds())
+            freshness = max(0.0, 1.0 - age_seconds / 600.0)
+        except (ValueError, TypeError):
+            freshness = 0.0
+    return {
+        "time_window": {
+            "start": min(starts) if starts else "",
+            "end": max(ends) if ends else "",
+        },
+        "resource_scope": {
+            key: str(value)
+            for key, value in {
+                "cluster_id": scope.get("cluster_id"),
+                "service_id": scope.get("service_id"),
+                "environment": scope.get("environment"),
+            }.items()
+            if value
+        },
+        "data_freshness": round(freshness, 4),
+        "evidence_refs": evidence_refs,
+        "scheduling_constraints": [str(x) for x in (scope.get("scheduling_constraints") or [])],
+    }
+
+
+def backtest_deployment_assessments(
+    records: list[dict[str, Any]],
+    *,
+    oracle_key: str = "oracle_verdict",
+) -> dict[str, Any]:
+    """E7 历史回测：重放历史部署决策并与 Oracle 判定比较。
+
+    门槛（14.4）：缺少关键数据时正确拒答率 ≥ 95%——即对数据不足的记录评估器
+    必须返回 insufficient_data 而不是猜测。``guessed_without_data`` 统计"缺数据
+    仍猜测"的严重错误，它直接拉低正确拒答率。accuracy 反映可判定记录的命中率。
+    """
+    total = len(records)
+    correct = 0
+    refused = 0
+    refused_but_oracle_decided = 0
+    guessed_without_data = 0
+    mismatch: list[dict[str, Any]] = []
+    for record in records:
+        raw_requirements = record.get("requirements")
+        requirements = None
+        if raw_requirements:
+            try:
+                requirements = DeploymentRequirements(**raw_requirements)
+            except ValueError:
+                requirements = None
+        target_scope = record.get("target_scope") or {}
+        tool_evidence = record.get("tool_evidence") or []
+        inventory = target_scope.get("deployment_inventory") or _inventory_from_tool_evidence(tool_evidence)
+        data_sufficient = bool(inventory) and requirements is not None
+        assessment = assess_deployment_capacity(
+            requirements,
+            target_scope=target_scope,
+            tool_evidence=tool_evidence,
+        )
+        oracle = str(record.get(oracle_key) or "insufficient_data")
+        if not data_sufficient:
+            refused += 1
+            if oracle != "insufficient_data":
+                refused_but_oracle_decided += 1
+            if assessment.verdict != "insufficient_data":
+                guessed_without_data += 1  # 数据不足仍猜测 → 硬门禁失败
+            continue
+        if assessment.verdict == oracle:
+            correct += 1
+        else:
+            mismatch.append({
+                "oracle": oracle, "got": assessment.verdict, "summary": assessment.summary,
+            })
+    correct_refusal_rate = (total - guessed_without_data) / total if total else 0.0
+    return {
+        "total": total,
+        "correct": correct,
+        "refused": refused,
+        "accuracy": round(correct / total, 4) if total else 0.0,
+        "correct_refusal_rate": round(correct_refusal_rate, 4),
+        "refused_but_oracle_decided": refused_but_oracle_decided,
+        "guessed_without_data": guessed_without_data,
+        "mismatches": mismatch[:20],
+        "gates": {
+            "min_correct_refusal_rate": 0.95,
+            "passed": bool(total) and correct_refusal_rate >= 0.95,
+        },
+    }
 
 
 def _inventory_from_tool_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:

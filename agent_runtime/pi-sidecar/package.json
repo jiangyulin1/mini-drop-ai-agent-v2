@@ -1,0 +1,19 @@
+{
+  "name": "mini-drop-pi-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mini-Drop Agent Runtime Sidecar (Pi SDK full-control mode). Exposes only the Mini-Drop internal protocol; never exposes Pi RPC to the network.",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs",
+    "test": "node --test test/server.test.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.83.0",
+    "typebox": "^1.3.13"
+  }
+}

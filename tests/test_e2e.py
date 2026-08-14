@@ -9,9 +9,7 @@
   3. Agent 离线检测：30 秒无心跳后标记 OFFLINE + 审计日志
 """
 
-import time
 from datetime import timedelta
-from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -115,10 +113,10 @@ class TestE2ENormalPath:
         assert len(arts) == 3
         assert {item["artifact_type"] for item in arts} >= {"raw", "flamegraph_json", "top_json"}
 
-        # Step 7: 触发诊断（API Key 未配 → 降级）
-        diag = client.post(f"/api/tasks/{task_id}/diagnose").json()["data"]
-        assert "report_id" in diag
-        assert "summary" in diag
+        # Step 7: E9 旧一次性诊断已退役 → 410 指向 Case 路径
+        resp = client.post(f"/api/tasks/{task_id}/diagnose")
+        assert resp.status_code == 410
+        assert "api/v1/cases" in resp.json()["detail"]
 
 
 # ── 场景 2：PID 不存在 ──────────────────────────────────────────

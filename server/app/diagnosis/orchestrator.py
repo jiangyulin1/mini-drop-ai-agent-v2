@@ -3023,8 +3023,8 @@ def _pressure_flags(summary: dict[str, Any], values: dict[str, Any]) -> dict[str
             and _num(summary.get("target_fs_available_bytes")) == 0
         ),
         "network_loss": (
-            _num(summary.get("tcp_retransmit_pct")) >= 5
-            or _num(summary.get("tcp_timeout_delta")) >= 3
+            _num(summary.get("tcp_retransmit_pct")) >= 2
+            or _num(summary.get("tcp_timeout_delta")) >= 2
             or log_network_loss
         ),
         "oom": _num(summary.get("container_oom_kill_delta")) > 0,

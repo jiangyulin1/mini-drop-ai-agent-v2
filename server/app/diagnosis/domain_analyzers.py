@@ -142,6 +142,19 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         and any(obs.get("pressure", {}).get("memory") for obs in target_obs)
         and not any(_memory_source(obs) for obs in target_obs)
     )
+    # 宿主内存争抢：同宿主某实例是内存来源（或已打 memory 压力标），目标自身不是
+    # 内存来源却表现出降级（任何压力或连接类错误都算）→ 归宿主内存争抢而非下游。
+    # 内存生成器把宿主内存耗尽会让目标响应变慢/连接超时，连接类证据是后果而非根因。
+    neighbor_memory_pressure = any(
+        _memory_source(obs) or obs.get("pressure", {}).get("memory")
+        for obs in same_host_obs
+    )
+    host_memory_contention = (
+        neighbor_memory_pressure
+        and not any(_memory_source(obs) for obs in target_obs)
+        and not target_hot
+        and (target_pressure or target_connectivity or endpoint_downstream)
+    )
     contributing_causes = _contributing_causes(
         scope, observations, target_obs, same_host_obs, downstream_obs,
     )
@@ -208,6 +221,34 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
                 "evidence_refs": _unique_refs(upload_failed_obs),
             },
         ])
+    elif host_memory_contention:
+        classification = "host_resource_contention"
+        confidence_level = "高"
+        summary = "同宿主实例存在明显内存压力且目标自身并非内存来源，目标降级更像是宿主内存争抢拖累。"
+        confidence_factors = {"scope_coverage": "high", "source_independence": "medium", "discriminating_evidence": "high"}
+        ruled_out.append({
+            "hypothesis": "downstream_dependency",
+            "reason": "同宿主内存来源更显著，目标的连接类错误/变慢更可能是宿主内存争抢的后果。",
+            "evidence_refs": all_refs,
+        })
+    elif target_obs and same_host_obs and neighbor_cpu_pressure and not target_hot:
+        # 同宿主存在 CPU/线程压力来源：即使目标同时出现连接类错误（CPU 饱和导致
+        # 处理变慢、socket 超时），也应优先归因噪声邻居而不是下游——连接证据是后果。
+        # 目标自身有可复现热点（top_function>=40）时仍归自身代码。
+        classification = "same_host_noisy_neighbor"
+        confidence_level = "高" if target_obs else "中"
+        summary = "同宿主其他实例存在明显资源压力，当前更像被噪声邻居或宿主机资源争抢拖累。"
+        confidence_factors = {"scope_coverage": "high", "source_independence": "medium", "discriminating_evidence": "high"}
+        ruled_out.append({
+            "hypothesis": "self_code_regression",
+            "reason": "目标实例缺少高占比代码热点，且同宿主实例压力更明显。",
+            "evidence_refs": all_refs,
+        })
+        ruled_out.append({
+            "hypothesis": "downstream_dependency",
+            "reason": "同宿主 CPU 噪声源比下游连接错误更接近根因，连接错误更像是噪声导致的处理变慢。",
+            "evidence_refs": all_refs,
+        })
     elif target_connectivity or endpoint_downstream:
         # 目标进程日志出现连接类错误（refused/reset/unreachable/denied），
         # 或受控连接探针显示下游端点不可达/容器停摆，都是下游依赖故障的直接
@@ -248,16 +289,6 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
             )
         )
         confidence_factors = {"scope_coverage": "high", "source_independence": "medium", "discriminating_evidence": "high"}
-    elif target_obs and same_host_obs and neighbor_cpu_pressure and not target_hot and not target_pressure:
-        classification = "same_host_noisy_neighbor"
-        confidence_level = "高" if target_obs else "中"
-        summary = "同宿主其他实例存在明显资源压力，当前更像被噪声邻居或宿主机资源争抢拖累。"
-        confidence_factors = {"scope_coverage": "high", "source_independence": "medium", "discriminating_evidence": "high"}
-        ruled_out.append({
-            "hypothesis": "self_code_regression",
-            "reason": "目标实例缺少高占比代码热点，且同宿主实例压力更明显。",
-            "evidence_refs": all_refs,
-        })
     elif target_obs and downstream_obs and downstream_pressure and not target_hot and not target_pressure:
         classification = "downstream_dependency"
         confidence_level = "中"
@@ -292,7 +323,35 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         if item["score"] >= 0.6
         and item["classification"] in {"downstream_dependency", "network_degradation"}
     ]
-    if len(strong_causes) >= 2 and len(distinct_domains) >= 2:
+    target_refs = {
+        str((obs.get("target") or {}).get("instance_id") or (obs.get("target") or {}).get("host_id") or "unknown")
+        for obs in target_obs
+    }
+    # 目标自身进程被挂起（runtime stall/lock）时，其网络/连接类信号是停顿的后果
+    # 而不是独立根因：同一根因不能拆成复合事故（如 PARTITION：frontend 停顿 +
+    # 网络劣化 = 一个分区根因；NOISY-CPU：checkoutservice 被噪声邻居打停 + 网络
+    # 变慢 = 一个噪声邻居根因，而不是 runtime+network 复合）。
+    target_runtime_cause = any(
+        item for item in strong_causes
+        if str(item["target_ref"]) in target_refs
+        and item["classification"] in {"runtime_lock_contention", "runtime_stall"}
+    )
+    runtime_network_single_root = (
+        target_runtime_cause
+        and any(
+            item for item in strong_causes
+            if str(item["target_ref"]) in target_refs
+            and item["classification"] in {"downstream_dependency", "network_degradation"}
+        )
+    )
+    if (
+        len(strong_causes) >= 2 and len(distinct_domains) >= 2
+        and not host_memory_contention
+        and not runtime_network_single_root
+        and not (classification == "same_host_noisy_neighbor" and target_runtime_cause)
+    ):
+        # host_memory_contention / 目标进程停顿（含噪声邻居打停）时的网络信号是
+        # 同一根因的症状，不是独立根因，不能拆成复合事故。
         primary = strong_causes[0]
         classification = "compound_incident"
         confidence_level = "高" if independent_source_count(observations) >= 2 else "中"
@@ -307,6 +366,12 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
     elif (
         len(multi_entity_downstream) >= 2
         and len({str(item["target_ref"]) for item in multi_entity_downstream}) >= 2
+        # 同一宿主内的依赖链（如 cartservice→redis-cart 停摆）是一个根因的下游传导，
+        # 不是多个独立下游故障；只有跨宿主的多个实体各自网络劣化才算独立复合
+        # （CROSS-WORKER / 双下游测试）。防止 SINGLE-REDIS 被误判成 compound。
+        and len({str(item.get("host_id") or "") for item in multi_entity_downstream}) >= 2
+        and not runtime_network_single_root
+        and not (classification == "same_host_noisy_neighbor" and target_runtime_cause)
     ):
         primary = multi_entity_downstream[0]
         classification = "compound_incident"
@@ -344,6 +409,23 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
             confidence_level = primary["confidence_level"]
             summary = primary["summary"]
 
+    # 网络劣化的位置：作用域内含一跳下游（依赖链）→ 目标到下游的链路劣化，判
+    # downstream；作用域内只有目标且网络劣化单点 → 目标自身链路问题，判 self
+    # （NETLOSS/STALE-REAL 注入到目标自身的 network loss）。
+    network_loss_obs = [
+        obs for obs in observations
+        if obs.get("pressure", {}).get("network_loss")
+        or _num(_facts(obs).get("tcp_retransmit_pct")) >= 5
+        or _num(_facts(obs).get("tcp_timeout_delta")) >= 3
+    ]
+    target_only_network_loss = (
+        any(any(obs is t for t in target_obs) for obs in network_loss_obs)
+        and not any(not any(obs is t for t in target_obs) for obs in network_loss_obs)
+    )
+    has_downstream_scope = bool(scope.get("downstream_service_ids"))
+    network_degradation_location = (
+        "downstream" if has_downstream_scope or not target_only_network_loss else "self"
+    )
     location_type = {
         "host_resource_contention": "shared_resource",
         "same_host_noisy_neighbor": "same_host",
@@ -351,8 +433,8 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         "self_code_or_process_pressure": "self",
         "single_instance_storage_path_failure": "self",
         "process_oom": "self",
-        "filesystem_exhaustion": "shared_resource",
-        "network_degradation": "downstream",
+        "filesystem_exhaustion": "shared_resource" if _multi_host_disk_full(observations) else "self",
+        "network_degradation": network_degradation_location,
         "runtime_lock_contention": "self",
         "runtime_stall": "self",
         "compound_incident": strong_causes[0]["location_type"] if strong_causes else "unknown",
@@ -384,9 +466,13 @@ def assess_cluster(scope: dict[str, Any], observations: list[dict[str, Any]]) ->
         target_ref = selected[0].get("target", {}).get("instance_id") or selected[0].get("target", {}).get("host_id")
     domain_type, subtype = _domain_cause(selected)
     if classification == "host_resource_contention":
-        # 宿主资源争抢归因（iowait/块延迟/宿主 system 开销）统一判为 IO 领域，
-        # 避免进程 CPU 表象（等待 IO 时的短暂 tick）覆盖宿主 IO 争抢的结论。
-        domain_type, subtype = "io", "host_io_contention"
+        # 宿主资源争抢归因：内存生成器耗尽宿主内存时判 memory 域，其余
+        # （iowait/块延迟/宿主 system 开销）统一判为 IO 领域，避免进程 CPU 表象
+        # （等待 IO 时的短暂 tick）覆盖宿主 IO 争抢的结论。
+        if host_memory_contention:
+            domain_type, subtype = "memory", "host_memory_contention"
+        else:
+            domain_type, subtype = "io", "host_io_contention"
     if strong_causes and classification in {
         "process_oom", "filesystem_exhaustion", "network_degradation",
         "runtime_lock_contention", "runtime_stall", "compound_incident",
@@ -834,6 +920,24 @@ def _memory_source(obs: dict[str, Any]) -> bool:
     )
 
 
+def _multi_host_disk_full(observations: list[dict[str, Any]]) -> bool:
+    """多个不同宿主机同时出现磁盘耗尽 → 共享存储；否则是节点本地盘（loopback/NFS 单挂点）。"""
+    hosts: set[str] = set()
+    for obs in observations:
+        facts = _facts(obs)
+        disk_used = max(_num(facts.get("root_fs_used_pct")), _num(facts.get("target_fs_used_pct")))
+        target_zero_available = (
+            facts.get("target_fs_available_bytes") is not None
+            and _num(facts.get("target_fs_used_pct")) > 0
+            and _num(facts.get("target_fs_available_bytes")) == 0
+        )
+        if disk_used >= 95 or _num(facts.get("enospc_count")) > 0 or target_zero_available:
+            target = obs.get("target") or {}
+            host = str(target.get("host_id") or target.get("instance_id") or "unknown")
+            hosts.add(host)
+    return len(hosts) >= 2
+
+
 def _unique_refs(observations: list[dict[str, Any]]) -> list[str]:
     result: list[str] = []
     for obs in observations:
@@ -898,6 +1002,18 @@ def _domain_cause(observations: list[dict[str, Any]]) -> tuple[str, str]:
         return "io", "filesystem_exhaustion"
     if any(_num(item.get("lock_waiter_count_max")) >= 15 and _num(item.get("blocked_thread_ratio_max")) >= 0.9 for item in facts):
         return "runtime", "lock_contention"
+    # 与 runtime_blocking_analyzer / _pressure_flags 的停顿判定对齐：T 态线程或采样窗口
+    # 零 CPU 前进 = 业务停顿，属于 runtime 域（否则会落到 unknown 丢域）。
+    if any(
+        _num(item.get("stopped_thread_count_max")) >= 2
+        or (
+            _num(item.get("thread_count_max")) >= 2
+            and _num(item.get("cpu_tick_delta")) == 0
+        )
+        or _num(item.get("uninterruptible_thread_count_max")) >= 2
+        for item in facts
+    ):
+        return "runtime", "process_stall"
     if any(_num(item.get("mysql_lock_wait_count")) > 0 or _num(item.get("mysql_lock_wait_seconds")) > 0 for item in facts):
         return "database", "mysql_lock_wait"
     if any(_num(item.get("jvm_gc_pause_p95_ms")) >= 200 or _num(item.get("jvm_gc_time_pct")) >= 10 for item in facts):
@@ -940,6 +1056,7 @@ def _contributing_causes(
             score: float, summary: str, location: str | None = None) -> None:
         target = obs.get("target") or {}
         target_ref = str(target.get("instance_id") or target.get("host_id") or target.get("agent_id") or "unknown")
+        host_id = str(target.get("host_id") or "")
         location_type = location or groups.get(id(obs), "unknown")
         key = (domain, subtype, target_ref)
         item = candidates.setdefault(key, {
@@ -948,6 +1065,7 @@ def _contributing_causes(
             "classification": classification,
             "location_type": location_type,
             "target_ref": target_ref,
+            "host_id": host_id,
             "score": 0.0,
             "confidence_level": "低",
             "summary": summary,
@@ -998,14 +1116,29 @@ def _contributing_causes(
         )
         if disk_used >= 95 or _num(facts.get("enospc_count")) > 0 or target_zero_available:
             add(obs, "io", "filesystem_exhaustion", "filesystem_exhaustion", 0.98,
-                f"文件系统使用率达到 {disk_used:.1f}% 或已经返回 ENOSPC。", "shared_resource")
+                f"文件系统使用率达到 {disk_used:.1f}% 或已经返回 ENOSPC。",
+                "shared_resource" if _multi_host_disk_full(observations) else "self")
         elif pressure.get("io_wait") or pressure.get("block_latency_high"):
             add(obs, "io", "host_or_shared_io_pressure", "host_resource_contention", 0.82,
                 "宿主或共享设备存在 I/O 等待/块延迟。", "shared_resource")
 
         retransmit = _num(facts.get("tcp_retransmit_pct"))
         timeouts = _num(facts.get("tcp_timeout_delta"))
-        if retransmit >= 5 or timeouts >= 3:
+        has_refused_reset = _log_connectivity_count([obs]) > 0
+        # 弱网络故障（重传 2-5%）由 _pressure_flags 在 network_loss 标记里体现
+        # （阈值 >=2%）。但 network_loss 标记也会因下游服务停摆的日志（timeout/
+        # refused/reset）触发——此时是下游依赖故障（downstream_dependency），
+        # 不是链路劣化。因此弱信号只在"无 refused/reset 日志"（纯超时=链路/分区）
+        # 或确有重传/超时事实时才归 network_degradation；拒绝型连接日志仍走
+        # downstream_dependency。对未走标准压力标记的原始观测（如 golden scenario）
+        # 保留 >=5% 强阈值，避免把目标自身轻度重传误判成网络劣化。
+        if (
+            retransmit >= 5 or timeouts >= 3
+            or (
+                pressure.get("network_loss")
+                and (retransmit >= 2 or timeouts >= 2 or not has_refused_reset)
+            )
+        ):
             add(obs, "network", "packet_loss_or_timeout", "network_degradation", 0.92,
                 f"TCP 重传 {retransmit:.1f}% 或超时增量 {int(timeouts)}。",
                 "downstream" if groups.get(id(obs)) == "self" else groups.get(id(obs)))

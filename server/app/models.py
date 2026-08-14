@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -388,6 +389,338 @@ class DiagnosticTargetSessionModel(Base):
             "created_by": self.created_by,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+        }
+
+
+class CaseResourceAttachmentModel(Base):
+    """Unified data-entry binding: a ResourceRef attached to a Case (E1).
+
+    Replaces the multi-way split (initial_task_ids / source_task_id /
+    target_scope.evidence_task_ids / source_collection_ids) with one
+    tenant-scoped row so a Task, a Collection batch or a conversation `@`
+    reference can be proven to enter the next diagnosis.
+    """
+
+    __tablename__ = "case_resource_attachments"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "resource_type", "resource_id",
+            name="uq_attachment_case_resource",
+        ),
+    )
+
+    id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    resource_type = Column(String(40), nullable=False)
+    resource_id = Column(String(128), nullable=False)
+    resource_revision = Column(Integer, nullable=True)
+    label = Column(String(256), nullable=False)
+    source = Column(String(40), nullable=False)
+    purpose = Column(Text, nullable=True)
+    attached_by = Column(String(128), nullable=False)
+    status = Column(String(40), nullable=False, default="PENDING_VALIDATION")
+    scope_match = Column(String(20), nullable=False, default="UNKNOWN")
+    time_match = Column(String(20), nullable=False, default="UNKNOWN")
+    freshness = Column(String(20), nullable=False, default="UNKNOWN")
+    quality = Column(String(20), nullable=False, default="UNKNOWN")
+    evidence_ids_json = Column(JSON, default=list)
+    rejection_reason = Column(String(128), nullable=True)
+    supersedes_json = Column(JSON, default=list)
+    row_version = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "attachment_id": self.id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "resource_ref": {
+                "type": self.resource_type,
+                "id": self.resource_id,
+                "revision": self.resource_revision,
+            },
+            "label": self.label,
+            "source": self.source,
+            "purpose": self.purpose,
+            "attached_by": self.attached_by,
+            "status": self.status,
+            "scope_match": self.scope_match,
+            "time_match": self.time_match,
+            "freshness": self.freshness,
+            "quality": self.quality,
+            "evidence_ids": self.evidence_ids_json or [],
+            "rejection_reason": self.rejection_reason,
+            "supersedes": self.supersedes_json or [],
+            "row_version": self.row_version,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class InvestigationPlanModel(Base):
+    """Persistent, versioned investigation plan (E2, plan 5.4)."""
+
+    __tablename__ = "investigation_plans"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "plan_revision", name="uq_plan_case_revision",
+        ),
+    )
+
+    plan_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False)
+    plan_revision = Column(Integer, nullable=False, default=0)
+    scope_revision = Column(Integer, nullable=False, default=0)
+    goal = Column(String(500), nullable=False)
+    status = Column(String(24), nullable=False, default="ACTIVE")
+    source = Column(String(40), nullable=False, default="deterministic")
+    created_by = Column(String(128), nullable=False)
+    row_version = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "plan_id": self.plan_id,
+            "case_id": self.case_id,
+            "plan_revision": self.plan_revision,
+            "scope_revision": self.scope_revision,
+            "goal": self.goal,
+            "status": self.status,
+            "source": self.source,
+            "created_by": self.created_by,
+            "row_version": self.row_version,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class InvestigationPlanStepModel(Base):
+    """A single plan step with its own state machine and revisions (E2)."""
+
+    __tablename__ = "investigation_plan_steps"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["plan_id"],
+            ["investigation_plans.plan_id"],
+            name="fk_plan_step_plan",
+        ),
+    )
+
+    step_id = Column(String(128), primary_key=True)
+    plan_id = Column(String(128), nullable=False)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False)
+    plan_revision = Column(Integer, nullable=False, default=0)
+    scope_revision = Column(Integer, nullable=False, default=0)
+    kind = Column(String(32), nullable=False)
+    collector_id = Column(String(128), nullable=True)
+    target_refs_json = Column(JSON, nullable=True)
+    purpose = Column(String(500), nullable=True)
+    hypothesis_refs_json = Column(JSON, nullable=True)
+    expected_information = Column(String(500), nullable=True)
+    priority = Column(Integer, nullable=False, default=0)
+    priority_source = Column(String(16), nullable=False, default="AI")
+    user_locked = Column(Boolean, nullable=False, default=False)
+    depends_on_json = Column(JSON, nullable=True)
+    risk = Column(String(24), nullable=False, default="READ_LOW")
+    # E3.5：集群 Step 的选择策略（ALL_IN_SCOPE/REPRESENTATIVE/OUTLIERS/...）
+    selection_strategy = Column(String(40), nullable=True)
+    status = Column(String(32), nullable=False, default="DRAFT")
+    task_ids_json = Column(JSON, nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "step_id": self.step_id,
+            "plan_id": self.plan_id,
+            "case_id": self.case_id,
+            "plan_revision": self.plan_revision,
+            "scope_revision": self.scope_revision,
+            "kind": self.kind,
+            "collector_id": self.collector_id,
+            "target_refs": self.target_refs_json or [],
+            "purpose": self.purpose,
+            "hypothesis_refs": self.hypothesis_refs_json or [],
+            "expected_information": self.expected_information,
+            "priority": self.priority,
+            "priority_source": self.priority_source,
+            "user_locked": self.user_locked,
+            "depends_on": self.depends_on_json or [],
+            "risk": self.risk,
+            "selection_strategy": self.selection_strategy,
+            "status": self.status,
+            "task_ids": self.task_ids_json or [],
+            "version": self.version,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class MembershipSnapshotModel(Base):
+    """E3.5: 冻结的集群成员快照；调查期间成员变化不修改历史快照。"""
+
+    __tablename__ = "membership_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "snapshot_id", name="uq_membership_snapshot",
+        ),
+    )
+
+    snapshot_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False)
+    environment_id = Column(String(128), nullable=False, default="")
+    cluster_id = Column(String(128), nullable=False, default="")
+    topology_version = Column(String(64), nullable=False, default="")
+    scope_revision = Column(Integer, nullable=False, default=1)
+    members_json = Column(JSON, nullable=False, default=list)
+    captured_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "snapshot_id": self.snapshot_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "environment_id": self.environment_id,
+            "cluster_id": self.cluster_id,
+            "topology_version": self.topology_version,
+            "scope_revision": self.scope_revision,
+            "members": self.members_json or [],
+            "captured_at": self.captured_at,
+        }
+
+
+class FanoutCollectionRunModel(Base):
+    """E3.5: 一个逻辑采集步骤展开出的多个单目标 Task 及聚合结果。"""
+
+    __tablename__ = "fanout_collection_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "run_id", name="uq_fanout_run",
+        ),
+    )
+
+    run_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False)
+    plan_step_id = Column(String(128), nullable=False, default="")
+    plan_revision = Column(Integer, nullable=False, default=0)
+    scope_revision = Column(Integer, nullable=False, default=1)
+    snapshot_id = Column(String(128), nullable=False, default="")
+    strategy = Column(String(40), nullable=False, default="ALL_IN_SCOPE")
+    collector_id = Column(String(128), nullable=False, default="sys_metrics")
+    target_members_json = Column(JSON, nullable=False, default=list)
+    task_ids_json = Column(JSON, nullable=False, default=list)
+    member_task_map_json = Column(JSON, nullable=False, default=dict)
+    task_statuses_json = Column(JSON, nullable=False, default=dict)
+    status = Column(String(24), nullable=False, default="RUNNING")
+    coverage = Column(Float, nullable=False, default=0.0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    quorum_met = Column(Boolean, nullable=False, default=False)
+    aggregate_json = Column(JSON, nullable=False, default=dict)
+    late_result_isolated_json = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "run_id": self.run_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "plan_step_id": self.plan_step_id,
+            "plan_revision": self.plan_revision,
+            "scope_revision": self.scope_revision,
+            "snapshot_id": self.snapshot_id,
+            "strategy": self.strategy,
+            "collector_id": self.collector_id,
+            "target_members": self.target_members_json or [],
+            "task_ids": self.task_ids_json or [],
+            "member_task_map": self.member_task_map_json or {},
+            "task_statuses": self.task_statuses_json or {},
+            "status": self.status,
+            "coverage": self.coverage or 0.0,
+            "failed_count": self.failed_count or 0,
+            "quorum_met": self.quorum_met,
+            "aggregate": self.aggregate_json or {},
+            "late_result_isolated": self.late_result_isolated_json or [],
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class EvidenceReviewModel(Base):
+    """User/system decision about an evidence item (E2, plan 5.5)."""
+
+    __tablename__ = "evidence_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "evidence_id", "review_revision",
+            name="uq_evidence_review_revision",
+        ),
+    )
+
+    review_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False)
+    evidence_id = Column(String(128), nullable=False)
+    decision = Column(String(20), nullable=False)
+    reason_code = Column(String(64), nullable=True)
+    reason = Column(String(1000), nullable=True)
+    actor_id = Column(String(128), nullable=False)
+    review_revision = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "review_id": self.review_id,
+            "case_id": self.case_id,
+            "evidence_id": self.evidence_id,
+            "decision": self.decision,
+            "reason_code": self.reason_code,
+            "reason": self.reason,
+            "actor_id": self.actor_id,
+            "review_revision": self.review_revision,
+            "created_at": self.created_at,
+        }
+
+
+class CollectionDecisionModel(Base):
+    """Recorded reuse/recollect decision (E2, plan 5.3)."""
+
+    __tablename__ = "collection_decisions"
+
+    decision_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False)
+    requested_collector = Column(String(128), nullable=False)
+    purpose = Column(String(500), nullable=True)
+    result = Column(String(32), nullable=False)
+    reused_task_ids_json = Column(JSON, nullable=True)
+    new_plan_step_ids_json = Column(JSON, nullable=True)
+    reason_codes_json = Column(JSON, nullable=True)
+    estimated_cost_json = Column(JSON, nullable=True)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "decision_id": self.decision_id,
+            "case_id": self.case_id,
+            "requested_collector": self.requested_collector,
+            "purpose": self.purpose,
+            "result": self.result,
+            "reused_task_ids": self.reused_task_ids_json or [],
+            "new_plan_step_ids": self.new_plan_step_ids_json or [],
+            "reason_codes": self.reason_codes_json or [],
+            "estimated_cost": self.estimated_cost_json or {},
+            "created_by": self.created_by,
+            "created_at": self.created_at,
         }
 
 
@@ -1395,8 +1728,6 @@ class DiagnosisSessionModel(Base):
             "evaluation_oracle": self.evaluation_oracle_json or {},
             "child_task_ids": self.child_task_ids_json or [],
             "conclusion_versions": self.conclusion_versions_json or [],
-            "initial_evidence_loaded": self.initial_evidence_loaded_json or [],
-            "initial_evidence_count": self.initial_evidence_count or 0,
             "model_version": self.model_version,
             "planner_version": self.planner_version,
             "lease_owner": self.lease_owner,

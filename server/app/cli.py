@@ -18,8 +18,6 @@ from pathlib import Path
 from server.app.ai_provider import get_ai_settings
 from server.app.nlp.intent_parser import parse_intent
 from server.app.nlp.summarizer import summarize, suggest_followup
-from server.app.rca.models import EvidenceInput
-from server.app.rca.report import run_diagnosis_context
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,9 +38,6 @@ def main(argv: list[str] | None = None) -> int:
     p_sum.add_argument("--top-json", required=True)
     p_sum.add_argument("--collector", default="perf_cpu")
 
-    p_diag = sub.add_parser("diagnose-local", help="run local RCA from structured evidence JSON")
-    p_diag.add_argument("--evidence", required=True)
-
     p_diff = sub.add_parser("diff-top", help="compare two TopN JSON files")
     p_diff.add_argument("--base", required=True)
     p_diff.add_argument("--head", required=True)
@@ -57,10 +52,6 @@ def main(argv: list[str] | None = None) -> int:
     p_alert.add_argument("--top-json", required=True)
     p_alert.add_argument("--hotspot-threshold", type=float, default=70.0)
     p_alert.add_argument("--sample-threshold", type=int, default=0)
-
-    p_batch = sub.add_parser("batch-diagnose", help="run local RCA for a directory of evidence JSON files")
-    p_batch.add_argument("--dir", required=True)
-    p_batch.add_argument("--pattern", default="*.json")
 
     p_export = sub.add_parser("export-summary", help="export TopN summary as markdown or JSON")
     p_export.add_argument("--top-json", required=True)
@@ -124,12 +115,6 @@ def main(argv: list[str] | None = None) -> int:
     p_cancel.add_argument("--url", default="http://localhost:8191")
     p_cancel.add_argument("--task-id", required=True)
     p_cancel.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
-
-    p_remote_diag = sub.add_parser("diagnose-remote", help="trigger remote diagnosis via Server API")
-    p_remote_diag.add_argument("--url", default="http://localhost:8191")
-    p_remote_diag.add_argument("--task-id", required=True)
-    p_remote_diag.add_argument("--wait", action="store_true", help="wait for diagnosis to complete")
-    p_remote_diag.add_argument("--api-key-env", default="MINI_DROP_API_KEY")
 
     p_report = sub.add_parser("report", help="generate a comprehensive profiling report")
     p_report.add_argument("--top-json", required=True)
@@ -211,11 +196,6 @@ def _cmd_summarize(args) -> int:
     return 0
 
 
-def _cmd_diagnose_local(args) -> int:
-    _print_json(_diagnose_local_payload(args.evidence))
-    return 0
-
-
 def _cmd_diff_top(args) -> int:
     result = _diff_top(args.base, args.head, args.threshold)
     _print_json(result)
@@ -247,23 +227,6 @@ def _cmd_alert(args) -> int:
         },
     })
     return 2 if triggered else 0
-
-
-def _cmd_batch_diagnose(args) -> int:
-    rows = []
-    for path in sorted(Path(args.dir).glob(args.pattern)):
-        try:
-            report = _diagnose_local_payload(str(path))
-            rows.append({
-                "file": str(path),
-                "ok": True,
-                "summary": report["report"].get("summary", ""),
-                "top_cause": (report["report"].get("ranked_causes") or [{}])[0].get("cause_id"),
-            })
-        except Exception as exc:
-            rows.append({"file": str(path), "ok": False, "error": str(exc)})
-    _print_json({"total": len(rows), "items": rows})
-    return 1 if any(not item["ok"] for item in rows) else 0
 
 
 def _cmd_export_summary(args) -> int:
@@ -367,44 +330,8 @@ def _diff_top(base_path: str, head_path: str, threshold: float) -> dict:
     }
 
 
-def _diagnose_local_payload(evidence_path: str) -> dict:
-    evidence_data = _read_json(evidence_path)
-    evidence = EvidenceInput(**evidence_data)
-    task_record = _TaskRecord(evidence.task_metadata)
-    outcome = run_diagnosis_context(
-        task_id=task_record.id,
-        task_record=task_record,
-        top_functions=evidence.top_functions,
-        ebpf_metrics=evidence.ebpf_metrics,
-        suggestions=evidence.suggestions,
-        failure_events=evidence.failure_events,
-        baseline_diff=evidence.baseline_diff,
-        agent_stats=evidence.agent_stats,
-        auto_execute_safe=False,
-    )
-    return {
-        "report": outcome.report.report.model_dump(),
-        "validated": outcome.report.validated,
-        "tool_results": [item.model_dump() for item in outcome.tool_results],
-        "repair_plan": outcome.repair_plan.model_dump() if outcome.repair_plan else None,
-    }
-
-
 def _print_json(data) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
-
-
-class _TaskRecord:
-    def __init__(self, metadata: dict):
-        self.id = metadata.get("task_id", "cli_task")
-        self.agent_id = metadata.get("agent_id", "cli_agent")
-        self.collector_type = metadata.get("collector_type", "perf_cpu")
-        self.target_pid = int(metadata.get("target_pid", 0))
-        self.sample_rate = int(metadata.get("sample_rate", 99))
-        self.duration_sec = max(1, int(metadata.get("duration_sec", 15)))
-        self.status = metadata.get("status", "DONE")
-        self.status_reason = metadata.get("status_reason", "CLI local diagnosis")
-        self.request_params = metadata.get("request_params", {})
 
 
 def _filter_keywords(kind: str) -> dict[str, list[str]]:
@@ -735,42 +662,6 @@ def _cmd_task_cancel(args) -> int:
         return 1
     except Exception as exc:
         _print_json({"task_id": args.task_id, "cancelled": False, "error": str(exc)})
-        return 1
-
-
-def _cmd_diagnose_remote(args) -> int:
-    """通过 Server API 触发远程诊断。"""
-    import urllib.request
-    import urllib.error
-
-    url = args.url.rstrip("/")
-    try:
-        req = _api_request(
-            f"{url}/api/tasks/{args.task_id}/diagnose",
-            method="POST", api_key_env=args.api_key_env,
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read())
-
-        diag_data = result.get("data", result)
-        diag_id = diag_data.get("diagnosis_id", "")
-        summary = diag_data.get("summary", "")
-        ranked = diag_data.get("ranked_causes", [])
-
-        _print_json({
-            "task_id": args.task_id,
-            "diagnosis_id": diag_id,
-            "summary": summary,
-            "top_cause": ranked[0] if ranked else None,
-            "all_causes": ranked,
-        })
-        return 0 if diag_data.get("validated", True) else 1
-    except urllib.error.HTTPError as exc:
-        err_body = exc.read().decode("utf-8", errors="replace")
-        _print_json({"error": f"HTTP {exc.code}", "detail": err_body})
-        return 1
-    except Exception as exc:
-        _print_json({"error": str(exc)})
         return 1
 
 
@@ -1180,11 +1071,9 @@ _COMMANDS = {
     "ai-config": _cmd_ai_config,
     "parse": _cmd_parse,
     "summarize": _cmd_summarize,
-    "diagnose-local": _cmd_diagnose_local,
     "diff-top": _cmd_diff_top,
     "ci-check": _cmd_ci_check,
     "alert": _cmd_alert,
-    "batch-diagnose": _cmd_batch_diagnose,
     "export-summary": _cmd_export_summary,
     "watch-task": _cmd_watch_task,
     "keywords": _cmd_keywords,
@@ -1196,7 +1085,6 @@ _COMMANDS = {
     "perf-top": _cmd_perf_top,
     "version": _cmd_version,
     "task-cancel": _cmd_task_cancel,
-    "diagnose-remote": _cmd_diagnose_remote,
     "report": _cmd_report,
     "feedback-stats": _cmd_feedback_stats,
     "storage-ls": _cmd_storage_ls,

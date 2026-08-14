@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from server.app import cli
 
 
@@ -112,28 +114,13 @@ def test_completion_scripts_include_keywords(capsys):
     assert "'ci-check'" in out
 
 
-def test_batch_diagnose_uses_rule_engine(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MINI_DROP_AI_ENABLED", "none")
-    evidence = tmp_path / "evidence.json"
-    evidence.write_text(json.dumps({
-        "task_metadata": {
-            "task_id": "task_cli",
-            "collector_type": "perf_cpu",
-            "status": "DONE",
-        },
-        "top_functions": [
-            {"name": "fib_recursive", "samples": 1000, "percent": 80.0},
-        ],
-        "suggestions": ["CPU hotspot detected"],
-    }), encoding="utf-8")
-
-    code = cli.main(["batch-diagnose", "--dir", str(tmp_path)])
-    out = json.loads(capsys.readouterr().out)
-
-    assert code == 0
-    assert out["total"] == 1
-    assert out["items"][0]["ok"] is True
-    assert out["items"][0]["top_cause"] == "cpu_hotspot_recursive"
+def test_old_diagnose_orchestration_commands_retired():
+    """E9：旧一次性诊断编排命令（diagnose-local / batch-diagnose / diagnose-remote）
+    已退役；CLI 不得再接受它们，防止旧脚本静默走已删除的编排。"""
+    for command in ("diagnose-local", "batch-diagnose", "diagnose-remote"):
+        with pytest.raises(SystemExit) as exc:
+            cli.main([command])
+        assert exc.value.code == 2  # argparse invalid choice
 
 
 def test_collect_accepts_sys_metrics_and_api_key_env(monkeypatch):

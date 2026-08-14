@@ -78,3 +78,12 @@ deploy/napcat/NapCat.*/
 testsets/real/online-boutique/runs/
 testsets/real/online-boutique/ground_truth/
 reports/eval/ai-ops-v2/live-vm-*/
+
+# 本机 VM 密码等敏感注入文件（不入库）
+.secrets/
+
+# 执行状态 / 部署候选 / 评测输出（可复现或大体积，不入库）
+reports/implementation/
+reports/eval/
+deploy/ssh/
+releases/

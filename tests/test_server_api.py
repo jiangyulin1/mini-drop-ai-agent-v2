@@ -959,51 +959,24 @@ class TestStoragePresign:
 
 
 class TestDiagnose:
-    """诊断触发端点。"""
+    """诊断触发端点（E9：旧一次性诊断已退役为 410 + Case 路径）。"""
 
-    def test_diagnose_enqueues_report(self, client: TestClient):
+    def test_diagnose_retired_with_410_and_pointer(self, client: TestClient):
         resp = client.post("/api/tasks", json={
             "name": "diag", "agent_id": "a1",
             "target_pid": 1, "collector_type": "perf_cpu",
         })
         task_id = resp.json()["data"]["task_id"]
-        diag = client.post(f"/api/tasks/{task_id}/diagnose").json()["data"]
-        assert diag["diagnosis_id"].startswith("diag_")
-        assert diag["report_id"].startswith("report_")
-        assert diag["task_id"] == task_id
-        assert "summary" in diag
-        assert "ranked_causes" in diag
-        assert "model" in diag
-        assert len(diag["tool_results"]) >= 1
-        assert diag["repair_plan"]["plan_id"].startswith("repair_")
+        resp = client.post(f"/api/tasks/{task_id}/diagnose")
+        assert resp.status_code == 410
+        assert "POST /api/v1/cases" in resp.json()["detail"]
+        assert "initial_tasks" in resp.json()["detail"]
 
-        detail = client.get(f"/api/diagnoses/{diag['diagnosis_id']}").json()["data"]
-        assert detail["run"]["task_id"] == task_id
-        assert len(detail["tool_results"]) >= 1
-        history = client.get(f"/api/tasks/{task_id}/diagnoses").json()["data"]
-        assert history[0]["id"] == diag["diagnosis_id"]
-
-        metrics = client.get("/api/metrics").text
-        assert 'mini_drop_diagnosis_total{status="' in metrics
-
-        feedback = client.post(
-            f"/api/diagnoses/{diag['diagnosis_id']}/feedback",
-            json={
-                "predicted_cause_id": "insufficient_data",
-                "feedback_label": "partial",
-                "feedback_note": "需要更多证据",
-            },
-        )
-        assert feedback.status_code == 200
-        assert feedback.json()["data"]["feedback_saved"] is True
-
+        # E9-1：旧一次性诊断不再写入 legacy 单任务诊断表（report_json/ranked_causes）
         aggregate = client.get("/api/diagnoses", params={"limit": 100}).json()["data"]
-        assert aggregate["total"] == 1
-        assert aggregate["items"][0]["id"] == diag["diagnosis_id"]
-        assert aggregate["items"][0]["run"]["task_id"] == task_id
-        assert aggregate["items"][0]["report"]["diagnosis_id"] == diag["diagnosis_id"]
-        assert "ranked_causes" in aggregate["items"][0]["report"]
-        assert aggregate["items"][0]["feedback"]["feedback_label"] == "partial"
+        assert aggregate["total"] == 0
+        history = client.get(f"/api/tasks/{task_id}/diagnoses").json()["data"]
+        assert history == []
 
     def test_diagnose_404_for_nonexistent(self, client: TestClient):
         resp = client.post("/api/tasks/nope/diagnose")
