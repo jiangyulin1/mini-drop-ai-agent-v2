@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -184,7 +186,9 @@ def test_verify_schedulable_rejects_stale_and_running_steps(client: TestClient):
     assert step["status"] in {"QUEUED", "WAITING_APPROVAL"}
 
 
-def test_evidence_review_excludes_and_persists(client: TestClient):
+def test_evidence_review_excludes_and_persists(client: TestClient, monkeypatch):
+    fixed_now = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    monkeypatch.setattr("server.app.sql_repository.now_utc", lambda: fixed_now)
     case = _create_case(client)
     reviewed = client.post(
         f"/api/v1/cases/{case['case_id']}/evidence/ev-102/reviews",

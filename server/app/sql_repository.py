@@ -1319,7 +1319,12 @@ class SqlRepository(SqlRepositoryV6Mixin):
             )
             if evidence_id:
                 query = query.filter(EvidenceReviewModel.evidence_id == evidence_id)
-            rows = query.order_by(EvidenceReviewModel.created_at.desc()).all()
+            rows = query.order_by(
+                EvidenceReviewModel.created_at.desc(),
+                EvidenceReviewModel.evidence_id.asc(),
+                EvidenceReviewModel.review_revision.desc(),
+                EvidenceReviewModel.review_id.desc(),
+            ).all()
             return [row.to_dict() for row in rows]
 
     def append_case_message(
