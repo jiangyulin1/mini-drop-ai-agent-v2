@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from jsonschema import Draft7Validator
@@ -12,8 +14,49 @@ from jsonschema import Draft7Validator
 from server.app.task_kinds import TASK_KINDS
 
 
+def _find_bash() -> str | None:
+    """Return a usable Bash executable, preferring Git Bash on Windows.
+
+    Windows exposes ``System32\\bash.exe`` even when WSL has no distribution
+    installed.  Merely resolving ``bash`` from PATH therefore produces false
+    syntax failures in CI.  GitHub's Windows runners ship Git Bash, so probe it
+    before falling back to PATH and only accept an executable that can start.
+    """
+
+    candidates: list[Path] = []
+    git = shutil.which("git")
+    if sys.platform == "win32" and git:
+        git_root = Path(git).resolve().parent.parent
+        candidates.extend((git_root / "bin" / "bash.exe", git_root / "usr" / "bin" / "bash.exe"))
+    path_bash = shutil.which("bash")
+    if path_bash:
+        candidates.append(Path(path_bash))
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).casefold()
+        if key in seen or not candidate.is_file():
+            continue
+        seen.add(key)
+        try:
+            result = subprocess.run(
+                [str(candidate), "--version"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except OSError:
+            continue
+        if result.returncode == 0:
+            return str(candidate)
+    return None
+
+
 def validate(root: Path) -> list[str]:
     errors: list[str] = []
+    bash = _find_bash()
+    if bash is None:
+        return ["A usable Bash executable is required to validate shell scripts."]
     schema_path = root / "manifest.schema.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = Draft7Validator(schema)
@@ -50,7 +93,7 @@ def validate(root: Path) -> list[str]:
                 errors.append(f"{relative}: 缺少故障适配器 {script.relative_to(root)}")
             else:
                 result = subprocess.run(
-                    ["bash", "-n", str(script)], capture_output=True, text=True,
+                    [bash, "-n", str(script)], capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                 )
                 if result.returncode:
@@ -75,7 +118,7 @@ def validate(root: Path) -> list[str]:
                 errors.append(f"{relative}: {field} 不存在: {script_path}")
             else:
                 result = subprocess.run(
-                    ["bash", "-n", str(script)], capture_output=True, text=True,
+                    [bash, "-n", str(script)], capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                 )
                 if result.returncode:
@@ -107,6 +150,8 @@ def validate(root: Path) -> list[str]:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser()
     parser.add_argument("root", nargs="?", default="testsets", type=Path)
     args = parser.parse_args()

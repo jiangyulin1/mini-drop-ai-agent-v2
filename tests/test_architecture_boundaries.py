@@ -21,6 +21,22 @@ ROOT = Path(__file__).resolve().parents[1]
 CANONICAL_ROUTERS = ROOT / "server" / "app" / "http" / "routers"
 
 
+def _http_route_contract(application):
+    """Flatten HTTP routes across FastAPI's eager and deferred router models."""
+
+    for route in application.routes:
+        contexts = (
+            route.effective_route_contexts()
+            if hasattr(route, "effective_route_contexts")
+            else (route,)
+        )
+        for context in contexts:
+            path = getattr(context, "path", None)
+            methods = getattr(context, "methods", None)
+            if path is not None and methods is not None:
+                yield path, tuple(sorted(methods))
+
+
 def test_routes_do_not_import_main():
     violations = []
     route_files = list(CANONICAL_ROUTERS.glob("*.py"))
@@ -57,8 +73,8 @@ def test_main_is_a_lightweight_entrypoint_and_factory_is_repeatable():
     first = create_app()
     second = create_app()
     assert first is not second
-    first_contract = {(route.path, tuple(sorted(route.methods or []))) for route in first.routes}
-    second_contract = {(route.path, tuple(sorted(route.methods or []))) for route in second.routes}
+    first_contract = set(_http_route_contract(first))
+    second_contract = set(_http_route_contract(second))
     assert first_contract == second_contract
     assert first.state.container is not second.state.container
     assert (
@@ -166,9 +182,9 @@ def test_openapi_contract_has_unique_operations_and_core_paths():
     application = create_app()
     operations: set[tuple[str, str]] = set()
     duplicates: list[tuple[str, str]] = []
-    for route in application.routes:
-        for method in route.methods or []:
-            key = (route.path, method)
+    for path, methods in _http_route_contract(application):
+        for method in methods:
+            key = (path, method)
             if key in operations:
                 duplicates.append(key)
             operations.add(key)
