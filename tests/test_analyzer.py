@@ -187,6 +187,10 @@ class TestAnalyzerMain:
         assert summary["status"] == "SUCCESS"
         assert summary["top_functions"][0]["name"] == "fib_hotspot"
         assert (output_root / "task-main" / "flamegraph.json").is_file()
+        suggestions = (output_root / "task-main" / "suggestions.md").read_text(
+            encoding="utf-8",
+        )
+        assert "Fibonacci" in suggestions
 
     def test_main_rejects_missing_perf_data(self, tmp_path, capsys):
         argv = [

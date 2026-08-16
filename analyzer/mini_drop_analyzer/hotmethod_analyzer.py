@@ -62,17 +62,20 @@ def main() -> None:
     # 4. 解析折叠栈 → TopN JSON + flamegraph JSON 树
     top_n = _parse_top(collapsed_path)
     top_path = output_dir / "top.json"
-    top_path.write_text(json.dumps(top_n, indent=2, ensure_ascii=False))
+    top_path.write_text(
+        json.dumps(top_n, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     flame_tree = _build_flame_tree(collapsed_path)
     tree_path = output_dir / "flamegraph.json"
     tree_text = json.dumps(flame_tree, separators=(",", ":"), ensure_ascii=False)
-    tree_path.write_text(tree_text)
+    tree_path.write_text(tree_text, encoding="utf-8")
 
     # 5. 规则引擎 → suggestions
     suggestions = _match_rules(top_n)
     sugg_path = output_dir / "suggestions.md"
-    sugg_path.write_text(suggestions)
+    sugg_path.write_text(suggestions, encoding="utf-8")
 
     summary = {
         "task_id": task_id,
@@ -177,7 +180,7 @@ def _stackcollapse(input_path: Path, output_path: Path) -> tuple[bool, str]:
 def _flamegraph_svg(collapsed: Path, output: Path) -> None:
     script = Path(__file__).resolve().parent.parent / "scripts" / "flamegraph.pl"
     if not script.is_file():
-        output.write_text(_fallback_svg("flamegraph.pl 未找到"))
+        output.write_text(_fallback_svg("flamegraph.pl 未找到"), encoding="utf-8")
         return
     try:
         subprocess.run(
@@ -188,7 +191,7 @@ def _flamegraph_svg(collapsed: Path, output: Path) -> None:
             timeout=60,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        output.write_text(_fallback_svg("火焰图生成失败"))
+        output.write_text(_fallback_svg("火焰图生成失败"), encoding="utf-8")
 
 
 def _fallback_svg(msg: str) -> str:
