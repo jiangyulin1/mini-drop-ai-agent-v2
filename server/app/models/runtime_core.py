@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    BigInteger,
     JSON,
     Boolean,
     Column,
@@ -180,6 +181,7 @@ class CaseEvidenceModel(Base):
     artifact_type = Column(String(32), nullable=True)
     collector_id = Column(String(64), nullable=True)
     source_type = Column(String(32), nullable=False, default="task_artifact")
+    source_id = Column(String(128), nullable=True)
     source_channel = Column(String(24), nullable=False, default="COLLECTOR", server_default="COLLECTOR")
     data_origin = Column(String(24), nullable=False, default="LIVE", server_default="LIVE")
     investigation_run_id = Column(String(128), nullable=True, index=True)
@@ -204,6 +206,12 @@ class CaseEvidenceModel(Base):
     schema_version = Column(String(32), nullable=True)
     producer_version = Column(String(64), nullable=True)
     raw_locator = Column(String(512), nullable=True)
+    size_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")
+    sha256 = Column(String(64), nullable=True)
+    completeness = Column(String(24), nullable=False, default="COMPLETE", server_default="COMPLETE")
+    trust_level = Column(String(24), nullable=False, default="INTERNAL", server_default="INTERNAL")
+    lineage_json = Column(JSON, nullable=False, default=dict)
+    trace_id = Column(String(128), nullable=True)
     late_after_cancel = Column(Boolean, nullable=False, default=False, server_default="0")
     stale_for_current_revision = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(DateTime(timezone=True), nullable=False)
@@ -220,6 +228,7 @@ class CaseEvidenceModel(Base):
             "artifact_type": self.artifact_type,
             "collector_id": self.collector_id,
             "source_type": self.source_type,
+            "source_id": self.source_id,
             "source_channel": self.source_channel,
             "data_origin": self.data_origin,
             "investigation_run_id": self.investigation_run_id,
@@ -244,6 +253,12 @@ class CaseEvidenceModel(Base):
             "schema_version": self.schema_version,
             "producer_version": self.producer_version,
             "raw_locator": self.raw_locator,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "completeness": self.completeness,
+            "trust_level": self.trust_level,
+            "lineage": self.lineage_json or {},
+            "trace_id": self.trace_id,
             "late_after_cancel": bool(self.late_after_cancel),
             "stale_for_current_revision": bool(self.stale_for_current_revision),
             "created_at": self.created_at,

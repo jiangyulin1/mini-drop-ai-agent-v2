@@ -222,7 +222,7 @@ def _pi_sidecar(monkeypatch):
 
 
 def test_pi_runtime_longitudinal_chain_with_follow_up_and_stop(client: TestClient, monkeypatch):
-    import server.app.main as main_module
+    import server.app.app_factory as main_module
 
     _register_agent("agent-x")
     case = _create_case(client)

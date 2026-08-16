@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from server.app import storage
+from server.app.flamegraph_parser import extract_top_functions_from_svg
+from server.app.logging_utils import log_event
 
 
 _TASK_ARTIFACT_REF = re.compile(r"^task:([^:]+)(?::artifact:([^:]+))?$")
@@ -188,3 +191,49 @@ def read_artifact_bytes(artifact: dict[str, Any]) -> bytes:
     if not object_key or storage.object_size(bucket, object_key) is None:
         raise FileNotFoundError(object_key or "missing artifact key")
     return storage.read_object_bytes(bucket, object_key)
+
+
+def extract_artifact_json(
+    artifacts: list[dict[str, Any]],
+    artifact_type: str,
+) -> Any | None:
+    """Read the first matching JSON artifact without exposing storage layout."""
+
+    for artifact in artifacts:
+        if artifact.get("artifact_type") != artifact_type:
+            continue
+        try:
+            return json.loads(read_artifact_bytes(artifact).decode("utf-8", errors="replace"))
+        except Exception as exc:  # noqa: BLE001 - unavailable evidence is non-fatal.
+            log_event(
+                "warning",
+                "artifact_json_unavailable",
+                artifact_type=artifact_type,
+                error=type(exc).__name__,
+            )
+            return None
+    return None
+
+
+def extract_top_functions(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Read TopN JSON, or derive it from an available flamegraph SVG."""
+
+    top_functions = extract_artifact_json(artifacts, "top_json")
+    if isinstance(top_functions, list) and top_functions:
+        return top_functions
+    for artifact in artifacts:
+        if artifact.get("artifact_type") != "flamegraph_svg":
+            continue
+        try:
+            svg_text = read_artifact_bytes(artifact).decode("utf-8", errors="replace")
+            derived = extract_top_functions_from_svg(svg_text)
+            if derived:
+                return derived
+        except Exception as exc:  # noqa: BLE001 - unavailable evidence is non-fatal.
+            log_event(
+                "warning",
+                "flamegraph_svg_top_parse_failed",
+                artifact_type="flamegraph_svg",
+                error=type(exc).__name__,
+            )
+    return []

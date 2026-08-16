@@ -217,7 +217,7 @@ def test_resolving_case_records_recovery_and_event(client: TestClient):
 
 
 def test_task_artifact_reader_passes_only_the_task_artifact_list(monkeypatch):
-    import server.app.main as main_module
+    import server.app.app_factory as main_module
 
     repository = type("Repository", (), {
         "artifacts": {"task-1": [{"artifact_type": "sys_metrics", "value": 1}]},

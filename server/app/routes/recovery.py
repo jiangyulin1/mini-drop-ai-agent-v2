@@ -1,17 +1,14 @@
-"""Legacy route layer extracted from ``server.app.main``.
+"""Deterministic recovery-metric helpers.
 
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
+This module contains no HTTP registration and has no dependency on the
+application bootstrap layer.
 """
 
 from __future__ import annotations
 
+from typing import Any
 
-from server.app.main import (  # noqa: F401
-    Any,
-    status_value,
-)
+from server.app.common_utils import status_value
 
 # ── 恢复验证与人工动作回填（多轮诊断闭环） ────────────────────
 
@@ -135,4 +132,9 @@ def _judge_recovery(baseline: dict[str, float], current: dict[str, float]) -> di
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = [
+    "VERIFICATION_TASK_DURATION_SEC",
+    "_find_diagnosis_sys_metrics_task",
+    "_judge_recovery",
+    "_read_sys_metrics_artifact_keys",
+]

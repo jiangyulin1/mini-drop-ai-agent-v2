@@ -32,12 +32,14 @@ import {
   createIncidentCase,
   createServiceChange,
   createTargetSession,
+  createCaseEventSource,
   decideCaseRecoveryPlan,
   dryRunCaseRecoveryPlan,
   executeCaseRecoveryPlan,
   getDiagnosisSession,
   getCaseCurrentUnderstanding,
   getIncidentCase,
+  getCaseWorkspace,
   getTask,
   listAgents,
   listDiagnosisSessions,
@@ -48,6 +50,7 @@ import {
   listRegisteredActions,
   listTasks,
   listTargetSessions,
+  ensureEventSourceAuthCookie,
   runAIValidation,
   startIncidentCaseDiagnosis,
   transitionIncidentCase,
@@ -63,6 +66,7 @@ import DiagnosisDataConsole from "./ai-workspace/DiagnosisDataConsole";
 import DiagnosisTechnicalDrawer from "./ai-workspace/DiagnosisTechnicalDrawer";
 import ScopeEditorModal from "./ai-workspace/ScopeEditorModal";
 import WorkerStatus from "./ai-workspace/WorkerStatus";
+import CanonicalCaseWorkspace from "./ai-workspace/CanonicalCaseWorkspace";
 import InvestigationWorkbench from "../components/InvestigationWorkbench";
 import {
   CASE_STATE_META,
@@ -97,6 +101,9 @@ export default function AIDiagnosisWorkspace() {
   const [selectedKey, setSelectedKey] = useState("");
   const [caseDetail, setCaseDetail] = useState(null);
   const [events, setEvents] = useState([]);
+  const [workspace, setWorkspace] = useState(null);
+  const [workspaceConnected, setWorkspaceConnected] = useState(false);
+  const [workspaceStreamSeed, setWorkspaceStreamSeed] = useState(null);
   const [diagnosis, setDiagnosis] = useState(null);
   const [currentUnderstanding, setCurrentUnderstanding] = useState(null);
   const [proposals, setProposals] = useState([]);
@@ -128,6 +135,7 @@ export default function AIDiagnosisWorkspace() {
   const newRunMode = Form.useWatch("run_mode", newForm);
   const [searchParams, setSearchParams] = useSearchParams();
   const handledFromTask = useRef("");
+  const handledCaseLink = useRef("");
   const listRequestSequence = useRef(0);
   const selectionRequestSequence = useRef(0);
   const selectedKeyRef = useRef(selectedKey);
@@ -197,6 +205,8 @@ export default function AIDiagnosisWorkspace() {
     if (!key) {
       if (isCurrent()) {
         setCaseDetail(null);
+        setWorkspace(null);
+        setWorkspaceStreamSeed(null);
         setDiagnosis(null);
         setCurrentUnderstanding(null);
         setProposals([]);
@@ -208,25 +218,34 @@ export default function AIDiagnosisWorkspace() {
     if (!quiet) setDetailLoading(true);
     if (!quiet && isCurrent()) {
       setCaseDetail(null);
+      setWorkspace(null);
+      setWorkspaceStreamSeed(null);
       setEvents([]);
       setDiagnosis(null);
     }
     try {
       if (key.startsWith("case:")) {
         const caseId = key.slice(5);
-        const [detail, eventResult, understandingResult, proposalResult, recoveryResult] = await Promise.all([
-          getIncidentCase(caseId),
+        const [workspaceResult, eventResult, understandingResult, proposalResult, recoveryResult] = await Promise.all([
+          getCaseWorkspace(caseId),
           listIncidentCaseEvents(caseId, { limit: 300 }),
           getCaseCurrentUnderstanding(caseId),
           listCaseProposals(caseId),
           listCaseRecoveryPlans(caseId),
         ]);
         if (!isCurrent()) return;
+        const detail = workspaceResult.case;
         let nextDiagnosis = null;
         if (detail.diagnosis_session_id) {
           nextDiagnosis = await getDiagnosisSession(detail.diagnosis_session_id);
         }
         if (!isCurrent()) return;
+        setWorkspace(workspaceResult);
+        setWorkspaceStreamSeed((current) => (
+          current?.caseId === caseId
+            ? current
+            : { caseId, afterSeq: Number(workspaceResult.last_event_seq || 0) }
+        ));
         setCaseDetail(detail);
         setEvents(eventResult.items || []);
         setCurrentUnderstanding(understandingResult.current_understanding || null);
@@ -237,6 +256,8 @@ export default function AIDiagnosisWorkspace() {
         const nextDiagnosis = await getDiagnosisSession(key.slice(10));
         if (!isCurrent()) return;
         setCaseDetail(null);
+        setWorkspace(null);
+        setWorkspaceStreamSeed(null);
         setEvents([]);
         setCurrentUnderstanding(null);
         setProposals([]);
@@ -252,6 +273,47 @@ export default function AIDiagnosisWorkspace() {
 
   useEffect(() => { refreshLists(); }, [refreshLists]);
   useEffect(() => { loadSelection(selectedKey); }, [loadSelection, selectedKey]);
+  useEffect(() => {
+    const caseId = searchParams.get("caseId") || "";
+    if (!caseId || loading || handledCaseLink.current === caseId) return;
+    if (!cases.some((item) => item.case_id === caseId)) return;
+    handledCaseLink.current = caseId;
+    chooseSelection(`case:${caseId}`);
+  }, [cases, chooseSelection, loading, searchParams]);
+  useEffect(() => {
+    if (!selectedKey.startsWith("case:") || workspaceStreamSeed?.caseId !== selectedKey.slice(5)) return undefined;
+    let closed = false;
+    let source = null;
+    const key = selectedKey;
+    void ensureEventSourceAuthCookie().then(() => {
+      if (closed) return;
+      source = createCaseEventSource(workspaceStreamSeed.caseId, workspaceStreamSeed.afterSeq);
+      source.onopen = () => { if (!closed) setWorkspaceConnected(true); };
+      source.onerror = () => { if (!closed) setWorkspaceConnected(false); };
+      source.addEventListener("case_event", (event) => {
+        if (closed) return;
+        try {
+          const item = JSON.parse(event.data);
+          setEvents((current) => {
+            const seq = Number(item.case_event_seq || event.lastEventId || 0);
+            if (current.some((entry) => (
+              (item.event_id && entry.event_id === item.event_id)
+              || (seq > 0 && Number(entry.case_event_seq || 0) === seq)
+            ))) return current;
+            return [...current, item].sort((a, b) => Number(a.case_event_seq || 0) - Number(b.case_event_seq || 0));
+          });
+          void loadSelection(key, { quiet: true });
+        } catch {
+          // A malformed frame must not tear down the durable stream.
+        }
+      });
+    }).catch(() => setWorkspaceConnected(false));
+    return () => {
+      closed = true;
+      source?.close();
+      setWorkspaceConnected(false);
+    };
+  }, [loadSelection, selectedKey, workspaceStreamSeed]);
   useEffect(() => {
     if (!selectedKey || actionLoading) return undefined;
     let cancelled = false;
@@ -448,7 +510,7 @@ export default function AIDiagnosisWorkspace() {
     try {
       const version = { expected_plan_version: plan.row_version };
       if (action === "dry-run") await dryRunCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, version);
-      if (action === "approve") await decideCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, { ...version, decision: "approve", reason: "用户已核对影响清单与回滚路径" });
+      if (action === "approve") await decideCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, { ...version, decision: "approve", reason: "用户已核对影响清单与回滚路径", approval_digest: plan.policy?.approval_binding?.proposal_digest });
       if (action === "reject") await decideCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, { ...version, decision: "reject", reason: "用户拒绝本次恢复动作" });
       if (action === "execute") await executeCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, version);
       if (action === "verify") await verifyCaseRecoveryPlan(caseDetail.case_id, plan.recovery_plan_id, version);
@@ -808,6 +870,7 @@ export default function AIDiagnosisWorkspace() {
             <CaseConversation
               detail={caseDetail}
               events={events}
+              assistantMessages={workspace?.messages || []}
               diagnosis={diagnosis}
               currentUnderstanding={currentUnderstanding}
               proposals={proposals}
@@ -827,6 +890,7 @@ export default function AIDiagnosisWorkspace() {
               onOpenRecovery={openRecoveryPlan}
               onRecoveryAction={recoveryPlanAction}
             />
+            <CanonicalCaseWorkspace workspace={workspace} connected={workspaceConnected} />
             <InvestigationWorkbench caseId={caseDetail.case_id} />
           </>
         ) : diagnosis ? (

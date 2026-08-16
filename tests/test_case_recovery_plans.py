@@ -86,6 +86,7 @@ def _prepare_and_approve(client: TestClient, case: dict, plan: dict) -> dict:
             "decision": "approve",
             "reason": "已核对影响清单和可回滚路径",
             "expected_plan_version": plan["row_version"],
+            "approval_digest": plan["policy"]["approval_binding"]["proposal_digest"],
         },
     )
     assert approved.status_code == 200, approved.text
@@ -179,6 +180,43 @@ def test_recovery_plan_cannot_execute_without_approval(client: TestClient):
     )
     assert response.status_code == 409
     assert "NOT_APPROVED" in response.json()["detail"]
+
+
+def test_recovery_approval_digest_is_required_and_bound_to_control_revision(client: TestClient):
+    _seed_expired_cache()
+    case = _create_case(client)
+    created = _create_plan(client, case)
+    dry = client.post(
+        f"/api/v1/cases/{case['case_id']}/recovery-plans/{created['recovery_plan_id']}/dry-run",
+        json={"expected_plan_version": created["row_version"]},
+    ).json()["data"]
+    missing = client.post(
+        f"/api/v1/cases/{case['case_id']}/recovery-plans/{dry['recovery_plan_id']}/decision",
+        json={
+            "decision": "approve",
+            "reason": "确认执行",
+            "expected_plan_version": dry["row_version"],
+        },
+    )
+    assert missing.status_code == 409
+    assert missing.json()["detail"] == "APPROVAL_DIGEST_REQUIRED"
+
+    paused = client.post(
+        f"/api/v1/cases/{case['case_id']}/commands",
+        json={"command": "PAUSE", "reason": "revision changed"},
+    )
+    assert paused.status_code == 200, paused.text
+    stale = client.post(
+        f"/api/v1/cases/{case['case_id']}/recovery-plans/{dry['recovery_plan_id']}/decision",
+        json={
+            "decision": "approve",
+            "reason": "确认执行",
+            "expected_plan_version": dry["row_version"],
+            "approval_digest": dry["policy"]["approval_binding"]["proposal_digest"],
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "APPROVAL_CONTROL_STALE"
 
 
 def test_policy_only_action_cannot_become_case_recovery_plan(client: TestClient):

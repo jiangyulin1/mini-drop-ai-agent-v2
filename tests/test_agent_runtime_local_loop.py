@@ -114,7 +114,7 @@ def _create_case(client: TestClient) -> dict:
 
 
 def test_local_longitudinal_chain_turn_query_task_evidence_wakeup(client, monkeypatch):
-    import server.app.main as main_module
+    import server.app.app_factory as main_module
     from server.app.schemas import CreateTaskRequest
 
     repo.register_agent(

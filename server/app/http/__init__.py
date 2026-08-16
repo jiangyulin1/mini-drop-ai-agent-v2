@@ -1,0 +1,1 @@
+"""Canonical HTTP adapter package."""

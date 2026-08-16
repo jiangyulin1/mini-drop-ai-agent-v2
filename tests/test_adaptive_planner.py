@@ -165,3 +165,44 @@ def test_fully_satisfied_contracts_generate_no_candidates():
         round_number=1,
     )
     assert candidates == []
+
+
+def test_paired_evidence_fork_changes_registered_action_class_and_aa_is_stable():
+    hypotheses = _hypotheses(["CPU_SATURATION", "LOCK_CONTENTION"])
+    base = {
+        "symptom": "latency_increase",
+        "hypotheses": hypotheses,
+        "scope": _scope(),
+        "available_probes": _r1_probes(),
+        "targets": _scope()["instances"],
+        "round_number": 2,
+    }
+
+    def selected(facts):
+        candidates = build_probe_candidates(
+            **base,
+            observations=[{
+                "target": _scope()["instances"][0],
+                "facts": facts,
+                "pressure": {},
+            }],
+        )
+        return [item["source_id"] for item in select_probe_actions(candidates, max_actions=2)]
+
+    runtime_already_observed = {
+        "runtime_type": "go",
+        "blocked_thread_ratio_max": 0.5,
+        "lock_waiter_count_max": 4,
+        "uninterruptible_thread_count_max": 1,
+    }
+    cpu_already_observed = {
+        "process_cpu_core_usage": 3.5,
+        "avg_cpu_user_pct": 90.0,
+        "top_function.name": "fib",
+    }
+    first_a = selected(runtime_already_observed)
+    first_b = selected(runtime_already_observed)
+    paired = selected(cpu_already_observed)
+    assert first_a == first_b  # A/A control: no random drift
+    assert first_a == ["host_process_metrics"]
+    assert paired == ["runtime_thread_snapshot"]

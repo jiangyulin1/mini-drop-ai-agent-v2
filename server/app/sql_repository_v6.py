@@ -39,6 +39,7 @@ from server.app.models import (
     ModelRequestModel,
     ModelResponseModel,
     OperationSpecModel,
+    OutboxConsumerEffectModel,
     RepairRecommendationModel,
     RuntimeWakeupModel,
     RuntimeWakeupSourceModel,
@@ -540,44 +541,202 @@ class SqlRepositoryV6Mixin:
                 CaseEvidenceModel.tenant_id == tenant_id,
             ).first()
             if evidence is not None:
-                evidence.status = "EXCLUDED" if decision == "EXCLUDED" else (
-                    "LOW_TRUST" if decision == "LOW_TRUST" else "ACTIVE"
-                )
+                evidence.status = {
+                    "EXCLUDED": "EXCLUDED",
+                    "SUPERSEDED": "SUPERSEDED",
+                    "INVALID": "INVALID",
+                    "LOW_TRUST": "LOW_TRUST",
+                }.get(decision, "ACTIVE")
                 evidence.updated_at = now
+                if evidence.status in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
+                    self._revalidate_conclusions_after_evidence_status(
+                        session, evidence, evidence.status, now,
+                    )
             session.flush()
             return row.to_dict()
+
+    def _revalidate_conclusions_after_evidence_status(
+        self,
+        session: OrmSession,
+        evidence: CaseEvidenceModel,
+        status: str,
+        now: datetime,
+    ) -> None:
+        """Append a machine-downgraded Conclusion revision after invalidation."""
+        affected = session.query(ClaimEvidenceBindingModel).filter(
+            ClaimEvidenceBindingModel.evidence_id == evidence.evidence_id,
+        ).all()
+        if not affected:
+            return
+        for binding in affected:
+            binding.verifier_result = f"EVIDENCE_{status}"
+        affected_ids = {binding.conclusion_id for binding in affected}
+        latest = session.query(ConclusionRevisionModel).filter(
+            ConclusionRevisionModel.case_id == evidence.case_id,
+            ConclusionRevisionModel.tenant_id == evidence.tenant_id,
+        ).order_by(ConclusionRevisionModel.revision.desc()).first()
+        if latest is None or latest.conclusion_id not in affected_ids:
+            return
+        previous_bindings = session.query(ClaimEvidenceBindingModel).filter(
+            ClaimEvidenceBindingModel.conclusion_id == latest.conclusion_id,
+        ).all()
+        evidence_rows = {
+            row.evidence_id: row
+            for row in session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.evidence_id.in_([
+                    binding.evidence_id for binding in previous_bindings
+                ]),
+            ).all()
+        }
+        valid_support = [
+            binding for binding in previous_bindings
+            if (evidence_rows.get(binding.evidence_id) is not None)
+            and evidence_rows[binding.evidence_id].status == "ACTIVE"
+            and binding.support_kind == "SUPPORTS"
+        ]
+        new_state = "PARTIALLY_CONFIRMED" if valid_support else "INSUFFICIENT_EVIDENCE"
+        limitation = f"evidence_invalidated:{evidence.evidence_id}:{status}"
+        downgraded = ConclusionRevisionModel(
+            conclusion_id=self._new_id("concl"),
+            case_id=latest.case_id,
+            tenant_id=latest.tenant_id,
+            investigation_run_id=latest.investigation_run_id,
+            revision=int(latest.revision or 0) + 1,
+            state=new_state,
+            primary_root_causes=latest.primary_root_causes or [],
+            ranked_primary_candidates=latest.ranked_primary_candidates or [],
+            contributing_factors=latest.contributing_factors or [],
+            amplifiers=latest.amplifiers or [],
+            propagated_effects=latest.propagated_effects or [],
+            symptoms=latest.symptoms or [],
+            coincidental_anomalies=latest.coincidental_anomalies or [],
+            ruled_out=latest.ruled_out or [],
+            causal_graph_revision_id=latest.causal_graph_revision_id,
+            claims=latest.claims or [],
+            evidence_gap_ids=latest.evidence_gap_ids or [],
+            recommendation_ids=latest.recommendation_ids or [],
+            limitations=list(dict.fromkeys([*(latest.limitations or []), limitation])),
+            abstention_reason=(
+                "Previously supporting evidence is no longer active"
+                if new_state == "INSUFFICIENT_EVIDENCE" else latest.abstention_reason
+            ),
+            report_text=latest.report_text,
+            created_from_cycle_id=latest.created_from_cycle_id,
+            model_request_id=latest.model_request_id,
+            verifier_version="causal-report-verifier.v2-revalidation",
+            created_at=now,
+        )
+        session.add(downgraded)
+        session.flush()
+        for old in previous_bindings:
+            current_evidence = evidence_rows.get(old.evidence_id)
+            result = (
+                old.verifier_result
+                if current_evidence is not None and current_evidence.status == "ACTIVE"
+                else f"EVIDENCE_{getattr(current_evidence, 'status', 'MISSING')}"
+            )
+            session.add(ClaimEvidenceBindingModel(
+                claim_id=self._new_id("claim"),
+                conclusion_id=downgraded.conclusion_id,
+                evidence_id=old.evidence_id,
+                projection_hash=old.projection_hash,
+                field_path=old.field_path,
+                extractor_id=old.extractor_id,
+                extractor_version=old.extractor_version,
+                extractor_hash=old.extractor_hash,
+                target_ref=old.target_ref,
+                resource_incarnation=old.resource_incarnation,
+                event_window=old.event_window or {},
+                predicate=old.predicate or {},
+                observed_value=old.observed_value or {},
+                support_kind=old.support_kind,
+                verifier_result=result,
+                created_at=now,
+            ))
 
     def enqueue_domain_outbox(
         self, *, aggregate_type: str, aggregate_id: str, event_type: str,
         payload: dict[str, Any] | None = None, dedupe_key: str | None = None,
         available_at: datetime | None = None,
+        aggregate_revision: int = 0, payload_schema_version: str = "1.0",
+        max_attempts: int = 8,
     ) -> dict[str, Any]:
         now = now_utc()
         dedupe_key = dedupe_key or f"{aggregate_type}:{aggregate_id}:{event_type}:{uuid4().hex}"
-        with self._write_session() as session:
-            existing = session.query(DomainOutboxModel).filter(
-                DomainOutboxModel.dedupe_key == dedupe_key,
-            ).first()
-            if existing is not None:
-                return existing.to_dict()
-            row = DomainOutboxModel(
-                outbox_id=self._new_id("outbox"),
-                aggregate_type=aggregate_type,
-                aggregate_id=aggregate_id,
-                event_type=event_type,
-                payload=payload or {},
-                dedupe_key=dedupe_key,
-                status="PENDING",
-                available_at=available_at or now,
-                attempts=0,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(row)
-            session.flush()
-            return row.to_dict()
+        try:
+            with self._write_session() as session:
+                return self._enqueue_domain_outbox_in_session(
+                    session,
+                    aggregate_type=aggregate_type,
+                    aggregate_id=aggregate_id,
+                    event_type=event_type,
+                    payload=payload,
+                    dedupe_key=dedupe_key,
+                    available_at=available_at or now,
+                    aggregate_revision=aggregate_revision,
+                    payload_schema_version=payload_schema_version,
+                    max_attempts=max_attempts,
+                ).to_dict()
+        except Exception as exc:
+            from sqlalchemy.exc import IntegrityError
 
-    def claim_domain_outbox(self, claimer: str, limit: int = 10) -> list[dict[str, Any]]:
+            if not isinstance(exc, IntegrityError):
+                raise
+            with self._read_session() as session:
+                existing = session.query(DomainOutboxModel).filter(
+                    DomainOutboxModel.dedupe_key == dedupe_key,
+                ).first()
+                if existing is None:
+                    raise
+                return existing.to_dict()
+
+    def _enqueue_domain_outbox_in_session(
+        self,
+        session: OrmSession,
+        *,
+        aggregate_type: str,
+        aggregate_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        dedupe_key: str,
+        available_at: datetime | None = None,
+        aggregate_revision: int = 0,
+        payload_schema_version: str = "1.0",
+        max_attempts: int = 8,
+    ) -> DomainOutboxModel:
+        existing = session.query(DomainOutboxModel).filter(
+            DomainOutboxModel.dedupe_key == dedupe_key,
+        ).first()
+        if existing is not None:
+            return existing
+        now = now_utc()
+        row = DomainOutboxModel(
+            outbox_id=self._new_id("outbox"),
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            event_type=event_type,
+            aggregate_revision=max(0, int(aggregate_revision)),
+            payload_schema_version=(payload_schema_version or "1.0")[:32],
+            payload=payload or {},
+            dedupe_key=dedupe_key,
+            status="PENDING",
+            available_at=available_at or now,
+            attempts=0,
+            max_attempts=max(1, min(int(max_attempts), 100)),
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+        session.flush()
+        return row
+
+    def claim_domain_outbox(
+        self,
+        claimer: str,
+        limit: int = 10,
+        *,
+        lease_seconds: int = 120,
+    ) -> list[dict[str, Any]]:
         now = now_utc()
         with self._write_session() as session:
             query = session.query(DomainOutboxModel).filter(
@@ -592,7 +751,10 @@ class SqlRepositoryV6Mixin:
                 row.status = "CLAIMED"
                 row.claimed_by = claimer
                 row.claim_token = uuid4().hex
-                row.claim_expires_at = now + timedelta(seconds=120)
+                row.claimed_at = now
+                row.claim_expires_at = now + timedelta(
+                    seconds=max(5, min(int(lease_seconds), 3600)),
+                )
                 row.attempts = int(row.attempts or 0) + 1
                 row.updated_at = now
                 results.append(row.to_dict())
@@ -602,16 +764,27 @@ class SqlRepositoryV6Mixin:
     def reclaim_expired_outbox(self, claimer: str, limit: int = 20) -> list[dict[str, Any]]:
         now = now_utc()
         with self._write_session() as session:
-            rows = session.query(DomainOutboxModel).filter(
+            query = session.query(DomainOutboxModel).filter(
                 DomainOutboxModel.status == "CLAIMED",
                 DomainOutboxModel.claim_expires_at < now,
-            ).order_by(DomainOutboxModel.created_at.asc()).limit(limit).all()
+            ).order_by(DomainOutboxModel.created_at.asc()).limit(limit)
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                query = query.with_for_update(skip_locked=True)
+            rows = query.all()
             results = []
             for row in rows:
-                row.status = "PENDING"
+                exhausted = int(row.attempts or 0) >= int(row.max_attempts or 8)
+                row.status = "DEAD" if exhausted else "PENDING"
+                row.dead_at = now if exhausted else None
+                row.last_error = row.last_error or f"claim expired; reclaimed by {claimer}"
                 row.claimed_by = None
                 row.claim_token = None
                 row.claim_expires_at = None
+                row.claimed_at = None
+                if not exhausted:
+                    row.available_at = now + timedelta(
+                        seconds=min(300, 2 ** min(int(row.attempts or 1) - 1, 8)),
+                    )
                 row.updated_at = now
                 results.append(row.to_dict())
             session.flush()
@@ -626,13 +799,141 @@ class SqlRepositoryV6Mixin:
             row = session.get(DomainOutboxModel, outbox_id)
             if row is None:
                 return None
-            if claim_token and row.claim_token != claim_token:
+            if row.status == "DELIVERED":
+                return row.to_dict()
+            if row.status != "CLAIMED" or not claim_token or row.claim_token != claim_token:
                 return row.to_dict()
             row.status = "DELIVERED"
             row.dispatch_outcome = dispatch_outcome or "DELIVERED"
+            row.delivered_at = now
+            row.claimed_by = None
+            row.claim_token = None
+            row.claim_expires_at = None
+            row.claimed_at = None
             row.updated_at = now
             session.flush()
             return row.to_dict()
+
+    def fail_domain_outbox(
+        self,
+        outbox_id: str,
+        *,
+        claim_token: str,
+        error: str,
+        base_delay_seconds: int = 1,
+        max_delay_seconds: int = 300,
+    ) -> dict[str, Any] | None:
+        """NACK one claim with bounded exponential backoff or DEAD state."""
+
+        now = now_utc()
+        with self._write_session() as session:
+            query = session.query(DomainOutboxModel).filter(
+                DomainOutboxModel.outbox_id == outbox_id,
+            )
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                query = query.with_for_update()
+            row = query.first()
+            if row is None:
+                return None
+            if row.status != "CLAIMED" or row.claim_token != claim_token:
+                return row.to_dict()
+            exhausted = int(row.attempts or 0) >= int(row.max_attempts or 8)
+            row.status = "DEAD" if exhausted else "PENDING"
+            row.last_error = str(error)[:2000]
+            row.dead_at = now if exhausted else None
+            if not exhausted:
+                delay = min(
+                    max(1, int(max_delay_seconds)),
+                    max(1, int(base_delay_seconds))
+                    * (2 ** min(max(0, int(row.attempts or 1) - 1), 16)),
+                )
+                row.available_at = now + timedelta(seconds=delay)
+            row.claimed_by = None
+            row.claim_token = None
+            row.claim_expires_at = None
+            row.claimed_at = None
+            row.updated_at = now
+            session.flush()
+            return row.to_dict()
+
+    def list_domain_outbox(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(DomainOutboxModel)
+            if status:
+                query = query.filter(DomainOutboxModel.status == status)
+            rows = query.order_by(DomainOutboxModel.created_at.asc()).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    def recover_dead_outbox(self, outbox_id: str) -> dict[str, Any] | None:
+        """Explicit operator recovery; DEAD items never retry themselves."""
+
+        now = now_utc()
+        with self._write_session() as session:
+            row = session.get(DomainOutboxModel, outbox_id)
+            if row is None:
+                return None
+            if row.status != "DEAD":
+                return row.to_dict()
+            row.status = "PENDING"
+            row.attempts = 0
+            row.available_at = now
+            row.dead_at = None
+            row.last_error = None
+            row.dispatch_outcome = "RECOVERED_BY_OPERATOR"
+            row.updated_at = now
+            session.flush()
+            return row.to_dict()
+
+    def record_outbox_consumer_effect(
+        self,
+        *,
+        event_id: str,
+        consumer_name: str,
+        effect_key: str,
+        effect_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically store one consumer effect and its idempotency receipt."""
+
+        def _existing() -> dict[str, Any] | None:
+            with self._read_session() as read_session:
+                row = read_session.query(OutboxConsumerEffectModel).filter(
+                    OutboxConsumerEffectModel.event_id == event_id,
+                    OutboxConsumerEffectModel.consumer_name == consumer_name,
+                ).first()
+                if row is None:
+                    return None
+                return {"applied": False, "effect": row.to_dict()}
+
+        prior = _existing()
+        if prior is not None:
+            return prior
+        try:
+            with self._write_session() as session:
+                row = OutboxConsumerEffectModel(
+                    receipt_id=self._new_id("receipt"),
+                    event_id=event_id,
+                    consumer_name=consumer_name,
+                    effect_key=effect_key,
+                    effect_payload=effect_payload or {},
+                    created_at=now_utc(),
+                )
+                session.add(row)
+                session.flush()
+                return {"applied": True, "effect": row.to_dict()}
+        except Exception as exc:
+            from sqlalchemy.exc import IntegrityError
+
+            if not isinstance(exc, IntegrityError):
+                raise
+            prior = _existing()
+            if prior is None:
+                raise
+            return prior
 
     def create_runtime_wakeup(
         self, *, case_id: str, tenant_id: str, investigation_run_id: str,
@@ -748,6 +1049,16 @@ class SqlRepositoryV6Mixin:
             session.add(row)
             session.flush()
             return row.to_dict()
+
+    def get_runtime_wakeup_by_outbox(self, outbox_id: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            mapping = session.query(RuntimeWakeupSourceModel).filter(
+                RuntimeWakeupSourceModel.outbox_id == outbox_id,
+            ).first()
+            if mapping is None:
+                return None
+            wakeup = session.get(RuntimeWakeupModel, mapping.wakeup_id)
+            return wakeup.to_dict() if wakeup is not None else None
 
     def upsert_operation_spec(self, **payload: Any) -> dict[str, Any]:
         now = now_utc()

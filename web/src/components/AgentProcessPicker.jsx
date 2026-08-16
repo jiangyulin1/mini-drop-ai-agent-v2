@@ -108,7 +108,7 @@ export default function AgentProcessPicker({
           value={value}
           onChange={onChange}
           disabled={disabled || !agentId}
-          addonBefore="PID"
+          prefix="PID"
           placeholder="手动填写"
           className={styles.pidInput}
           aria-label="目标 PID"

@@ -72,7 +72,7 @@ async function route(req, res) {
     json(res, 200, { ok: true, data: {
       status: manager ? "ready" : "degraded",
       runtime_type: "pi",
-      runtime_version: "pi-0.83.0",
+      runtime_version: "pi-0.84.2",
       model_ready: Boolean(manager?.modelRuntime),
     }});
     return;

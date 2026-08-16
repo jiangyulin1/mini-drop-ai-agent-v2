@@ -1,50 +1,105 @@
-"""Legacy route layer extracted from ``server.app.main``.
+"""Task and task-artifact HTTP routes.
 
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
+This module is an explicit router and receives the repository through the
+application container.  It intentionally does not import the bootstrap module.
 """
 
 from __future__ import annotations
 
 
-from server.app.main import (  # noqa: F401
-    _json,
-    _read_artifact_object_text,
-    _resolve_artifact_path_or_none,
-    _safe_download_filename,
-    _task_view,
-    _url_quote,
-    _validate_presign_request,
+import json
+import os
+from pathlib import Path
+from typing import Annotated, Any, Optional
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
+
+from server.app import storage
+from server.app.application.task_views import task_view
+from server.app.artifact_service import inspect_artifact
+from server.app.common_utils import status_value
+from server.app.http.dependencies import get_repository_application_service
+from server.app.logging_utils import log_event
+from server.app.schemas import (
     APIResponse,
-    Actor,
     CancelTaskRequest,
     CreateTaskRequest,
-    FileResponse,
-    HTTPException,
     MAX_SAMPLE_RATE,
     MAX_TASK_DURATION_SEC,
-    Optional,
     RCAFeedbackRequest,
-    Request,
     RetryTaskRequest,
-    StreamingResponse,
-    TaskStatus,
-    app,
-    inspect_artifact,
-    list_task_kinds,
-    normalize_task_name,
-    os,
-    repo,
-    status_value,
-    store,
 )
+from server.app.state_machine import Actor, TaskStatus
+from server.app.task_kinds import list_task_kinds
+from server.app.task_names import normalize_task_name
+
+
+router = APIRouter()
+Repository = Annotated[Any, Depends(get_repository_application_service)]
+
+
+def _artifact_root() -> Path:
+    return Path(os.getenv("MINI_DROP_ARTIFACT_ROOT", "/tmp/mini-drop")).expanduser().resolve()
+
+
+def _resolve_artifact_path_or_none(local_path: str | None) -> Path | None:
+    if not local_path:
+        return None
+    root = _artifact_root()
+    candidate = Path(local_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root):
+        raise HTTPException(status_code=403, detail="产物路径不在允许目录内")
+    return resolved if resolved.is_file() else None
+
+
+def _validate_presign_request(bucket: str, key: str) -> str:
+    if bucket != os.getenv("MINIO_BUCKET", "mini-drop"):
+        raise HTTPException(status_code=403, detail="bucket 不在允许范围内")
+    if not key:
+        raise HTTPException(status_code=400, detail="key 参数不能为空")
+    normalized = key.replace("\\", "/")
+    if normalized.startswith("/") or any(
+        part in {"", ".", ".."} for part in normalized.split("/")
+    ):
+        raise HTTPException(status_code=400, detail="key 路径不合法")
+    if not normalized.startswith("tasks/"):
+        raise HTTPException(status_code=403, detail="key 不在任务产物目录内")
+    return normalized
+
+
+def _read_artifact_object_text(artifact: dict) -> str:
+    bucket = artifact.get("bucket") or os.getenv("MINIO_BUCKET", "mini-drop")
+    key = _validate_presign_request(bucket, artifact.get("object_key", ""))
+    try:
+        return storage.read_object_bytes(bucket, key).decode("utf-8", errors="replace")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        log_event(
+            "warning",
+            "artifact_object_read_failed",
+            bucket=bucket,
+            object_key=key,
+            error=type(exc).__name__,
+        )
+        raise HTTPException(status_code=404, detail="对象存储产物不存在") from exc
+
+
+def _safe_download_filename(value: str) -> str:
+    filename = Path(value.replace("\\", "/")).name
+    filename = "".join(ch for ch in filename if ch >= " " and ch not in {'"', ";"})
+    return filename[:255] or "artifact.bin"
 
 # ── 任务 ──────────────────────────────────────────────────────
 
 
-@app.get("/api/task-kinds")
-def get_task_kinds(agent_id: str = "") -> APIResponse:
+@router.get("/api/task-kinds")
+def get_task_kinds(repo: Repository, agent_id: str = "") -> APIResponse:
     """Return metadata used to build task forms.
 
     When ``agent_id`` is supplied, unsupported collectors are filtered out at
@@ -64,7 +119,11 @@ def get_task_kinds(agent_id: str = "") -> APIResponse:
     })
 
 
-def _validate_task_agent_capability(agent_id: str, collector_type: str) -> None:
+def _validate_task_agent_capability(
+    repo: Any,
+    agent_id: str,
+    collector_type: str,
+) -> None:
     agent = repo.agents.get(agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent 不存在")
@@ -78,9 +137,13 @@ def _validate_task_agent_capability(agent_id: str, collector_type: str) -> None:
         )
 
 
-@app.post("/api/tasks")
-def create_task(payload: CreateTaskRequest, request: Request) -> APIResponse:
-    _validate_task_agent_capability(payload.agent_id, payload.collector_type)
+@router.post("/api/tasks")
+def create_task(
+    payload: CreateTaskRequest,
+    request: Request,
+    repo: Repository,
+) -> APIResponse:
+    _validate_task_agent_capability(repo, payload.agent_id, payload.collector_type)
     if payload.target_pid <= 0:
         raise HTTPException(status_code=400, detail="target_pid 必须为正整数")
     if payload.target_pid > 4194304:  # Linux pid_max 上限
@@ -119,8 +182,9 @@ def create_task(payload: CreateTaskRequest, request: Request) -> APIResponse:
     return APIResponse(data={"task_id": task.id, "status": status_value(task.status)})
 
 
-@app.get("/api/tasks")
+@router.get("/api/tasks")
 def list_tasks(
+    repo: Repository,
     limit: int = 1000,
     offset: int = 0,
     search: str = "",
@@ -134,7 +198,7 @@ def list_tasks(
     limit = min(max(limit, 1), 1000)
     offset = max(offset, 0)
 
-    all_items = [_task_view(t).model_dump() for t in repo.tasks.values()]
+    all_items = [task_view(t).model_dump() for t in repo.tasks.values()]
 
     # 搜索：按任务名称模糊匹配
     if search:
@@ -152,30 +216,30 @@ def list_tasks(
     return APIResponse(data={"items": page, "total": total, "offset": offset, "limit": limit})
 
 
-@app.get("/api/tasks/{task_id}")
-def get_task(task_id: str) -> APIResponse:
+@router.get("/api/tasks/{task_id}")
+def get_task(task_id: str, repo: Repository) -> APIResponse:
     task = repo.tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return APIResponse(data=_task_view(task).model_dump())
+    return APIResponse(data=task_view(task).model_dump())
 
 
-@app.get("/api/tasks/{task_id}/attempts")
-def get_task_attempts(task_id: str) -> APIResponse:
+@router.get("/api/tasks/{task_id}/attempts")
+def get_task_attempts(task_id: str, repo: Repository) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     return APIResponse(data=repo.list_task_attempts(task_id))
 
 
-@app.get("/api/tasks/{task_id}/analysis-jobs")
-def get_task_analysis_jobs(task_id: str) -> APIResponse:
+@router.get("/api/tasks/{task_id}/analysis-jobs")
+def get_task_analysis_jobs(task_id: str, repo: Repository) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     return APIResponse(data=repo.list_task_analysis_jobs(task_id))
 
 
-@app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: str) -> APIResponse:
+@router.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, repo: Repository) -> APIResponse:
     """删除任务及其关联的事件、产物和诊断结果。"""
     task = repo.tasks.get(task_id)
     if task is None:
@@ -193,8 +257,12 @@ def delete_task(task_id: str) -> APIResponse:
     return APIResponse(data={"task_id": task_id, "deleted": True})
 
 
-@app.post("/api/tasks/{task_id}/cancel")
-def cancel_task(task_id: str, payload: CancelTaskRequest) -> APIResponse:
+@router.post("/api/tasks/{task_id}/cancel")
+def cancel_task(
+    task_id: str,
+    payload: CancelTaskRequest,
+    repo: Repository,
+) -> APIResponse:
     """Cancel an active task. Repeating the same request is safe."""
 
     try:
@@ -210,11 +278,12 @@ def cancel_task(task_id: str, payload: CancelTaskRequest) -> APIResponse:
     })
 
 
-@app.post("/api/tasks/{task_id}/retry")
+@router.post("/api/tasks/{task_id}/retry")
 def retry_task(
     task_id: str,
     payload: RetryTaskRequest,
     request: Request,
+    repo: Repository,
 ) -> APIResponse:
     """Create a new task from a terminal task without mutating its history."""
 
@@ -240,6 +309,7 @@ def retry_task(
         options=options,
     )
     _validate_task_agent_capability(
+        repo,
         retry_payload.agent_id,
         retry_payload.collector_type,
     )
@@ -265,16 +335,20 @@ def retry_task(
     })
 
 
-@app.get("/api/tasks/{task_id}/events")
-def get_task_events(task_id: str) -> APIResponse:
+@router.get("/api/tasks/{task_id}/events")
+def get_task_events(task_id: str, repo: Repository) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     items = [repo.as_dict(e) for e in repo.events if e.task_id == task_id]
     return APIResponse(data=items)
 
 
-@app.get("/api/tasks/{task_id}/artifacts")
-def get_task_artifacts(task_id: str, verify: bool = True) -> APIResponse:
+@router.get("/api/tasks/{task_id}/artifacts")
+def get_task_artifacts(
+    task_id: str,
+    repo: Repository,
+    verify: bool = True,
+) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     return APIResponse(data=[
@@ -288,8 +362,13 @@ def get_task_artifacts(task_id: str, verify: bool = True) -> APIResponse:
     ])
 
 
-@app.get("/api/tasks/{task_id}/artifacts/{artifact_type}/content")
-def get_task_artifact_content(task_id: str, artifact_type: str, index: Optional[int] = None) -> APIResponse:
+@router.get("/api/tasks/{task_id}/artifacts/{artifact_type}/content")
+def get_task_artifact_content(
+    task_id: str,
+    artifact_type: str,
+    repo: Repository,
+    index: Optional[int] = None,
+) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     for artifact in repo.artifacts.get(task_id, []):
@@ -302,18 +381,23 @@ def get_task_artifact_content(task_id: str, artifact_type: str, index: Optional[
         if path is None and artifact.get("object_key"):
             text = _read_artifact_object_text(artifact)
             if artifact_type.endswith("_json") or artifact.get("content_type") == "application/json":
-                return APIResponse(data=_json.loads(text))
+                return APIResponse(data=json.loads(text))
             return APIResponse(data={"text": text})
         if path is None:
             raise HTTPException(status_code=404, detail="本地产物不存在")
         if artifact_type.endswith("_json") or artifact.get("content_type") == "application/json":
-            return APIResponse(data=_json.loads(path.read_text(encoding="utf-8")))
+            return APIResponse(data=json.loads(path.read_text(encoding="utf-8")))
         return APIResponse(data={"text": path.read_text(encoding="utf-8", errors="replace")})
     raise HTTPException(status_code=404, detail="产物不存在")
 
 
-@app.get("/api/tasks/{task_id}/artifacts/{artifact_type}/download")
-def download_task_artifact(task_id: str, artifact_type: str, index: Optional[int] = None):
+@router.get("/api/tasks/{task_id}/artifacts/{artifact_type}/download")
+def download_task_artifact(
+    task_id: str,
+    artifact_type: str,
+    repo: Repository,
+    index: Optional[int] = None,
+):
     """经 Server 流式下载产物，使浏览器无需直接访问 MinIO 9000 端口。"""
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -337,38 +421,38 @@ def download_task_artifact(task_id: str, artifact_type: str, index: Optional[int
 
         bucket = artifact.get("bucket") or os.getenv("MINIO_BUCKET", "mini-drop")
         key = _validate_presign_request(bucket, artifact.get("object_key", ""))
-        stored_size = store.object_size(bucket, key)
+        stored_size = storage.object_size(bucket, key)
         if stored_size is None:
             raise HTTPException(status_code=404, detail="产物文件已不存在，请下载结构化证据 JSON")
         expected_size = artifact.get("size_bytes") or 0
         if expected_size and stored_size != expected_size:
             raise HTTPException(status_code=409, detail="产物完整性检查失败：对象大小与登记值不一致")
         headers = {
-            "Content-Disposition": f"attachment; filename*=UTF-8''{_url_quote(filename)}",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
             "X-Content-Type-Options": "nosniff",
             "Content-Length": str(stored_size),
         }
         return StreamingResponse(
-            store.stream_object(bucket, key),
+            storage.stream_object(bucket, key),
             media_type=media_type,
             headers=headers,
         )
     raise HTTPException(status_code=404, detail="产物不存在")
 
 
-@app.get("/api/storage/presign")
+@router.get("/api/storage/presign")
 def presign_url(bucket: str = "mini-drop", key: str = "", expires: int = 3600) -> APIResponse:
     """生成 MinIO 预签名下载 URL。"""
     key = _validate_presign_request(bucket, key)
     try:
-        url = store.presigned_get_url(bucket, key, expires)
+        url = storage.presigned_get_url(bucket, key, expires)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return APIResponse(data={"url": url, "expires_sec": expires})
 
 
-@app.post("/api/tasks/{task_id}/diagnose")
-def diagnose_task(task_id: str) -> APIResponse:
+@router.post("/api/tasks/{task_id}/diagnose")
+def diagnose_task(task_id: str, repo: Repository) -> APIResponse:
     """E9：旧「一次性诊断」编排已退役。
 
     Task 结果页的入口已收敛为「创建调查 Case」（POST /api/v1/cases，initial_tasks
@@ -387,15 +471,19 @@ def diagnose_task(task_id: str) -> APIResponse:
     )
 
 
-@app.get("/api/tasks/{task_id}/diagnoses")
-def list_task_diagnoses(task_id: str) -> APIResponse:
+@router.get("/api/tasks/{task_id}/diagnoses")
+def list_task_diagnoses(task_id: str, repo: Repository) -> APIResponse:
     if task_id not in repo.tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
     return APIResponse(data=repo.list_diagnoses_for_task(task_id))
 
 
-@app.get("/api/diagnoses")
-def list_diagnosis_history(limit: int = 500, offset: int = 0) -> APIResponse:
+@router.get("/api/diagnoses")
+def list_diagnosis_history(
+    repo: Repository,
+    limit: int = 500,
+    offset: int = 0,
+) -> APIResponse:
     """Return legacy RCA history without one browser request per task."""
 
     limit = min(max(limit, 1), 1000)
@@ -409,16 +497,20 @@ def list_diagnosis_history(limit: int = 500, offset: int = 0) -> APIResponse:
     })
 
 
-@app.get("/api/diagnoses/{diagnosis_id}")
-def get_diagnosis(diagnosis_id: str) -> APIResponse:
+@router.get("/api/diagnoses/{diagnosis_id}")
+def get_diagnosis(diagnosis_id: str, repo: Repository) -> APIResponse:
     item = repo.get_diagnosis(diagnosis_id)
     if item is None:
         raise HTTPException(status_code=404, detail="诊断不存在")
     return APIResponse(data=item)
 
 
-@app.post("/api/diagnoses/{diagnosis_id}/feedback")
-def submit_diagnosis_feedback(diagnosis_id: str, payload: RCAFeedbackRequest) -> APIResponse:
+@router.post("/api/diagnoses/{diagnosis_id}/feedback")
+def submit_diagnosis_feedback(
+    diagnosis_id: str,
+    payload: RCAFeedbackRequest,
+    repo: Repository,
+) -> APIResponse:
     item = repo.get_diagnosis(diagnosis_id)
     if item is None:
         raise HTTPException(status_code=404, detail="诊断不存在")

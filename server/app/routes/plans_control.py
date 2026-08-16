@@ -1,74 +1,74 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Investigation planning, control, and Agent-turn HTTP endpoints."""
 
 from __future__ import annotations
 
+import secrets
+from typing import Any
 
-from server.app.main import (  # noqa: F401
-    _build_runtime_case_context,
-    _case_agent_progress,
-    _case_investigation_footprint,
-    _request_principal,
-    _request_tenant,
-    _require_role,
-    APIResponse,
-    Actor,
-    AgentRuntimeMode,
-    AgentTurnInput,
+from fastapi import APIRouter, HTTPException, Request
+
+from server.app.agent_runtime.config import AgentRuntimeMode, runtime_mode
+from server.app.agent_runtime.dispatcher import get_runtime
+from server.app.agent_runtime.port import AgentTurnInput
+from server.app.ai_provider import model_audit_scope
+from server.app.case_collaboration import (
+    CaseMessageRequest,
+    EvidenceReviewRequest,
+    PlanUpdateRequest,
+    ReprioritizeStepRequest,
+    RetargetStepRequest,
+    StartCaseDiagnosisRequest,
+    build_case_context_packet,
+    build_case_diagnosis_query,
+)
+from server.app.common_utils import status_value
+from server.app.diagnosis.agent_runtime import (
     AgentTurnIntent,
     AgentTurnRequest,
     AgentTurnResult,
-    Any,
-    CaseMessageRequest,
-    CreateDiagnosisRequest,
     DeploymentAssessmentRequest,
-    EvidenceReviewInput,
-    EvidenceReviewRequest,
-    HTTPException,
-    InvestigationActionCandidate,
-    PlanUpdateInput,
-    PlanUpdateRequest,
-    ReprioritizeStepRequest,
-    Request,
-    ResourceRef,
-    RetargetStepRequest,
-    StartCaseDiagnosisRequest,
-    TERMINAL_DIAGNOSIS_STATUSES,
-    TaskStatus,
-    app,
     assess_deployment_capacity,
-    build_case_context_packet,
-    build_case_diagnosis_query,
     build_case_evidence_chain,
     build_observability_tool_plan,
-    build_proposal_cards,
     classify_turn,
-    diagnosis_orchestrator,
-    evaluate_investigation_stop,
-    evidence_attachment_service,
     execute_tool_plan,
-    get_runtime,
-    investigation_plan_service,
-    model_audit_scope,
     parse_deployment_requirements,
-    rank_investigation_actions,
     render_understanding_answer,
-    repo,
-    route_disposition,
-    runtime_mode,
-    secrets,
-    source_gateway,
-    status_value,
 )
+from server.app.diagnosis.investigation_plan import EvidenceReviewInput, PlanUpdateInput
+from server.app.diagnosis.investigation_planner import (
+    InvestigationActionCandidate,
+    evaluate_investigation_stop,
+    rank_investigation_actions,
+)
+from server.app.diagnosis.proposal_card import build_proposal_cards
+from server.app.diagnosis.reference_resolver import ResourceRef
+from server.app.diagnosis.schemas import CreateDiagnosisRequest, TERMINAL_DIAGNOSIS_STATUSES
+from server.app.diagnosis.v6_policy import route_disposition
+from server.app.http.auth import (
+    request_principal as _request_principal,
+    request_tenant as _request_tenant,
+    require_role as _require_role,
+)
+from server.app.routes.cases import _case_agent_progress
+from server.app.runtime_services import (
+    diagnosis_orchestrator,
+    evidence_attachment_service,
+    investigation_plan_service,
+    repo,
+    source_gateway,
+)
+from server.app.schemas import APIResponse
+from server.app.state_machine import Actor, TaskStatus
+from server.app.v6_routes import _build_runtime_case_context, _case_investigation_footprint
+
+
+router = APIRouter()
 
 # ── E2 持久化调查计划与双通道控制 ────────────────────────────────
 
 
-@app.get("/api/v1/cases/{case_id}/plans/current")
+@router.get("/api/v1/cases/{case_id}/plans/current")
 def get_case_investigation_plan(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -78,7 +78,7 @@ def get_case_investigation_plan(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data=plan if plan else {"plan_id": None, "steps": []})
 
 
-@app.put("/api/v1/cases/{case_id}/plans")
+@router.put("/api/v1/cases/{case_id}/plans")
 def update_case_investigation_plan(
     case_id: str,
     payload: PlanUpdateRequest,
@@ -146,7 +146,7 @@ def _cancel_step_tasks(case_id: str, tenant_id: str, step_id: str) -> list[str]:
     return list(dict.fromkeys(cancelled))
 
 
-@app.post("/api/v1/cases/{case_id}/steps/{step_id}/cancel")
+@router.post("/api/v1/cases/{case_id}/steps/{step_id}/cancel")
 def cancel_case_plan_step(case_id: str, step_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -171,7 +171,7 @@ def cancel_case_plan_step(case_id: str, step_id: str, request: Request) -> APIRe
     return APIResponse(data=step)
 
 
-@app.post("/api/v1/cases/{case_id}/steps/{step_id}/remove")
+@router.post("/api/v1/cases/{case_id}/steps/{step_id}/remove")
 def remove_case_plan_step(case_id: str, step_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -190,7 +190,7 @@ def remove_case_plan_step(case_id: str, step_id: str, request: Request) -> APIRe
     return APIResponse(data=step)
 
 
-@app.post("/api/v1/cases/{case_id}/steps/{step_id}/reprioritize")
+@router.post("/api/v1/cases/{case_id}/steps/{step_id}/reprioritize")
 def reprioritize_case_plan_step(
     case_id: str,
     step_id: str,
@@ -210,7 +210,7 @@ def reprioritize_case_plan_step(
     return APIResponse(data=step)
 
 
-@app.post("/api/v1/cases/{case_id}/steps/{step_id}/retarget")
+@router.post("/api/v1/cases/{case_id}/steps/{step_id}/retarget")
 def retarget_case_plan_step(
     case_id: str,
     step_id: str,
@@ -239,7 +239,7 @@ def retarget_case_plan_step(
     return APIResponse(data=step)
 
 
-@app.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews")
+@router.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews")
 def review_case_evidence(
     case_id: str,
     evidence_id: str,
@@ -267,7 +267,7 @@ def review_case_evidence(
     return APIResponse(data=review)
 
 
-@app.get("/api/v1/cases/{case_id}/evidence-reviews")
+@router.get("/api/v1/cases/{case_id}/evidence-reviews")
 def list_case_evidence_reviews(
     case_id: str,
     request: Request,
@@ -281,7 +281,7 @@ def list_case_evidence_reviews(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/context-packets")
+@router.get("/api/v1/cases/{case_id}/context-packets")
 def list_case_context_packets(
     case_id: str,
     request: Request,
@@ -300,7 +300,7 @@ def list_case_context_packets(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/model-attempts")
+@router.get("/api/v1/cases/{case_id}/model-attempts")
 def list_case_model_attempts(
     case_id: str,
     request: Request,
@@ -319,7 +319,7 @@ def list_case_model_attempts(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/hypotheses")
+@router.get("/api/v1/cases/{case_id}/hypotheses")
 def get_case_hypotheses(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     graph = repo.get_case_hypothesis_graph(case_id, _request_tenant())
@@ -328,7 +328,7 @@ def get_case_hypotheses(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data=graph)
 
 
-@app.get("/api/v1/cases/{case_id}/iterations")
+@router.get("/api/v1/cases/{case_id}/iterations")
 def get_case_iterations(
     case_id: str,
     request: Request,
@@ -347,7 +347,7 @@ def get_case_iterations(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.post("/api/v1/cases/{case_id}/diagnoses")
+@router.post("/api/v1/cases/{case_id}/diagnoses")
 def start_case_diagnosis(
     case_id: str,
     payload: StartCaseDiagnosisRequest,
@@ -548,7 +548,7 @@ def start_case_diagnosis(
     })
 
 
-@app.get("/api/v1/cases/{case_id}/proposals")
+@router.get("/api/v1/cases/{case_id}/proposals")
 def list_case_proposals(case_id: str, request: Request) -> APIResponse:
     """提案卡：把 Case 诊断的待审批动作派生为可读卡片（依据/作用/影响/成本）。"""
     _require_role(request, "operator")
@@ -566,7 +566,7 @@ def list_case_proposals(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data={"case_id": case_id, "proposals": cards})
 
 
-@app.get("/api/v1/cases/{case_id}/understanding")
+@router.get("/api/v1/cases/{case_id}/understanding")
 def get_case_current_understanding(case_id: str, request: Request) -> APIResponse:
     """Return the current programmatic understanding from live Case evidence."""
     _require_role(request, "operator")
@@ -602,7 +602,7 @@ def get_case_current_understanding(case_id: str, request: Request) -> APIRespons
     })
 
 
-@app.post("/api/v1/cases/{case_id}/messages")
+@router.post("/api/v1/cases/{case_id}/messages")
 def append_incident_case_message(
     case_id: str,
     payload: CaseMessageRequest,
@@ -628,8 +628,8 @@ def append_incident_case_message(
 
 
 
-@app.post("/api/v1/cases/{case_id}/deployment-assessment")
-@app.post("/api/v1/cases/{case_id}/deployment-assessments")
+@router.post("/api/v1/cases/{case_id}/deployment-assessment")
+@router.post("/api/v1/cases/{case_id}/deployment-assessments")
 def assess_case_deployment(
     case_id: str,
     payload: DeploymentAssessmentRequest,
@@ -672,7 +672,7 @@ def assess_case_deployment(
     return APIResponse(data=assessment.model_dump(mode="json"))
 
 
-@app.post("/api/v1/cases/{case_id}/agent/turn")
+@router.post("/api/v1/cases/{case_id}/agent/turn")
 def run_incident_case_agent_turn(
     case_id: str,
     payload: AgentTurnRequest,
@@ -763,9 +763,9 @@ def run_incident_case_agent_turn(
                 client_command_id=payload.client_command_id,
             )
 
-    # G2: PI / PI_SHADOW 模式必须走 AgentRuntimePort，不再由 classify_turn
-    # 直接驱动旧 start_case_diagnosis 路径。Sidecar 不可用时 fail-closed，
-    # Case 与用户消息仍已持久化，切回 deterministic 后可继续。
+    runtime_fallback_reason: str | None = None
+    # PI is preferred when configured. Provider/Sidecar failure falls back to
+    # the deterministic path without granting any additional side effects.
     if runtime_mode() in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
         try:
             runtime = get_runtime()
@@ -814,48 +814,36 @@ def run_incident_case_agent_turn(
                     client_command_id=payload.client_command_id,
                 )
         except RuntimeError as exc:
-            result = AgentTurnResult(
-                turn_id=f"turn_{secrets.token_hex(12)}",
-                intent=intent,
-                status="runtime_unavailable",
-                assistant_message="Pi Runtime 当前不可用，本轮未启动新调查；可稍后重试或切换 deterministic 回退。",
-                decision_summary=[f"runtime_unavailable:{str(exc)[:200]}"],
-                evidence_chain=[],
-                limitations=["Pi Runtime 不可用，已保持 fail-closed"],
-                next_actions=[{"type": "switch_deterministic", "description": "切换回确定性 Runtime 或配置 MINI_DROP_PI_RUNTIME_URL"}],
-            )
+            runtime_fallback_reason = str(exc)[:200]
             repo.record_case_event(
                 case_id,
                 tenant_id,
                 event_type="agent_runtime_turn_rejected",
-                payload=result.model_dump(mode="json"),
+                payload={
+                    "status": "deterministic_fallback",
+                    "reason": runtime_fallback_reason,
+                },
                 actor_id="mini-drop-agent-runtime",
             )
-            return APIResponse(data=result.model_dump(mode="json"))
-        result = AgentTurnResult(
-            turn_id=accepted.turn_id,
-            intent=intent,
-            status="runtime_turn_accepted",
-            assistant_message=(
-                "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。"
-                if accepted.mode != "pi_shadow"
-                else "本轮已进入 Shadow 模式：Runtime 可提出计划但不会创建任何 Task。"
-            ),
-            decision_summary=[
-                f"runtime_mode={accepted.mode}",
-                f"runtime_turn_id={accepted.turn_id}",
-            ],
-            evidence_chain=[],
-            next_actions=[{"type": "runtime_turn", "turn_id": accepted.turn_id, "mode": accepted.mode}],
-        )
-        repo.record_case_event(
-            case_id,
-            tenant_id,
-            event_type="agent_runtime_turn_submitted",
-            payload=result.model_dump(mode="json"),
-            actor_id="mini-drop-agent-runtime",
-        )
-        return APIResponse(data=result.model_dump(mode="json"))
+            repo.record_agent_runtime_turn(
+                turn_id=deterministic_turn_id,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                runtime_session_id="deterministic-fallback",
+                runtime_generation=1,
+                user_message=payload.message,
+                requested_mode="deterministic_fallback",
+                status="COMPLETED",
+                accepted_mode="deterministic_fallback",
+                detail=runtime_fallback_reason,
+                idempotency_key=f"runtime-turn:{case_id}:{deterministic_turn_id}",
+                disposition=disposition,
+                side_effect_policy=side_effect_policy,
+                actor_id=principal_id,
+                client_command_id=payload.client_command_id,
+            )
+        else:
+            return _runtime_accepted_response(case_id, tenant_id, accepted, intent)
 
     case = repo.get_incident_case(case_id, tenant_id) or case
     graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
@@ -875,6 +863,9 @@ def run_incident_case_agent_turn(
     evidence_chain = build_case_evidence_chain(graph, evidence) or evidence_chain
     contradictions = list(understanding.get("contradictions") or [])
     limitations = list(understanding.get("missing") or [])
+    if runtime_fallback_reason:
+        decisions.insert(0, "Pi Runtime 不可用，已自动切换 deterministic Runtime")
+        limitations.append(f"runtime_fallback:{runtime_fallback_reason}")
     next_actions: list[dict[str, Any]] = []
     tool_calls = []
     deployment_assessment = None
@@ -1019,10 +1010,62 @@ def run_incident_case_agent_turn(
         deployment_assessment=deployment_assessment,
         side_effect_delta=side_effect_delta,
     )
+    persisted_message = repo.add_assistant_message(
+        case_id=case_id,
+        tenant_id=tenant_id,
+        content=assistant_message,
+        trigger_turn_id=deterministic_turn_id,
+        origin_turn_id=deterministic_turn_id,
+        evidence_refs=[
+            str(item.get("evidence_id"))
+            for item in evidence_chain
+            if item.get("evidence_id")
+        ],
+        limitation_refs=limitations,
+    )
     repo.record_case_event(
         case_id,
         tenant_id,
         event_type="agent_turn_completed",
+        payload={
+            **result.model_dump(mode="json"),
+            "message_id": persisted_message["message_id"],
+        },
+        actor_id="mini-drop-agent-runtime",
+    )
+    return APIResponse(data=result.model_dump(mode="json"))
+
+
+def _runtime_accepted_response(
+    case_id: str,
+    tenant_id: str,
+    accepted,
+    intent: AgentTurnIntent,
+) -> APIResponse:
+    result = AgentTurnResult(
+        turn_id=accepted.turn_id,
+        intent=intent,
+        status="runtime_turn_accepted",
+        assistant_message=(
+            "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。"
+            if accepted.mode != "pi_shadow"
+            else "本轮已进入 Shadow 模式：Runtime 可提出计划但不会创建任何 Task。"
+        ),
+        decision_summary=[
+            f"runtime_mode={accepted.mode}",
+            f"runtime_turn_id={accepted.turn_id}",
+        ],
+        evidence_chain=[],
+        next_actions=[{
+            "type": "runtime_turn",
+            "turn_id": accepted.turn_id,
+            "mode": accepted.mode,
+        }],
+    )
+    repo.record_case_event(
+        case_id,
+        tenant_id,
+        event_type="agent_runtime_turn_submitted",
         payload=result.model_dump(mode="json"),
         actor_id="mini-drop-agent-runtime",
     )
@@ -1050,4 +1093,4 @@ def _deployment_next_actions(assessment: dict[str, Any], tool_calls: list[Any]) 
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = ["_cancel_case_tasks", "router", "start_case_diagnosis"]

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mini-drop.local/schemas/implementation-baseline.schema.json",
+  "title": "Mini-Drop implementation baseline",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "base_commit",
+    "worktree_clean",
+    "worktree_fingerprint",
+    "changed_files",
+    "python_versions",
+    "node_version",
+    "alembic_heads",
+    "dependency_lock_status",
+    "protobuf_status",
+    "python_test_summary",
+    "sidecar_test_summary",
+    "web_test_summary",
+    "migration_check",
+    "known_architecture_violations",
+    "current_gate",
+    "next_action"
+  ],
+  "properties": {
+    "schema_version": {"const": "implementation-baseline.v1"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "worktree_clean": {"type": "boolean"},
+    "worktree_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "python_versions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "node_version": {"type": "string"},
+    "alembic_heads": {"type": "array", "items": {"type": "string"}},
+    "dependency_lock_status": {"enum": ["VALID", "INVALID", "MISSING"]},
+    "dependency_lock_reasons": {"type": "array", "items": {"type": "string"}},
+    "protobuf_status": {"enum": ["READY", "NEEDS_GENERATION"]},
+    "python_test_summary": {"$ref": "#/$defs/testSummary"},
+    "sidecar_test_summary": {"$ref": "#/$defs/testSummary"},
+    "web_test_summary": {"$ref": "#/$defs/testSummary"},
+    "migration_check": {"enum": ["PASS", "FAIL", "NOT_RUN"]},
+    "known_architecture_violations": {"type": "array", "items": {"type": "string"}},
+    "service_status": {"type": "object"},
+    "checks": {"type": "object"},
+    "current_gate": {"type": "string", "pattern": "^C[0-8]$"},
+    "next_action": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "testSummary": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL", "NOT_RUN"]},
+        "exit_code": {"type": ["integer", "null"]},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "errors": {"type": "integer", "minimum": 0},
+        "skipped": {"type": "integer", "minimum": 0},
+        "log": {"type": "string"}
+      }
+    }
+  },
+  "additionalProperties": true
+}

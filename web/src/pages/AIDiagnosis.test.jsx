@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import AIDiagnosis from "./AIDiagnosis";
 import {
-  getIncidentCase,
+  getCaseWorkspace,
   getCaseCurrentUnderstanding,
   listAgents,
   listDiagnosisSessions,
@@ -25,6 +25,12 @@ vi.mock("../api/client", () => ({
   createCaseRecoveryPlan: vi.fn(),
   createServiceChange: vi.fn(),
   createTargetSession: vi.fn(),
+  createCaseEventSource: vi.fn(() => ({
+    addEventListener: vi.fn(),
+    close: vi.fn(),
+    onopen: null,
+    onerror: null,
+  })),
   decideCaseRecoveryPlan: vi.fn(),
   dryRunCaseRecoveryPlan: vi.fn(),
   executeCaseRecoveryPlan: vi.fn(),
@@ -33,6 +39,7 @@ vi.mock("../api/client", () => ({
   getDiagnosisSession: vi.fn(),
   getCaseCurrentUnderstanding: vi.fn(),
   getIncidentCase: vi.fn(),
+  getCaseWorkspace: vi.fn(),
   getTask: vi.fn(),
   getTaskArtifactContent: vi.fn(),
   getTaskArtifacts: vi.fn(),
@@ -45,6 +52,7 @@ vi.mock("../api/client", () => ({
   listRegisteredActions: vi.fn(),
   listTargetSessions: vi.fn(),
   listTasks: vi.fn(),
+  ensureEventSourceAuthCookie: vi.fn(() => Promise.resolve()),
   runAIValidation: vi.fn(),
   runIncidentCaseAgentTurn: vi.fn(),
   startIncidentCaseDiagnosis: vi.fn(),
@@ -92,7 +100,15 @@ describe("AIDiagnosis workspace", () => {
       capabilities: ["sys_metrics", "perf_cpu"],
     }]);
     listIncidentCases.mockResolvedValue({ items: [CASE], total: 1 });
-    getIncidentCase.mockResolvedValue(CASE);
+    getCaseWorkspace.mockResolvedValue({
+      case_projection_version: 1,
+      revisions: { case_command: 1, control: 1, scope: 1, plan: 0 },
+      case: CASE,
+      engine: { state: "IDLE" },
+      plan: {}, campaign: {}, executions: [], evidence: [], causal_graph: {},
+      evidence_gaps: [], conclusion: null, recommendations: [], messages: [],
+      last_event_seq: 0,
+    });
     getCaseCurrentUnderstanding.mockResolvedValue({
       current_understanding: {
         understanding: "OTHER_UNKNOWN：尚无活跃候选解释",
@@ -113,6 +129,9 @@ describe("AIDiagnosis workspace", () => {
     render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
 
     expect((await screen.findAllByText("service-x CPU 飙高")).length).toBeGreaterThan(0);
+    expect(await screen.findByTestId("canonical-workspace")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Campaign \/ Execution/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Causal Graph" })).toBeInTheDocument();
     expect(await screen.findByText("设置诊断范围")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看 Worker 状态" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument();
@@ -135,7 +154,7 @@ describe("AIDiagnosis workspace", () => {
     expect(await screen.findByRole("heading", { name: "诊断数据台" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /新建多机采集/ })).toBeInTheDocument();
 
-    await waitFor(() => expect(getIncidentCase).toHaveBeenCalledWith(CASE.case_id));
+    await waitFor(() => expect(getCaseWorkspace).toHaveBeenCalledWith(CASE.case_id));
   });
 
   it("opens change registration from the selected case", async () => {

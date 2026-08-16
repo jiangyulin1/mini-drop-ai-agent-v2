@@ -135,10 +135,35 @@ def verify_claim_binding(
     evidence_id = claim.get("evidence_id")
     if not evidence_id or evidence.get("status") not in {"ACTIVE"}:
         return False, "EVIDENCE_NOT_ACTIVE"
+    if evidence.get("stale_for_current_revision"):
+        return False, "EVIDENCE_REVISION_STALE"
     projection_hash = claim.get("projection_hash")
-    matching = [item for item in projections if item.get("projection_hash") == projection_hash]
+    matching = [
+        item for item in projections
+        if item.get("evidence_id") == evidence_id
+        and item.get("projection_hash") == projection_hash
+    ]
     if not matching:
         return False, "PROJECTION_HASH_NOT_FOUND"
+    if claim.get("projection_version") is not None:
+        if int(claim["projection_version"]) != int(matching[0].get("projection_version") or 0):
+            return False, "PROJECTION_VERSION_MISMATCH"
+    for field, code in (
+        ("target_ref", "TARGET_REF_MISMATCH"),
+        ("resource_incarnation", "RESOURCE_INCARNATION_MISMATCH"),
+    ):
+        supplied = claim.get(field)
+        if supplied is not None and str(supplied) != str(evidence.get(field) or ""):
+            return False, code
+    requested_window = claim.get("event_window") or {}
+    evidence_window = evidence.get("time_window") or {}
+    if requested_window:
+        if any(
+            requested_window.get(key) is not None
+            and str(requested_window.get(key)) != str(evidence_window.get(key))
+            for key in ("start", "end")
+        ):
+            return False, "EVENT_WINDOW_MISMATCH"
     field_path = claim.get("field_path")
     if field_path:
         predicate = claim.get("predicate") or {}
@@ -165,7 +190,10 @@ def verify_primary_confirmation(
         return "PARTIALLY_CONFIRMED"
     nodes = graph.get("nodes") or []
     edges = graph.get("edges") or []
-    primary = [node for node in nodes if node.get("verifier_role") == "PRIMARY_ROOT_CAUSE"]
+    primary = [
+        node for node in nodes
+        if node.get("verifier_role") in {"PRIMARY_CAUSE", "PRIMARY_ROOT_CAUSE"}
+    ]
     required = [edge for edge in edges if edge.get("verification_state") not in {"OBSERVED", "SUPPORTED"}]
     if not primary or required:
         return "PARTIALLY_CONFIRMED"

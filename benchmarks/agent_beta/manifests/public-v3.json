@@ -1,0 +1,114 @@
+{
+  "schema_version": "agent-beta-public-v3",
+  "suite_id": "agent-beta-public-v3",
+  "prompt_file": "docs/ai_agent_feature_complete_demo_prompt_v6.md",
+  "source_lock_file": "benchmarks/agent_beta/sources.lock.json",
+  "runner_file": "scripts/run_agent_beta_public_eval.py",
+  "mandatory_scenarios": [
+    {
+      "id": "M01",
+      "name": "standalone_drop",
+      "pytest": [
+        "tests/test_drop_execution_pipeline.py::test_dispatch_creates_durable_attempt_and_dual_status",
+        "tests/test_drop_execution_pipeline.py::test_grpc_result_is_queued_then_completed_by_analyzer_worker"
+      ]
+    },
+    {
+      "id": "M02",
+      "name": "answer_only_zero_side_effects",
+      "pytest": [
+        "tests/test_v6_audit_regressions.py::test_answer_only_machine_policy_blocks_write_tool_and_has_zero_side_effects"
+      ]
+    },
+    {
+      "id": "M03",
+      "name": "existing_artifact_explanation",
+      "pytest": [
+        "tests/test_agent_beta_cross_feature.py::test_data_driven_evidence_lifecycle_answer_only_and_restore"
+      ]
+    },
+    {
+      "id": "M04",
+      "name": "three_round_evidence_wakeup_decision",
+      "pytest": [
+        "tests/test_plan_driver.py::test_three_round_evidence_e2e",
+        "tests/test_agent_runtime_local_loop.py::test_local_longitudinal_chain_turn_query_task_evidence_wakeup"
+      ]
+    },
+    {
+      "id": "M05",
+      "name": "pause_resume_stop_retarget",
+      "pytest": [
+        "tests/test_incident_cases.py::test_case_message_pause_resume_and_optimistic_version",
+        "tests/test_case_supervisor.py::test_stop_command_is_applied_and_stops_advance",
+        "tests/test_plan_driver.py::test_retarget_running_step_cancels_old_native_task"
+      ]
+    },
+    {
+      "id": "M06",
+      "name": "sidecar_server_worker_restart",
+      "pytest": [
+        "tests/test_agent_runtime_turn_endpoint.py::test_sidecar_restart_rotates_runtime_generation",
+        "tests/test_outbox_reliability.py::test_committed_state_and_outbox_survive_crash_before_relay",
+        "tests/test_drop_execution_pipeline.py::test_artifact_replay_is_attempt_idempotent",
+        "tests/test_cluster_scope.py::test_fanout_recovery_is_idempotent"
+      ]
+    },
+    {
+      "id": "M07",
+      "name": "homogeneous_and_heterogeneous_campaign",
+      "pytest": [
+        "tests/test_cluster_scope.py::test_fanout_three_node_dispatch",
+        "tests/test_campaign.py::test_campaign_compiles_common_baseline_and_heterogeneous_assignments"
+      ]
+    },
+    {
+      "id": "M08",
+      "name": "collector_query_mcp_lineage",
+      "pytest": [
+        "tests/test_connection_probe.py::test_connection_probe_is_a_structured_artifact_and_normalizes_facts",
+        "tests/test_query_gateway.py::test_query_creates_native_task_with_case_provenance",
+        "tests/test_mcp_fact_resolver.py::test_evidence_service_calls_mcp_and_sanitizes"
+      ]
+    },
+    {
+      "id": "M09",
+      "name": "compound_causal_with_distractor",
+      "pytest": [
+        "tests/test_diagnosis_orchestrator.py::TestDiagnosisSessionAPI::test_downstream_pressure_is_reported_as_root_cause_node_not_first_alert",
+        "tests/test_causal_verifier_contract.py::test_downstream_anomaly_without_supported_causal_edge_cannot_be_confirmed_primary",
+        "tests/test_causal_verifier_contract.py::test_blocker_gap_or_undistinguished_alternative_forces_downgrade"
+      ]
+    },
+    {
+      "id": "M10",
+      "name": "evidence_exclude_downgrades_conclusion",
+      "pytest": [
+        "tests/test_case_evidence.py::test_excluding_supporting_evidence_appends_downgraded_conclusion"
+      ]
+    },
+    {
+      "id": "M11",
+      "name": "provider_pi_mcp_independent_failures",
+      "pytest": [
+        "tests/test_nlp.py::TestIntentParsing::test_api_key_not_set_uses_fallback",
+        "tests/test_agent_runtime_turn_endpoint.py::test_agent_turn_falls_back_when_sidecar_url_missing",
+        "tests/test_mcp_fact_resolver.py::test_evidence_service_gateway_failure_degrades"
+      ]
+    },
+    {
+      "id": "M12",
+      "name": "browser_refresh_sse_replay",
+      "runner": "browser_real_backend"
+    },
+    {
+      "id": "M13",
+      "name": "candidate_fault_cleanup_reality",
+      "runner": "candidate_and_cleanup"
+    }
+  ],
+  "external_holdout": {
+    "status": "AWAITING_EXTERNAL_HOLDOUT",
+    "reason": "Blind holdout data and scoring authority are intentionally outside this repository."
+  }
+}

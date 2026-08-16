@@ -1,58 +1,60 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Incident case, target, campaign, and workspace HTTP endpoints."""
 
 from __future__ import annotations
 
+import asyncio
+import json as _json
+from datetime import datetime
+from typing import Any
 
-from server.app.main import (  # noqa: F401
-    _create_case_query_task,
-    _json,
-    _request_principal,
-    _request_tenant,
-    _require_role,
-    _task_view,
-    APIResponse,
-    Any,
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
+from server.app.agent_runtime.config import runtime_mode
+from server.app.application.task_views import task_view as _task_view
+from server.app.case_collaboration import (
     AttachResourcesRequest,
-    BUS,
-    CampaignCreateInput,
     CaseState,
     CreateCaseRequest,
     CreateChangeRequest,
     CreateTargetSessionRequest,
     CreateTargetSignalRequest,
     ExcludeAttachmentRequest,
-    HTTPException,
     IndexProfileTaskRequest,
-    QUERY_REGISTRY,
-    QueryError,
     ReferenceSearchRequest,
-    Request,
-    ResourceRef,
-    StreamingResponse,
     TargetSessionTransitionRequest,
-    app,
-    asyncio,
+    serialize_time_range,
+)
+from server.app.diagnosis.campaign import (
+    CampaignCreateInput,
     build_campaign_plan,
     campaign_matrix,
-    datetime,
+)
+from server.app.diagnosis.query_registry import QUERY_REGISTRY
+from server.app.diagnosis.reference_resolver import ResourceRef
+from server.app.event_bus import BUS
+from server.app.http.auth import (
+    request_principal as _request_principal,
+    request_tenant as _request_tenant,
+    require_role as _require_role,
+)
+from server.app.runtime_services import (
     diagnosis_orchestrator,
     evidence_attachment_service,
     investigation_plan_service,
     reference_resolver,
     repo,
-    runtime_mode,
-    serialize_time_range,
 )
+from server.app.schemas import APIResponse
+from server.app.v6_routes import QueryError, _create_case_query_task
+
+
+router = APIRouter()
 
 # ── AI Incident Case 协作层（v1）───────────────────────────────
 
 
-@app.post("/api/v1/target-sessions")
+@router.post("/api/v1/target-sessions")
 def create_target_session(
     payload: CreateTargetSessionRequest, request: Request,
 ) -> APIResponse:
@@ -68,7 +70,7 @@ def create_target_session(
     return APIResponse(data=result)
 
 
-@app.get("/api/v1/target-sessions")
+@router.get("/api/v1/target-sessions")
 def list_target_sessions(
     request: Request, status: str = "", limit: int = 100,
 ) -> APIResponse:
@@ -81,7 +83,7 @@ def list_target_sessions(
     return APIResponse(data={"items": items})
 
 
-@app.get("/api/v1/target-sessions/{target_session_id}")
+@router.get("/api/v1/target-sessions/{target_session_id}")
 def get_target_session(target_session_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     result = repo.get_target_session(target_session_id, _request_tenant())
@@ -90,7 +92,7 @@ def get_target_session(target_session_id: str, request: Request) -> APIResponse:
     return APIResponse(data=result)
 
 
-@app.post("/api/v1/target-sessions/{target_session_id}/transition")
+@router.post("/api/v1/target-sessions/{target_session_id}/transition")
 def transition_target_session(
     target_session_id: str,
     payload: TargetSessionTransitionRequest,
@@ -116,7 +118,7 @@ def transition_target_session(
     return APIResponse(data=result)
 
 
-@app.post("/api/v1/target-sessions/{target_session_id}/signals")
+@router.post("/api/v1/target-sessions/{target_session_id}/signals")
 def create_target_signal(
     target_session_id: str,
     payload: CreateTargetSignalRequest,
@@ -152,7 +154,7 @@ def create_target_signal(
     })
 
 
-@app.get("/api/v1/target-sessions/{target_session_id}/signals")
+@router.get("/api/v1/target-sessions/{target_session_id}/signals")
 def list_target_signals(
     target_session_id: str, request: Request, limit: int = 100,
 ) -> APIResponse:
@@ -165,7 +167,7 @@ def list_target_signals(
     return APIResponse(data={"items": items})
 
 
-@app.post("/api/v1/target-sessions/{target_session_id}/profile-windows/index-task")
+@router.post("/api/v1/target-sessions/{target_session_id}/profile-windows/index-task")
 def index_target_profile_task(
     target_session_id: str,
     payload: IndexProfileTaskRequest,
@@ -185,7 +187,7 @@ def index_target_profile_task(
     return APIResponse(data={"items": items, "indexed_count": len(items)})
 
 
-@app.get("/api/v1/target-sessions/{target_session_id}/profile-windows")
+@router.get("/api/v1/target-sessions/{target_session_id}/profile-windows")
 def list_target_profile_windows(
     target_session_id: str,
     request: Request,
@@ -212,7 +214,7 @@ def list_target_profile_windows(
     return APIResponse(data={"items": items})
 
 
-@app.post("/api/v1/cases")
+@router.post("/api/v1/cases")
 def create_incident_case(payload: CreateCaseRequest, request: Request) -> APIResponse:
     _require_role(request, "operator")
     target = None
@@ -259,7 +261,7 @@ def create_incident_case(payload: CreateCaseRequest, request: Request) -> APIRes
     return APIResponse(data=result)
 
 
-@app.post("/api/v1/changes")
+@router.post("/api/v1/changes")
 def create_change_record(payload: CreateChangeRequest, request: Request) -> APIResponse:
     """登记一次发布/配置/开关变更（供 AI 做变更前后对比与回归关联）。"""
     _require_role(request, "operator")
@@ -275,7 +277,7 @@ def create_change_record(payload: CreateChangeRequest, request: Request) -> APIR
     return APIResponse(data=result)
 
 
-@app.get("/api/v1/changes")
+@router.get("/api/v1/changes")
 def list_change_records(
     request: Request,
     service_id: str | None = None,
@@ -292,7 +294,7 @@ def list_change_records(
     return APIResponse(data={"items": items})
 
 
-@app.get("/api/v1/cases")
+@router.get("/api/v1/cases")
 def list_incident_cases(
     request: Request,
     state: str = "",
@@ -319,7 +321,7 @@ def list_incident_cases(
     })
 
 
-@app.get("/api/v1/cases/{case_id}")
+@router.get("/api/v1/cases/{case_id}")
 def get_incident_case(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     result = repo.get_incident_case(case_id, _request_tenant())
@@ -370,8 +372,12 @@ def _case_agent_progress(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@app.get("/api/v1/cases/{case_id}/events/stream")
-async def stream_incident_case_events(case_id: str, request: Request) -> StreamingResponse:
+@router.get("/api/v1/cases/{case_id}/events/stream")
+async def stream_incident_case_events(
+    case_id: str,
+    request: Request,
+    after_seq: int = 0,
+) -> StreamingResponse:
     """v6 SSE: replay DB events after Last-Event-ID, then subscribe without a gap."""
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -379,19 +385,24 @@ async def stream_incident_case_events(case_id: str, request: Request) -> Streami
         raise HTTPException(status_code=404, detail="Case 不存在")
     last_event_id = request.headers.get("Last-Event-ID", "0")
     try:
-        after_seq = int(last_event_id)
+        cursor = max(int(last_event_id), max(after_seq, 0))
     except ValueError:
-        after_seq = 0
-    replay = repo.list_case_events(case_id, tenant_id, limit=200, after_seq=after_seq) or []
+        cursor = max(after_seq, 0)
+    # Subscribe before reading the replay window.  An event committed while the
+    # replay query runs is therefore present either in the replay, the queue, or
+    # both; the monotonic cursor below removes the possible duplicate.
     subscription = BUS.subscribe()
+    replay = repo.list_case_events(case_id, tenant_id, limit=1000, after_seq=cursor) or []
 
     async def event_stream():
+        high_water = cursor
         try:
             for item in replay:
                 seq = int(item.get("case_event_seq") or 0)
-                if seq <= after_seq:
+                if seq <= high_water:
                     continue
-                yield f"id: {seq}\nevent: {item.get('event_type')}\ndata: {_json.dumps(item, ensure_ascii=False, default=str)}\n\n"
+                high_water = seq
+                yield f"id: {seq}\nevent: case_event\ndata: {_json.dumps(item, ensure_ascii=False, default=str)}\n\n"
             while True:
                 try:
                     bus_event = await asyncio.wait_for(
@@ -406,9 +417,10 @@ async def stream_incident_case_events(case_id: str, request: Request) -> Streami
                 if str(data.get("case_id") or "") != case_id:
                     continue
                 seq = int(data.get("case_event_seq") or 0)
-                if seq <= after_seq:
+                if seq <= high_water:
                     continue
-                yield f"id: {seq}\nevent: {data.get('event_type')}\ndata: {_json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+                high_water = seq
+                yield f"id: {seq}\nevent: case_event\ndata: {_json.dumps(data, ensure_ascii=False, default=str)}\n\n"
         finally:
             BUS.unsubscribe(subscription)
 
@@ -419,7 +431,7 @@ async def stream_incident_case_events(case_id: str, request: Request) -> Streami
     )
 
 
-@app.get("/api/v1/cases/{case_id}/events")
+@router.get("/api/v1/cases/{case_id}/events")
 def list_incident_case_events(
     case_id: str,
     request: Request,
@@ -443,7 +455,7 @@ def list_incident_case_events(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.post("/api/v1/references/search")
+@router.post("/api/v1/references/search")
 def search_references(
     payload: ReferenceSearchRequest,
     request: Request,
@@ -462,14 +474,14 @@ def search_references(
     })
 
 
-@app.get("/api/v1/query-operations")
+@router.get("/api/v1/query-operations")
 def list_query_operations(request: Request) -> APIResponse:
     """G4：注册的低风险只读 Query 目录。"""
     _require_role(request, "operator")
     return APIResponse(data={"items": QUERY_REGISTRY.list_operations(), "total": len(QUERY_REGISTRY.list_operations())})
 
 
-@app.post("/api/v1/cases/{case_id}/queries")
+@router.post("/api/v1/cases/{case_id}/queries")
 def create_case_query(
     case_id: str,
     payload: dict[str, Any],
@@ -504,7 +516,7 @@ def create_case_query(
 
 
 
-@app.post("/api/v1/cases/{case_id}/attachments")
+@router.post("/api/v1/cases/{case_id}/attachments")
 def attach_case_resources(
     case_id: str,
     payload: AttachResourcesRequest,
@@ -536,7 +548,7 @@ def attach_case_resources(
     return APIResponse(data={"items": results})
 
 
-@app.post("/api/v1/cases/{case_id}/campaigns")
+@router.post("/api/v1/cases/{case_id}/campaigns")
 def create_case_campaign(
     case_id: str,
     payload: CampaignCreateInput,
@@ -574,7 +586,7 @@ def create_case_campaign(
     return APIResponse(data={"plan": plan, "matrix": campaign_matrix(plan)})
 
 
-@app.post("/api/v1/cases/{case_id}/campaigns/preview")
+@router.post("/api/v1/cases/{case_id}/campaigns/preview")
 def preview_case_campaign(
     case_id: str,
     payload: CampaignCreateInput,
@@ -602,7 +614,7 @@ def preview_case_campaign(
     })
 
 
-@app.get("/api/v1/cases/{case_id}/campaigns/current")
+@router.get("/api/v1/cases/{case_id}/campaigns/current")
 def get_case_campaign(
     case_id: str,
     request: Request,
@@ -616,7 +628,7 @@ def get_case_campaign(
     return APIResponse(data={"matrix": campaign_matrix(plan)})
 
 
-@app.get("/api/v1/cases/{case_id}/evidence")
+@router.get("/api/v1/cases/{case_id}/evidence")
 def list_case_evidence(
     case_id: str,
     request: Request,
@@ -641,7 +653,7 @@ def list_case_evidence(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/evidence/{evidence_id}/projections")
+@router.get("/api/v1/cases/{case_id}/evidence/{evidence_id}/projections")
 def get_case_evidence_projections(
     case_id: str,
     evidence_id: str,
@@ -656,7 +668,7 @@ def get_case_evidence_projections(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/workspace")
+@router.get("/api/v1/cases/{case_id}/workspace")
 def get_case_workspace(case_id: str, request: Request) -> APIResponse:
     """v6 9.2: one database snapshot for the Workbench first paint."""
     _require_role(request, "operator")
@@ -719,7 +731,7 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
     })
 
 
-@app.get("/api/v1/cases/{case_id}/causal-graphs")
+@router.get("/api/v1/cases/{case_id}/causal-graphs")
 def get_case_causal_graphs(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -729,7 +741,7 @@ def get_case_causal_graphs(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data={"graph": graph})
 
 
-@app.get("/api/v1/cases/{case_id}/evidence-gaps")
+@router.get("/api/v1/cases/{case_id}/evidence-gaps")
 def get_case_evidence_gaps(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -737,7 +749,7 @@ def get_case_evidence_gaps(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/conclusions")
+@router.get("/api/v1/cases/{case_id}/conclusions")
 def get_case_conclusions(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -745,7 +757,7 @@ def get_case_conclusions(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data={"conclusion": conclusion})
 
 
-@app.get("/api/v1/cases/{case_id}/recommendations")
+@router.get("/api/v1/cases/{case_id}/recommendations")
 def get_case_recommendations(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -753,7 +765,7 @@ def get_case_recommendations(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/acquisition-operations")
+@router.get("/api/v1/acquisition-operations")
 def list_acquisition_operations(request: Request) -> APIResponse:
     _require_role(request, "operator")
     items = repo.list_operation_specs() if hasattr(repo, "list_operation_specs") else []
@@ -762,7 +774,7 @@ def list_acquisition_operations(request: Request) -> APIResponse:
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/execution-units")
+@router.get("/api/v1/cases/{case_id}/execution-units")
 def list_case_execution_units(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -772,7 +784,7 @@ def list_case_execution_units(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.get("/api/v1/cases/{case_id}/attachments")
+@router.get("/api/v1/cases/{case_id}/attachments")
 def list_case_attachments(
     case_id: str,
     request: Request,
@@ -785,7 +797,7 @@ def list_case_attachments(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.post("/api/v1/cases/{case_id}/attachments/{attachment_id}/exclude")
+@router.post("/api/v1/cases/{case_id}/attachments/{attachment_id}/exclude")
 def exclude_case_attachment(
     case_id: str,
     attachment_id: str,
@@ -810,4 +822,4 @@ def exclude_case_attachment(
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = ["_case_agent_progress", "router"]

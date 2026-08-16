@@ -12,10 +12,18 @@ import {
   SessionManager,
   defineTool,
 } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildToolCatalog } from "./tools.mjs";
+import { EventSpool } from "./event-spool.mjs";
+
+const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+const piPackage = JSON.parse(readFileSync(join(dirname(piEntry), "..", "package.json"), "utf8"));
+const PI_RUNTIME_VERSION = piPackage.version;
 
 export class RuntimeManager {
-  constructor({ modelRuntime, internalBase, noSkills = true } = {}) {
+  constructor({ modelRuntime, internalBase, noSkills = true, eventSpool } = {}) {
     this.modelRuntime = modelRuntime;
     this.internalBase = internalBase || "http://127.0.0.1:8191";
     this.sessions = new Map(); // case_id -> {session, generation, context}
@@ -23,6 +31,9 @@ export class RuntimeManager {
     this.forwardedKeys = new Set(); // idempotency keys already POSTed
     this.lastAnswers = new Map(); // case_id -> last auditable final answer
     this.noSkills = noSkills;
+    this.eventSpool = eventSpool || new EventSpool(
+      process.env.MINI_DROP_PI_EVENT_SPOOL_PATH || join(process.cwd(), "data", "pi-runtime-events.jsonl"),
+    );
   }
 
   async ensureModelRuntime() {
@@ -59,16 +70,30 @@ export class RuntimeManager {
         this.lastAnswers.delete(caseId);
       } else {
         existing.context = caseContext;
+        existing.toolEnvelope.current = this._toolEnvelope(caseContext);
+        const activeNames = buildToolCatalog({
+          internalBase: this.internalBase,
+          sideEffectPolicy: caseContext?.side_effect_policy || "AUTO_READ_LOW",
+          getEnvelope: () => existing.toolEnvelope.current,
+        }).map((tool) => tool.name);
+        existing.session.setActiveToolsByName(activeNames);
+        await this.replayPending(caseId);
         return this._binding(caseId);
       }
     }
     await this.ensureModelRuntime();
     const generation = incomingGeneration;
+    const toolEnvelope = { current: this._toolEnvelope(caseContext) };
     const tools = buildToolCatalog({
       internalBase: this.internalBase,
-      sideEffectPolicy: caseContext?.side_effect_policy || "AUTO_READ_LOW",
+      sideEffectPolicy: "AUTO_READ_LOW",
+      getEnvelope: () => toolEnvelope.current,
     });
-    const allowedNames = tools.map((tool) => tool.name);
+    const allowedNames = buildToolCatalog({
+      internalBase: this.internalBase,
+      sideEffectPolicy: caseContext?.side_effect_policy || "AUTO_READ_LOW",
+      getEnvelope: () => toolEnvelope.current,
+    }).map((tool) => tool.name);
     const thinkingLevel = process.env.MINI_DROP_PI_THINKING_LEVEL || "high";
     const { session } = await createAgentSession({
       model: this.selectedModel || this.modelRuntime,
@@ -97,9 +122,20 @@ export class RuntimeManager {
       subscribed: false,
       currentTurnId: null,
       lastError: "",
+      toolEnvelope,
     });
     this.lastSeq.set(caseId, 0);
+    await this.replayPending(caseId);
     return this._binding(caseId);
+  }
+
+  _toolEnvelope(context) {
+    return {
+      side_effect_policy: context?.side_effect_policy || "AUTO_READ_LOW",
+      runtime_generation: Number(context?.runtime_generation) || 1,
+      expected_control_revision: Number(context?.control_revision) || 1,
+      expected_scope_revision: Number(context?.scope_revision) || 1,
+    };
   }
 
   get(case_id) {
@@ -112,7 +148,7 @@ export class RuntimeManager {
     return {
       case_id,
       runtime_type: "pi",
-      runtime_version: "pi-0.83.0",
+      runtime_version: `pi-${PI_RUNTIME_VERSION}`,
       runtime_session_id: case_id,
       runtime_generation: entry.generation,
       status: "READY",
@@ -238,14 +274,14 @@ export class RuntimeManager {
   state(case_id) {
     const entry = this.sessions.get(case_id);
     if (!entry) {
-      return { case_id, status: "NOT_STARTED", runtime_generation: 0, last_event_seq: 0, runtime_version: "pi-0.83.0", detail: "" };
+      return { case_id, status: "NOT_STARTED", runtime_generation: 0, last_event_seq: 0, runtime_version: `pi-${PI_RUNTIME_VERSION}`, detail: "" };
     }
     return {
       case_id,
       status: "READY",
       runtime_generation: entry.generation,
       last_event_seq: this.lastSeq.get(case_id) || 0,
-      runtime_version: "pi-0.83.0",
+      runtime_version: `pi-${PI_RUNTIME_VERSION}`,
       detail: entry.lastError || "",
     };
   }
@@ -310,7 +346,11 @@ export class RuntimeManager {
     if (seq <= 0) return;
     const idempotencyKey = `runtime-event:${case_id}:${entry.generation}:${seq}:${event.type}`;
     if (this.forwardedKeys.has(idempotencyKey)) return;
-    this.forwardedKeys.add(idempotencyKey);
+    const pendingRecord = this.eventSpool.get(idempotencyKey);
+    if (pendingRecord) {
+      await this._deliverSpoolRecord(pendingRecord, entry);
+      return;
+    }
     const projection = this._auditProjection(event);
     if (event.type === "turn_end") {
       try {
@@ -327,30 +367,54 @@ export class RuntimeManager {
     projection.trigger_turn_id = entry.currentTurnId || null;
     projection.side_effect_policy = entry.context?.side_effect_policy || null;
     projection.context_snapshot_id = entry.context?.context_snapshot_id || null;
+    const record = {
+      case_id,
+      runtime_generation: entry.generation,
+      event_id: `evt-${case_id}-${entry.generation}-${seq}`,
+      event_seq: seq,
+      event_type: event.type,
+      payload: projection,
+      idempotency_key: idempotencyKey,
+    };
+    this.eventSpool.append(record);
+    await this._deliverSpoolRecord(record, entry);
+  }
+
+  async replayPending(caseId = null) {
+    for (const record of this.eventSpool.pending(caseId)) {
+      const entry = this.sessions.get(record.case_id);
+      if (!entry) continue;
+      await this._deliverSpoolRecord(record, entry);
+    }
+  }
+
+  async _deliverSpoolRecord(record, entry) {
     try {
-      const resp = await fetch(`${this.internalBase}/internal/runtime/v1/cases/${case_id}/events`, {
+      const token = process.env.MINI_DROP_PI_INTERNAL_TOKEN || "";
+      if (!token) return;
+      const resp = await fetch(`${this.internalBase}/internal/runtime/v1/cases/${record.case_id}/events`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Internal-Token": token,
         },
         body: JSON.stringify({
-          runtime_generation: entry.generation,
-          events: [{
-            event_id: `evt-${case_id}-${entry.generation}-${seq}`,
-            event_seq: seq,
-            event_type: event.type,
-            payload: projection,
-            idempotency_key: idempotencyKey,
-          }],
+          runtime_generation: record.runtime_generation,
+          events: [record],
         }),
       });
-      if (!resp.ok) {
-        this.forwardedKeys.delete(idempotencyKey);
+      if (resp.ok) {
+        this.eventSpool.ack(record.idempotency_key);
+        this.forwardedKeys.add(record.idempotency_key);
+      } else if (resp.status === 409) {
+        // A rotated generation is permanently fenced and must never replay.
+        this.eventSpool.ack(record.idempotency_key);
+        this.forwardedKeys.add(record.idempotency_key);
+        entry.lastError = "event fenced by newer runtime generation";
+      } else {
         entry.lastError = `event forward failed: ${resp.status}`;
       }
     } catch (err) {
-      this.forwardedKeys.delete(idempotencyKey);
       entry.lastError = `event forward failed: ${String(err)}`;
     }
   }

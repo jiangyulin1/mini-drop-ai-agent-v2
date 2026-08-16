@@ -51,7 +51,7 @@ def test_init_db_adds_v2_columns_to_legacy_database(monkeypatch, tmp_path):
     }
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0023_v6_agent_core"
+            "0025_evidence_contract"
         )
     reset_engine()
 
@@ -72,12 +72,13 @@ def test_init_db_creates_fresh_schema_at_head(monkeypatch, tmp_path):
         "case_recovery_plans", "diagnostic_target_sessions", "target_signals",
         "profile_windows",
         "agent_runtime_bindings", "agent_runtime_turns", "agent_runtime_events", "case_evidence",
+        "domain_outbox", "outbox_consumer_effects",
     }.issubset(
         inspector.get_table_names()
     )
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0023_v6_agent_core"
+            "0025_evidence_contract"
         )
     reset_engine()
 

@@ -1,68 +1,75 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Fanout, recovery, authorization, and system-control HTTP endpoints."""
 
 from __future__ import annotations
 
-
-from server.app.main import (  # noqa: F401
-    _Path,
-    _cancel_case_tasks,
-    _extract_task_artifact_json,
+from server.app.routes.recovery import (
+    VERIFICATION_TASK_DURATION_SEC,
     _find_diagnosis_sys_metrics_task,
     _judge_recovery,
     _read_sys_metrics_artifact_keys,
-    _request_principal,
-    _request_tenant,
-    _require_role,
-    APIResponse,
+)
+from server.app.routes.plans_control import _cancel_case_tasks
+
+import os
+import secrets
+import time
+from pathlib import Path as _Path
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from server.app.agent_runtime.config import AgentRuntimeMode, runtime_mode
+from server.app.agent_runtime.dispatcher import get_runtime
+from server.app.artifact_service import extract_artifact_json
+from server.app.case_collaboration import CaseCorrectionRequest, CaseTransitionRequest
+from server.app.common_utils import status_value
+from server.app.diagnosis.action_registry import (
     ActionEvaluationRequest,
-    Actor,
-    AgentRuntimeMode,
-    Any,
-    AuthorizationEvaluationRequest,
-    BaseModel,
-    CAPABILITY_EPOCH,
-    CaseCorrectionRequest,
-    CaseTransitionRequest,
-    CreateAuthorizationGrantRequest,
-    CreateTaskRequest,
     DEFAULT_ACTION_REGISTRY,
-    EnvironmentProfile,
-    FanoutCollectionRun,
-    Field,
-    HTTPException,
-    MembershipSnapshot,
-    Optional,
+    evaluate_action,
+)
+from server.app.diagnosis.authorization import (
+    AuthorizationEvaluationRequest,
+    CreateAuthorizationGrantRequest,
+    evaluate_source_access,
+)
+from server.app.diagnosis.cluster_scope import EnvironmentProfile, MembershipSnapshot
+from server.app.diagnosis.fanout import FanoutCollectionRun
+from server.app.diagnosis.governance import (
+    CAPABILITY_EPOCH,
     RED_BUTTON,
-    Request,
-    ResourceRef,
+    issue_capability_key,
+)
+from server.app.diagnosis.reference_resolver import ResourceRef
+from server.app.diagnosis.source_gateway import (
     SourceGatewayError,
     SourceQueryRequest,
-    VERIFICATION_TASK_DURATION_SEC,
-    app,
+)
+from server.app.http.auth import (
+    request_principal as _request_principal,
+    request_tenant as _request_tenant,
+    require_role as _require_role,
+)
+from server.app.prometheus_metrics import record_source_access
+from server.app.runtime_services import (
     diagnosis_orchestrator,
-    evaluate_action,
-    evaluate_source_access,
     evidence_attachment_service,
     fanout_service,
-    get_runtime,
     investigation_plan_service,
-    issue_capability_key,
-    now_utc,
-    os,
-    record_source_access,
     repo,
-    runtime_mode,
-    secrets,
     source_gateway,
-    status_value,
     target_resolver,
-    time,
 )
+from server.app.schemas import APIResponse, CreateTaskRequest
+from server.app.state_machine import Actor, now_utc
+
+
+router = APIRouter()
+
+
+def _extract_task_artifact_json(repository, task_id: str, artifact_type: str):
+    return extract_artifact_json(repository.artifacts.get(task_id, []), artifact_type)
 
 # ── E3.5 集群范围与采集扇出 ─────────────────────────────────────────
 
@@ -77,7 +84,7 @@ def _fanout_step(case_id: str, tenant_id: str, step_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail=f"PlanStep 不存在: {step_id}")
 
 
-@app.post("/api/v1/cases/{case_id}/fanout")
+@router.post("/api/v1/cases/{case_id}/fanout")
 def create_case_fanout(case_id: str, payload: dict[str, Any], request: Request) -> APIResponse:
     """E3.5：冻结成员快照，按选择策略展开一个逻辑 Step 为单目标 Task 扇出。
 
@@ -150,7 +157,7 @@ def create_case_fanout(case_id: str, payload: dict[str, Any], request: Request) 
     })
 
 
-@app.get("/api/v1/cases/{case_id}/fanout")
+@router.get("/api/v1/cases/{case_id}/fanout")
 def list_case_fanout_runs(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -159,7 +166,7 @@ def list_case_fanout_runs(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data={"items": repo.list_fanout_runs(case_id, tenant_id)})
 
 
-@app.get("/api/v1/cases/{case_id}/fanout/{run_id}")
+@router.get("/api/v1/cases/{case_id}/fanout/{run_id}")
 def get_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -169,7 +176,7 @@ def get_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIRespo
     return APIResponse(data=run)
 
 
-@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/cancel")
+@router.post("/api/v1/cases/{case_id}/fanout/{run_id}/cancel")
 def cancel_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIResponse:
     """取消传播：未完成 Task 全部转 CANCELLED，已 DONE 不动。"""
     _require_role(request, "operator")
@@ -185,7 +192,7 @@ def cancel_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIRe
     return APIResponse(data=updated)
 
 
-@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/resume")
+@router.post("/api/v1/cases/{case_id}/fanout/{run_id}/resume")
 def resume_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIResponse:
     """恢复：已取消的未终态 Task 重新进入 PENDING，run 回到 RUNNING。"""
     _require_role(request, "operator")
@@ -196,7 +203,7 @@ def resume_case_fanout_run(case_id: str, run_id: str, request: Request) -> APIRe
     return APIResponse(data=fanout_service.resume_run(FanoutCollectionRun(**run)))
 
 
-@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/task-outcome")
+@router.post("/api/v1/cases/{case_id}/fanout/{run_id}/task-outcome")
 def report_fanout_task_outcome(case_id: str, run_id: str, payload: dict[str, Any],
                                request: Request) -> APIResponse:
     """记录单个 Task 结果；scope_revision 不匹配的迟到结果被隔离。"""
@@ -215,7 +222,7 @@ def report_fanout_task_outcome(case_id: str, run_id: str, payload: dict[str, Any
     ))
 
 
-@app.post("/api/v1/cases/{case_id}/fanout/{run_id}/aggregate")
+@router.post("/api/v1/cases/{case_id}/fanout/{run_id}/aggregate")
 def aggregate_case_fanout(case_id: str, run_id: str, payload: dict[str, Any],
                           request: Request) -> APIResponse:
     """coverage-aware Evidence 聚合：只以成功成员作结论来源，覆盖率不足只出局部结论。"""
@@ -253,7 +260,7 @@ def aggregate_case_fanout(case_id: str, run_id: str, payload: dict[str, Any],
     })
 
 
-@app.post("/api/v1/cases/{case_id}/verification")
+@router.post("/api/v1/cases/{case_id}/verification")
 def verify_case_recovery(
     case_id: str,
     payload: dict[str, Any],
@@ -354,7 +361,7 @@ def verify_case_recovery(
     return APIResponse(data=payload)
 
 
-@app.post("/api/v1/cases/{case_id}/manual-actions")
+@router.post("/api/v1/cases/{case_id}/manual-actions")
 def record_case_manual_action(
     case_id: str,
     payload: dict[str, Any],
@@ -395,7 +402,7 @@ def record_case_manual_action(
     return APIResponse(data={"case_id": case_id, "event": event, "record": record})
 
 
-@app.post("/api/v1/cases/{case_id}/corrections")
+@router.post("/api/v1/cases/{case_id}/corrections")
 def correct_incident_case(
     case_id: str,
     payload: CaseCorrectionRequest,
@@ -523,7 +530,7 @@ class CaseCommandRequest(BaseModel):
     expected_campaign_revision: int | None = None
 
 
-@app.post("/api/v1/cases/{case_id}/commands")
+@router.post("/api/v1/cases/{case_id}/commands")
 def apply_case_command(
     case_id: str,
     payload: CaseCommandRequest,
@@ -652,7 +659,7 @@ class EvaluationBootstrapRequest(BaseModel):
     candidate_digest: str = ""
 
 
-@app.post("/api/v1/internal/evaluation-runs/bootstrap")
+@router.post("/api/v1/internal/evaluation-runs/bootstrap")
 def bootstrap_evaluation_run(payload: EvaluationBootstrapRequest, request: Request) -> APIResponse:
     """11.6 Formal Harness entry point.
 
@@ -673,28 +680,28 @@ def bootstrap_evaluation_run(payload: EvaluationBootstrapRequest, request: Reque
     })
 
 
-@app.post("/api/v1/cases/{case_id}/pause")
+@router.post("/api/v1/cases/{case_id}/pause")
 def pause_incident_case(
     case_id: str, payload: CaseTransitionRequest, request: Request,
 ) -> APIResponse:
     return _transition_case_from_api(case_id, payload, request, "pause")
 
 
-@app.post("/api/v1/cases/{case_id}/resume")
+@router.post("/api/v1/cases/{case_id}/resume")
 def resume_incident_case(
     case_id: str, payload: CaseTransitionRequest, request: Request,
 ) -> APIResponse:
     return _transition_case_from_api(case_id, payload, request, "resume")
 
 
-@app.post("/api/v1/cases/{case_id}/stop")
+@router.post("/api/v1/cases/{case_id}/stop")
 def stop_incident_case(
     case_id: str, payload: CaseTransitionRequest, request: Request,
 ) -> APIResponse:
     return _transition_case_from_api(case_id, payload, request, "stop")
 
 
-@app.post("/api/v1/cases/{case_id}/resolve")
+@router.post("/api/v1/cases/{case_id}/resolve")
 def resolve_incident_case(
     case_id: str, payload: CaseTransitionRequest, request: Request,
 ) -> APIResponse:
@@ -706,13 +713,13 @@ class SystemControlRequest(BaseModel):
     value: dict[str, Any] = Field(default_factory=dict)
 
 
-@app.get("/api/v1/controls")
+@router.get("/api/v1/controls")
 def list_controls(request: Request) -> APIResponse:
     _require_role(request, "operator")
     return APIResponse(data=repo.list_system_controls())
 
 
-@app.post("/api/v1/controls/{control_name}")
+@router.post("/api/v1/controls/{control_name}")
 def set_control(control_name: str, payload: SystemControlRequest, request: Request) -> APIResponse:
     _require_role(request, "operator")
     allowed = {RED_BUTTON, CAPABILITY_EPOCH}
@@ -724,7 +731,7 @@ def set_control(control_name: str, payload: SystemControlRequest, request: Reque
     return APIResponse(data=result)
 
 
-@app.post("/api/v1/controls/capability-key/issue")
+@router.post("/api/v1/controls/capability-key/issue")
 def issue_capability(request: Request, body: Optional[dict] = None) -> APIResponse:
     _require_role(request, "operator")
     body = body or {}
@@ -733,7 +740,7 @@ def issue_capability(request: Request, body: Optional[dict] = None) -> APIRespon
     return APIResponse(data=key)
 
 
-@app.post("/api/v1/sources/{source_id}/query")
+@router.post("/api/v1/sources/{source_id}/query")
 def query_registered_source(
     source_id: str,
     payload: SourceQueryRequest,
@@ -765,7 +772,7 @@ def query_registered_source(
     return APIResponse(data=envelope.model_dump(mode="json"))
 
 
-@app.post("/api/v1/grants")
+@router.post("/api/v1/grants")
 def create_authorization_grant(payload: CreateAuthorizationGrantRequest, request: Request) -> APIResponse:
     _require_role(request, "authorization_admin")
     if payload.tenant_id != _request_tenant():
@@ -791,7 +798,7 @@ def create_authorization_grant(payload: CreateAuthorizationGrantRequest, request
     return APIResponse(data=created)
 
 
-@app.get("/api/v1/grants")
+@router.get("/api/v1/grants")
 def list_authorization_grants(
     request: Request,
     principal_id: str = "",
@@ -810,7 +817,7 @@ def list_authorization_grants(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.delete("/api/v1/grants/{grant_id}")
+@router.delete("/api/v1/grants/{grant_id}")
 def revoke_authorization_grant(grant_id: str, request: Request) -> APIResponse:
     _require_role(request, "authorization_admin")
     result = repo.revoke_authorization_grant(grant_id, _request_principal(request))
@@ -819,7 +826,7 @@ def revoke_authorization_grant(grant_id: str, request: Request) -> APIResponse:
     return APIResponse(data=result)
 
 
-@app.post("/api/v1/policy/evaluate-source")
+@router.post("/api/v1/policy/evaluate-source")
 def evaluate_source_authorization(payload: AuthorizationEvaluationRequest, request: Request) -> APIResponse:
     _require_role(request, "authorization_admin")
     if payload.tenant_id != _request_tenant():
@@ -833,7 +840,7 @@ def evaluate_source_authorization(payload: AuthorizationEvaluationRequest, reque
     return APIResponse(data=result.model_dump(mode="json"))
 
 
-@app.get("/api/v1/actions")
+@router.get("/api/v1/actions")
 def list_registered_actions(request: Request) -> APIResponse:
     _require_role(request, "operator")
     items = [item.model_dump(mode="json") for item in DEFAULT_ACTION_REGISTRY.list()]
@@ -844,7 +851,7 @@ def list_registered_actions(request: Request) -> APIResponse:
     })
 
 
-@app.post("/api/v1/actions/{action_id}/evaluate")
+@router.post("/api/v1/actions/{action_id}/evaluate")
 def evaluate_registered_action(
     action_id: str,
     payload: ActionEvaluationRequest,
@@ -862,4 +869,4 @@ def evaluate_registered_action(
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = ["router", "verify_case_recovery"]

@@ -1,33 +1,27 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Agent discovery and process-scan endpoints."""
 
 from __future__ import annotations
 
+import time
+from typing import Annotated, Any
 
-from server.app.main import (  # noqa: F401
-    _json,
-    _read_artifact_object_text,
-    _resolve_artifact_path_or_none,
-    APIResponse,
-    Any,
-    CreateTaskRequest,
-    HTTPException,
-    Request,
-    app,
-    repo,
-    status_value,
-    time,
-)
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from server.app.artifact_service import extract_artifact_json
+from server.app.common_utils import status_value
+from server.app.http.dependencies import get_repository_application_service
+from server.app.schemas import APIResponse, CreateTaskRequest
+
+
+router = APIRouter()
+Repository = Annotated[Any, Depends(get_repository_application_service)]
 
 # ── Agent（查询面） ────────────────────────────────────────────
 
 
-@app.get("/api/agents")
+@router.get("/api/agents")
 def list_agents(
+    repo: Repository,
     limit: int = 1000,
     offset: int = 0,
 ) -> APIResponse:
@@ -51,11 +45,12 @@ def list_agents(
 # ── 进程发现（选择诊断目标用） ────────────────────────────────────
 
 
-@app.post("/api/agents/{agent_id}/processes/scan")
+@router.post("/api/agents/{agent_id}/processes/scan")
 def scan_agent_processes(
     agent_id: str,
     payload: dict[str, Any],
     request: Request,
+    repo: Repository,
 ) -> APIResponse:
     """在目标 Worker 上扫描进程，返回可选的诊断目标候选。
 
@@ -121,7 +116,7 @@ def scan_agent_processes(
             "message": "扫描尚未完成，请稍后重试",
         })
 
-    processes = _read_scan_artifact(task.id)
+    processes = _read_scan_artifact(repo, task.id)
     return APIResponse(data={
         "task_id": task.id,
         "status": "DONE",
@@ -130,28 +125,19 @@ def scan_agent_processes(
     })
 
 
-def _read_scan_artifact(task_id: str) -> list[dict[str, Any]]:
+def _read_scan_artifact(repo: Any, task_id: str) -> list[dict[str, Any]]:
     """读取 process_scan 任务的进程清单产物。"""
     for artifact in repo.artifacts.get(task_id, []):
         if artifact.get("artifact_type") != "process_scan":
             continue
-        path = _resolve_artifact_path_or_none(artifact.get("local_path"))
-        if path is None and artifact.get("object_key"):
-            text = _read_artifact_object_text(artifact)
-            try:
-                return _json.loads(text).get("processes", [])
-            except (TypeError, ValueError):
-                return []
-        if path is not None:
-            try:
-                return _json.loads(path.read_text(encoding="utf-8")).get("processes", [])
-            except (TypeError, ValueError):
-                return []
+        value = extract_artifact_json([artifact], "process_scan")
+        return value.get("processes", []) if isinstance(value, dict) else []
     return []
 
 
-@app.get("/api/audit-logs")
+@router.get("/api/audit-logs")
 def list_audit_logs(
+    repo: Repository,
     limit: int = 1000,
     offset: int = 0,
 ) -> APIResponse:
@@ -165,4 +151,4 @@ def list_audit_logs(
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = ["router", "scan_agent_processes"]

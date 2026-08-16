@@ -88,6 +88,12 @@ def test_attachment_materializes_task_artifacts_as_case_evidence(client: TestCli
     assert evidence[0]["task_id"] == task_id
     assert evidence[0]["artifact_type"] == "sys_metrics"
     assert evidence[0]["projection_hash"]
+    assert evidence[0]["source_id"] == "sys_metrics"
+    assert evidence[0]["schema_version"] == "1"
+    assert evidence[0]["completeness"] == "COMPLETE"
+    assert evidence[0]["trust_level"] == "INTERNAL"
+    assert evidence[0]["sha256"]
+    assert evidence[0]["lineage"]["task_id"] == task_id
     attachment = repo.list_case_attachments(case["case_id"], "tenant-a")[0]
     assert attachment["evidence_ids"] == item["evidence_ids"]
     listed = client.get(f"/api/v1/cases/{case['case_id']}/evidence")
@@ -154,3 +160,36 @@ def test_evidence_review_excluded_updates_canonical_store(client: TestClient):
         headers={"X-Internal-Token": TOKEN},
     )
     assert resp.status_code == 400
+
+
+def test_excluding_supporting_evidence_appends_downgraded_conclusion(client: TestClient):
+    task_id = _done_task_with_artifact()
+    case = _create_case(client)
+    attached = client.post(
+        f"/api/v1/cases/{case['case_id']}/attachments",
+        json={"references": [{"type": "task", "id": task_id}]},
+    ).json()["data"]["items"][0]
+    evidence_id = attached["evidence_ids"][0]
+    finished = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"],
+            "summary": "CPU 证据支持当前结论",
+            "evidence_ids": [evidence_id],
+        },
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert finished.status_code == 200, finished.text
+    original = repo.get_conclusion(case["case_id"], "tenant-a")
+    assert original["revision"] == 1
+
+    review = client.post(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
+        json={"evidence_id": evidence_id, "decision": "EXCLUDED", "reason": "outlier"},
+    )
+    assert review.status_code == 200, review.text
+    downgraded = repo.get_conclusion(case["case_id"], "tenant-a")
+    assert downgraded["revision"] == 2
+    assert downgraded["state"] == "INSUFFICIENT_EVIDENCE"
+    assert downgraded["verifier_version"] == "causal-report-verifier.v2-revalidation"
+    assert downgraded["claim_evidence_bindings"][0]["verifier_result"] == "EVIDENCE_EXCLUDED"

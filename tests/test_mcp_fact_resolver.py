@@ -195,7 +195,7 @@ def test_evidence_service_gateway_failure_degrades():
 
 
 def test_mcp_facts_endpoint_resolves(client: TestClient, monkeypatch):
-    import server.app.main as main
+    import server.app.runtime_services as main
     # 测试环境默认无注册 MCP Source；显式注册 k8s source 以验证 CALL_MCP 判定
     monkeypatch.setattr(
         main.mcp_evidence_service._resolver, "_registered",

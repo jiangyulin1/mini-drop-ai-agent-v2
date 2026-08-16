@@ -84,6 +84,11 @@ from server.app.state_machine import (
     build_status_event,
     now_utc,
 )
+from server.app.persistence.uow import SqlAlchemyUnitOfWork
+from server.app.persistence.fencing import (
+    LeaseFenceViolation,
+    active_case_lease_fence,
+)
 
 
 def _collection_queue_ttl_sec(duration_sec: int) -> int:
@@ -149,6 +154,39 @@ class SqlRepository(SqlRepositoryV6Mixin):
         self.agent_metrics: dict[str, dict[str, Any]] = {}
         # TTL 缓存：key → (expires_at, value)
         self._cache: dict[str, tuple[float, Any]] = {}
+        self._uow_factory = lambda: SqlAlchemyUnitOfWork(
+            session_factory=new_session,
+            lock=self._lock,
+            cache_invalidator=self._cache.clear,
+            pre_commit_validator=self._validate_active_case_fence,
+        )
+
+    @staticmethod
+    def _validate_active_case_fence(session: OrmSession) -> None:
+        """Lock and validate the active Supervisor fence immediately before commit."""
+
+        fence = active_case_lease_fence()
+        if fence is None:
+            return
+        query = session.query(CaseRuntimeLeaseModel).filter(
+            CaseRuntimeLeaseModel.case_id == fence.case_id,
+            CaseRuntimeLeaseModel.tenant_id == fence.tenant_id,
+        )
+        if session.bind is not None and session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        lease = query.execution_options(populate_existing=True).first()
+        now = now_utc()
+        lease_until = lease.lease_until if lease is not None else None
+        if lease_until is not None and lease_until.tzinfo is None:
+            lease_until = lease_until.replace(tzinfo=timezone.utc)
+        if (
+            lease is None
+            or lease.owner != fence.owner
+            or int(lease.row_version or 0) != fence.token
+            or lease_until is None
+            or lease_until < now
+        ):
+            raise LeaseFenceViolation("CASE_LEASE_FENCED")
 
     def _cached(self, key: str, ttl_sec: float, factory):
         """带 TTL 的简单缓存。
@@ -170,6 +208,15 @@ class SqlRepository(SqlRepositoryV6Mixin):
         self._cache[key] = (now + ttl_sec, value)
         return value
 
+    def invalidate_cache(self, key: str | None = None) -> None:
+        """Invalidate repository read caches without exposing private state."""
+
+        with self._lock:
+            if key is None:
+                self._cache.clear()
+            else:
+                self._cache.pop(key, None)
+
     @contextmanager
     def _write_session(self):
         """写事务 context manager：加锁 → 建 session → 提交/回滚 → 关闭 → 清缓存 → 提交后通知。
@@ -180,21 +227,8 @@ class SqlRepository(SqlRepositoryV6Mixin):
         SSE 事件通过 ``session.info["_post_commit_notifications"]`` 注册，
         只在 commit 成功后才发布——事务回滚时订阅者不会收到虚假事件。
         """
-        with self._lock:
-            session = new_session()
-            try:
-                yield session
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                hooks = list(session.info.get("_post_commit_notifications", []))
-                session.close()
-            # 写入后清除所有 TTL 缓存，确保下次读取拿到最新数据
-            self._cache.clear()
-            for hook in hooks:
-                hook()
+        with self._uow_factory() as session:
+            yield session
 
     @staticmethod
     def _locked_task(session: OrmSession, task_id: str) -> TaskModel | None:
@@ -1605,6 +1639,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
         artifact_type: str | None,
         collector_id: str | None,
         source_type: str,
+        source_id: str | None = None,
         target_ref: str | None,
         content_hash: str | None,
         projection_hash: str | None,
@@ -1628,6 +1663,12 @@ class SqlRepository(SqlRepositoryV6Mixin):
         schema_version: str | None = None,
         producer_version: str | None = None,
         raw_locator: str | None = None,
+        size_bytes: int = 0,
+        sha256: str | None = None,
+        completeness: str = "COMPLETE",
+        trust_level: str = "INTERNAL",
+        lineage: dict[str, Any] | None = None,
+        trace_id: str | None = None,
         late_after_cancel: bool = False,
         stale_for_current_revision: bool = False,
     ) -> dict[str, Any]:
@@ -1643,6 +1684,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 existing.artifact_type = artifact_type or existing.artifact_type
                 existing.collector_id = collector_id or existing.collector_id
                 existing.source_type = source_type
+                existing.source_id = source_id or existing.source_id
                 existing.source_channel = source_channel
                 existing.data_origin = data_origin
                 existing.investigation_run_id = investigation_run_id or existing.investigation_run_id
@@ -1667,6 +1709,13 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 existing.schema_version = schema_version or existing.schema_version
                 existing.producer_version = producer_version or existing.producer_version
                 existing.raw_locator = raw_locator or existing.raw_locator
+                existing.size_bytes = int(size_bytes or existing.size_bytes or 0)
+                existing.sha256 = sha256 or existing.sha256
+                existing.completeness = completeness
+                existing.trust_level = trust_level
+                if lineage:
+                    existing.lineage_json = _json_safe(lineage)
+                existing.trace_id = trace_id or existing.trace_id
                 existing.late_after_cancel = bool(late_after_cancel)
                 existing.stale_for_current_revision = bool(stale_for_current_revision)
                 existing.updated_at = now
@@ -1682,6 +1731,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 artifact_type=artifact_type,
                 collector_id=collector_id,
                 source_type=source_type,
+                source_id=source_id,
                 source_channel=source_channel,
                 data_origin=data_origin,
                 investigation_run_id=investigation_run_id,
@@ -1706,6 +1756,12 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 schema_version=schema_version,
                 producer_version=producer_version,
                 raw_locator=raw_locator,
+                size_bytes=int(size_bytes or 0),
+                sha256=sha256,
+                completeness=completeness,
+                trust_level=trust_level,
+                lineage_json=_json_safe(lineage or {}),
+                trace_id=trace_id,
                 late_after_cancel=bool(late_after_cancel),
                 stale_for_current_revision=bool(stale_for_current_revision),
                 created_at=now,
@@ -1788,6 +1844,9 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 return None
             row.status = "EXCLUDED"
             row.updated_at = now
+            self._revalidate_conclusions_after_evidence_status(
+                session, row, "EXCLUDED", now,
+            )
             session.flush()
             return row.to_dict()
 
@@ -2869,13 +2928,30 @@ class SqlRepository(SqlRepositoryV6Mixin):
         owner: str,
         ttl_seconds: int,
     ) -> bool:
-        """CAS 获取 Case 短租约；已被他人持有且未过期时返回 False。"""
+        """Compatibility bool API over the token-returning fenced acquire."""
+
+        return self.acquire_case_lease_token(
+            case_id,
+            tenant_id,
+            owner=owner,
+            ttl_seconds=ttl_seconds,
+        ) is not None
+
+    def acquire_case_lease_token(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        owner: str,
+        ttl_seconds: int,
+    ) -> int | None:
+        """Acquire a lease and return its monotonically increasing fence token."""
         now = now_utc()
         until = now + timedelta(seconds=ttl_seconds)
         with self._write_session() as session:
             case = self._locked_case(session, case_id, tenant_id)
             if case is None or case.state in {"STOPPED", "RESOLVED"}:
-                return False
+                return None
             lease = session.query(CaseRuntimeLeaseModel).filter(
                 CaseRuntimeLeaseModel.case_id == case_id,
                 CaseRuntimeLeaseModel.tenant_id == tenant_id,
@@ -2885,14 +2961,15 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 if held_until.tzinfo is None:
                     held_until = held_until.replace(tzinfo=timezone.utc)
                 if held_until >= now and lease.owner != owner:
-                    return False
+                    return None
                 # 过期或被同一 owner 重新竞争 → 更新持有。
                 lease.owner = owner
                 lease.lease_until = until
                 lease.row_version += 1
                 lease.updated_at = now
+                token = int(lease.row_version)
             else:
-                session.add(CaseRuntimeLeaseModel(
+                lease = CaseRuntimeLeaseModel(
                     id=f"lease_{uuid4().hex}",
                     case_id=case_id,
                     tenant_id=tenant_id,
@@ -2901,9 +2978,11 @@ class SqlRepository(SqlRepositoryV6Mixin):
                     row_version=1,
                     created_at=now,
                     updated_at=now,
-                ))
-            session.commit()
-            return True
+                )
+                session.add(lease)
+                token = 1
+            session.flush()
+            return token
 
     def renew_case_lease(
         self,
@@ -2912,6 +2991,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
         *,
         owner: str,
         ttl_seconds: int,
+        fence_token: int | None = None,
     ) -> bool:
         now = now_utc()
         with self._write_session() as session:
@@ -2922,20 +3002,35 @@ class SqlRepository(SqlRepositoryV6Mixin):
             ).first()
             if lease is None:
                 return False
+            held_until = lease.lease_until
+            if held_until.tzinfo is None:
+                held_until = held_until.replace(tzinfo=timezone.utc)
+            if held_until < now:
+                return False
+            if fence_token is not None and int(lease.row_version or 0) != fence_token:
+                return False
             lease.lease_until = now + timedelta(seconds=ttl_seconds)
             lease.row_version += 1
             lease.updated_at = now
-            session.commit()
             return True
 
-    def release_case_lease(self, case_id: str, tenant_id: str, owner: str) -> None:
+    def release_case_lease(
+        self,
+        case_id: str,
+        tenant_id: str,
+        owner: str,
+        *,
+        fence_token: int | None = None,
+    ) -> None:
         with self._write_session() as session:
-            session.query(CaseRuntimeLeaseModel).filter(
+            query = session.query(CaseRuntimeLeaseModel).filter(
                 CaseRuntimeLeaseModel.case_id == case_id,
                 CaseRuntimeLeaseModel.tenant_id == tenant_id,
                 CaseRuntimeLeaseModel.owner == owner,
-            ).delete(synchronize_session=False)
-            session.commit()
+            )
+            if fence_token is not None:
+                query = query.filter(CaseRuntimeLeaseModel.row_version == fence_token)
+            query.delete(synchronize_session=False)
 
     def list_unleased_cases(
         self,
@@ -2994,7 +3089,6 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 created_at=now,
             )
             session.add(row)
-            session.commit()
             return row.to_dict()
 
     def list_pending_case_commands(
@@ -3014,7 +3108,6 @@ class SqlRepository(SqlRepositoryV6Mixin):
             if row is not None:
                 row.status = "DONE"
                 row.processed_at = now_utc()
-                session.commit()
 
     # ------------------------------------------------------------------
     # Global governance controls (Red Button, capability rotation epoch)
@@ -3044,7 +3137,6 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 row.enabled = enabled
                 row.value_json = value if value is not None else row.value_json or {}
                 row.updated_at = now_utc()
-            session.commit()
             return row.to_dict()
 
     def list_system_controls(self) -> list[dict[str, Any]]:
@@ -3633,6 +3725,20 @@ class SqlRepository(SqlRepositoryV6Mixin):
                         **payload.model_dump(),
                         "idempotency_key_present": bool(normalized_key),
                     },
+                )
+                self._enqueue_domain_outbox_in_session(
+                    session,
+                    aggregate_type="task",
+                    aggregate_id=task_id,
+                    event_type="TASK_STATE_CHANGED",
+                    aggregate_revision=0,
+                    payload_schema_version="1.0",
+                    payload={
+                        "task_id": task_id,
+                        "from_status": None,
+                        "to_status": TaskStatus.PENDING.value,
+                    },
+                    dedupe_key=f"task-state:{hashlib.sha256(f'{task_id}:0:PENDING'.encode()).hexdigest()}",
                 )
                 return task
         except IntegrityError:
@@ -4634,6 +4740,24 @@ class SqlRepository(SqlRepositoryV6Mixin):
             task.started_at = now_utc()
         if to_status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED):
             task.finished_at = now_utc()
+
+        revision = int(task.row_version or 0)
+        state_identity = f"{task_id}:{revision}:{to_status.value}"
+        self._enqueue_domain_outbox_in_session(
+            session,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            event_type="TASK_STATE_CHANGED",
+            aggregate_revision=revision,
+            payload_schema_version="1.0",
+            payload={
+                "task_id": task_id,
+                "from_status": from_status,
+                "to_status": to_status.value,
+                "reason": reason,
+            },
+            dedupe_key=f"task-state:{hashlib.sha256(state_identity.encode()).hexdigest()}",
+        )
 
         # 发布 SSE 事件（仅在事务提交成功后）
         self._notify_after_commit(session, "task_changed", {

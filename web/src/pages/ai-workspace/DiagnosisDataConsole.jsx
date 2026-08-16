@@ -316,7 +316,7 @@ export default function DiagnosisDataConsole({
           </div>
           <div>
             <Typography.Text strong>时长</Typography.Text>
-            <InputNumber min={1} max={120} value={duration} onChange={(value) => setDuration(value || 15)} addonAfter="秒" style={{ width: 180, marginLeft: 10 }} />
+            <InputNumber min={1} max={120} value={duration} onChange={(value) => setDuration(value || 15)} suffix="秒" style={{ width: 180, marginLeft: 10 }} />
           </div>
           <div>
             <Typography.Text strong>Worker 与 PID</Typography.Text>

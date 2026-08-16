@@ -1,35 +1,30 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Common HTTP endpoints exposed through an explicit router."""
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
+import queue as queue_module
+import secrets
+from typing import Any
 
-from server.app.main import (  # noqa: F401
-    _json,
-    _queue,
-    _request_principal,
-    _request_tenant,
-    APIResponse,
-    Any,
-    BUS,
-    HTTPException,
-    REGISTRY,
-    Request,
-    app,
-    asyncio,
-    env_bool,
-    os,
-    secrets,
-)
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+
+from server.app.common_utils import env_bool
+from server.app.event_bus import BUS
+from server.app.http.auth import request_principal, request_tenant
+from server.app.prometheus_metrics import REGISTRY
+from server.app.schemas import APIResponse
+
+
+router = APIRouter()
 
 # ── 通用 ──────────────────────────────────────────────────────
 
 
-@app.get("/api/events/stream")
+@router.get("/api/events/stream")
 async def sse_stream(request: Request, since: str = ""):
     """Server-Sent Events 实时推送。
 
@@ -39,8 +34,6 @@ async def sse_stream(request: Request, since: str = ""):
     用法：const es = new EventSource('/api/events/stream');
           es.onmessage = (e) => console.log(JSON.parse(e.data));
     """
-    from fastapi.responses import StreamingResponse
-
     async def event_generator():
         queue = BUS.subscribe()
         try:
@@ -51,7 +44,7 @@ async def sse_stream(request: Request, since: str = ""):
                     yield (
                         f"id: {event['id']}\n"
                         f"event: {event['event']}\n"
-                        f"data: {_json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
+                        f"data: {json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
                     )
 
             # 持续推送新事件
@@ -61,9 +54,9 @@ async def sse_stream(request: Request, since: str = ""):
                     yield (
                         f"id: {event['id']}\n"
                         f"event: {event['event']}\n"
-                        f"data: {_json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
+                        f"data: {json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
                     )
-                except _queue.Empty:
+                except queue_module.Empty:
                     # 每 30 秒发一个注释行保活
                     yield ":keepalive\n\n"
         except asyncio.CancelledError:
@@ -82,31 +75,30 @@ async def sse_stream(request: Request, since: str = ""):
     )
 
 
-@app.get("/api/metrics")
+@router.get("/api/metrics")
 def prometheus_metrics() -> Any:
     """Prometheus 指标端点。
 
     返回 text/plain 格式的指标数据，可被 Prometheus server 抓取。
     无需鉴权（抓取时 Prometheus 通常不带自定义 header）。
     """
-    from fastapi.responses import PlainTextResponse
     return PlainTextResponse(content=REGISTRY.generate(), media_type="text/plain; charset=utf-8")
 
 
-@app.get("/api/me")
+@router.get("/api/me")
 def current_user(request: Request) -> APIResponse:
-    principal_id = _request_principal(request)
+    principal_id = request_principal(request)
     roles = sorted(getattr(request.state, "principal_roles", set()))
     return APIResponse(data={
         "user_id": principal_id,
         "name": principal_id,
         "role": roles[0] if roles else "operator",
         "roles": roles,
-        "tenant_id": _request_tenant(),
+        "tenant_id": request_tenant(),
     })
 
 
-@app.post("/api/auth/set-cookie")
+@router.post("/api/auth/set-cookie")
 def auth_set_cookie(request: Request, body: dict) -> APIResponse:
     """通过 HttpOnly cookie 设置 API Key（比 localStorage 更安全）。
 
@@ -116,7 +108,6 @@ def auth_set_cookie(request: Request, body: dict) -> APIResponse:
     浏览器将自动在后续请求中携带该 cookie，
     JavaScript 无法通过 document.cookie 读取（HttpOnly）。
     """
-    from fastapi.responses import JSONResponse as _JsonResp
     api_key = (body or {}).get("api_key", "").strip()
     if not api_key:
         return APIResponse(code=400, message="api_key 不能为空")
@@ -135,7 +126,7 @@ def auth_set_cookie(request: Request, body: dict) -> APIResponse:
         if secure_override
         else request.url.scheme == "https" or forwarded_proto == "https"
     )
-    resp = _JsonResp(content={"code": 0, "message": "ok", "data": None})
+    resp = JSONResponse(content={"code": 0, "message": "ok", "data": None})
     resp.set_cookie(
         key="mini_drop_api_key",
         value=api_key,
@@ -148,14 +139,13 @@ def auth_set_cookie(request: Request, body: dict) -> APIResponse:
     return resp
 
 
-@app.post("/api/auth/clear-cookie")
+@router.post("/api/auth/clear-cookie")
 def auth_clear_cookie() -> APIResponse:
     """清除 HttpOnly cookie。"""
-    from fastapi.responses import JSONResponse as _JsonResp
-    resp = _JsonResp(content={"code": 0, "message": "ok", "data": None})
+    resp = JSONResponse(content={"code": 0, "message": "ok", "data": None})
     resp.delete_cookie(key="mini_drop_api_key", path="/api")
     return resp
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = ["router"]

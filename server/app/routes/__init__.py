@@ -1,1 +1,1 @@
-"""Route modules registered by server.app.main."""
+"""Explicit API routers assembled by the application factory."""

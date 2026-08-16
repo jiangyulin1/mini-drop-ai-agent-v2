@@ -11,6 +11,7 @@ Exit codes: 0 built/verified; 1 invalid candidate; 2 worktree changed mid-build.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import math
@@ -20,7 +21,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ UNTRACKED_SOURCE_DIRS = (
     "demo/",
     "web/src/",
     "web/public/",
+    "web/e2e/",
     "docs/",
     "benchmarks/agent_beta/",
     "agent_runtime/",
@@ -46,7 +47,10 @@ UNTRACKED_SOURCE_DIRS = (
     "golden_scenarios/",
 )
 UNTRACKED_ALLOWLIST = (
+    ".gitattributes",
     "requirements.lock",
+    "uv.lock",
+    "web/playwright.config.js",
     "benchmarks/ai_ops_v2/public/cases.json",
     "benchmarks/ai_ops_v2/private/oracles.json",
     "benchmarks/lightweight_ai_eval/manifest.json",
@@ -57,7 +61,8 @@ UNTRACKED_ALLOWLIST = (
 BLOCKLIST_RE = re.compile(
     r"(^|/)(\.env|\.env\..*|.*\.pem$|.*\.key$|.*\.crt$|node_modules/|"
     r"reports/|testsets/|\.pytest-|\.git/|\.venv/|venv/|deploy/ssh/|"
-    r"ssh/|external-package/|.*run-records\.jsonl$|.*bundles/|private/)",
+    r"ssh/|external-package/|web/test-results/|agent_runtime/pi-sidecar/data/|"
+    r".*run-records\.jsonl$|.*bundles/|private/)",
     re.IGNORECASE,
 )
 SECRET_RE = re.compile(
@@ -66,6 +71,11 @@ SECRET_RE = re.compile(
     re.IGNORECASE,
 )
 PRIVATE_KEY_RE = re.compile(r"BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY")
+LF_TEXT_SUFFIXES = {
+    ".css", ".html", ".js", ".jsx", ".json", ".lock", ".md", ".mjs",
+    ".proto", ".ps1", ".py", ".pyi", ".sh", ".toml", ".txt", ".yaml", ".yml",
+}
+CRLF_TEXT_SUFFIXES = {".bat", ".cmd"}
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -74,6 +84,31 @@ def sha256_bytes(data: bytes) -> str:
 
 def sha256_file(path: Path) -> str:
     return sha256_bytes(path.read_bytes())
+
+
+def canonical_file_mode(path: Path) -> str:
+    if path.is_symlink():
+        return "0o777"
+    try:
+        shebang = path.read_bytes()[:2] == b"#!"
+    except OSError:
+        shebang = False
+    return "0o755" if path.suffix.lower() == ".sh" or shebang else "0o644"
+
+
+def normalize_payload_text(root: Path) -> None:
+    """Apply the repository line-ending contract before content addressing."""
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        suffix = path.suffix.lower()
+        if suffix not in LF_TEXT_SUFFIXES | CRLF_TEXT_SUFFIXES and path.name != "Makefile":
+            continue
+        data = path.read_bytes()
+        if b"\0" in data:
+            continue
+        lf = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        path.write_bytes(lf.replace(b"\n", b"\r\n") if suffix in CRLF_TEXT_SUFFIXES else lf)
 
 
 def canonical_json(value: Any) -> str:
@@ -133,7 +168,7 @@ def collect_payload_files(root: Path) -> list[dict[str, Any]]:
                 rows.append({
                     "relative_path": rel,
                     "file_type": "file",
-                    "mode": oct(path.stat().st_mode & 0o777),
+                    "mode": canonical_file_mode(path),
                     "size": len(data),
                     "sha256": sha256_bytes(data),
                     "link_target": None,
@@ -224,6 +259,47 @@ def migration_head(staging: Path) -> str:
         return f"unavailable:{exc.__class__.__name__}"
 
 
+def package_version(staging: Path) -> str:
+    content = (staging / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    return match.group(1) if match else "unknown"
+
+
+def pi_version(staging: Path) -> str:
+    package = json.loads(
+        (staging / "agent_runtime/pi-sidecar/package-lock.json").read_text(encoding="utf-8")
+    )
+    root = package.get("packages", {}).get("", {})
+    return str(root.get("dependencies", {}).get("@earendil-works/pi-coding-agent") or "unknown")
+
+
+def deterministic_tar_gz(
+    archive: Path,
+    staging: Path,
+    relative_paths: list[str],
+    *,
+    source_date_epoch: int,
+) -> None:
+    """Write identical gzip/tar bytes for identical normalized payload bytes."""
+    with archive.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=source_date_epoch) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as tf:
+                for rel in sorted(relative_paths):
+                    path = staging / rel
+                    if not (path.is_file() or path.is_symlink()):
+                        continue
+                    info = tf.gettarinfo(str(path), arcname=rel)
+                    info.uid = info.gid = 0
+                    info.uname = info.gname = ""
+                    info.mtime = source_date_epoch
+                    info.mode = int(canonical_file_mode(path), 8)
+                    if path.is_symlink():
+                        tf.addfile(info)
+                    else:
+                        with path.open("rb") as source:
+                            tf.addfile(info, source)
+
+
 def verify_archive(archive: Path, manifest: dict[str, Any], python: str) -> list[str]:
     import tempfile
     errors: list[str] = []
@@ -231,6 +307,23 @@ def verify_archive(archive: Path, manifest: dict[str, Any], python: str) -> list
         root = Path(tmp)
         with tarfile.open(archive) as tf:
             tf.extractall(root)
+        embedded_manifest_path = root / "candidate-manifest.json"
+        if not embedded_manifest_path.is_file():
+            errors.append("candidate-manifest.json is missing")
+        else:
+            try:
+                embedded_manifest = json.loads(embedded_manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                errors.append(f"candidate-manifest.json is invalid: {exc}")
+            else:
+                if embedded_manifest != manifest:
+                    errors.append("embedded candidate manifest differs from published manifest")
+                calculated_manifest_digest = canonical_digest({
+                    key: value for key, value in embedded_manifest.items()
+                    if key != "manifest_digest"
+                })
+                if embedded_manifest.get("manifest_digest") != calculated_manifest_digest:
+                    errors.append("candidate manifest digest mismatch")
         listed = {item["relative_path"] for item in manifest["payload_files"]}
         listed.add("candidate-manifest.json")
         extra = sorted(
@@ -241,6 +334,20 @@ def verify_archive(archive: Path, manifest: dict[str, Any], python: str) -> list
         )
         if extra:
             errors.append("extra files not listed in manifest: " + ",".join(extra[:10]))
+        for item in manifest["payload_files"]:
+            path = root / item["relative_path"]
+            if item["file_type"] == "symlink":
+                if not path.is_symlink() or os.readlink(path) != item["link_target"]:
+                    errors.append(f"symlink mismatch: {item['relative_path']}")
+                continue
+            if not path.is_file():
+                errors.append(f"payload file missing: {item['relative_path']}")
+                continue
+            data = path.read_bytes()
+            if len(data) != item["size"] or sha256_bytes(data) != item["sha256"]:
+                errors.append(f"payload digest mismatch: {item['relative_path']}")
+        if tree_digest(manifest["payload_files"]) != manifest.get("payload_tree_digest"):
+            errors.append("payload tree digest mismatch")
         try:
             subprocess.run(
                 [python, "scripts/compile_proto.py"], cwd=str(root),
@@ -274,6 +381,9 @@ def main() -> int:
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--python", default=sys.executable)
     args = parser.parse_args()
+    python_path = Path(args.python)
+    if python_path.exists():
+        args.python = str(python_path.resolve())
 
     head = git("rev-parse", "HEAD").strip()
     diff = git("diff", "HEAD").encode("utf-8")
@@ -356,11 +466,7 @@ def main() -> int:
         shutil.rmtree(staged_dist, ignore_errors=True)
         shutil.copytree(built_dist, staged_dist)
 
-    for script in staging.rglob("*.sh"):
-        script.write_bytes(script.read_bytes().replace(b"\r\n", b"\n"))
-    makefile = staging / "Makefile"
-    if makefile.is_file():
-        makefile.write_bytes(makefile.read_bytes().replace(b"\r\n", b"\n"))
+    normalize_payload_text(staging)
 
     findings = scan_for_secrets(staging)
     if findings:
@@ -381,7 +487,17 @@ def main() -> int:
         web_dist_tree_digest = tree_digest(web_files)
 
     sidecar_lock = staging / "agent_runtime" / "pi-sidecar" / "package-lock.json"
+    web_lock = staging / "web" / "package-lock.json"
+    uv_lock = staging / "uv.lock"
+    requirements_export = staging / "requirements.lock"
     migration_plan = staging / "migrations" / "migration-plan.json"
+    lock_components = {
+        "python_uv": sha256_file(uv_lock) if uv_lock.is_file() else None,
+        "python_requirements_export": sha256_file(requirements_export) if requirements_export.is_file() else None,
+        "sidecar_npm": sha256_file(sidecar_lock) if sidecar_lock.is_file() else None,
+        "web_npm": sha256_file(web_lock) if web_lock.is_file() else None,
+    }
+    source_date_epoch = int(os.getenv("SOURCE_DATE_EPOCH") or git("show", "-s", "--format=%ct", head).strip())
     manifest: dict[str, Any] = {
         "schema_version": "candidate-manifest-v2",
         "release_id": release_id,
@@ -394,14 +510,19 @@ def main() -> int:
              "sha256": sha256_file(ROOT / p)} for p in allowed_untracked
         ],
         "web_dist_tree_sha256": web_dist_tree_digest,
-        "python_lock_sha256": sha256_file(staging / "requirements.lock") if (staging / "requirements.lock").is_file() else None,
-        "sidecar_package_lock_sha256": sha256_file(sidecar_lock) if sidecar_lock.is_file() else None,
-        "actual_pi_version": "0.83.0",
+        "lock_components": lock_components,
+        "lock_digest": canonical_digest(lock_components),
+        "python_lock_sha256": lock_components["python_uv"],
+        "requirements_export_sha256": lock_components["python_requirements_export"],
+        "sidecar_package_lock_sha256": lock_components["sidecar_npm"],
+        "web_package_lock_sha256": lock_components["web_npm"],
+        "actual_package_version": package_version(staging),
+        "actual_pi_version": pi_version(staging),
         "migration_head": migration_head(staging),
         "migration_plan_digest": sha256_file(migration_plan) if migration_plan.is_file() else None,
         "prompt_digest": sha256_file(ROOT / "docs/ai_agent_feature_complete_demo_prompt_v6.md"),
         "public_contract_digest": sha256_file(ROOT / "benchmarks/agent_beta/contracts/public-contract-v1.json"),
-        "source_date_epoch": int(datetime.now(timezone.utc).timestamp()),
+        "source_date_epoch": source_date_epoch,
     }
     manifest_digest = canonical_digest({k: v for k, v in manifest.items() if k != "manifest_digest"})
     manifest["manifest_digest"] = manifest_digest
@@ -412,24 +533,49 @@ def main() -> int:
 
     archive_path = args.output_dir / f"{release_id}.tar.gz"
     existing_receipt_path = args.output_dir / f"{release_id}.receipt.json"
-    if archive_path.exists() or (args.output_dir / f"{release_id}.manifest.json").exists():
+    published_manifest_path = args.output_dir / f"{release_id}.manifest.json"
+    if archive_path.exists() or published_manifest_path.exists():
         previous_digest = None
         if existing_receipt_path.exists():
-            previous_digest = json.loads(existing_receipt_path.read_text()).get("archive_sha256")
+            previous_digest = json.loads(existing_receipt_path.read_text(encoding="utf-8")).get("archive_sha256")
         if previous_digest and sha256_file(archive_path) == previous_digest:
-            print(json.dumps({"release_id": release_id, "reused": True}, ensure_ascii=False))
-            return 0
+            verify_errors = verify_archive(archive_path, manifest, args.python) if args.verify else []
+            shutil.rmtree(staging, ignore_errors=True)
+            result = {
+                "release_id": release_id,
+                "reused": True,
+                "archive_sha256": previous_digest,
+            }
+            if args.verify:
+                result["verify"] = {"ok": not verify_errors, "errors": verify_errors}
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1 if verify_errors else 0
+        shutil.rmtree(staging, ignore_errors=True)
         print("existing release ID exists without identical verified bytes; refusing to overwrite", file=sys.stderr)
         return 1
 
     payload_paths = {row["relative_path"] for row in payload_files}
-    with tarfile.open(archive_path, "w:gz") as tf:
-        for rel in sorted(payload_paths):
-            path = staging / rel
-            if path.is_file() or path.is_symlink():
-                tf.add(path, arcname=rel, recursive=False)
-        tf.add(manifest_path, arcname="candidate-manifest.json")
-    archive_sha256 = sha256_file(archive_path)
+    temporary_archive_path = args.output_dir / f".{release_id}.tmp-{os.getpid()}.tar.gz"
+    deterministic_tar_gz(
+        temporary_archive_path,
+        staging,
+        sorted(payload_paths | {"candidate-manifest.json"}),
+        source_date_epoch=source_date_epoch,
+    )
+    archive_sha256 = sha256_file(temporary_archive_path)
+
+    verify_errors = verify_archive(temporary_archive_path, manifest, args.python) if args.verify else []
+    if verify_errors:
+        temporary_archive_path.unlink(missing_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
+        print(json.dumps({
+            "release_id": release_id,
+            "archive_sha256": archive_sha256,
+            "verify": {"ok": False, "errors": verify_errors},
+        }, ensure_ascii=False, indent=2))
+        return 1
+
+    os.replace(temporary_archive_path, archive_path)
 
     receipt = {
         "schema_version": "package-receipt-v1",
@@ -439,7 +585,7 @@ def main() -> int:
         "archive_sha256": archive_sha256,
     }
     existing_receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
-    (args.output_dir / f"{release_id}.manifest.json").write_text(
+    published_manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     shutil.rmtree(staging, ignore_errors=True)
@@ -459,11 +605,7 @@ def main() -> int:
         "source_date_epoch": manifest["source_date_epoch"],
     }
     if args.verify:
-        verify_errors = verify_archive(archive_path, manifest, args.python)
-        summary["verify"] = {"ok": not verify_errors, "errors": verify_errors}
-        if verify_errors:
-            print(json.dumps(summary, ensure_ascii=False, indent=2))
-            return 1
+        summary["verify"] = {"ok": True, "errors": []}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

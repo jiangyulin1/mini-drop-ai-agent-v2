@@ -12,6 +12,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import tarfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,41 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def load_candidate_manifest(archive: Path) -> dict:
+    with tarfile.open(archive) as bundle:
+        member = bundle.getmember("candidate-manifest.json")
+        source = bundle.extractfile(member)
+        if source is None:
+            raise RuntimeError("candidate manifest is not readable")
+        return json.loads(source.read().decode("utf-8"))
+
+
+def candidate_identity(manifest: dict) -> dict:
+    return {
+        "release_id": manifest["release_id"],
+        "payload_tree_digest": manifest["payload_tree_digest"],
+        "lock_digest": manifest["lock_digest"],
+        "migration_head": manifest["migration_head"],
+        "package_version": manifest["actual_package_version"],
+        "pi_version": manifest["actual_pi_version"],
+        "actual_package_version": manifest["actual_package_version"],
+        "actual_pi_version": manifest["actual_pi_version"],
+    }
+
+
+def parse_migration_head(output: str) -> str:
+    """Return the single Alembic revision from ``alembic heads`` output.
+
+    Alembic renders a normal head as ``<revision> (head)``.  Receipts and the
+    Candidate Manifest intentionally store the stable revision identifier, not
+    the presentation suffix.  Multiple heads remain a hard deployment error.
+    """
+    revisions = [line.split()[0] for line in output.splitlines() if line.strip()]
+    if len(revisions) != 1:
+        raise RuntimeError(f"expected exactly one migration head, got {revisions!r}")
+    return revisions[0]
+
+
 def node_user(node: str) -> str:
     return NODES[node]
 
@@ -66,21 +102,39 @@ def systemctl(node: str, action: str, services: list[str]) -> str:
 
 
 def main() -> int:
+    global SSH_CONFIG
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--ssh-config", type=Path, default=SSH_CONFIG)
     parser.add_argument("--release-id", default="")
     parser.add_argument("--prepare-only", action="store_true", help="upload/install but do not switch links or services")
     parser.add_argument("--skip-install", action="store_true")
     parser.add_argument("--reuse-prepared", action="store_true", help="release directory already prepared; do not extract/install again")
     args = parser.parse_args()
 
+    SSH_CONFIG = args.ssh_config.resolve()
+    if not SSH_CONFIG.is_file():
+        print(f"SSH config missing: {SSH_CONFIG}", file=sys.stderr)
+        return 1
+
     archive = args.archive.resolve()
     if not archive.is_file():
         print(f"archive missing: {archive}", file=sys.stderr)
         return 1
     archive_sha = sha256_file(archive)
-    release_id = args.release_id or archive.stem.replace(".tar", "")
-    receipt = {"started_at": datetime.now(timezone.utc).isoformat(), "release_id": release_id,
+    manifest = load_candidate_manifest(archive)
+    if args.manifest:
+        published_manifest = json.loads(args.manifest.resolve().read_text(encoding="utf-8"))
+        if published_manifest != manifest:
+            print("published manifest does not match embedded candidate manifest", file=sys.stderr)
+            return 1
+    release_id = args.release_id or manifest["release_id"]
+    if release_id != manifest["release_id"]:
+        print("release ID does not match embedded candidate manifest", file=sys.stderr)
+        return 1
+    identity = candidate_identity(manifest)
+    receipt = {"started_at": datetime.now(timezone.utc).isoformat(), **identity,
                "archive_sha256": archive_sha, "nodes": {}}
     print(f"deploy {release_id} archive_sha={archive_sha}")
 
@@ -110,12 +164,11 @@ def main() -> int:
             pass
         if not args.skip_install and not args.reuse_prepared:
             print(f"installing {node} deps into {remote_release}")
-            ssh(node, f"cd {remote_release} && python3 -m venv .venv && "
-                      "grep -v '^-e git+' requirements.lock > /tmp/mini-drop-requirements.txt && "
-                      ".venv/bin/pip install -q --upgrade pip setuptools wheel && "
-                      ".venv/bin/pip install -q -r /tmp/mini-drop-requirements.txt && "
-                      ".venv/bin/pip install -q -e . --no-deps")
-            ssh(node, f"cd {remote_release} && .venv/bin/python -m pip check")
+            ssh(node, f"cd {remote_release} && python3 -m venv .uv-bootstrap && "
+                      ".uv-bootstrap/bin/pip install -q uv==0.12.5 && "
+                      ".uv-bootstrap/bin/uv sync --locked --no-dev --python python3")
+            ssh(node, f"cd {remote_release} && "
+                      ".uv-bootstrap/bin/uv pip check --python .venv/bin/python")
         if node == "control":
             print(f"installing sidecar npm deps on {node}")
             ssh(node, f"cd {remote_release}/agent_runtime/pi-sidecar && "
@@ -123,7 +176,37 @@ def main() -> int:
             ssh(node, f"mkdir -p {remote_release}/deploy/env && "
                       f"cp {active}/deploy/env/control-native.env {remote_release}/deploy/env/control-native.env && "
                       f"cp {active}/deploy/env/sidecar.env {remote_release}/deploy/env/sidecar.env 2>/dev/null || true")
-        receipt["nodes"][node] = {"prepared": True, "release_path": remote_release}
+        remote_manifest = json.loads(ssh(node, f"cat {remote_release}/candidate-manifest.json"))
+        if candidate_identity(remote_manifest) != identity:
+            print(f"candidate identity mismatch on {node}", file=sys.stderr)
+            return 1
+        installed_version = ssh(
+            node,
+            f"cd {remote_release} && .venv/bin/python -c 'import importlib.metadata as m; "
+            "print(m.version(\"micro-drop\"))'",
+        ).strip()
+        installed_pi = "not-applicable"
+        if node == "control":
+            installed_pi = ssh(
+                node,
+                f"cd {remote_release}/agent_runtime/pi-sidecar && "
+                "PATH=/home/control/node-v22.19.0/bin:$PATH node -e 'const fs=require(\"fs\");"
+                "console.log(JSON.parse(fs.readFileSync(\"node_modules/@earendil-works/pi-coding-agent/package.json\")).version)'",
+            ).strip()
+            if installed_pi != identity["pi_version"]:
+                print(f"Pi runtime version mismatch on {node}: {installed_pi}", file=sys.stderr)
+                return 1
+        if installed_version != identity["package_version"]:
+            print(f"package version mismatch on {node}: {installed_version}", file=sys.stderr)
+            return 1
+        receipt["nodes"][node] = {
+            "prepared": True,
+            "release_path": remote_release,
+            **identity,
+            "archive_sha256": archive_sha,
+            "installed_package_version": installed_version,
+            "installed_pi_version": installed_pi,
+        }
         print(f"{node} prepared")
 
     if args.prepare_only:
@@ -133,54 +216,120 @@ def main() -> int:
         out.write_text(json.dumps(receipt, indent=2) + "\n")
         return 0
 
-    print("stopping control writers for migration")
-    systemctl("control", "stop", CONTROL_SERVICES)
-    time.sleep(2)
-    ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
-                   "test -n \"$SQLITE_PATH\" && cp -v \"$SQLITE_PATH\" \"$SQLITE_PATH.pre-deploy\" || true")
-    print("migrating from new release")
-    ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
-                   f"cd ~/mini-drop-release-{release_id} && .venv/bin/python -m alembic upgrade head")
-    head = ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
-               f"cd ~/mini-drop-release-{release_id} && .venv/bin/python -m alembic heads").strip()
-    print("head after migration:", head.replace("\n", " "))
-    receipt["migration_head"] = head
-
-    print("switching active links")
+    previous_links: dict[str, str] = {}
     for node in NODES:
         user = node_user(node)
-        remote_release = f"/home/{user}/mini-drop-release-{release_id}"
-        ssh(node, f"ln -sfn {remote_release} /home/{user}/mini-drop-active")
-        receipt["nodes"][node]["link_switched_at"] = datetime.now(timezone.utc).isoformat()
+        previous = ssh(node, f"readlink -f /home/{user}/mini-drop-active").strip()
+        if not previous.startswith(f"/home/{user}/mini-drop-release-"):
+            print(f"unsafe or missing previous active link on {node}: {previous!r}", file=sys.stderr)
+            return 1
+        previous_links[node] = previous
+        receipt["nodes"][node]["previous_release_path"] = previous
 
-    print("restarting services")
-    systemctl("control", "daemon-reload", [])
-    systemctl("control", "restart", ["mini-drop-s3", "mini-drop-server", "mini-drop-analyzer", "mini-drop-pi-sidecar"])
-    for node in ("worker1", "worker2"):
-        systemctl(node, "daemon-reload", [])
-        systemctl(node, "restart", WORKER_SERVICES)
-    time.sleep(10)
+    head = ""
+    try:
+        print("stopping control writers for migration")
+        systemctl("control", "stop", CONTROL_SERVICES)
+        time.sleep(2)
+        ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
+                       "test -n \"$SQLITE_PATH\" && cp -v \"$SQLITE_PATH\" \"$SQLITE_PATH.pre-deploy\" || true")
+        print("migrating from new release")
+        ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
+                       f"cd ~/mini-drop-release-{release_id} && .venv/bin/python -m alembic upgrade head")
+        head_output = ssh(
+            "control",
+            "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
+            f"cd ~/mini-drop-release-{release_id} && .venv/bin/python -m alembic heads",
+        ).strip()
+        head = parse_migration_head(head_output)
+        print("head after migration:", head, f"(raw: {head_output.replace(chr(10), ' ')})")
+        receipt["migration_head"] = head
+        if head != identity["migration_head"]:
+            raise RuntimeError(
+                f"migration head mismatch: expected {identity['migration_head']}, got {head}"
+            )
 
-    deadline = time.time() + 120
-    ready = None
-    while time.time() < deadline:
+        print("switching active links")
+        for node in NODES:
+            user = node_user(node)
+            remote_release = f"/home/{user}/mini-drop-release-{release_id}"
+            ssh(node, f"ln -sfn {remote_release} /home/{user}/mini-drop-active")
+            receipt["nodes"][node]["link_switched_at"] = datetime.now(timezone.utc).isoformat()
+
+        print("restarting services")
+        systemctl("control", "daemon-reload", [])
+        systemctl("control", "restart", [
+            "mini-drop-s3", "mini-drop-server", "mini-drop-analyzer", "mini-drop-pi-sidecar",
+        ])
+        for node in ("worker1", "worker2"):
+            systemctl(node, "daemon-reload", [])
+            systemctl(node, "restart", WORKER_SERVICES)
+        time.sleep(10)
+
+        deadline = time.time() + 120
+        ready = None
+        while time.time() < deadline:
+            try:
+                ready = ssh("control", "source ~/mini-drop-active/deploy/env/control-native.env && "
+                                      "curl -sk https://127.0.0.1/api/readyz -H \"X-API-Key: $MINI_DROP_API_KEY\"")
+                if '"healthy":true' in ready:
+                    break
+            except RuntimeError:
+                pass
+            time.sleep(5)
+        if not ready or '"healthy":true' not in ready:
+            raise RuntimeError(f"readyz failed: {ready[:500] if ready else ''}")
+        print("readyz healthy")
+        agents = ssh("control", "source ~/mini-drop-active/deploy/env/control-native.env && "
+                                "curl -sk https://127.0.0.1/api/agents -H \"X-API-Key: $MINI_DROP_API_KEY\"")
+        if '"ONLINE"' not in agents:
+            raise RuntimeError(f"no ONLINE worker after activation: {agents[:500]}")
+        print("agents response:", agents[:300])
+    except Exception as exc:  # noqa: BLE001
+        print(f"activation failed; restoring previous links: {exc}", file=sys.stderr)
+        rollback_errors: list[str] = []
+        for node, previous in previous_links.items():
+            user = node_user(node)
+            try:
+                ssh(node, f"ln -sfn {previous} /home/{user}/mini-drop-active")
+            except Exception as rollback_exc:  # noqa: BLE001
+                rollback_errors.append(f"{node} link: {rollback_exc}")
         try:
-            ready = ssh("control", "source ~/mini-drop-active/deploy/env/control-native.env && "
-                                  "curl -sk https://127.0.0.1/api/readyz -H \"X-API-Key: $MINI_DROP_API_KEY\"")
-            if '"healthy":true' in ready:
-                break
-        except RuntimeError:
-            pass
-        time.sleep(5)
-    if not ready or '"healthy":true' not in ready:
-        print(f"readyz failed: {ready[:500] if ready else ''}", file=sys.stderr)
+            systemctl("control", "restart", [
+                "mini-drop-s3", "mini-drop-server", "mini-drop-analyzer", "mini-drop-pi-sidecar",
+            ])
+        except Exception as rollback_exc:  # noqa: BLE001
+            rollback_errors.append(f"control services: {rollback_exc}")
+        for node in ("worker1", "worker2"):
+            try:
+                systemctl(node, "restart", WORKER_SERVICES)
+            except Exception as rollback_exc:  # noqa: BLE001
+                rollback_errors.append(f"{node} services: {rollback_exc}")
+        receipt["finished_at"] = datetime.now(timezone.utc).isoformat()
+        receipt["status"] = "ROLLBACK_FAILED" if rollback_errors else "ROLLED_BACK"
+        receipt["activation_error"] = str(exc)
+        receipt["rollback_errors"] = rollback_errors
+        out = ROOT / "reports" / "implementation" / f"deploy-{release_id}-failed.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
         return 1
-    print("readyz healthy")
-    agents = ssh("control", "source ~/mini-drop-active/deploy/env/control-native.env && "
-                            "curl -sk https://127.0.0.1/api/agents -H \"X-API-Key: $MINI_DROP_API_KEY\"")
-    print("agents response:", agents[:300])
+
     receipt["finished_at"] = datetime.now(timezone.utc).isoformat()
     receipt["status"] = "DEPLOYED"
+    for node in NODES:
+        receipt["nodes"][node]["migration_head"] = head
+        node_receipt = {
+            "schema_version": "node-deployment-receipt-v1",
+            "node": node,
+            "status": "DEPLOYED",
+            "finished_at": receipt["finished_at"],
+            **receipt["nodes"][node],
+        }
+        node_out = ROOT / "reports" / "implementation" / f"deploy-{release_id}-{node}.receipt.json"
+        node_out.parent.mkdir(parents=True, exist_ok=True)
+        node_out.write_text(json.dumps(node_receipt, indent=2) + "\n", encoding="utf-8")
+        remote_receipt = json.dumps(node_receipt, separators=(",", ":"))
+        ssh(node, f"printf '%s' '{remote_receipt}' > ~/mini-drop-release-{release_id}/deployment-receipt.json")
     out = ROOT / "reports" / "implementation" / f"deploy-{release_id}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(receipt, indent=2) + "\n")

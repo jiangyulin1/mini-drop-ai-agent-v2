@@ -429,6 +429,16 @@ export function getCaseWorkspace(caseId) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/workspace`);
 }
 
+/** Open the canonical per-Case stream from a Workspace Snapshot cursor. */
+export function createCaseEventSource(caseId, afterSeq = 0) {
+  const params = new URLSearchParams();
+  if (Number(afterSeq) > 0) params.set("after_seq", String(afterSeq));
+  const query = params.toString();
+  return new EventSource(
+    `/api/v1/cases/${encodeURIComponent(caseId)}/events/stream${query ? `?${query}` : ""}`,
+  );
+}
+
 export function applyCaseCommand(caseId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/commands`, payload);
 }

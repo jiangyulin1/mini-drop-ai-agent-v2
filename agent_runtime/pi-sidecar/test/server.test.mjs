@@ -7,6 +7,10 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "../src/server.mjs";
 import { RuntimeManager } from "../src/runtime.mjs";
+import { EventSpool } from "../src/event-spool.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { buildToolCatalog, ALLOWED_TOOL_NAMES } from "../src/tools.mjs";
 
 let server;
@@ -107,8 +111,10 @@ test("READ_ONLY catalog contains no proposal tools", () => {
 test("internal tool calls send X-Internal-Token when configured", async () => {
   const originalFetch = globalThis.fetch;
   let capturedHeaders = null;
+  let capturedBody = null;
   globalThis.fetch = async (_url, options) => {
     capturedHeaders = options.headers;
+    capturedBody = options.body;
     return new Response(JSON.stringify({ ok: true, data: {} }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -116,14 +122,119 @@ test("internal tool calls send X-Internal-Token when configured", async () => {
   };
   try {
     process.env.MINI_DROP_PI_INTERNAL_TOKEN = "test-token";
-    const tools = buildToolCatalog({ internalBase: "http://127.0.0.1:1" });
+    const tools = buildToolCatalog({
+      internalBase: "http://127.0.0.1:1",
+      getEnvelope: () => ({
+        side_effect_policy: "READ_ONLY",
+        runtime_generation: 7,
+        expected_control_revision: 3,
+        expected_scope_revision: 4,
+      }),
+    });
     const tool = tools.find((t) => t.name === "get_case_snapshot");
     await tool.execute("call-1", { case_id: "case-a" });
     assert.equal(capturedHeaders["X-Internal-Token"], "test-token");
+    const sent = JSON.parse(capturedBody);
+    assert.equal(sent.side_effect_policy, "READ_ONLY");
+    assert.equal(sent.runtime_generation, 7);
+    assert.equal(sent.expected_control_revision, 3);
+    assert.equal(sent.expected_scope_revision, 4);
   } finally {
     delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
     globalThis.fetch = originalFetch;
   }
+});
+
+test("event spool survives restart and deletes only after ACK", () => {
+  const root = mkdtempSync(join(tmpdir(), "mini-drop-spool-"));
+  const path = join(root, "events.jsonl");
+  try {
+    const first = new EventSpool(path);
+    first.append({
+      case_id: "case-spool",
+      runtime_generation: 2,
+      event_seq: 9,
+      event_type: "turn_end",
+      idempotency_key: "event-spool-key",
+    });
+    const restarted = new EventSpool(path);
+    assert.equal(restarted.pending("case-spool").length, 1);
+    restarted.ack("event-spool-key");
+    assert.equal(new EventSpool(path).pending().length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("restarted runtime replays spooled event and ACKs exactly once", async () => {
+  const root = mkdtempSync(join(tmpdir(), "mini-drop-spool-replay-"));
+  const path = join(root, "events.jsonl");
+  const originalFetch = globalThis.fetch;
+  try {
+    new EventSpool(path).append({
+      case_id: "case-replay",
+      runtime_generation: 4,
+      event_id: "evt-replay",
+      event_seq: 11,
+      event_type: "turn_end",
+      payload: { text: "durable answer" },
+      idempotency_key: "runtime-event:case-replay:4:11:turn_end",
+    });
+    const requests = [];
+    globalThis.fetch = async (url, options) => {
+      requests.push({ url, options });
+      return new Response(JSON.stringify({ ok: true, data: { accepted: 1 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    process.env.MINI_DROP_PI_INTERNAL_TOKEN = "test-token";
+    const manager = new RuntimeManager({
+      modelRuntime: {},
+      internalBase: "http://127.0.0.1:8191",
+      eventSpool: new EventSpool(path),
+    });
+    manager.sessions.set("case-replay", { generation: 4, lastError: "" });
+    await manager.replayPending("case-replay");
+    await manager.replayPending("case-replay");
+    assert.equal(requests.length, 1);
+    assert.equal(JSON.parse(requests[0].options.body).events[0].event_id, "evt-replay");
+    assert.equal(new EventSpool(path).pending().length, 0);
+  } finally {
+    delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
+    globalThis.fetch = originalFetch;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("snapshot refresh keeps one session and updates active tool catalog", async () => {
+  const manager = new RuntimeManager({
+    modelRuntime: {},
+    eventSpool: new EventSpool(null),
+  });
+  const activated = [];
+  const session = {
+    setActiveToolsByName(names) { activated.push(names); },
+  };
+  manager.sessions.set("case-refresh", {
+    session,
+    generation: 3,
+    subscribed: true,
+    toolEnvelope: { current: {} },
+  });
+  const binding = await manager.startOrResume({
+    case_id: "case-refresh",
+    runtime_generation: 3,
+    side_effect_policy: "READ_ONLY",
+    control_revision: 8,
+    scope_revision: 9,
+  });
+  assert.equal(binding.runtime_generation, 3);
+  assert.equal(manager.get("case-refresh").session, session);
+  assert.equal(manager.get("case-refresh").subscribed, true);
+  assert.equal(activated.length, 1);
+  assert.equal(activated[0].includes("request_operation"), false);
+  assert.equal(manager.get("case-refresh").toolEnvelope.current.runtime_generation, 3);
 });
 
 test("runtime forwards non-thinking events and drops private thinking", async () => {
@@ -138,7 +249,11 @@ test("runtime forwards non-thinking events and drops private thinking", async ()
   };
   try {
     process.env.MINI_DROP_PI_INTERNAL_TOKEN = "test-token";
-    const manager = new RuntimeManager({ modelRuntime: {}, internalBase: "http://127.0.0.1:8191" });
+    const manager = new RuntimeManager({
+      modelRuntime: {},
+      internalBase: "http://127.0.0.1:8191",
+      eventSpool: new EventSpool(null),
+    });
     manager.sessions.set("case-x", { generation: 2 });
     manager.lastSeq.set("case-x", 0);
     manager._observe("case-x", { type: "thinking.private", text: "secret" });
@@ -178,7 +293,11 @@ test("case routes require X-Internal-Token when configured", async () => {
 });
 
 test("runtime caches last final answer for repeat-question stability", async () => {
-  const manager = new RuntimeManager({ modelRuntime: {}, internalBase: "http://127.0.0.1:8191" });
+  const manager = new RuntimeManager({
+    modelRuntime: {},
+    internalBase: "http://127.0.0.1:8191",
+    eventSpool: new EventSpool(null),
+  });
   manager.sessions.set("case-x", { generation: 1 });
   manager.lastSeq.set("case-x", 1);
   process.env.MINI_DROP_PI_INTERNAL_TOKEN = "test-token";

@@ -1,30 +1,26 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Natural-language task helpers exposed through an explicit router."""
 
 from __future__ import annotations
 
+from typing import Annotated, Any
 
-from server.app.main import (  # noqa: F401
-    _extract_artifact_json,
-    _extract_top_functions,
-    APIResponse,
-    HTTPException,
-    app,
-    parse_intent,
-    repo,
-    resolve_pid,
-    suggest_followup,
-    summarize,
-)
+from fastapi import APIRouter, Depends, HTTPException
+
+from server.app.artifact_service import extract_artifact_json, extract_top_functions
+from server.app.http.dependencies import get_repository_application_service
+from server.app.nlp.intent_parser import parse_intent
+from server.app.nlp.process_resolver import resolve_pid
+from server.app.nlp.summarizer import summarize, suggest_followup
+from server.app.schemas import APIResponse
+
+
+router = APIRouter()
+Repository = Annotated[Any, Depends(get_repository_application_service)]
 
 # ── NLP 自然语言采集 ────────────────────────────────────────────
 
 
-@app.post("/api/nlp/parse")
+@router.post("/api/nlp/parse")
 def nlp_parse_intent(body: dict) -> APIResponse:
     """将用户自然语言描述解析为结构化任务参数。"""
     query = body.get("query", "").strip()
@@ -46,8 +42,8 @@ def nlp_parse_intent(body: dict) -> APIResponse:
     })
 
 
-@app.post("/api/nlp/summarize")
-def nlp_summarize_task(body: dict) -> APIResponse:
+@router.post("/api/nlp/summarize")
+def nlp_summarize_task(body: dict, repo: Repository) -> APIResponse:
     """对已完成任务的结果进行 AI 总结并生成追问建议。"""
     task_id = body.get("task_id", "")
     if not task_id:
@@ -58,8 +54,8 @@ def nlp_summarize_task(body: dict) -> APIResponse:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     artifacts = repo.artifacts.get(task_id, [])
-    top_functions = _extract_top_functions(artifacts)
-    ebpf_metrics = _extract_artifact_json(artifacts, "ebpf_metrics")
+    top_functions = extract_top_functions(artifacts)
+    ebpf_metrics = extract_artifact_json(artifacts, "ebpf_metrics")
     suggestions = []
 
     # 从 top_functions 中提取提示
@@ -88,4 +84,4 @@ def nlp_summarize_task(body: dict) -> APIResponse:
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = ["router"]

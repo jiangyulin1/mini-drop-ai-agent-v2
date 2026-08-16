@@ -108,12 +108,13 @@ def test_sidecar_package_lock_and_banner_version_are_consistent():
     import json
     from server.app.agent_runtime.config import pi_runtime_version
     package_path = Path(__file__).resolve().parents[1] / "agent_runtime" / "pi-sidecar" / "package.json"
-    package = json.loads(package_path.read_text())
+    package = json.loads(package_path.read_text(encoding="utf-8"))
     actual = package["dependencies"]["@earendil-works/pi-coding-agent"].split(".")[:2]
     declared = pi_runtime_version().split(".")[:2]
     assert declared == actual
     runtime_src = (
         Path(__file__).resolve().parents[1]
         / "agent_runtime" / "pi-sidecar" / "src" / "runtime.mjs"
-    ).read_text()
-    assert f"pi-{pi_runtime_version()}" in runtime_src
+    ).read_text(encoding="utf-8")
+    assert 'import.meta.resolve("@earendil-works/pi-coding-agent")' in runtime_src
+    assert "runtime_version: `pi-${PI_RUNTIME_VERSION}`" in runtime_src

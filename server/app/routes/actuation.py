@@ -1,60 +1,69 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Controlled actuation, recovery-plan, and autonomous-loop HTTP endpoints."""
 
 from __future__ import annotations
 
+from server.app.routes.agents_process import scan_agent_processes
+from server.app.routes.plans_control import start_case_diagnosis
+from server.app.routes.fanout import verify_case_recovery
 
-from server.app.main import (  # noqa: F401
-    _Path,
-    _extract_artifact_json,
-    _request_principal,
-    _request_tenant,
-    _require_role,
-    APIResponse,
-    ActionEvaluationRequest,
-    ActuationError,
-    ActuationGateway,
-    AgentCallbacks,
-    Any,
-    AuthorizationDecision,
-    AutonomousIncidentAgent,
-    CaseSupervisor,
+import os
+import secrets
+import time
+from datetime import timedelta
+from pathlib import Path as _Path
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+
+from server.app import storage as store
+from server.app.artifact_service import extract_artifact_json as _extract_artifact_json
+from server.app.artifact_service import read_artifact_bytes
+from server.app.case_collaboration import (
     CreateRecoveryPlanRequest,
-    DEFAULT_ACTION_REGISTRY,
-    DistributedActuationGateway,
-    HTTPException,
-    PlanDriver,
-    RecoveryCheckError,
     RecoveryPlanDecisionRequest,
     RecoveryPlanExecuteRequest,
-    Request,
     StartCaseDiagnosisRequest,
-    app,
-    build_verification_contract,
-    diagnosis_orchestrator,
+)
+from server.app.diagnosis.action_registry import (
+    ActionEvaluationRequest,
+    DEFAULT_ACTION_REGISTRY,
     evaluate_action,
+)
+from server.app.diagnosis.actuation import ActuationError, ActuationGateway, is_executable
+from server.app.diagnosis.authorization import AuthorizationDecision
+from server.app.diagnosis.approval_binding import (
+    seal_approval_binding,
+    verify_approval_binding,
+)
+from server.app.diagnosis.v6_policy import stable_hash
+from server.app.diagnosis.autonomous_agent import AgentCallbacks, AutonomousIncidentAgent
+from server.app.diagnosis.case_supervisor import CaseSupervisor
+from server.app.diagnosis.distributed_actuation import DistributedActuationGateway
+from server.app.diagnosis.plan_driver import PlanDriver
+from server.app.diagnosis.recovery_verifier import RecoveryCheckError, run_http_checks
+from server.app.diagnosis.verification_contract import (
+    build_verification_contract,
     evaluate_verification,
-    extract_top_functions_from_svg,
+)
+from server.app.flamegraph_parser import extract_top_functions_from_svg
+from server.app.http.auth import (
+    request_principal as _request_principal,
+    request_tenant as _request_tenant,
+    require_role as _require_role,
+)
+from server.app.logging_utils import log_event
+from server.app.runtime_services import (
+    diagnosis_orchestrator,
     fanout_service,
     investigation_plan_service,
-    is_executable,
-    log_event,
-    now_utc,
-    os,
-    read_artifact_bytes,
     repo,
-    run_http_checks,
-    scan_agent_processes,
-    start_case_diagnosis,
-    store,
     target_resolver,
-    time,
-    verify_case_recovery,
 )
+from server.app.schemas import APIResponse
+from server.app.state_machine import now_utc
+
+
+router = APIRouter()
 
 # ── 受控修复执行（Actuation Gateway 首个实例） ────────────────────
 
@@ -124,6 +133,7 @@ def _autonomy_verify_recovery(case: dict[str, Any], diagnosis_id: str) -> dict[s
                     instance["agent_id"],
                     {"query": swarm_service, "timeout_sec": 20, "max_results": 20},
                     _internal_operator_request(f"/api/agents/{instance['agent_id']}/processes/scan"),
+                    repo,
                 ).data
             except Exception:
                 continue
@@ -229,7 +239,7 @@ PLAN_DRIVER = PlanDriver(
 )
 
 
-@app.post("/api/v1/cases/{case_id}/agent/step")
+@router.post("/api/v1/cases/{case_id}/agent/step")
 def advance_autonomous_case(case_id: str, request: Request) -> APIResponse:
     """Manually trigger one idempotent autonomous-loop step for inspection."""
     _require_role(request, "operator")
@@ -243,7 +253,7 @@ def advance_autonomous_case(case_id: str, request: Request) -> APIResponse:
     return APIResponse(data=result)
 
 
-@app.post("/api/v1/cases/{case_id}/agent/plan-driver")
+@router.post("/api/v1/cases/{case_id}/agent/plan-driver")
 def advance_case_plan_driver(case_id: str, request: Request) -> APIResponse:
     """E4：手动触发一次 PlanDriver 调度（自动调度 READ_LOW 步骤 / Task 唤醒）。"""
     _require_role(request, "operator")
@@ -280,7 +290,7 @@ def _case_recovery_plan_or_404(case_id: str, tenant_id: str, plan_id: str) -> di
     return plan
 
 
-@app.get("/api/v1/cases/{case_id}/recovery-plans")
+@router.get("/api/v1/cases/{case_id}/recovery-plans")
 def list_case_recovery_plans(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
@@ -291,7 +301,7 @@ def list_case_recovery_plans(case_id: str, request: Request) -> APIResponse:
     })
 
 
-@app.post("/api/v1/cases/{case_id}/recovery-plans")
+@router.post("/api/v1/cases/{case_id}/recovery-plans")
 def create_case_recovery_plan(
     case_id: str,
     payload: CreateRecoveryPlanRequest,
@@ -336,7 +346,7 @@ def create_case_recovery_plan(
     return APIResponse(data=plan)
 
 
-@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/dry-run")
+@router.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/dry-run")
 def dry_run_case_recovery_plan(
     case_id: str,
     plan_id: str,
@@ -369,13 +379,30 @@ def dry_run_case_recovery_plan(
             "DRY_RUN_COMPLETED"
             if dry.get("dry_run", {}).get("candidate_count", 0) else "DRY_RUN_EMPTY"
         )
+        policy_json = policy.model_dump(mode="json")
+        if next_status == "DRY_RUN_COMPLETED":
+            policy_json["approval_binding"] = seal_approval_binding(
+                operation=plan["action_id"],
+                normalized_arguments=plan["parameters"],
+                target_resource_incarnation=stable_hash({
+                    "case_target_scope": case.get("target_scope") or {},
+                    "dry_run_items": (dry.get("dry_run") or {}).get("items") or [],
+                }),
+                risk=str(policy.impact_level.value),
+                scope_revision=int(case.get("scope_revision") or 1),
+                control_revision=int(case.get("control_revision") or 1),
+                execution_epoch=str(dry["attempt_id"]),
+                expires_at=(now_utc() + timedelta(minutes=15)).isoformat(),
+                nonce=secrets.token_urlsafe(24),
+                approver_identity=_request_principal(request),
+            )
         updated = repo.transition_case_recovery_plan(
             case_id, tenant_id, plan_id,
             to_status=next_status,
             actor_id=_request_principal(request),
             expected_plan_version=payload.expected_plan_version,
             updates={
-                "policy_json": policy.model_dump(mode="json"),
+                "policy_json": policy_json,
                 "dry_run_attempt_id": dry["attempt_id"],
                 "dry_run_json": dry["dry_run"],
             },
@@ -385,7 +412,7 @@ def dry_run_case_recovery_plan(
     return APIResponse(data=updated)
 
 
-@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/decision")
+@router.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/decision")
 def decide_case_recovery_plan(
     case_id: str,
     plan_id: str,
@@ -398,6 +425,22 @@ def decide_case_recovery_plan(
     if plan["status"] != "DRY_RUN_COMPLETED":
         raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_READY_FOR_DECISION")
     now = now_utc()
+    if payload.decision == "approve":
+        case = repo.get_incident_case(case_id, tenant_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case 不存在")
+        binding = (plan.get("policy") or {}).get("approval_binding")
+        approval_error = verify_approval_binding(
+            binding,
+            supplied_digest=str(payload.approval_digest or ""),
+            approver_identity=_request_principal(request),
+            scope_revision=int(case.get("scope_revision") or 1),
+            control_revision=int(case.get("control_revision") or 1),
+            execution_epoch=str(plan.get("dry_run_attempt_id") or ""),
+            now=now,
+        )
+        if approval_error:
+            raise HTTPException(status_code=409, detail=approval_error)
     updates = (
         {"approved_by": _request_principal(request), "approved_at": now}
         if payload.decision == "approve"
@@ -416,7 +459,7 @@ def decide_case_recovery_plan(
     return APIResponse(data=updated)
 
 
-@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/execute")
+@router.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/execute")
 def execute_case_recovery_plan(
     case_id: str,
     plan_id: str,
@@ -431,6 +474,18 @@ def execute_case_recovery_plan(
     plan = _case_recovery_plan_or_404(case_id, tenant_id, plan_id)
     if plan["status"] not in {"APPROVED", "EXECUTING"} or not plan.get("approved_by"):
         raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_APPROVED")
+    approval_binding = (plan.get("policy") or {}).get("approval_binding")
+    if plan["status"] == "APPROVED":
+        approval_error = verify_approval_binding(
+            approval_binding,
+            supplied_digest=str((approval_binding or {}).get("proposal_digest") or ""),
+            approver_identity=str(plan.get("approved_by") or ""),
+            scope_revision=int(case.get("scope_revision") or 1),
+            control_revision=int(case.get("control_revision") or 1),
+            execution_epoch=str(plan.get("dry_run_attempt_id") or ""),
+        )
+        if approval_error:
+            raise HTTPException(status_code=409, detail=approval_error)
     definition = DEFAULT_ACTION_REGISTRY.get(plan["action_id"])
     policy = evaluate_action(plan["action_id"], ActionEvaluationRequest(
         tenant_id=tenant_id,
@@ -445,11 +500,20 @@ def execute_case_recovery_plan(
         raise HTTPException(status_code=403, detail=f"ACTION_DENIED:{','.join(policy.reason_codes)}")
     try:
         if plan["status"] == "APPROVED":
+            consumed_binding = {
+                **(approval_binding or {}),
+                "consumed_at": now_utc().isoformat(),
+            }
+            consumed_policy = {
+                **(plan.get("policy") or {}),
+                "approval_binding": consumed_binding,
+            }
             plan = repo.transition_case_recovery_plan(
                 case_id, tenant_id, plan_id,
                 to_status="EXECUTING",
                 actor_id=_request_principal(request),
                 expected_plan_version=payload.expected_plan_version,
+                updates={"policy_json": consumed_policy},
             )
             if plan is None:
                 raise ValueError("RECOVERY_PLAN_NOT_FOUND")
@@ -595,7 +659,7 @@ def _rollback_case_recovery_plan(
     return updated
 
 
-@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/rollback")
+@router.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/rollback")
 def rollback_case_recovery_plan(
     case_id: str,
     plan_id: str,
@@ -662,7 +726,7 @@ def _verify_local_recovery_postconditions(plan: dict[str, Any]) -> dict[str, Any
     }
 
 
-@app.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/verify")
+@router.post("/api/v1/cases/{case_id}/recovery-plans/{plan_id}/verify")
 def verify_case_recovery_plan(
     case_id: str,
     plan_id: str,
@@ -698,7 +762,7 @@ def verify_case_recovery_plan(
     return APIResponse(data={"judgment": judgment, "recovery_plan": final_plan})
 
 
-@app.post("/api/v1/actions/{action_id}/dry-run")
+@router.post("/api/v1/actions/{action_id}/dry-run")
 def dry_run_registered_action(
     action_id: str,
     payload: dict[str, Any],
@@ -723,7 +787,7 @@ def dry_run_registered_action(
     })
 
 
-@app.post("/api/v1/actions/{action_id}/execute")
+@router.post("/api/v1/actions/{action_id}/execute")
 def execute_registered_action(
     action_id: str,
     payload: dict[str, Any],
@@ -748,7 +812,7 @@ def execute_registered_action(
     return APIResponse(data={**result, "tenant_id": tenant_id})
 
 
-@app.post("/api/v1/actions/{action_id}/rollback")
+@router.post("/api/v1/actions/{action_id}/rollback")
 def rollback_registered_action(
     action_id: str,
     payload: dict[str, Any],
@@ -863,4 +927,10 @@ def _safe_download_filename(value: str) -> str:
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = [
+    "ACTUATION_GATEWAY",
+    "AUTONOMOUS_AGENT",
+    "CASE_SUPERVISOR",
+    "PLAN_DRIVER",
+    "router",
+]

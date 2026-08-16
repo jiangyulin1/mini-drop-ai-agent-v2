@@ -134,6 +134,61 @@ def test_runtime_final_event_persists_assistant_message_and_completes_turn(clien
     assert any(item["event_type"] == "turn.completed" for item in events)
 
 
+def test_stale_runtime_generation_cannot_persist_event_or_message(client):
+    case = _create_case(client)
+    repo.upsert_agent_runtime_binding(
+        case["case_id"],
+        "tenant-a",
+        runtime_type="pi",
+        runtime_version="pi-0.84.2",
+        runtime_session_id="sess-new",
+        runtime_generation=2,
+        status="READY",
+    )
+    before_events = repo.list_agent_runtime_events(case["case_id"], "tenant-a")
+    before_messages = repo.list_assistant_messages(case["case_id"], "tenant-a")
+    response = client.post(
+        f"/internal/runtime/v1/cases/{case['case_id']}/events",
+        json={
+            "runtime_generation": 1,
+            "events": [{
+                "event_id": "evt-stale-final",
+                "event_seq": 99,
+                "event_type": "turn_end",
+                "payload": {"text": "stale answer", "trigger_turn_id": "old-turn"},
+            }],
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "GENERATION_FENCED"
+    assert repo.list_agent_runtime_events(case["case_id"], "tenant-a") == before_events
+    assert repo.list_assistant_messages(case["case_id"], "tenant-a") == before_messages
+
+
+def test_deterministic_turn_persists_one_assistant_message(client):
+    case = _create_case(client)
+    response = client.post(
+        f"/api/v1/cases/{case['case_id']}/agent/turn",
+        json={
+            "message": "只解释当前状态",
+            "requested_disposition": "ANSWER_ONLY",
+        },
+    )
+    assert response.status_code == 200, response.text
+    messages = repo.list_assistant_messages(case["case_id"], "tenant-a")
+    assert len(messages) == 1
+    events = repo.list_case_events(case["case_id"], "tenant-a")
+    completed = [item for item in events if item["event_type"] == "agent_turn_completed"]
+    assert len(completed) == 1
+    assert completed[0]["payload"]["message_id"] == messages[0]["message_id"]
+    workspace = client.get(f"/api/v1/cases/{case['case_id']}/workspace")
+    assert workspace.status_code == 200
+    workspace_messages = workspace.json()["data"]["messages"]
+    assert [item["message_id"] for item in workspace_messages] == [messages[0]["message_id"]]
+    assert workspace_messages[0]["content"] == messages[0]["content"]
+
+
 def test_answer_only_machine_policy_blocks_write_tool_and_has_zero_side_effects(client):
     case = _create_case(client)
     turn = client.post(
@@ -164,6 +219,33 @@ def test_answer_only_machine_policy_blocks_write_tool_and_has_zero_side_effects(
     stored_turn = repo.list_agent_runtime_turns(case["case_id"], "tenant-a")[0]
     assert stored_turn["disposition"] == "ANSWER_ONLY"
     assert stored_turn["side_effect_policy"] == "READ_ONLY"
+
+
+def test_propose_only_operation_never_creates_execution_unit(client):
+    case = _create_case(client)
+    repo.register_agent(
+        "agent-v6-propose",
+        "node-v6-propose",
+        "192.168.50.12",
+        version="0.3.0",
+        capabilities=["process_scan"],
+    )
+    assert repo.list_execution_units(case["case_id"], "tenant-a") == []
+
+    proposed = client.post(
+        "/internal/agent/tools/query",
+        json={
+            "case_id": case["case_id"],
+            "operation": "process.list",
+            "parameters": {},
+            "side_effect_policy": "PROPOSE_ONLY",
+            "idempotency_key": "propose-only-no-execution-unit",
+        },
+        headers=_headers(),
+    )
+    assert proposed.status_code == 200, proposed.text
+    assert proposed.json()["data"]["task"]["id"]
+    assert repo.list_execution_units(case["case_id"], "tenant-a") == []
 
 
 def test_terminal_case_accepts_answer_only_but_rejects_new_investigation(client):
@@ -231,7 +313,7 @@ def test_task_wake_is_durable_when_sidecar_is_absent(client, monkeypatch):
     monkeypatch.setenv("MINI_DROP_PI_RUNTIME_URL", "")
     from server.app.agent_runtime.dispatcher import reset_runtime
     reset_runtime()
-    from server.app import main as main_module
+    from server.app import app_factory as main_module
     main_module._wake_case_from_task(task.id, TaskStatus.DONE.value)
     wakeups = repo.list_runtime_wakeups(case["case_id"], "tenant-a")
     assert wakeups, "task wake must be durable before sidecar delivery"
@@ -276,6 +358,23 @@ def test_finish_rejects_wrong_projection_field_or_missing_projection(client):
     )
     assert missing_projection.status_code == 400
     assert missing_projection.json()["detail"].startswith("INVALID_EVIDENCE_REFS")
+
+    wrong_target = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"],
+            "summary": "错误目标结论",
+            "evidence_ids": [evidence_id],
+            "claims": [{
+                "evidence_id": evidence_id,
+                "projection_hash": projection["projection_hash"],
+                "target_ref": "task:not-the-source-task",
+            }],
+        },
+        headers=_headers(),
+    )
+    assert wrong_target.status_code == 400
+    assert "TARGET_REF_MISMATCH" in wrong_target.json()["detail"]
 
 
 def test_case_events_do_not_invalidate_semantic_cas(client):

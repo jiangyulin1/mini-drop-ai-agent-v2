@@ -18,6 +18,7 @@ from server.app.models import Base
 
 class MockSidecarHandler(BaseHTTPRequestHandler):
     received: list[tuple[str, str, dict]] = []
+    runtime_status = "READY"
 
     def log_message(self, *args):
         pass
@@ -56,6 +57,20 @@ class MockSidecarHandler(BaseHTTPRequestHandler):
         else:
             self._respond({"ok": True, "data": {"accepted": True}})
 
+    def do_GET(self):
+        self.__class__.received.append((self.path, "GET", {}))
+        if self.path.endswith("/state"):
+            self._respond({"ok": True, "data": {
+                "case_id": self.path.split("/")[-2],
+                "status": self.__class__.runtime_status,
+                "runtime_generation": 1,
+                "last_event_seq": 0,
+                "runtime_version": "pi-0.84.2",
+                "detail": "",
+            }})
+        else:
+            self._respond({"ok": True, "data": {"accepted": True}})
+
 
 @pytest.fixture(autouse=True)
 def _reset_repo(monkeypatch):
@@ -82,6 +97,7 @@ def client_fixture():
 @contextmanager
 def _start_sidecar(monkeypatch, mode: str):
     MockSidecarHandler.received = []
+    MockSidecarHandler.runtime_status = "READY"
     server = HTTPServer(("127.0.0.1", 0), MockSidecarHandler)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -140,10 +156,31 @@ def test_agent_turn_routes_through_agent_runtime_port(client, monkeypatch, mode)
             item for item in MockSidecarHandler.received
             if item[0].endswith("/resume")
         ]
+        # Cycle refreshes keep the same live Sidecar session/generation.
+        assert resume_requests[-1][2]["context"]["runtime_generation"] == 1
+
+
+def test_sidecar_restart_rotates_runtime_generation(client, monkeypatch):
+    with _start_sidecar(monkeypatch, "pi"):
+        case = _create_case(client)
+        first = client.post(
+            f"/api/v1/cases/{case['case_id']}/agent/turn",
+            json={"message": "开始调查"},
+        )
+        assert first.status_code == 200, first.text
+        MockSidecarHandler.runtime_status = "NOT_STARTED"
+        second = client.post(
+            f"/api/v1/cases/{case['case_id']}/agent/turn",
+            json={"message": "重启后继续"},
+        )
+        assert second.status_code == 200, second.text
+        resume_requests = [
+            item for item in MockSidecarHandler.received if item[0].endswith("/resume")
+        ]
         assert resume_requests[-1][2]["context"]["runtime_generation"] == 2
 
 
-def test_agent_turn_fails_closed_when_sidecar_url_missing(client, monkeypatch):
+def test_agent_turn_falls_back_when_sidecar_url_missing(client, monkeypatch):
     monkeypatch.setenv("MINI_DROP_AGENT_RUNTIME", "pi")
     monkeypatch.setenv("MINI_DROP_PI_RUNTIME_URL", "")
     reset_runtime()
@@ -154,9 +191,10 @@ def test_agent_turn_fails_closed_when_sidecar_url_missing(client, monkeypatch):
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
-    assert data["status"] == "runtime_unavailable"
+    assert data["status"] != "runtime_unavailable"
+    assert any("deterministic" in item for item in data["decision_summary"])
     events = client.get(f"/api/v1/cases/{case['case_id']}/events").json()["data"]["items"]
-    assert events[-1]["event_type"] == "agent_runtime_turn_rejected"
+    assert any(item["event_type"] == "agent_runtime_turn_rejected" for item in events)
 
 
 def test_internal_runtime_events_are_deduplicated_by_idempotency_key(client):
@@ -201,7 +239,7 @@ def test_internal_runtime_events_are_deduplicated_by_idempotency_key(client):
 
 
 def test_task_done_wakes_pi_runtime_with_materialized_case_evidence(client, monkeypatch):
-    import server.app.main as main_module
+    import server.app.app_factory as main_module
     from server.app.schemas import CreateTaskRequest
 
     monkeypatch.setenv("MINI_DROP_AGENT_RUNTIME", "pi")

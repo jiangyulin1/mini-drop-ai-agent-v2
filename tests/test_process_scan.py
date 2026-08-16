@@ -138,7 +138,7 @@ def test_scan_returns_processes_when_done(client, monkeypatch):
     task_id = _make_scan_task_done(query="service-x")
 
     # 让扫描 API 直接命中已完成的同一幂等任务，并跳过轮询等待
-    monkeypatch.setattr("server.app.main.time.sleep", lambda _: None)
+    monkeypatch.setattr("server.app.routes.agents_process.time.sleep", lambda _: None)
     resp = client.post("/api/agents/worker-1/processes/scan", json={"query": "service-x", "timeout_sec": 5})
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -152,7 +152,7 @@ def test_scan_returns_processes_when_done(client, monkeypatch):
 def test_scan_parses_empty_result(client, monkeypatch):
     _register_agent()
     _make_scan_task_done(processes=[], query="")
-    monkeypatch.setattr("server.app.main.time.sleep", lambda _: None)
+    monkeypatch.setattr("server.app.routes.agents_process.time.sleep", lambda _: None)
     resp = client.post("/api/agents/worker-1/processes/scan", json={"query": "", "timeout_sec": 5})
     assert resp.status_code == 200
     assert resp.json()["data"]["processes"] == []

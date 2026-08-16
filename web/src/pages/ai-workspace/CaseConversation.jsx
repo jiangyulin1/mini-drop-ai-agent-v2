@@ -322,6 +322,7 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
 export default function CaseConversation({
   detail,
   events,
+  assistantMessages = [],
   diagnosis,
   currentUnderstanding,
   proposals,
@@ -343,7 +344,29 @@ export default function CaseConversation({
 }) {
   const state = CASE_STATE_META[detail.state] || { label: detail.state, color: "default", tone: "idle" };
   const status = DIAGNOSIS_STATUS_META[diagnosis?.status] || { label: diagnosis?.status, color: "default" };
-  const userEvents = useMemo(() => (events || []).filter((event) => event.event_type !== "case_created"), [events]);
+  const userEvents = useMemo(() => {
+    const timeline = (events || []).filter((event) => event.event_type !== "case_created");
+    const representedMessageIds = new Set(
+      timeline.map((event) => event.payload?.message_id).filter(Boolean),
+    );
+    for (const item of assistantMessages || []) {
+      if (representedMessageIds.has(item.message_id)) continue;
+      timeline.push({
+        event_id: `persisted:${item.message_id}`,
+        event_type: "assistant.message",
+        created_at: item.created_at,
+        payload: {
+          message_id: item.message_id,
+          content: item.content,
+          evidence_refs: item.evidence_refs || [],
+        },
+      });
+    }
+    return timeline.sort((a, b) => {
+      const timeOrder = String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      return timeOrder || Number(a.case_event_seq || 0) - Number(b.case_event_seq || 0);
+    });
+  }, [assistantMessages, events]);
   const waitingProbes = (diagnosis?.probes || []).filter((probe) => probe.status === "WAITING_APPROVAL");
   const diagnosisRunning = diagnosis
     && !TERMINAL_DIAGNOSIS.has(diagnosis.status)

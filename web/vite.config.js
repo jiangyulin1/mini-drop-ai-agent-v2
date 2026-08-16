@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.js",
+    include: ["src/**/*.{test,spec}.{js,jsx}"],
     css: false,
   },
   build: {
@@ -38,7 +39,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:8191",
+        target: process.env.MINI_DROP_WEB_API_TARGET || "http://localhost:8191",
         changeOrigin: true,
       },
     },

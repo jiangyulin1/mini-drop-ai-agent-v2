@@ -1,0 +1,10 @@
+{
+  "schema_version": "agent-beta-public-v3-lock",
+  "digest_contract": "UTF-8 text, CRLF and CR normalized to LF before SHA-256",
+  "canonical_text_sha256": {
+    "prompt": "37e5362f8122f760e6cc8e0fbc8e69f1a8d832d3a3ab7e7c197af2d6690038f2",
+    "source_lock": "af0558e0d3e5ec5666f0a24afe3e016d1e69bc002e799777dd76a07303d0b774",
+    "manifest": "aa16f11d97f052d07b85d1bf798d03ecb89ec165679c5692156b66b9e6266e9d",
+    "runner": "98b6a4f1f20d9c0a25e4a14e80e4a81752b880009acf929f65f5206c0bd7e3eb"
+  }
+}

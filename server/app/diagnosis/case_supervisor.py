@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from server.app.diagnosis.autonomous_agent import AutonomousIncidentAgent
 from server.app.diagnosis.governance import is_red_button_active
+from server.app.persistence.fencing import CaseLeaseFence, case_lease_fence
 
 _STOPPED_STATES = {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}
 
@@ -53,17 +54,49 @@ class CaseSupervisor:
         if is_red_button_active(self.repo):
             return {"outcome": "RED_BUTTON_ACTIVE"}
         owner = f"{self._owner_prefix}:{uuid4().hex}"
-        if not self.repo.acquire_case_lease(
-            case_id, tenant_id, owner=owner, ttl_seconds=self.lease_ttl,
-        ):
+        acquire_token = getattr(self.repo, "acquire_case_lease_token", None)
+        fence_token = (
+            acquire_token(
+                case_id,
+                tenant_id,
+                owner=owner,
+                ttl_seconds=self.lease_ttl,
+            )
+            if acquire_token is not None
+            else (
+                1
+                if self.repo.acquire_case_lease(
+                    case_id,
+                    tenant_id,
+                    owner=owner,
+                    ttl_seconds=self.lease_ttl,
+                )
+                else None
+            )
+        )
+        if fence_token is None:
             return {"outcome": "LEASE_BUSY"}
         try:
-            stopped = self._process_commands(case_id, tenant_id)
-            if stopped:
-                return {"outcome": "STOPPED_BY_COMMAND"}
-            return self.agent.step(case_id, tenant_id)
+            with case_lease_fence(CaseLeaseFence(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                owner=owner,
+                token=fence_token,
+            )):
+                stopped = self._process_commands(case_id, tenant_id)
+                if stopped:
+                    return {"outcome": "STOPPED_BY_COMMAND"}
+                return self.agent.step(case_id, tenant_id)
         finally:
-            self.repo.release_case_lease(case_id, tenant_id, owner)
+            try:
+                self.repo.release_case_lease(
+                    case_id,
+                    tenant_id,
+                    owner,
+                    fence_token=fence_token,
+                )
+            except TypeError:
+                self.repo.release_case_lease(case_id, tenant_id, owner)
 
     # ── 命令队列 ───────────────────────────────────────────────────
 

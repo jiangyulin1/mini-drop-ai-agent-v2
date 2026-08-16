@@ -287,7 +287,7 @@ export default function DiagnosisHistory() {
             <Card
               size="small"
               style={{ textAlign: "center" }}
-              bodyStyle={{ padding: "12px 16px" }}
+              styles={{ body: { padding: "12px 16px" } }}
             >
               <Typography.Text type="secondary" style={{ fontSize: FONT_SIZES.sm }}>
                 {s.label}
@@ -304,7 +304,7 @@ export default function DiagnosisHistory() {
       </Row>
 
       {/* 搜索 + 过滤 */}
-      <Card size="small" bodyStyle={{ padding: "12px 16px" }}>
+      <Card size="small" styles={{ body: { padding: "12px 16px" } }}>
         <Space wrap size="middle">
           <Input
             placeholder="搜索任务名 / 诊断 ID / 摘要…"

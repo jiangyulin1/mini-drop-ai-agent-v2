@@ -626,19 +626,19 @@ make fmt            # ruff format
 make demo           # bash demo/demo.sh
 
 # dev.py（跨平台）
-python dev.py proto
-python dev.py server
-python dev.py agent
-python dev.py test
-python dev.py lint
-python dev.py install              # pip install -e ".[dev]"
+uv run --locked python dev.py proto
+uv run --locked python dev.py server
+uv run --locked python dev.py agent
+uv run --locked python dev.py test
+uv run --locked python dev.py lint
 
 # 完整开发流程
-pip install -e ".[dev]"
-python dev.py proto
-python dev.py server      # 终端 1
-python dev.py agent       # 终端 2
-python dev.py test
+python -m pip install uv==0.12.5
+uv sync --locked --extra dev
+uv run --locked python dev.py proto
+uv run --locked python dev.py server      # 终端 1
+uv run --locked python dev.py agent       # 终端 2
+uv run --locked python dev.py test
 npm --prefix web run dev  # Vite HMR :5173（可选）
 ```
 

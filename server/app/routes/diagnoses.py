@@ -1,53 +1,57 @@
-"""Legacy route layer extracted from ``server.app.main``.
-
-All modules in this package decorate the shared FastAPI ``app`` object from
-``server.app.main``.  Import order is maintained at the bottom of ``main`` so
-later modules can reuse helper names re-exported by earlier modules.
-"""
+"""Diagnosis, evidence, source, and runtime HTTP endpoints."""
 
 from __future__ import annotations
 
+import hashlib
+import io
+import json as _json
+import os
+import zipfile
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import quote as _url_quote
 
-from server.app.main import (  # noqa: F401
-    _extract_api_token,
-    _json,
-    _request_principal,
-    _request_tenant,
-    _require_role,
-    _safe_download_filename,
-    _url_quote,
-    APIResponse,
-    Any,
-    ApprovalRequest,
-    CreateDiagnosisRequest,
-    HTTPException,
-    Optional,
-    Request,
-    Response,
-    SourceQueryRequest,
-    active_runtime_info,
-    agent_flags,
-    app,
-    build_audit_bundle,
-    diagnosis_orchestrator,
+from fastapi import APIRouter, HTTPException, Request, Response
+
+from server.app.agent_runtime.config import agent_flags
+from server.app.agent_runtime.dispatcher import active_runtime_info
+from server.app.artifact_service import (
     evidence_artifact_links,
-    hashlib,
     inspect_artifact,
-    io,
-    list_registered_probes,
+    read_artifact_bytes,
+)
+from server.app.diagnosis.audit_trace import build_audit_bundle
+from server.app.diagnosis.probe_registry import list_probes as list_registered_probes
+from server.app.diagnosis.schemas import ApprovalRequest, CreateDiagnosisRequest
+from server.app.diagnosis.source_gateway import SourceQueryRequest
+from server.app.http.auth import (
+    extract_api_token as _extract_api_token,
+    request_principal as _request_principal,
+    request_tenant as _request_tenant,
+    require_role as _require_role,
+)
+from server.app.runtime_services import (
+    diagnosis_orchestrator,
     mcp_client_manager,
     mcp_evidence_service,
-    os,
-    read_artifact_bytes,
     repo,
     source_gateway,
-    zipfile,
 )
+from server.app.schemas import APIResponse
+
+
+router = APIRouter()
+
+
+def _safe_download_filename(value: str) -> str:
+    filename = Path(value.replace("\\", "/")).name
+    filename = "".join(ch for ch in filename if ch >= " " and ch not in {'"', ";"})
+    return filename[:255] or "artifact.bin"
 
 # ── AI 集群诊断会话（v1）──────────────────────────────────────
 
 
-@app.post("/api/v1/diagnoses")
+@router.post("/api/v1/diagnoses")
 def create_diagnosis_session(payload: CreateDiagnosisRequest) -> APIResponse:
     """创建独立诊断会话，并只编排注册表中的受控探针。"""
     try:
@@ -59,7 +63,7 @@ def create_diagnosis_session(payload: CreateDiagnosisRequest) -> APIResponse:
     return APIResponse(data=data)
 
 
-@app.get("/api/v1/diagnoses")
+@router.get("/api/v1/diagnoses")
 def list_diagnosis_sessions(limit: int = 100, offset: int = 0) -> APIResponse:
     limit = min(max(limit, 1), 1000)
     offset = max(offset, 0)
@@ -72,7 +76,7 @@ def list_diagnosis_sessions(limit: int = 100, offset: int = 0) -> APIResponse:
     })
 
 
-@app.get("/api/v1/diagnoses/{diagnosis_id}")
+@router.get("/api/v1/diagnoses/{diagnosis_id}")
 def get_diagnosis_session(diagnosis_id: str) -> APIResponse:
     data = diagnosis_orchestrator.get(diagnosis_id, advance=True)
     if data is None:
@@ -95,7 +99,7 @@ def get_diagnosis_session(diagnosis_id: str) -> APIResponse:
     return APIResponse(data=data)
 
 
-@app.get("/api/v1/diagnoses/{diagnosis_id}/audit-bundle")
+@router.get("/api/v1/diagnoses/{diagnosis_id}/audit-bundle")
 def get_diagnosis_audit_bundle(
     diagnosis_id: str,
     include_oracle: bool = False,
@@ -107,7 +111,7 @@ def get_diagnosis_audit_bundle(
     return APIResponse(data=build_audit_bundle(data, include_oracle=include_oracle))
 
 
-@app.get("/api/v1/diagnoses/{diagnosis_id}/audit-bundle/download")
+@router.get("/api/v1/diagnoses/{diagnosis_id}/audit-bundle/download")
 def download_diagnosis_audit_bundle(
     diagnosis_id: str,
     include_oracle: bool = False,
@@ -146,7 +150,7 @@ def _find_diagnosis_evidence(diagnosis_id: str, evidence_id: str) -> dict:
     return evidence
 
 
-@app.get("/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence_id}/download")
+@router.get("/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence_id}/download")
 def download_diagnosis_evidence(diagnosis_id: str, evidence_id: str) -> Response:
     """Download the persisted structured evidence even if its raw artifact expired."""
 
@@ -168,7 +172,7 @@ def download_diagnosis_evidence(diagnosis_id: str, evidence_id: str) -> Response
     )
 
 
-@app.get("/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence_id}/bundle")
+@router.get("/api/v1/diagnoses/{diagnosis_id}/evidence/{evidence_id}/bundle")
 def download_diagnosis_evidence_bundle(diagnosis_id: str, evidence_id: str) -> Response:
     """Build a self-describing ZIP containing evidence, manifest, and available files."""
 
@@ -256,7 +260,7 @@ def download_diagnosis_evidence_bundle(diagnosis_id: str, evidence_id: str) -> R
     )
 
 
-@app.get("/api/storage/reconciliation")
+@router.get("/api/storage/reconciliation")
 def reconcile_artifact_storage(limit: int = 1000, verify_hash: bool = False) -> APIResponse:
     """Compare artifact metadata with the files currently present in storage."""
 
@@ -286,7 +290,7 @@ def reconcile_artifact_storage(limit: int = 1000, verify_hash: bool = False) -> 
     return APIResponse(data={"summary": summary, "items": items})
 
 
-@app.post("/api/v1/diagnoses/{diagnosis_id}/cancel")
+@router.post("/api/v1/diagnoses/{diagnosis_id}/cancel")
 def cancel_diagnosis_session(diagnosis_id: str, body: Optional[dict] = None) -> APIResponse:
     """取消诊断会话：终态幂等；非终态收敛到 USER_CANCELED 并取消活跃子任务。"""
     reason = ((body or {}).get("reason") or "").strip() or "用户取消诊断"
@@ -299,7 +303,7 @@ def cancel_diagnosis_session(diagnosis_id: str, body: Optional[dict] = None) -> 
     return APIResponse(data=data)
 
 
-@app.post("/api/v1/diagnoses/{diagnosis_id}/approvals")
+@router.post("/api/v1/diagnoses/{diagnosis_id}/approvals")
 def approve_diagnosis_probe(diagnosis_id: str, payload: ApprovalRequest) -> APIResponse:
     try:
         data = diagnosis_orchestrator.approve(diagnosis_id, payload)
@@ -310,12 +314,12 @@ def approve_diagnosis_probe(diagnosis_id: str, payload: ApprovalRequest) -> APIR
     return APIResponse(data=data)
 
 
-@app.get("/api/v1/probes")
+@router.get("/api/v1/probes")
 def list_probe_definitions() -> APIResponse:
     return APIResponse(data=[probe.model_dump(mode="json") for probe in list_registered_probes()])
 
 
-@app.get("/api/v1/sources")
+@router.get("/api/v1/sources")
 def list_source_definitions() -> APIResponse:
     """List registered AI-readable sources without exposing credential references."""
     return APIResponse(data={
@@ -324,7 +328,7 @@ def list_source_definitions() -> APIResponse:
     })
 
 
-@app.get("/api/v1/mcp/status")
+@router.get("/api/v1/mcp/status")
 def get_mcp_status(request: Request) -> APIResponse:
     """Expose deployment-safe MCP configuration state; never return endpoints with credentials."""
     _require_role(request, "operator")
@@ -341,7 +345,7 @@ def get_mcp_status(request: Request) -> APIResponse:
     })
 
 
-@app.post("/api/v1/mcp/facts")
+@router.post("/api/v1/mcp/facts")
 def resolve_missing_fact(payload: dict[str, Any], request: Request) -> APIResponse:
     """E6：Missing Fact → REUSE_NATIVE / CALL_MCP / INSUFFICIENT 确定性判定。"""
     _require_role(request, "operator")
@@ -355,7 +359,7 @@ def resolve_missing_fact(payload: dict[str, Any], request: Request) -> APIRespon
     return APIResponse(data=resolution.model_dump(mode="json"))
 
 
-@app.post("/api/v1/mcp/facts/query")
+@router.post("/api/v1/mcp/facts/query")
 def query_mcp_for_fact(payload: dict[str, Any], request: Request) -> APIResponse:
     """E6：按 Missing Fact 走受控 MCP 补证（注入清洗 + 成本台账）。"""
     _require_role(request, "operator")
@@ -379,7 +383,7 @@ def query_mcp_for_fact(payload: dict[str, Any], request: Request) -> APIResponse
     return APIResponse(data=result)
 
 
-@app.get("/api/v1/mcp/ledger")
+@router.get("/api/v1/mcp/ledger")
 def get_mcp_ledger(request: Request) -> APIResponse:
     """E6：MCP 调用成本与新鲜度台账。"""
     _require_role(request, "operator")
@@ -392,7 +396,7 @@ def get_mcp_ledger(request: Request) -> APIResponse:
     })
 
 
-@app.get("/api/v1/identity")
+@router.get("/api/v1/identity")
 def get_current_identity(request: Request) -> APIResponse:
     return APIResponse(data={
         "principal_id": _request_principal(request),
@@ -408,7 +412,7 @@ def get_current_identity(request: Request) -> APIResponse:
     })
 
 
-@app.get("/api/v1/cases/{case_id}/agent/runtime-state")
+@router.get("/api/v1/cases/{case_id}/agent/runtime-state")
 def get_case_agent_runtime_state(case_id: str, request: Request) -> APIResponse:
     """G1/G2：返回当前 Case 的持久 Runtime Binding、Turn 与归一化事件。
 
@@ -430,7 +434,7 @@ def get_case_agent_runtime_state(case_id: str, request: Request) -> APIResponse:
     })
 
 
-@app.get("/api/v1/agent-runtime/config")
+@router.get("/api/v1/agent-runtime/config")
 def get_agent_runtime_config(request: Request) -> APIResponse:
     """Expose the active investigator runtime mode and feature flags.
 
@@ -450,4 +454,4 @@ def get_agent_runtime_config(request: Request) -> APIResponse:
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = ["router"]

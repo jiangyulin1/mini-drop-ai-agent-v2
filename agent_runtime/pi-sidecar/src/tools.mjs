@@ -10,7 +10,7 @@
 import { Type } from "typebox";
 
 /** Proxy that forwards a tool call back to Mini-Drop FastAPI over internal HTTP. */
-function makeInternalTool(name, label, description, parameters, internalPath) {
+function makeInternalTool(name, label, description, parameters, internalPath, getEnvelope) {
   return {
     name,
     label,
@@ -25,7 +25,7 @@ function makeInternalTool(name, label, description, parameters, internalPath) {
       const resp = await fetch(internalPath, {
         method: "POST",
         headers,
-        body: JSON.stringify({ ...params, tool: name }),
+        body: JSON.stringify({ ...params, tool: name, ...(getEnvelope?.() || {}) }),
       });
       if (!resp.ok) {
         return { content: [{ type: "text", text: `tool ${name} failed: ${resp.status}` }], details: {} };
@@ -42,6 +42,7 @@ function makeInternalTool(name, label, description, parameters, internalPath) {
 export function buildToolCatalog({
   internalBase = "http://127.0.0.1:8191",
   sideEffectPolicy = "AUTO_READ_LOW",
+  getEnvelope = () => ({}),
 } = {}) {
   const base = `${internalBase}/internal/agent/tools`;
   const tools = [
@@ -50,7 +51,7 @@ export function buildToolCatalog({
       "Get Case Snapshot",
       "Return Case goal, revisions, plan, canonical evidence inventory and projection hashes.",
       Type.Object({ case_id: Type.String({ description: "Case ID" }) }),
-      `${base}/case-snapshot`,
+      `${base}/case-snapshot`, getEnvelope,
     ),
     makeInternalTool(
       "list_case_evidence",
@@ -61,7 +62,7 @@ export function buildToolCatalog({
         filters: Type.Optional(Type.Object({}, { additionalProperties: true })),
         cursor: Type.Optional(Type.String({ description: "Page cursor" })),
       }),
-      `${base}/list-case-evidence`,
+      `${base}/list-case-evidence`, getEnvelope,
     ),
     makeInternalTool(
       "get_evidence_projection",
@@ -73,7 +74,7 @@ export function buildToolCatalog({
         projection_kinds: Type.Optional(Type.Array(Type.String({ description: "Projection kinds" }))),
         max_bytes: Type.Optional(Type.Integer({ description: "Maximum bytes", default: 131072 })),
       }),
-      `${base}/get-evidence-projection`,
+      `${base}/get-evidence-projection`, getEnvelope,
     ),
     makeInternalTool(
       "compare_evidence",
@@ -84,7 +85,7 @@ export function buildToolCatalog({
         evidence_ids: Type.Array(Type.String({ description: "Evidence IDs" })),
         dimensions: Type.Optional(Type.Array(Type.String({ description: "Compare dimensions" }))),
       }),
-      `${base}/compare-evidence`,
+      `${base}/compare-evidence`, getEnvelope,
     ),
     makeInternalTool(
       "search_knowledge",
@@ -94,21 +95,21 @@ export function buildToolCatalog({
         query: Type.String({ description: "Knowledge query" }),
         limit: Type.Optional(Type.Integer({ description: "Maximum results" })),
       }),
-      `${base}/search-knowledge`,
+      `${base}/search-knowledge`, getEnvelope,
     ),
     makeInternalTool(
       "get_causal_graph",
       "Get Causal Graph",
       "Read current CausalGraphRevision with nodes and edges.",
       Type.Object({ case_id: Type.String({ description: "Case ID" }) }),
-      `${base}/get-causal-graph`,
+      `${base}/get-causal-graph`, getEnvelope,
     ),
     makeInternalTool(
       "get_evidence_gaps",
       "Get Evidence Gaps",
       "Read precise open EvidenceGap records.",
       Type.Object({ case_id: Type.String({ description: "Case ID" }) }),
-      `${base}/get-evidence-gaps`,
+      `${base}/get-evidence-gaps`, getEnvelope,
     ),
     makeInternalTool(
       "find_reusable_evidence",
@@ -119,14 +120,14 @@ export function buildToolCatalog({
         missing_fact: Type.String({ description: "The fact to verify" }),
         target: Type.String({ description: "Target resource reference" }),
       }),
-      `${base}/reusable-evidence`,
+      `${base}/reusable-evidence`, getEnvelope,
     ),
     makeInternalTool(
       "list_operations",
       "List Acquisition Operations",
       "List registered OperationSpec records that are enabled and auto-allowed.",
       Type.Object({ case_id: Type.Optional(Type.String({ description: "Case ID" })) }),
-      `${base}/list-operations`,
+      `${base}/list-operations`, getEnvelope,
     ),
     makeInternalTool(
       "propose_plan_revision",
@@ -150,7 +151,7 @@ export function buildToolCatalog({
           depends_on: Type.Optional(Type.Array(Type.String({ description: "Step IDs this step depends on" }))),
         })),
       }),
-      `${base}/plan`,
+      `${base}/plan`, getEnvelope,
     ),
     makeInternalTool(
       "request_operation",
@@ -166,14 +167,14 @@ export function buildToolCatalog({
         expected_control_revision: Type.Optional(Type.Integer({ description: "Control revision from Snapshot" })),
         expected_scope_revision: Type.Optional(Type.Integer({ description: "Scope revision from Snapshot" })),
       }),
-      `${base}/query`,
+      `${base}/query`, getEnvelope,
     ),
     makeInternalTool(
       "evaluate_hypotheses",
       "Evaluate Hypotheses",
       "Run deterministic analyzers + calibration over current evidence. Anti-hallucination check.",
       Type.Object({ case_id: Type.String({ description: "Case ID" }) }),
-      `${base}/evaluate-hypotheses`,
+      `${base}/evaluate-hypotheses`, getEnvelope,
     ),
     makeInternalTool(
       "finish_investigation",
@@ -192,7 +193,7 @@ export function buildToolCatalog({
         }))),
         limitations: Type.Optional(Type.Array(Type.String({ description: "Limitations" }))),
       }),
-      `${base}/finish`,
+      `${base}/finish`, getEnvelope,
     ),
     makeInternalTool(
       "rca_candidate_analysis",
@@ -202,7 +203,7 @@ export function buildToolCatalog({
         task_metadata: Type.Object({}, { additionalProperties: true }),
         top_functions: Type.Array(Type.Object({}, { additionalProperties: true })),
       }),
-      `${base}/rca-analysis`,
+      `${base}/rca-analysis`, getEnvelope,
     ),
   ];
   if (sideEffectPolicy === "READ_ONLY") {

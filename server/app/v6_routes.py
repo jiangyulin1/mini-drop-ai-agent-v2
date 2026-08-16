@@ -1,9 +1,4 @@
-"""v6 Agent HTTP surface extracted from the legacy main module.
-
-This module imports the shared FastAPI ``app`` object and service globals from
-``server.app.main``.  ``main`` imports this module after ``app`` exists, so all
-decorators register on the same application; no second app object is created.
-"""
+"""v6 Agent HTTP surface exposed through an explicit router."""
 
 from __future__ import annotations
 
@@ -13,41 +8,75 @@ import os
 import secrets
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
-# Import the shared application namespace.  This is intentional: v6 routes are
-# an extraction layer above the legacy main module, not a second application.
-from server.app.main import (
-    APIResponse,
-    CaseContextSnapshot,
-    CreateTaskRequest,
-    PROPOSE_ONLY_TOOLS,
-    PlanUpdateInput,
-    QUERY_REGISTRY,
-    READ_ONLY_TOOLS,
-    SKILL_REGISTRY,
-    agent_max_active_cases,
-    app,
+from server.app.agent_runtime.config import agent_max_active_cases
+from server.app.agent_runtime.port import CaseContextSnapshot
+from server.app.application.task_views import task_view as _task_view
+from server.app.diagnosis.investigation_directive import build_directive
+from server.app.diagnosis.investigation_plan import PlanUpdateInput
+from server.app.diagnosis.knowledge import retrieve_knowledge
+from server.app.diagnosis.query_registry import QUERY_REGISTRY
+from server.app.diagnosis.skill_registry import SKILL_REGISTRY
+from server.app.diagnosis.v6_policy import PROPOSE_ONLY_TOOLS, READ_ONLY_TOOLS
+from server.app.agent_runtime.shadow import (
     build_deterministic_plan,
-    build_directive,
-    case_evidence_service,
     compare_plans,
+    request_shadow_plan,
+)
+from server.app.http.auth import (
+    request_tenant as _request_tenant,
+    require_role as _require_role,
+)
+from server.app.runtime_services import (
+    case_evidence_service,
     diagnosis_orchestrator,
     evidence_attachment_service,
     investigation_plan_service,
     repo,
-    request_shadow_plan,
-    retrieve_knowledge,
-    _request_tenant,
-    _require_role,
-    _resolve_query_target,
-    _task_view,
 )
+from server.app.schemas import APIResponse, CreateTaskRequest
 from server.app.diagnosis.v6_policy import (
     tool_policy_error,
     verify_claim_binding,
     verify_primary_confirmation,
 )
+
+
+router = APIRouter()
+
+
+def _resolve_query_target(
+    case: dict[str, Any],
+    target_ref: str,
+) -> dict[str, Any] | None:
+    instances = (case.get("target_scope") or {}).get("instances") or []
+    if target_ref:
+        for item in instances:
+            if target_ref in {
+                str(item.get("instance_id") or ""),
+                str(item.get("agent_id") or ""),
+                str(item.get("pid") or ""),
+            }:
+                return {
+                    "agent_id": str(item.get("agent_id") or ""),
+                    "pid": int(item.get("pid") or 1),
+                }
+    for item in instances:
+        return {
+            "agent_id": str(item.get("agent_id") or ""),
+            "pid": int(item.get("pid") or 1),
+        }
+    for agent in getattr(repo, "agents", {}).values():
+        if isinstance(agent, dict):
+            agent_id = str(agent.get("agent_id") or agent.get("id") or "")
+            status = str(agent.get("status") or "ONLINE")
+        else:
+            agent_id = str(getattr(agent, "id", "") or "")
+            status = str(getattr(agent, "status", "") or "ONLINE")
+        if status == "ONLINE" and agent_id:
+            return {"agent_id": agent_id, "pid": 1}
+    return None
 
 
 class QueryError(Exception):
@@ -209,7 +238,7 @@ def _build_runtime_case_context(
         disposition=disposition,
         side_effect_policy=side_effect_policy,
         context_snapshot_id=None,
-        runtime_generation=int(binding.get("runtime_generation") or 0) + 1 if binding else 0,
+        runtime_generation=int(binding.get("runtime_generation") or 1) if binding else 1,
         runtime_session_id=str(binding.get("runtime_session_id") or "") if binding else "",
         hypotheses=[
             {
@@ -334,7 +363,7 @@ def _visible_evidence_ids(content: str, case_id: str, tenant_id: str) -> list[st
     return [item for item in known if item and item in content]
 
 
-@app.post("/internal/agent/tools/case-snapshot")
+@router.post("/internal/agent/tools/case-snapshot")
 def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id = str(payload.get("case_id") or "")
@@ -397,7 +426,7 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
     })
 
 
-@app.post("/internal/agent/tools/list-case-evidence")
+@router.post("/internal/agent/tools/list-case-evidence")
 def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) -> APIResponse:
     """v6 read-only tool: canonical evidence inventory with projection hashes."""
     _require_internal_token(request)
@@ -433,7 +462,7 @@ def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) 
     })
 
 
-@app.post("/internal/agent/tools/list-operations")
+@router.post("/internal/agent/tools/list-operations")
 def internal_tool_list_operations(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     items = repo.list_operation_specs(enabled_only=True) if hasattr(repo, "list_operation_specs") else []
@@ -442,7 +471,7 @@ def internal_tool_list_operations(payload: dict[str, Any], request: Request) -> 
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.post("/internal/agent/tools/get-evidence-projection")
+@router.post("/internal/agent/tools/get-evidence-projection")
 def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Request) -> APIResponse:
     """v6 read-only tool: bounded content expansion of EvidenceProjection."""
     _require_internal_token(request)
@@ -475,7 +504,7 @@ def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Requ
     })
 
 
-@app.post("/internal/agent/tools/compare-evidence")
+@router.post("/internal/agent/tools/compare-evidence")
 def internal_tool_compare_evidence(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id = str(payload.get("case_id") or "")
@@ -503,7 +532,7 @@ def internal_tool_compare_evidence(payload: dict[str, Any], request: Request) ->
     return APIResponse(data={"items": rows, "dimensions": payload.get("dimensions") or ["signals"]})
 
 
-@app.post("/internal/agent/tools/search-knowledge")
+@router.post("/internal/agent/tools/search-knowledge")
 def internal_tool_search_knowledge(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     query = str(payload.get("query") or "")
@@ -511,7 +540,7 @@ def internal_tool_search_knowledge(payload: dict[str, Any], request: Request) ->
     return APIResponse(data={"items": items})
 
 
-@app.post("/internal/agent/tools/get-causal-graph")
+@router.post("/internal/agent/tools/get-causal-graph")
 def internal_tool_get_causal_graph(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id = str(payload.get("case_id") or "")
@@ -520,7 +549,7 @@ def internal_tool_get_causal_graph(payload: dict[str, Any], request: Request) ->
     return APIResponse(data={"graph": graph})
 
 
-@app.post("/internal/agent/tools/get-evidence-gaps")
+@router.post("/internal/agent/tools/get-evidence-gaps")
 def internal_tool_get_evidence_gaps(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id = str(payload.get("case_id") or "")
@@ -529,7 +558,7 @@ def internal_tool_get_evidence_gaps(payload: dict[str, Any], request: Request) -
     return APIResponse(data={"items": items})
 
 
-@app.post("/internal/agent/tools/reusable-evidence")
+@router.post("/internal/agent/tools/reusable-evidence")
 def internal_tool_reusable_evidence(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id = str(payload.get("case_id") or "")
@@ -558,7 +587,7 @@ def internal_tool_reusable_evidence(payload: dict[str, Any], request: Request) -
     })
 
 
-@app.post("/internal/agent/tools/query")
+@router.post("/internal/agent/tools/query")
 def internal_tool_create_query(payload: dict[str, Any], request: Request) -> APIResponse:
     """G4/G6：Pi 通过受控 Query Gateway 请求注册操作；仍由原生 Task 执行。"""
     _require_internal_token(request)
@@ -584,7 +613,7 @@ def internal_tool_create_query(payload: dict[str, Any], request: Request) -> API
     return APIResponse(data={"task": _task_view(task), "operation": operation_id})
 
 
-@app.post("/internal/agent/tools/plan")
+@router.post("/internal/agent/tools/plan")
 def internal_tool_upsert_plan(payload: dict[str, Any], request: Request) -> APIResponse:
     """模型提出新 Plan Revision。必须携带当前 revision，否则 STALE_PLAN 拒绝。"""
     _require_internal_token(request)
@@ -610,7 +639,7 @@ def internal_tool_upsert_plan(payload: dict[str, Any], request: Request) -> APIR
     return APIResponse(data=plan)
 
 
-@app.post("/internal/agent/tools/evaluate-hypotheses")
+@router.post("/internal/agent/tools/evaluate-hypotheses")
 def internal_tool_evaluate_hypotheses(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id = str(payload.get("case_id") or "")
@@ -628,7 +657,7 @@ def internal_tool_evaluate_hypotheses(payload: dict[str, Any], request: Request)
     })
 
 
-@app.post("/internal/agent/tools/rca-analysis")
+@router.post("/internal/agent/tools/rca-analysis")
 def internal_tool_rca_analysis(payload: dict[str, Any], request: Request) -> APIResponse:
     """E9：把 rca 候选归因分析器作为只读 Tool 暴露，模型不能越过它自创原因。
 
@@ -662,7 +691,7 @@ def internal_tool_rca_analysis(payload: dict[str, Any], request: Request) -> API
     })
 
 
-@app.post("/internal/agent/tools/finish")
+@router.post("/internal/agent/tools/finish")
 def internal_tool_finish(payload: dict[str, Any], request: Request) -> APIResponse:
     """结构化结论提交；必须引用真实存在的 Evidence ID，并落审计事件。"""
     _require_internal_token(request)
@@ -817,13 +846,13 @@ def internal_tool_finish(payload: dict[str, Any], request: Request) -> APIRespon
     })
 
 
-@app.get("/internal/agent/tools/health")
+@router.get("/internal/agent/tools/health")
 def internal_tool_health(request: Request) -> APIResponse:
     _require_internal_token(request)
     return APIResponse(data={"ok": True, "service": "mini-drop-tool-gateway"})
 
 
-@app.post("/internal/runtime/v1/cases/{case_id}/events")
+@router.post("/internal/runtime/v1/cases/{case_id}/events")
 def internal_runtime_events(
     case_id: str,
     payload: dict[str, Any],
@@ -841,6 +870,9 @@ def internal_runtime_events(
     generation = int(payload.get("runtime_generation") or 0)
     if generation <= 0:
         raise HTTPException(status_code=400, detail="INVALID_RUNTIME_GENERATION")
+    binding = repo.get_agent_runtime_binding(case_id, tenant_id)
+    if binding is not None and generation != int(binding.get("runtime_generation") or 0):
+        raise HTTPException(status_code=409, detail="GENERATION_FENCED")
     events = payload.get("events") or []
     if not isinstance(events, list) or not events:
         raise HTTPException(status_code=400, detail="NO_RUNTIME_EVENTS")
@@ -889,13 +921,12 @@ def internal_runtime_events(
                 final_turn_id = str(payload_json.get("trigger_turn_id") or "")
                 final_cycle_id = cycle_id or str(payload_json.get("cycle_id") or "")
                 final_model_request_id = model_request_id or str(payload_json.get("model_request_id") or "")
-    binding = repo.get_agent_runtime_binding(case_id, tenant_id)
     if binding is not None and max_seq > int(binding.get("last_event_seq") or 0):
         repo.upsert_agent_runtime_binding(
             case_id,
             tenant_id,
             runtime_type=binding.get("runtime_type") or "pi",
-            runtime_version=binding.get("runtime_version") or "pi-0.83.0",
+            runtime_version=binding.get("runtime_version") or "pi-0.84.2",
             runtime_session_id=binding.get("runtime_session_id") or "",
             runtime_generation=int(binding.get("runtime_generation") or generation),
             status=binding.get("status") or "READY",
@@ -949,7 +980,7 @@ def internal_runtime_events(
     })
 
 
-@app.get("/internal/runtime/v1/cases/{case_id}/events")
+@router.get("/internal/runtime/v1/cases/{case_id}/events")
 def internal_runtime_events_list(
     case_id: str,
     request: Request,
@@ -963,7 +994,7 @@ def internal_runtime_events_list(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
-@app.post("/api/v1/cases/{case_id}/agent/shadow-plan")
+@router.post("/api/v1/cases/{case_id}/agent/shadow-plan")
 async def run_case_shadow_plan(case_id: str, request: Request) -> APIResponse:
     """E3 Shadow Plan：Pi 生成计划但不创建 Task，与确定性计划配对比较。"""
     _require_role(request, "operator")
@@ -996,4 +1027,10 @@ async def run_case_shadow_plan(case_id: str, request: Request) -> APIResponse:
 
 
 
-__all__ = [name for name in list(globals()) if not name.startswith("__")]
+__all__ = [
+    "QueryError",
+    "_build_runtime_case_context",
+    "_case_investigation_footprint",
+    "_create_case_query_task",
+    "router",
+]

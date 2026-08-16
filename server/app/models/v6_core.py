@@ -375,7 +375,11 @@ class EvidenceProjectionModel(Base):
 class EvidenceReviewRevisionModel(Base):
     __tablename__ = "evidence_review_revisions"
     __table_args__ = (
-        UniqueConstraint("evidence_id", "review_revision", name="uq_evidence_review_revision"),
+        UniqueConstraint(
+            "evidence_id",
+            "review_revision",
+            name="uq_evidence_review_revision_v6",
+        ),
     )
 
     review_revision_id = Column(String(128), primary_key=True)
@@ -407,12 +411,15 @@ class DomainOutboxModel(Base):
     __table_args__ = (
         UniqueConstraint("dedupe_key", name="uq_domain_outbox_dedupe"),
         Index("ix_domain_outbox_status_available", "status", "available_at"),
+        Index("ix_domain_outbox_claim_expiry", "status", "claim_expires_at"),
     )
 
     outbox_id = Column(String(128), primary_key=True)
     aggregate_type = Column(String(64), nullable=False)
     aggregate_id = Column(String(128), nullable=False, index=True)
     event_type = Column(String(64), nullable=False)
+    aggregate_revision = Column(Integer, nullable=False, default=0)
+    payload_schema_version = Column(String(32), nullable=False, default="1.0")
     payload = Column(JSON, nullable=False, default=dict)
     dedupe_key = Column(String(128), nullable=False)
     status = Column(String(24), nullable=False, default="PENDING", index=True)
@@ -420,9 +427,13 @@ class DomainOutboxModel(Base):
     claim_token = Column(String(128), nullable=True)
     claimed_by = Column(String(128), nullable=True)
     claim_expires_at = Column(DateTime(timezone=True), nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=8)
     last_error = Column(Text, nullable=True)
     dispatch_outcome = Column(String(32), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    dead_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -432,6 +443,8 @@ class DomainOutboxModel(Base):
             "aggregate_type": self.aggregate_type,
             "aggregate_id": self.aggregate_id,
             "event_type": self.event_type,
+            "aggregate_revision": self.aggregate_revision,
+            "payload_schema_version": self.payload_schema_version,
             "payload": self.payload or {},
             "dedupe_key": self.dedupe_key,
             "status": self.status,
@@ -439,11 +452,50 @@ class DomainOutboxModel(Base):
             "claim_token": self.claim_token,
             "claimed_by": self.claimed_by,
             "claim_expires_at": self.claim_expires_at,
+            "claimed_at": self.claimed_at,
             "attempts": self.attempts,
+            "max_attempts": self.max_attempts,
             "last_error": self.last_error,
             "dispatch_outcome": self.dispatch_outcome,
+            "delivered_at": self.delivered_at,
+            "dead_at": self.dead_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+        }
+
+
+class OutboxConsumerEffectModel(Base):
+    """Durable idempotency receipt and effect record for one consumer."""
+
+    __tablename__ = "outbox_consumer_effects"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "consumer_name",
+            name="uq_outbox_consumer_event",
+        ),
+        UniqueConstraint(
+            "consumer_name",
+            "effect_key",
+            name="uq_outbox_consumer_effect_key",
+        ),
+    )
+
+    receipt_id = Column(String(128), primary_key=True)
+    event_id = Column(String(128), nullable=False, index=True)
+    consumer_name = Column(String(128), nullable=False, index=True)
+    effect_key = Column(String(256), nullable=False)
+    effect_payload = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "receipt_id": self.receipt_id,
+            "event_id": self.event_id,
+            "consumer_name": self.consumer_name,
+            "effect_key": self.effect_key,
+            "effect_payload": self.effect_payload or {},
+            "created_at": self.created_at,
         }
 
 

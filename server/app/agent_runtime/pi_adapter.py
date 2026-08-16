@@ -29,7 +29,7 @@ from server.app.agent_runtime.port import (
     RuntimeSteer,
 )
 
-PI_RUNTIME_VERSION = "pi-0.83.0"
+PI_RUNTIME_VERSION = "pi-0.84.2"
 
 
 class PiSidecarError(RuntimeError):
@@ -73,6 +73,22 @@ class PiAgentRuntimeAdapter(AgentRuntimePort):
 
     # ── AgentRuntimePort 实现 ───────────────────────────────────────────
     def start_or_resume(self, case_context: CaseContextSnapshot) -> RuntimeBinding:
+        # A missing in-memory Sidecar session with an existing persisted Server
+        # binding means the Sidecar restarted. Rotate generation exactly once;
+        # ordinary Cycle Snapshot refreshes retain the current generation.
+        try:
+            state = self.get_state(case_context.case_id)
+        except PiSidecarError:
+            state = None
+        if (
+            state is not None
+            and state.status == "NOT_STARTED"
+            and case_context.runtime_session_id
+        ):
+            case_context = case_context.model_copy(update={
+                "runtime_generation": max(1, case_context.runtime_generation + 1),
+                "runtime_session_id": "",
+            })
         data = self._call("POST", f"/internal/runtime/v1/cases/{case_context.case_id}/resume",
                           {"context": case_context.model_dump(mode="json")})
         return RuntimeBinding(**data)

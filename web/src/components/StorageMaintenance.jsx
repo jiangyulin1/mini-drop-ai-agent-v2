@@ -154,7 +154,7 @@ export default function StorageMaintenance() {
               setRetentionDays(value || 7);
               setDryRunResult(null);
             }}
-            addonAfter="天"
+            suffix="天"
             style={{ width: 130 }}
           />
         </Space>

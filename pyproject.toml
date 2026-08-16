@@ -2,13 +2,16 @@
 name = "micro-drop"
 version = "0.1.0"
 description = "Mini-Drop: a lightweight Linux performance profiling platform"
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.14"
 dependencies = [
     "alembic>=1.13,<2",
     "fastapi>=0.100",
     "uvicorn>=0.23",
     "pydantic>=2.0",
     "eval_type_backport>=0.2.0",
+    # greenlet 3.2 no longer publishes CPython 3.9 wheels. SQLAlchemy pulls it
+    # on common platforms, so keep the last wheel-backed line for Python 3.9.
+    "greenlet>=3.1,<3.2; python_version < '3.10'",
     "grpcio>=1.80,<1.81",
     "protobuf>=6.33.5,<7",
     "psycopg[binary]>=3.1",
@@ -21,6 +24,10 @@ dependencies = [
     "sqlalchemy>=2.0",
 ]
 
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
@@ -28,6 +35,7 @@ dev = [
     "httpx>=0.27",
     "grpcio-tools>=1.80,<1.81",
     "jsonschema>=4.23,<5",
+    "pyyaml>=6,<7",
     "paramiko>=3.4,<4",
     "loguru>=0.7",
     "ruff>=0.9,<1",

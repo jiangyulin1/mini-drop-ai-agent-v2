@@ -126,7 +126,7 @@ export default function MultiAgentCollectionModal({
         </div>
         <div>
           <Typography.Text strong>时长</Typography.Text>
-          <InputNumber min={1} max={120} value={duration} onChange={(value) => setDuration(value || 15)} addonAfter="秒" style={{ width: 180, marginLeft: 10 }} />
+          <InputNumber min={1} max={120} value={duration} onChange={(value) => setDuration(value || 15)} suffix="秒" style={{ width: 180, marginLeft: 10 }} />
         </div>
         <div>
           <Typography.Text strong>Worker 与目标进程</Typography.Text>

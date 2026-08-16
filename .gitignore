@@ -90,8 +90,11 @@ releases/
 
 # Local rebuild environment symlinks / private lab access
 /.venv
+/.vite/
 /web/node_modules
 /agent_runtime/pi-sidecar/node_modules
+/agent_runtime/pi-sidecar/data/
+/web/test-results/
 /ssh/
 /external-package/
 /hyperv-linux-access.md

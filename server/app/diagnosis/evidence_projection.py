@@ -230,6 +230,6 @@ def project_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     return build_evidence_projection(
         artifact.get("artifact_type") or "raw",
         metadata,
-        source_bytes=int(artifact.get("size") or 0),
+        source_bytes=int(artifact.get("size_bytes") or artifact.get("size") or 0),
         raw_locator=str(raw_locator),
     )

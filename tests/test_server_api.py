@@ -133,7 +133,7 @@ class TestHealthz:
     ):
         monkeypatch.setenv("MINI_DROP_REQUIRE_ANALYZER", "1")
         monkeypatch.setattr(
-            "server.app.main.new_session",
+            "server.app.app_factory.new_session",
             mock.Mock(side_effect=RuntimeError("postgresql://user:password@secret-db")),
         )
         monkeypatch.setattr(
@@ -187,7 +187,7 @@ class TestHealthz:
             "total_count": 8,
             "checks": [],
         }
-        with mock.patch("server.app.main.run_ai_validation_suite", return_value=result):
+        with mock.patch("server.app.app_factory.run_ai_validation_suite", return_value=result):
             resp = client.post("/api/ai-validation/runs")
         assert resp.status_code == 200
         assert resp.json()["data"]["status"] == "PASSED"
