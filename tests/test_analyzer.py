@@ -5,7 +5,6 @@
 """
 
 import json
-import re
 import sys
 from unittest import mock
 
@@ -182,7 +181,9 @@ class TestAnalyzerMain:
              mock.patch("analyzer.mini_drop_analyzer.hotmethod_analyzer._flamegraph_svg", side_effect=fake_svg):
             main()
 
-        summary = json.loads(capsys.readouterr().out)
+        raw_summary = capsys.readouterr().out
+        assert raw_summary.isascii()
+        summary = json.loads(raw_summary)
         assert summary["status"] == "SUCCESS"
         assert summary["top_functions"][0]["name"] == "fib_hotspot"
         assert (output_root / "task-main" / "flamegraph.json").is_file()

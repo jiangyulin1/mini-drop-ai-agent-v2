@@ -86,7 +86,10 @@ def main() -> None:
             "suggestions_md": str(sugg_path),
         },
     }
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    # Stdout is a machine-readable JSON protocol. Keep it ASCII-safe because
+    # Windows service/CI consoles may use cp1252 even when the payload contains
+    # Chinese diagnostic advice. JSON consumers recover the original Unicode.
+    print(json.dumps(summary, indent=2, ensure_ascii=True))
 
 
 def _fail(msg: str) -> None:
