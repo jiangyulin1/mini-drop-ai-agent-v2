@@ -1,0 +1,6 @@
+{
+  "fixture_id": "fake-evidence",
+  "description": "引用不存在 Evidence 时必须 FAIL",
+  "expected_verdict": "MUST_FAIL",
+  "status": "SPECIFIED"
+}

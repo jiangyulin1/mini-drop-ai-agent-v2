@@ -28,7 +28,11 @@ from server.app.models import (
     AnalyzerWorkerModel,
     AgentMetricSnapshotModel,
     AgentModel,
+    AgentRuntimeBindingModel,
+    AgentRuntimeEventModel,
+    AgentRuntimeTurnModel,
     ArtifactModel,
+    CaseEvidenceModel,
     AuditLogModel,
     AuthorizationGrantModel,
     CaseResourceAttachmentModel,
@@ -66,6 +70,7 @@ from server.app.models import (
     TargetSignalModel,
 )
 from server.app import storage as store
+from server.app.sql_repository_v6 import SqlRepositoryV6Mixin
 from server.app.logging_utils import log_event
 from server.app.prometheus_metrics import record_task_transition
 from server.app.rca.models import FeedbackPrior
@@ -134,7 +139,7 @@ def _parse_aware_datetime(value: Any) -> datetime | None:
         return None
 
 
-class SqlRepository:
+class SqlRepository(SqlRepositoryV6Mixin):
     """SQLAlchemy 持久化 Repository。"""
 
     def __init__(self) -> None:
@@ -880,6 +885,7 @@ class SqlRepository:
         *,
         limit: int = 200,
         after_id: int = 0,
+        after_seq: int = 0,
     ) -> list[dict[str, Any]] | None:
         with self._read_session() as session:
             exists = session.query(IncidentCaseModel.id).filter(
@@ -888,11 +894,15 @@ class SqlRepository:
             ).first()
             if exists is None:
                 return None
-            rows = session.query(CaseEventModel).filter(
+            query = session.query(CaseEventModel).filter(
                 CaseEventModel.case_id == case_id,
                 CaseEventModel.tenant_id == tenant_id,
-                CaseEventModel.id > after_id,
-            ).order_by(CaseEventModel.id.asc()).limit(limit).all()
+            )
+            if after_seq > 0:
+                query = query.filter(CaseEventModel.case_event_seq > after_seq)
+            elif after_id > 0:
+                query = query.filter(CaseEventModel.id > after_id)
+            rows = query.order_by(CaseEventModel.id.asc()).limit(limit).all()
             return [row.to_dict() for row in rows]
 
     # ── Case Resource Attachments（E1 统一数据入口）────────────────────
@@ -1292,7 +1302,7 @@ class SqlRepository:
             case = self._locked_case(session, case_id, tenant_id)
             if case is None:
                 return None
-            if case.state == "STOPPED":
+            if case.state == "STOPPED" and kind != "explanation_request":
                 raise ValueError("CASE_STOPPED")
             event = CaseEventModel(
                 case_id=case.id,
@@ -1312,6 +1322,7 @@ class SqlRepository:
                 "state": case.state,
                 "row_version": case.row_version,
             })
+            self._notify_after_commit(session, "case_event", event.to_dict())
             return event.to_dict()
 
     def record_case_event(
@@ -1329,8 +1340,8 @@ class SqlRepository:
             case = self._locked_case(session, case_id, tenant_id)
             if case is None:
                 return None
-            if case.state == "STOPPED":
-                raise ValueError("CASE_STOPPED")
+            # v6: terminal Cases still receive control/system/assistant events.
+            # append_case_message remains the only user-message guard.
             event = CaseEventModel(
                 case_id=case.id,
                 tenant_id=case.tenant_id,
@@ -1349,7 +1360,436 @@ class SqlRepository:
                 "state": case.state,
                 "row_version": case.row_version,
             })
+            self._notify_after_commit(session, "case_event", event.to_dict())
             return event.to_dict()
+
+    # ── Agent Runtime persistence（G1/G2）────────────────────────────────
+
+    def upsert_agent_runtime_binding(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        runtime_type: str,
+        runtime_version: str,
+        runtime_session_id: str,
+        runtime_generation: int,
+        status: str = "READY",
+        last_event_seq: int = 0,
+        last_context_snapshot_id: str | None = None,
+        lease_owner: str | None = None,
+        deployment_epoch: int | None = None,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            existing = session.get(AgentRuntimeBindingModel, case_id)
+            if existing is not None:
+                existing.tenant_id = tenant_id
+                existing.runtime_type = runtime_type
+                existing.runtime_version = runtime_version
+                existing.runtime_session_id = runtime_session_id
+                existing.runtime_generation = runtime_generation
+                existing.status = status
+                existing.last_event_seq = last_event_seq
+                existing.last_context_snapshot_id = last_context_snapshot_id
+                existing.lease_owner = lease_owner
+                if deployment_epoch is not None:
+                    existing.deployment_epoch = max(existing.deployment_epoch, int(deployment_epoch))
+                existing.updated_at = now
+                session.flush()
+                return existing.to_dict()
+            row = AgentRuntimeBindingModel(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                runtime_type=runtime_type,
+                runtime_version=runtime_version,
+                runtime_session_id=runtime_session_id,
+                runtime_generation=runtime_generation,
+                status=status,
+                last_event_seq=last_event_seq,
+                last_context_snapshot_id=last_context_snapshot_id,
+                lease_owner=lease_owner,
+                deployment_epoch=int(deployment_epoch or 1),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def get_agent_runtime_binding(
+        self, case_id: str, tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.get(AgentRuntimeBindingModel, case_id)
+            if row is None or row.tenant_id != tenant_id:
+                return None
+            return row.to_dict()
+
+    def record_agent_runtime_turn(
+        self,
+        *,
+        turn_id: str,
+        case_id: str,
+        tenant_id: str,
+        runtime_session_id: str | None,
+        runtime_generation: int,
+        user_message: str,
+        requested_mode: str | None,
+        status: str,
+        accepted_mode: str,
+        detail: str | None = None,
+        idempotency_key: str | None = None,
+        disposition: str | None = None,
+        side_effect_policy: str | None = None,
+        actor_id: str | None = None,
+        client_command_id: str | None = None,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            if idempotency_key:
+                existing = session.query(AgentRuntimeTurnModel).filter(
+                    AgentRuntimeTurnModel.idempotency_key == idempotency_key,
+                ).first()
+                if existing is not None:
+                    return existing.to_dict()
+            row = AgentRuntimeTurnModel(
+                turn_id=turn_id,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                runtime_session_id=runtime_session_id,
+                runtime_generation=runtime_generation,
+                user_message=user_message,
+                requested_mode=requested_mode,
+                disposition=disposition,
+                side_effect_policy=side_effect_policy,
+                actor_id=actor_id,
+                client_command_id=client_command_id,
+                status=status,
+                accepted_mode=accepted_mode,
+                detail=detail,
+                idempotency_key=idempotency_key,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def get_agent_runtime_turn(
+        self, turn_id: str, tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.get(AgentRuntimeTurnModel, turn_id)
+            if row is None or row.tenant_id != tenant_id:
+                return None
+            return row.to_dict()
+
+    def list_agent_runtime_turns(
+        self, case_id: str, tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(AgentRuntimeTurnModel).filter(
+                AgentRuntimeTurnModel.case_id == case_id,
+                AgentRuntimeTurnModel.tenant_id == tenant_id,
+            ).order_by(AgentRuntimeTurnModel.created_at.asc()).all()
+            return [row.to_dict() for row in rows]
+
+    def record_agent_runtime_event(
+        self,
+        *,
+        event_id: str,
+        case_id: str,
+        tenant_id: str,
+        runtime_generation: int,
+        event_seq: int,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        cycle_id: str | None = None,
+        model_request_id: str | None = None,
+        evaluation_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            if idempotency_key:
+                existing = session.query(AgentRuntimeEventModel).filter(
+                    AgentRuntimeEventModel.idempotency_key == idempotency_key,
+                ).first()
+                if existing is not None:
+                    result = existing.to_dict()
+                    result["duplicate"] = True
+                    return result
+            row = AgentRuntimeEventModel(
+                event_id=event_id,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                runtime_generation=runtime_generation,
+                event_seq=event_seq,
+                event_type=event_type,
+                cycle_id=cycle_id,
+                model_request_id=model_request_id,
+                evaluation_run_id=evaluation_run_id,
+                payload_json=payload or {},
+                idempotency_key=idempotency_key,
+                created_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def list_agent_runtime_events(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        after_seq: int = 0,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(AgentRuntimeEventModel).filter(
+                AgentRuntimeEventModel.case_id == case_id,
+                AgentRuntimeEventModel.tenant_id == tenant_id,
+                AgentRuntimeEventModel.event_seq > after_seq,
+            ).order_by(AgentRuntimeEventModel.event_seq.asc()).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    def persist_case_conclusion(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        summary: str,
+        evidence_refs: list[str],
+        limitations: list[str] | None = None,
+        actor_id: str = "mini-drop-pi-runtime",
+    ) -> dict[str, Any] | None:
+        """Persist a structured Agent conclusion draft on the Case aggregate."""
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            case.current_finding_json = {
+                "status": "concluded",
+                "statement": summary,
+                "evidence_refs": list(evidence_refs),
+                "limitations": list(limitations or []),
+            }
+            case.current_activity_json = {
+                "phase": "conclusion_drafted",
+                "message": "Agent 已提交结论草稿，等待用户确认或继续追问",
+            }
+            case.row_version += 1
+            case.updated_at = now
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case.id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+                "row_version": case.row_version,
+            })
+            return case.to_dict()
+
+    # ── Canonical Case Evidence（G3）────────────────────────────────────
+
+    def upsert_case_evidence(
+        self,
+        *,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        attachment_id: str | None,
+        task_id: str | None,
+        artifact_id: int | None,
+        artifact_type: str | None,
+        collector_id: str | None,
+        source_type: str,
+        target_ref: str | None,
+        content_hash: str | None,
+        projection_hash: str | None,
+        quality: str = "COMPLETE",
+        freshness: str = "UNKNOWN",
+        time_window: dict[str, Any] | None = None,
+        actor_id: str = "mini-drop-evidence-service",
+        source_channel: str = "COLLECTOR",
+        data_origin: str = "LIVE",
+        investigation_run_id: str | None = None,
+        execution_unit_id: str | None = None,
+        source_call_id: str | None = None,
+        membership_snapshot_id: str | None = None,
+        resource_incarnation: str | None = None,
+        event_time_start: Any = None,
+        event_time_end: Any = None,
+        clock_id: str | None = None,
+        clock_offset_ms: int | None = None,
+        clock_uncertainty_ms: int | None = None,
+        artifact_schema: str | None = None,
+        schema_version: str | None = None,
+        producer_version: str | None = None,
+        raw_locator: str | None = None,
+        late_after_cancel: bool = False,
+        stale_for_current_revision: bool = False,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            existing = session.get(CaseEvidenceModel, evidence_id)
+            if existing is not None:
+                if existing.case_id != case_id or existing.tenant_id != tenant_id:
+                    raise ValueError("EVIDENCE_OWNERSHIP_CONFLICT")
+                existing.attachment_id = attachment_id or existing.attachment_id
+                existing.task_id = task_id or existing.task_id
+                existing.artifact_id = artifact_id if artifact_id is not None else existing.artifact_id
+                existing.artifact_type = artifact_type or existing.artifact_type
+                existing.collector_id = collector_id or existing.collector_id
+                existing.source_type = source_type
+                existing.source_channel = source_channel
+                existing.data_origin = data_origin
+                existing.investigation_run_id = investigation_run_id or existing.investigation_run_id
+                existing.execution_unit_id = execution_unit_id or existing.execution_unit_id
+                existing.source_call_id = source_call_id or existing.source_call_id
+                existing.membership_snapshot_id = membership_snapshot_id or existing.membership_snapshot_id
+                existing.target_ref = target_ref or existing.target_ref
+                existing.resource_incarnation = resource_incarnation or existing.resource_incarnation
+                existing.content_hash = content_hash or existing.content_hash
+                existing.projection_hash = projection_hash or existing.projection_hash
+                existing.quality = quality
+                existing.freshness = freshness
+                if time_window:
+                    existing.time_window_json = time_window
+                existing.event_time_start = _parse_aware_datetime(event_time_start)
+                existing.event_time_end = _parse_aware_datetime(event_time_end)
+                existing.ingested_at = now
+                existing.clock_id = clock_id or existing.clock_id
+                existing.clock_offset_ms = clock_offset_ms if clock_offset_ms is not None else existing.clock_offset_ms
+                existing.clock_uncertainty_ms = clock_uncertainty_ms if clock_uncertainty_ms is not None else existing.clock_uncertainty_ms
+                existing.artifact_schema = artifact_schema or existing.artifact_schema
+                existing.schema_version = schema_version or existing.schema_version
+                existing.producer_version = producer_version or existing.producer_version
+                existing.raw_locator = raw_locator or existing.raw_locator
+                existing.late_after_cancel = bool(late_after_cancel)
+                existing.stale_for_current_revision = bool(stale_for_current_revision)
+                existing.updated_at = now
+                session.flush()
+                return existing.to_dict()
+            row = CaseEvidenceModel(
+                evidence_id=evidence_id,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                attachment_id=attachment_id,
+                task_id=task_id,
+                artifact_id=artifact_id,
+                artifact_type=artifact_type,
+                collector_id=collector_id,
+                source_type=source_type,
+                source_channel=source_channel,
+                data_origin=data_origin,
+                investigation_run_id=investigation_run_id,
+                execution_unit_id=execution_unit_id,
+                source_call_id=source_call_id,
+                membership_snapshot_id=membership_snapshot_id,
+                target_ref=target_ref,
+                resource_incarnation=resource_incarnation,
+                content_hash=content_hash,
+                projection_hash=projection_hash,
+                status="ACTIVE",
+                quality=quality,
+                freshness=freshness,
+                time_window_json=time_window or {},
+                event_time_start=_parse_aware_datetime(event_time_start),
+                event_time_end=_parse_aware_datetime(event_time_end),
+                ingested_at=now,
+                clock_id=clock_id,
+                clock_offset_ms=clock_offset_ms,
+                clock_uncertainty_ms=clock_uncertainty_ms,
+                artifact_schema=artifact_schema,
+                schema_version=schema_version,
+                producer_version=producer_version,
+                raw_locator=raw_locator,
+                late_after_cancel=bool(late_after_cancel),
+                stale_for_current_revision=bool(stale_for_current_revision),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def get_case_evidence(
+        self,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+                CaseEvidenceModel.evidence_id == evidence_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def list_case_evidence(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+            )
+            if status:
+                query = query.filter(CaseEvidenceModel.status == status)
+            rows = query.order_by(CaseEvidenceModel.created_at.asc()).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    def restore_case_evidence(
+        self,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        *,
+        actor_id: str = "operator",
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            row = session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+                CaseEvidenceModel.evidence_id == evidence_id,
+            ).first()
+            if row is None:
+                return None
+            row.status = "ACTIVE"
+            row.updated_at = now
+            session.flush()
+            return row.to_dict()
+
+    def exclude_case_evidence(
+        self,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        *,
+        actor_id: str = "operator",
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            row = session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+                CaseEvidenceModel.evidence_id == evidence_id,
+            ).first()
+            if row is None:
+                return None
+            row.status = "EXCLUDED"
+            row.updated_at = now
+            session.flush()
+            return row.to_dict()
 
     def create_case_recovery_plan(
         self,
@@ -1651,6 +2091,8 @@ class SqlRepository:
             case.recovery_json = {**summary["recovery"], "status": "not_started"}
             case.diagnosis_session_id = None
             case.scope_revision += 1
+            case.control_revision += 1
+            case.case_command_revision += 1
             case.row_version += 1
             case.updated_at = now
             event = CaseEventModel(
@@ -1734,6 +2176,8 @@ class SqlRepository:
             case.state_reason = reason
             case.updated_at = now
             case.row_version += 1
+            case.case_command_revision += 1
+            case.control_revision += 1
             if target == "STOPPED":
                 case.stopped_at = now
                 case.current_activity_json = {
@@ -3129,6 +3573,8 @@ class SqlRepository:
                 if agent is None:
                     raise ValueError(f"Agent {payload.agent_id} 不存在")
 
+                options = payload.options or {}
+                lineage_case_id = str(options.get("case_id") or "") or None
                 task = TaskModel(
                     id=task_id,
                     name=payload.name,
@@ -3149,7 +3595,20 @@ class SqlRepository:
                     traceparent=(traceparent or "")[:64] or None,
                     request_params=payload.model_dump(),
                     idempotency_key=normalized_key,
-                    diagnosis_step_id=(payload.options or {}).get("diagnosis_step_id"),
+                    diagnosis_step_id=options.get("diagnosis_step_id"),
+                    origin=options.get("origin") or ("AI_CASE" if lineage_case_id else "USER_DROP"),
+                    visibility=options.get("visibility") or ("USER_VISIBLE" if lineage_case_id else "USER_VISIBLE"),
+                    case_id=lineage_case_id,
+                    case_title=options.get("case_title"),
+                    turn_id=options.get("turn_id"),
+                    plan_step_id=options.get("plan_step_id"),
+                    step_revision_id=options.get("step_revision_id"),
+                    campaign_id=options.get("campaign_id"),
+                    campaign_revision=options.get("campaign_revision"),
+                    assignment_id=options.get("assignment_id"),
+                    execution_unit_id=options.get("execution_unit_id"),
+                    risk=options.get("risk"),
+                    purpose=options.get("purpose"),
                     created_at=ts,
                 )
                 session.add(task)
@@ -4098,6 +4557,7 @@ class SqlRepository:
                 weight.positive_count, weight.partial_count, weight.negative_count,
             )
             weight.updated_at = ts
+
 
     # ------------------------------------------------------------------
     # 内部辅助

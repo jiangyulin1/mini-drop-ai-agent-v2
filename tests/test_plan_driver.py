@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.database import init_db, reset_engine
-from server.app.main import PLAN_DRIVER, app, repo
+from server.app.main import PLAN_DRIVER, _run_plan_driver_pass, app, repo
 from server.app.models import Base
 from server.app.state_machine import Actor, TaskStatus
 
@@ -177,6 +177,59 @@ def test_duplicate_collection_is_reused_not_recollected(client: TestClient):
     assert result["dispatched"] == []
 
 
+def test_cancel_running_step_cancels_native_task(client: TestClient):
+    _register_agent()
+    case = _create_case(client)
+    plan = _put_plan(client, case, [_step("sys_metrics")])
+    step_id = plan["steps"][0]["step_id"]
+    dispatched = client.post(
+        f"/api/v1/cases/{case['case_id']}/agent/plan-driver", json={},
+    ).json()["data"]["dispatched"]
+    task_id = dispatched[0]["task_id"]
+    cancelled = client.post(
+        f"/api/v1/cases/{case['case_id']}/steps/{step_id}/cancel", json={},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    task = repo.tasks[task_id]
+    assert str(task.status) == "CANCELLED"
+
+
+def test_retarget_running_step_cancels_old_native_task(client: TestClient):
+    _register_agent()
+    case = _create_case(client)
+    plan = _put_plan(client, case, [_step("sys_metrics")])
+    step_id = plan["steps"][0]["step_id"]
+    dispatched = client.post(
+        f"/api/v1/cases/{case['case_id']}/agent/plan-driver", json={},
+    ).json()["data"]["dispatched"]
+    task_id = dispatched[0]["task_id"]
+    retarget = client.post(
+        f"/api/v1/cases/{case['case_id']}/steps/{step_id}/retarget",
+        json={"target_refs": ["instance:inst-b"], "collector_id": "log_scan"},
+    )
+    assert retarget.status_code == 200, retarget.text
+    assert str(repo.tasks[task_id].status) == "CANCELLED"
+    step = retarget.json()["data"]
+    assert step["status"] == "CANCEL_REQUESTED"
+
+
+def test_stopping_case_cancels_case_derived_tasks(client: TestClient):
+    _register_agent()
+    case = _create_case(client)
+    plan = _put_plan(client, case, [_step("sys_metrics")])
+    dispatched = client.post(
+        f"/api/v1/cases/{case['case_id']}/agent/plan-driver", json={},
+    ).json()["data"]["dispatched"]
+    task_id = dispatched[0]["task_id"]
+    case = client.get(f"/api/v1/cases/{case['case_id']}").json()["data"]
+    stopped = client.post(
+        f"/api/v1/cases/{case['case_id']}/stop",
+        json={"reason": "用户停止", "expected_row_version": case["row_version"]},
+    )
+    assert stopped.status_code == 200, stopped.text
+    assert str(repo.tasks[task_id].status) == "CANCELLED"
+
+
 def test_cancelled_step_is_not_dispatched(client: TestClient):
     _register_agent()
     case = _create_case(client)
@@ -251,3 +304,28 @@ def test_cluster_step_fans_out_via_membership(client: TestClient):
     runs = client.get(f"/api/v1/cases/{case['case_id']}/fanout").json()["data"]["items"]
     assert any(run["run_id"] == cluster["run_id"] for run in runs)
     assert runs[0]["strategy"] == "ALL_IN_SCOPE"
+
+
+def _case_task_ids(case_id: str) -> list[str]:
+    return [
+        str(task.id) for task in repo.tasks.values()
+        if ((task.request_params or {}).get("options") or {}).get("case_id") == case_id
+    ]
+
+
+def test_auto_read_low_flag_blocks_background_scan(client: TestClient, monkeypatch):
+    monkeypatch.setenv("MINI_DROP_AGENT_AUTO_READ_LOW", "0")
+    _register_agent()
+    case = _create_case(client)
+    _put_plan(client, case, [_step("sys_metrics")])
+    _run_plan_driver_pass()
+    assert _case_task_ids(case["case_id"]) == []
+
+
+def test_auto_read_low_flag_enables_background_scan(client: TestClient, monkeypatch):
+    monkeypatch.setenv("MINI_DROP_AGENT_AUTO_READ_LOW", "1")
+    _register_agent()
+    case = _create_case(client)
+    _put_plan(client, case, [_step("sys_metrics")])
+    _run_plan_driver_pass()
+    assert len(_case_task_ids(case["case_id"])) == 1

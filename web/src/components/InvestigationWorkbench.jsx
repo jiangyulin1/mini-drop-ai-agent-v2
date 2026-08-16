@@ -54,9 +54,15 @@ export default function InvestigationWorkbench({ caseId }) {
         listCaseEvidenceReviews(caseId),
         listCaseFanoutRuns(caseId),
       ]);
-      setPlan(planResp.data?.data ?? planResp.data ?? null);
-      setReviews(reviewsResp.data?.data?.items ?? []);
-      setFanoutRuns(fanoutResp.data?.data?.items ?? []);
+      // client.js interceptor already unwraps body.data.  Keep a narrow
+      // compatibility branch for tests/legacy callers that still return an
+      // Axios-shaped response; production never reads response.data.data.
+      const planPayload = planResp?.data?.plan_id ? planResp.data : planResp;
+      const reviewPayload = reviewsResp?.data?.items ? reviewsResp.data : reviewsResp;
+      const fanoutPayload = fanoutResp?.data?.items ? fanoutResp.data : fanoutResp;
+      setPlan(planPayload ?? null);
+      setReviews(reviewPayload?.items ?? []);
+      setFanoutRuns(fanoutPayload?.items ?? []);
       setOffline(false);
       setError("");
     } catch (err) {

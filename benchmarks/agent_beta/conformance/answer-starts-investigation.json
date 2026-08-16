@@ -1,0 +1,6 @@
+{
+  "fixture_id": "answer-starts-investigation",
+  "description": "解释型追问触发新调查时必须 FAIL",
+  "expected_verdict": "MUST_FAIL",
+  "status": "SPECIFIED"
+}

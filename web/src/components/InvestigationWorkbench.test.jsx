@@ -5,36 +5,36 @@ import InvestigationWorkbench from "./InvestigationWorkbench";
 import * as api from "../api/client";
 
 const planResponse = {
-  data: {
-    plan_id: "plan-1",
-    plan_revision: 2,
-    goal: "验证支付接口超时根因",
-    steps: [
-      { step_id: "step-run", collector_id: "sys_metrics", purpose: "采集基础指标",
-        priority: 90, risk: "READ_LOW", status: "RUNNING" },
-      { step_id: "step-queued", collector_id: "log_scan", purpose: "扫描错误日志",
-        priority: 80, risk: "READ_LOW", status: "QUEUED",
-        selection_strategy: "REPRESENTATIVE" },
-      { step_id: "step-done", collector_id: "perf_cpu", purpose: "CPU 热点",
-        priority: 70, risk: "READ_LOW", status: "COMPLETED" },
-    ],
-  },
+  plan_id: "plan-1",
+  plan_revision: 2,
+  goal: "验证支付接口超时根因",
+  steps: [
+    { step_id: "step-run", collector_id: "sys_metrics", purpose: "采集基础指标",
+      priority: 90, risk: "READ_LOW", status: "RUNNING" },
+    { step_id: "step-queued", collector_id: "log_scan", purpose: "扫描错误日志",
+      priority: 80, risk: "READ_LOW", status: "QUEUED",
+      selection_strategy: "REPRESENTATIVE" },
+    { step_id: "step-done", collector_id: "perf_cpu", purpose: "CPU 热点",
+      priority: 70, risk: "READ_LOW", status: "COMPLETED" },
+  ],
 };
 
 describe("InvestigationWorkbench", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // client.js response interceptor unwraps body.data; component mocks must
+    // use the real unwrapped wire shape to prevent double-.data false green.
     vi.spyOn(api, "getCaseInvestigationPlan").mockResolvedValue(planResponse);
     vi.spyOn(api, "listCaseEvidenceReviews").mockResolvedValue({
-      data: { data: { items: [
+      items: [
         { review_id: "r1", evidence_id: "ev-1", decision: "TRUSTED", reason: "已复核" },
-      ] } },
+      ],
     });
     vi.spyOn(api, "listCaseFanoutRuns").mockResolvedValue({
-      data: { data: { items: [
+      items: [
         { run_id: "fanout-1", strategy: "ALL_IN_SCOPE", coverage: 0.67,
           status: "COMPLETED", aggregate: { conclusion: "fault-domain" } },
-      ] } },
+      ],
     });
     vi.spyOn(api, "cancelCasePlanStep").mockResolvedValue({});
     vi.spyOn(api, "removeCasePlanStep").mockResolvedValue({});

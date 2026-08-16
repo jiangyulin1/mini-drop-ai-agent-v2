@@ -1,0 +1,6 @@
+{
+  "fixture_id": "no-native-task",
+  "description": "AI 采集未经过原生 Task/Supervisor 时必须 FAIL",
+  "expected_verdict": "MUST_FAIL",
+  "status": "SPECIFIED"
+}

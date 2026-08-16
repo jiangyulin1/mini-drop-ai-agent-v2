@@ -283,12 +283,17 @@ class InvestigationPlanService:
             "reason": payload.reason,
             "actor_id": actor_id,
         })
-        # 排除后的 Evidence 从后续 Attachment/Prompt 投影中剥离
+        # 排除后的 Evidence 从后续 Attachment/Prompt 投影中剥离；恢复时回写 canonical store。
         if payload.decision == "EXCLUDED":
             self._apply_excluded_evidence(case_id, tenant_id, payload.evidence_id)
+        elif payload.decision == "RESTORED":
+            if hasattr(self._repo, "restore_case_evidence"):
+                self._repo.restore_case_evidence(case_id, tenant_id, payload.evidence_id)
         return review
 
     def _apply_excluded_evidence(self, case_id: str, tenant_id: str, evidence_id: str) -> None:
+        if hasattr(self._repo, "exclude_case_evidence"):
+            self._repo.exclude_case_evidence(case_id, tenant_id, evidence_id)
         for attachment in self._repo.list_case_attachments(case_id, tenant_id):
             evidence_ids = attachment.get("evidence_ids") or []
             if evidence_id in evidence_ids:

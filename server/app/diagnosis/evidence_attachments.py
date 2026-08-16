@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from server.app.diagnosis.case_evidence import CaseEvidenceService
 from server.app.diagnosis.reference_resolver import ReferenceResolver, ResourceRef
 
 # 兼容旧前端：target_scope.evidence_task_ids 里的 Task 自动投影为 Attachment
@@ -33,9 +34,15 @@ def _attachment_id(case_id: str, ref: ResourceRef) -> str:
 
 
 class EvidenceAttachmentService:
-    def __init__(self, repository: Any, resolver: ReferenceResolver | None = None):
+    def __init__(
+        self,
+        repository: Any,
+        resolver: ReferenceResolver | None = None,
+        case_evidence_service: CaseEvidenceService | None = None,
+    ):
         self._repo = repository
         self._resolver = resolver or ReferenceResolver(repository)
+        self._evidence = case_evidence_service or CaseEvidenceService(repository)
 
     # ── create / backfill ──────────────────────────────────────────────
     def attach_resources(
@@ -88,12 +95,28 @@ class EvidenceAttachmentService:
                     "supersedes": [],
                 },
             )
+            evidence_ids = list(resolved.evidence_ids or [])
+            if resolved.eligible and ref.type == "task":
+                evidence_ids = self._evidence.materialize_task_artifacts(
+                    case_id,
+                    tenant_id,
+                    task_id=ref.id,
+                    attachment_id=attachment.get("attachment_id"),
+                    actor_id=actor_id,
+                )
+                if evidence_ids:
+                    attachment = self._repo.update_case_attachment(
+                        attachment.get("attachment_id"),
+                        tenant_id,
+                        {"evidence_ids": evidence_ids},
+                    ) or attachment
             results.append({
                 "ref": ref.model_dump(mode="json"),
                 "result": status if resolved.eligible else "REJECTED",
                 "attachment_id": attachment.get("attachment_id"),
                 "detail": resolved.label,
                 "rejection_reason": reason,
+                "evidence_ids": evidence_ids,
             })
             # 集合展开：每个成员 Task 也建立独立 Attachment，
             # active_task_ids 因此只需读取 task 类型附件，无需二次展开。
@@ -125,12 +148,28 @@ class EvidenceAttachmentService:
                             "supersedes": [],
                         },
                     )
+                    member_evidence_ids = []
+                    if member_resolved.eligible:
+                        member_evidence_ids = self._evidence.materialize_task_artifacts(
+                            case_id,
+                            tenant_id,
+                            task_id=str(member_id),
+                            attachment_id=member_attachment.get("attachment_id"),
+                            actor_id=actor_id,
+                        )
+                        if member_evidence_ids:
+                            member_attachment = self._repo.update_case_attachment(
+                                member_attachment.get("attachment_id"),
+                                tenant_id,
+                                {"evidence_ids": member_evidence_ids},
+                            ) or member_attachment
                     results.append({
                         "ref": member_ref.model_dump(mode="json"),
                         "result": "ACCEPTED" if member_resolved.eligible else "REJECTED",
                         "attachment_id": member_attachment.get("attachment_id"),
                         "detail": f"集合成员 {member_id}",
                         "rejection_reason": member_resolved.reason_code,
+                        "evidence_ids": member_evidence_ids,
                     })
         return results
 

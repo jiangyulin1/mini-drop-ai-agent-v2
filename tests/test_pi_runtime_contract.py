@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import time
@@ -101,3 +102,18 @@ def test_pi_reports_version_with_expected_major_minor():
     # Plan targets 0.84.0; local machine 0.83.0.  Both satisfy the contract.
     assert major_minor[0] == 0, f"unexpected pi major version {version}"
     assert major_minor[1] >= 83, f"pi too old: {version} (need >= 0.83)"
+
+
+def test_sidecar_package_lock_and_banner_version_are_consistent():
+    import json
+    from server.app.agent_runtime.config import pi_runtime_version
+    package_path = Path(__file__).resolve().parents[1] / "agent_runtime" / "pi-sidecar" / "package.json"
+    package = json.loads(package_path.read_text())
+    actual = package["dependencies"]["@earendil-works/pi-coding-agent"].split(".")[:2]
+    declared = pi_runtime_version().split(".")[:2]
+    assert declared == actual
+    runtime_src = (
+        Path(__file__).resolve().parents[1]
+        / "agent_runtime" / "pi-sidecar" / "src" / "runtime.mjs"
+    ).read_text()
+    assert f"pi-{pi_runtime_version()}" in runtime_src

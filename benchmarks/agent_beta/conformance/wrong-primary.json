@@ -1,0 +1,6 @@
+{
+  "fixture_id": "wrong-primary",
+  "description": "Primary 误判为下游症状时必须 FAIL",
+  "expected_verdict": "MUST_FAIL",
+  "status": "SPECIFIED"
+}

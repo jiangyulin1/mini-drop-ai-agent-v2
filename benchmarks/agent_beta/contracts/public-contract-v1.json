@@ -1,0 +1,410 @@
+{
+  "schema_version": "1.0",
+  "contract_id": "public-contract-v1",
+  "prompt_file": "docs/ai_agent_feature_complete_demo_prompt_v6.md",
+  "prompt_sha256": "37e5362f8122f760e6cc8e0fbc8e69f1a8d832d3a3ab7e7c197af2d6690038f2",
+  "normative": "docs/ai_agent_feature_complete_demo_prompt.md sections 8.1/8.4/8.5",
+  "requirements": [
+    {
+      "id": "D01",
+      "description": "解释型追问不误启动调查"
+    },
+    {
+      "id": "D02",
+      "description": "第一页或 @ 已有数据物化、引用和零重复采集"
+    },
+    {
+      "id": "D03",
+      "description": "模糊语言触发真实、连续、自适应 Agent 调查"
+    },
+    {
+      "id": "D04",
+      "description": "暂停、转向、补证、降信任、恢复和 revision 隔离"
+    },
+    {
+      "id": "D05",
+      "description": "人工共同基线 + 异构 Assignment"
+    },
+    {
+      "id": "D06",
+      "description": "AI 异构 Campaign、部分失败和覆盖率约束"
+    },
+    {
+      "id": "D07",
+      "description": "注册低风险 Query 的正向执行与越界拒绝"
+    },
+    {
+      "id": "D08",
+      "description": "Skill 版本、选择理由、正触发与负触发"
+    },
+    {
+      "id": "D09",
+      "description": "可构建 Knowledge、可打开引用、不冒充 Current Evidence"
+    },
+    {
+      "id": "D10",
+      "description": "SourceRegistry/MCP 补证、清洗、失败缺口和 lineage"
+    },
+    {
+      "id": "D11",
+      "description": "Primary/Contributing/Amplifier/Propagation/Symptom/Coincidental 及有向边"
+    },
+    {
+      "id": "D12",
+      "description": "采集失败、冲突、陈旧、时钟和覆盖不足的精确 EvidenceGap"
+    },
+    {
+      "id": "D13",
+      "description": "与 Cause/Edge 绑定的缓解、根修复、放大治理和验证"
+    },
+    {
+      "id": "D14",
+      "description": "Sidecar/Server/Supervisor/Worker 重启、重复事件和幂等恢复"
+    },
+    {
+      "id": "D15",
+      "description": "持久会话、真实进度、任务双入口和关键图内嵌展示"
+    },
+    {
+      "id": "D16",
+      "description": "部署承载两阶段评估和条件化拒答"
+    },
+    {
+      "id": "D17",
+      "description": "非技术用户可完成、专家可追溯和纠错"
+    },
+    {
+      "id": "D18",
+      "description": "真实故障、盲测 Oracle、独立评分和规则外假设"
+    },
+    {
+      "id": "D19",
+      "description": "Pi/Provider/MCP 故障时普通 Drop 与 deterministic 回退"
+    },
+    {
+      "id": "D20",
+      "description": "故障 TTL、清理、最终健康和候选证据绑定"
+    }
+  ],
+  "cases": [
+    {
+      "id": "P01",
+      "name": "conversation.explain_only",
+      "description": "问“这张 CPU 图是什么意思”；ANSWER_ONLY，引用现有 Evidence，Plan/Campaign/ExecutionUnit/Task/采集唤醒 Outbox 增量均为 0；AssistantMessage/SSE 正常持久化，刷新后仍存在",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D01",
+        "D09",
+        "D15"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P02",
+      "name": "ingress.existing_evidence_reuse",
+      "description": "@Task/@Collection 物化为 CaseEvidence；充分时新增 Task=0；Task↔Artifact↔Evidence↔Conclusion 双向追溯",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D02",
+        "D17"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P03",
+      "name": "autonomy.single_fault",
+      "description": "用户只说“商城变慢，请自行定位”；真实 Query+Collector 和至少三次 model turn；同一首轮 Snapshot fork 两 Case 只改变第二轮 Evidence 时必须合理分叉",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT",
+        "CAUSAL_SINGLE"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D03",
+        "D07",
+        "D18"
+      ],
+      "repeats": 3
+    },
+    {
+      "id": "P04",
+      "name": "control.revision_interrupt",
+      "description": "慢采集中暂停、改目标、补证、降低旧证据、恢复；旧 revision/tool/迟到结果不推进，时间线完整",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D04",
+        "D14"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P05",
+      "name": "campaign.manual_heterogeneous",
+      "description": "所有目标采共同基线，网关查服务/连接、API 查网络/短日志、DB 查 IO/连接；矩阵和原生 Task 一一对应",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D05",
+        "D07"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P06",
+      "name": "campaign.agent_heterogeneous_partial",
+      "description": "AI 对网关/API/DB 生成差异化 Assignment；一个 Worker 离线/缺能力；Coverage 列节点/角色/事实缺口并拒绝全局结论",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D06",
+        "D12",
+        "D17"
+      ],
+      "repeats": 3
+    },
+    {
+      "id": "P07",
+      "name": "query.registry",
+      "description": "正向运行 process/network/service/log 操作；管道、命令替换、路径逃逸、自定义 executable/cwd/env、无限日志和 scope 外目标在 Worker 启动前拒绝",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D07",
+        "D19"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P08",
+      "name": "skill_knowledge_mcp",
+      "description": "Skill 改变策略，Knowledge 引用可打开但不作当前事实，MCP 形成 Evidence；Source 失败生成具体 Gap，文档指令不能扩大工具权限",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D08",
+        "D09",
+        "D10",
+        "D12"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P09",
+      "name": "causal.public_cascade",
+      "description": "真实 A内存增长→GC→A延迟→B超时→B重试放大→下游压力；A 为 Primary、B 重试为 Amplifier、逐边真实 Evidence、下游非根因",
+      "scoring_profiles": [
+        "CAUSAL_SINGLE"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D03",
+        "D11",
+        "D13",
+        "D18"
+      ],
+      "repeats": 3
+    },
+    {
+      "id": "P10",
+      "name": "causal.missing_edge",
+      "description": "屏蔽/失败一条决定性边并加入更显著下游 distractor；只允许部分确认，Gap 明确已知/未知/失败/最小补证，DB 不升为 Primary",
+      "scoring_profiles": [
+        "CAUSAL_PARTIAL"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D11",
+        "D12",
+        "D13",
+        "D18"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P11",
+      "name": "capacity.two_phase",
+      "description": "两个 required subcase 首轮都遮蔽明确事实并必须返回 INSUFFICIENT_DATA；补证后一例 FIT、一例 NOT_FIT；始终 CONDITIONAL 失败，不实际部署",
+      "scoring_profiles": [
+        "CAPACITY"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D10",
+        "D12",
+        "D16"
+      ],
+      "repeats": 1
+    },
+    {
+      "id": "P12",
+      "name": "recovery.ui.cleanup",
+      "description": "重启 Sidecar、Server/Supervisor、Worker，注入重复事件与 SSE 重连；无重复副作用，普通 Drop 可用，AI Task 双入口可见，关键图内嵌，全部清理",
+      "scoring_profiles": [
+        "FUNCTIONAL_CONTRACT"
+      ],
+      "minimum_realness": "R4",
+      "requirements": [
+        "D14",
+        "D15",
+        "D17",
+        "D19",
+        "D20"
+      ],
+      "repeats": 1
+    }
+  ],
+  "holdout_slots": [
+    {
+      "id": "H01",
+      "source": "RCAEval RE2 CPU",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H02",
+      "source": "RCAEval RE2 MEM",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H03",
+      "source": "RCAEval RE2 DISK",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H04",
+      "source": "RCAEval RE2 DELAY",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H05",
+      "source": "RCAEval RE2 LOSS",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H06",
+      "source": "RCAEval RE2 SOCKET",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H07",
+      "source": "RCAEval RE3 code-level",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H08",
+      "source": "RCAEval RE3 code-level",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H09",
+      "source": "RCAEval RE3 code-level",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R2"
+    },
+    {
+      "id": "H10",
+      "source": "isolated dynamic causal stack",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H11",
+      "source": "isolated dynamic causal stack",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H12",
+      "source": "isolated dynamic causal stack",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H13",
+      "source": "isolated dynamic dual root",
+      "scoring_profile": "CAUSAL_MULTI",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H14",
+      "source": "dynamic Amplifier",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H15",
+      "source": "dynamic distractor",
+      "scoring_profile": "CAUSAL_SINGLE",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H16",
+      "source": "dynamic masked edge",
+      "scoring_profile": "CAUSAL_PARTIAL",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H17",
+      "source": "dynamic time/clock reversal",
+      "scoring_profile": "CAUSAL_PARTIAL",
+      "minimum_realness": "R3"
+    },
+    {
+      "id": "H18a",
+      "source": "three-node membership incarnation",
+      "scoring_profile": "FUNCTIONAL_CONTRACT",
+      "minimum_realness": "R4"
+    },
+    {
+      "id": "H18b",
+      "source": "three-node capacity",
+      "scoring_profile": "CAPACITY",
+      "minimum_realness": "R4"
+    },
+    {
+      "id": "H19",
+      "source": "three-node healthy baseline",
+      "scoring_profile": "HEALTHY_ABSTAIN",
+      "minimum_realness": "R4"
+    }
+  ],
+  "scoring_profiles": [
+    "FUNCTIONAL_CONTRACT",
+    "CAUSAL_SINGLE",
+    "CAUSAL_MULTI",
+    "CAUSAL_PARTIAL",
+    "CAPACITY",
+    "HEALTHY_ABSTAIN"
+  ],
+  "forbidden_contract_drift": [
+    "删除断言",
+    "缩小 realness",
+    "减少 repeats",
+    "扩大预算",
+    "降低阈值"
+  ]
+}

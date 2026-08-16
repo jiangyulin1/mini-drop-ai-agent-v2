@@ -41,7 +41,7 @@ class MockSidecarHandler(BaseHTTPRequestHandler):
             self._respond({"ok": True, "data": {
                 "case_id": body["context"]["case_id"],
                 "runtime_type": "pi",
-                "runtime_version": "pi-0.84.0",
+                "runtime_version": "pi-0.83.0",
                 "runtime_session_id": "mock-session-1",
                 "runtime_generation": 1,
                 "status": "READY",
@@ -53,6 +53,18 @@ class MockSidecarHandler(BaseHTTPRequestHandler):
             self._respond({"ok": True, "data": {
                 "turn_id": "turn-mock-1", "accepted": True, "mode": "pi",
                 "detail": "已提交到 Pi Sidecar",
+            }})
+        elif self.path.endswith("/shadow-plan"):
+            self._respond({"ok": True, "data": {
+                "goal": "定位支付超时",
+                "steps": [{
+                    "collector_id": "sys_metrics",
+                    "purpose": "基础指标",
+                    "risk": "READ_LOW",
+                    "priority": 50,
+                    "status": "QUEUED",
+                }],
+                "source": "pi_shadow",
             }})
         elif self.path.endswith("/steer"):
             self._respond({"ok": True, "data": {"accepted": True}})
@@ -67,7 +79,7 @@ class MockSidecarHandler(BaseHTTPRequestHandler):
             self._respond({"ok": True, "data": {
                 "case_id": "case-mock", "status": "READY",
                 "runtime_generation": 1, "last_event_seq": 5,
-                "runtime_version": "pi-0.84.0", "detail": "",
+                "runtime_version": "pi-0.83.0", "detail": "",
             }})
         else:
             self._respond({"ok": False, "error": "not_found"})
@@ -142,3 +154,10 @@ def test_adapter_requires_sidecar_url(monkeypatch):
     from server.app.agent_runtime.pi_adapter import PiAgentRuntimeAdapter
     with pytest.raises(RuntimeError, match="MINI_DROP_PI_RUNTIME_URL"):
         PiAgentRuntimeAdapter()
+
+
+def test_submit_shadow_plan_returns_plan(sidecar):
+    adapter = _adapter(sidecar)
+    plan = adapter.submit_shadow_plan("case-a", _snapshot())
+    assert plan["source"] == "pi_shadow"
+    assert plan["steps"][0]["collector_id"] == "sys_metrics"

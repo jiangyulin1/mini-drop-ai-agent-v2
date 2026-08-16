@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
-"""Build an immutable deploy candidate from the CURRENT working tree.
+"""Build an immutable v6 Candidate from the CURRENT working tree.
 
-E0 gate (plan section 19.3): the release object must be "the same code that just
-passed the local gate", even when the working tree has uncommitted changes.  This
-script:
+The release ID is derived from every payload byte.  Untracked source files are
+hashed by content, not by path only, and web dist is hashed as a tree.
+A package receipt is emitted outside the archive so no self-hash loop exists.
 
-  1. snapshots committed HEAD with `git archive`;
-  2. overlays every tracked-file change from the working tree;
-  3. copies only allowlisted untracked source files;
-  4. builds the web distribution;
-  5. scans the bundle for credentials / private topology / reports / test data;
-  6. emits an immutable Release Manifest with content hashes.
-
-It never runs `git commit`, never rsyncs the whole workspace and never writes
-.env, certificates, API keys or private eval data into the bundle.
+Exit codes: 0 built/verified; 1 invalid candidate; 2 worktree changed mid-build.
 """
 
 from __future__ import annotations
@@ -21,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -33,9 +26,6 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Untracked source files that must travel with a candidate.  Files are taken
-# from tracked source directories (strict, not a workspace rsync); anything
-# generated, private or environment-specific is deliberately excluded.
 UNTRACKED_SOURCE_DIRS = (
     "server/",
     "agent/",
@@ -49,25 +39,27 @@ UNTRACKED_SOURCE_DIRS = (
     "web/src/",
     "web/public/",
     "docs/",
+    "benchmarks/agent_beta/",
+    "agent_runtime/",
+    "mini_drop_observability/",
+    "knowledge/",
+    "golden_scenarios/",
 )
 UNTRACKED_ALLOWLIST = (
+    "requirements.lock",
     "benchmarks/ai_ops_v2/public/cases.json",
-    "benchmarks/ai_ops_v2/private/oracles.json",  # scoring-only; never reaches model context
+    "benchmarks/ai_ops_v2/private/oracles.json",
     "benchmarks/lightweight_ai_eval/manifest.json",
     "benchmarks/environments/hyperv_online_boutique_verified_vm.json",
     "benchmarks/environments/hyperv_three_node.json",
 )
 
-# Paths that must never enter a candidate bundle.
 BLOCKLIST_RE = re.compile(
     r"(^|/)(\.env|\.env\..*|.*\.pem$|.*\.key$|.*\.crt$|node_modules/|"
     r"reports/|testsets/|\.pytest-|\.git/|\.venv/|venv/|deploy/ssh/|"
-    r"ai_agent_runtime_state|.*run-records\.jsonl$|.*bundles/|private/)",
+    r"ssh/|external-package/|.*run-records\.jsonl$|.*bundles/|private/)",
     re.IGNORECASE,
 )
-# Real secrets are literal values with entropy.  Placeholders (${VAR}),
-# env reads (os.getenv) and bare identifiers (PASSWORD=SECRET) are code, not
-# secrets, and must not block a candidate.
 SECRET_RE = re.compile(
     r"(MINI_DROP_API_KEY|MINI_DROP_GRPC_TOKEN|AI_API_KEY|API_KEY|PASSWORD)[ \t]*[:=][ \t]*"
     r"([\"']?[A-Za-z0-9_./+\-]{8,}[\"']?)",
@@ -76,7 +68,80 @@ SECRET_RE = re.compile(
 PRIVATE_KEY_RE = re.compile(r"BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY")
 
 
-def _is_placeholder(value: str) -> bool:
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    return sha256_bytes(path.read_bytes())
+
+
+def canonical_json(value: Any) -> str:
+    """RFC 8785 style JCS used for candidate digests."""
+    if isinstance(value, dict):
+        return "{" + ",".join(
+            json.dumps(str(k), ensure_ascii=False, separators=(",", ":"))
+            + ":" + canonical_json(value[k])
+            for k in sorted(value.keys())
+        ) + "}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(canonical_json(item) for item in value) + "]"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(str(value), ensure_ascii=False, separators=(",", ":"))
+
+
+def canonical_digest(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def git(*args: str, cwd: Path = ROOT) -> str:
+    proc = subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True,
+        text=True, encoding="utf-8", errors="replace", check=True,
+    )
+    return proc.stdout
+
+
+def collect_payload_files(root: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if not BLOCKLIST_RE.search(d)]
+        current = Path(dirpath)
+        for name in sorted(filenames + dirnames):
+            path = current / name
+            rel = path.relative_to(root).as_posix()
+            if BLOCKLIST_RE.search(rel):
+                continue
+            if rel in {"candidate-manifest.json", "package-receipt.json", "_snapshot.tar"}:
+                continue
+            if path.is_symlink():
+                rows.append({
+                    "relative_path": rel,
+                    "file_type": "symlink",
+                    "mode": "0o777",
+                    "size": 0,
+                    "sha256": "",
+                    "link_target": os.readlink(path),
+                })
+            elif path.is_file():
+                data = path.read_bytes()
+                rows.append({
+                    "relative_path": rel,
+                    "file_type": "file",
+                    "mode": oct(path.stat().st_mode & 0o777),
+                    "size": len(data),
+                    "sha256": sha256_bytes(data),
+                    "link_target": None,
+                })
+    return sorted(rows, key=lambda item: item["relative_path"])
+
+
+def is_placeholder(value: str) -> bool:
     value = value.strip().strip("\"'")
     upper = value.upper()
     if value.startswith("${") or value.startswith("$") or value.startswith("os."):
@@ -90,13 +155,7 @@ def _is_placeholder(value: str) -> bool:
     return False
 
 
-def _is_literal_high_entropy(value: str) -> bool:
-    """A real secret is a single literal token with meaningful entropy.
-
-    Code expressions (`shlex.quote`, `args.api_key`, `request.add_header`) and
-    tests using low-entropy word values ("should-not-appear") are not release
-    secrets.  A genuine key mixes character classes beyond lowercase letters.
-    """
+def is_literal_high_entropy(value: str) -> bool:
     value = value.strip().strip("\"'")
     if not value or any(ch in value for ch in "().\t ") or value.startswith((":", "{")):
         return False
@@ -105,103 +164,104 @@ def _is_literal_high_entropy(value: str) -> bool:
     has_upper = any(ch.isupper() for ch in value)
     has_digit = any(ch.isdigit() for ch in value)
     if not (has_digit or has_upper):
-        return False  # 全小写词（含连字符）更可能是测试占位而非密钥
+        return False
     counts: dict[str, int] = {}
     for ch in value:
         counts[ch] = counts.get(ch, 0) + 1
     n = len(value)
-    entropy = -sum((c / n) * __import__("math").log2(c / n) for c in counts.values())
+    entropy = -sum((c / n) * math.log2(c / n) for c in counts.values())
     return entropy >= 3.5
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def sha256_file(path: Path) -> str:
-    return sha256_bytes(path.read_bytes())
-
-
-def git(*args: str, cwd: Path = ROOT) -> str:
-    proc = subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True,
-        text=True, encoding="utf-8", errors="replace", check=True,
-    )
-    return proc.stdout
-
-
-def collect_files(root: Path) -> list[Path]:
-    files: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(root).as_posix()
-        if BLOCKLIST_RE.search(rel):
-            continue
-        files.append(path)
-    return files
 
 
 def scan_for_secrets(root: Path) -> list[str]:
     findings: list[str] = []
-    for path in collect_files(root):
+    for row in collect_payload_files(root):
+        if row.get("file_type") != "file":
+            continue
+        path = root / row["relative_path"]
         try:
-            text = path.read_bytes()
+            data = path.read_bytes()
         except OSError:
             continue
-        if b"\x00" in text[:2048]:
+        if b"\x00" in data[:2048]:
             continue
-        content = text.decode("utf-8", "ignore")
+        content = data.decode("utf-8", "ignore")
         for match in SECRET_RE.finditer(content):
-            value = match.group(2)
-            if not _is_placeholder(value) and _is_literal_high_entropy(value):
-                findings.append(f"{path.relative_to(root)}: {match.group(0)[:60]!r}")
+            if not is_placeholder(match.group(2)) and is_literal_high_entropy(match.group(2)):
+                findings.append(f"{row['relative_path']}: {match.group(0)[:60]!r}")
         if PRIVATE_KEY_RE.search(content):
-            findings.append(f"{path.relative_to(root)}: contains private key material")
+            findings.append(f"{row['relative_path']}: contains private key material")
     return findings
 
 
-def verify_archive(archive: Path, python: str, sidecar: Path | None = None) -> list[str]:
-    """Unpack a candidate archive into an empty dir and re-run import + migration."""
-    import tempfile
+def tree_digest(files: list[dict[str, Any]]) -> str:
+    digest_rows = [
+        {
+            "relative_path": row["relative_path"],
+            "file_type": row["file_type"],
+            "mode": row["mode"],
+            "size": row["size"],
+            "sha256": row["sha256"],
+            "link_target": row["link_target"],
+        }
+        for row in files
+    ]
+    return canonical_digest(digest_rows)
 
+
+def migration_head(staging: Path) -> str:
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        config = Config(str(staging / "alembic.ini"))
+        config.set_main_option("script_location", str(staging / "migrations"))
+        script = ScriptDirectory.from_config(config)
+        heads = script.get_heads()
+        if len(heads) == 1:
+            return heads[0]
+        return ",".join(sorted(heads))
+    except Exception as exc:
+        return f"unavailable:{exc.__class__.__name__}"
+
+
+def verify_archive(archive: Path, manifest: dict[str, Any], python: str) -> list[str]:
+    import tempfile
     errors: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
-        with tarfile.open(archive) as tf:
-            tf.extractall(tmp)
         root = Path(tmp)
-        expected_hash = None
-        if sidecar and sidecar.is_file():
-            expected_hash = json.loads(sidecar.read_text(encoding="utf-8")).get("archive_sha256")
-        if expected_hash and expected_hash != sha256_file(archive):
-            errors.append("sidecar archive_sha256 does not match archive content")
+        with tarfile.open(archive) as tf:
+            tf.extractall(root)
+        listed = {item["relative_path"] for item in manifest["payload_files"]}
+        listed.add("candidate-manifest.json")
+        extra = sorted(
+            p.relative_to(root).as_posix() for p in root.rglob("*")
+            if (p.is_file() or p.is_symlink())
+            and p.relative_to(root).as_posix() not in listed
+            and "__pycache__" not in p.parts
+        )
+        if extra:
+            errors.append("extra files not listed in manifest: " + ",".join(extra[:10]))
         try:
             subprocess.run(
                 [python, "scripts/compile_proto.py"], cwd=str(root),
                 capture_output=True, text=True, timeout=180, check=True,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"compile_proto failed: {exc}")
         try:
             subprocess.run(
                 [python, "-c", "import server.app.main"], cwd=str(root),
                 capture_output=True, text=True, timeout=120, check=True,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"import server.app.main failed: {exc}")
         try:
             subprocess.run(
                 [python, "scripts/check_migrations.py"], cwd=str(root),
-                capture_output=True, text=True, timeout=120, check=True,
+                capture_output=True, text=True, timeout=180, check=True,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"migration graph check failed: {exc}")
-        web_dist = root / "web" / "dist"
-        embedded = root / "release-manifest.json"
-        if embedded.is_file():
-            embedded_manifest = json.loads(embedded.read_text(encoding="utf-8"))
-            if embedded_manifest.get("web_dist_sha256") and not (web_dist / "index.html").is_file():
-                errors.append("web/dist/index.html missing though manifest declares web_dist_sha256")
     return errors
 
 
@@ -209,13 +269,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path,
                         default=ROOT / "reports" / "implementation" / "candidates")
-    parser.add_argument("--build-web", action="store_true",
-                        help="run npm build before bundling (requires node_modules)")
+    parser.add_argument("--build-web", action="store_true")
     parser.add_argument("--skip-build", action="store_true")
-    parser.add_argument("--verify", action="store_true",
-                        help="unpack the produced archive and re-run import/migration checks")
-    parser.add_argument("--python", default=str(ROOT / ".venv" / "Scripts" / "python.exe")
-                        if os.name == "nt" else "python")
+    parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--python", default=sys.executable)
     args = parser.parse_args()
 
     head = git("rev-parse", "HEAD").strip()
@@ -223,10 +280,9 @@ def main() -> int:
     untracked = [line for line in git("ls-files", "--others", "--exclude-standard").splitlines() if line]
     allowed_untracked = sorted(
         p for p in untracked
-        if p in UNTRACKED_ALLOWLIST or any(p.startswith(prefix) for prefix in UNTRACKED_SOURCE_DIRS)
+        if (ROOT / p).is_file()
+        and (p in UNTRACKED_ALLOWLIST or any(p.startswith(prefix) for prefix in UNTRACKED_SOURCE_DIRS))
     )
-    # 编译的 protobuf 桩被 server/app/generated/.gitignore 排除在 untracked 之外，
-    # 但部署运行需要它们。强制纳入（__init__.py 已受版本控制，走 tracked diff）。
     compiled_proto = sorted(
         p.relative_to(ROOT).as_posix()
         for p in (ROOT / "server/app/generated").glob("*.py")
@@ -234,21 +290,34 @@ def main() -> int:
     )
     allowed_untracked = sorted(set(allowed_untracked) | set(compiled_proto))
     changed_tracked = [line for line in git("diff", "--name-only", "HEAD").splitlines() if line]
-
-    fingerprint_input = {
+    before_files = {
         "head": head,
         "tracked_diff_sha256": sha256_bytes(diff),
-        "included_untracked_files": allowed_untracked,
+        "included_untracked_files": [
+            {"path": p, "sha256": sha256_file(ROOT / p)} for p in allowed_untracked
+        ],
     }
-    fingerprint = sha256_bytes(json.dumps(fingerprint_input, sort_keys=True).encode())
-    release_id = f"cand-{head[:10]}-{fingerprint[:10]}"
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    staging = args.output_dir / "staging" / release_id
+
+    if args.build_web and not args.skip_build:
+        npm_bin = "npm.cmd" if os.name == "nt" else "npm"
+        subprocess.run([npm_bin, "--prefix", "web", "run", "build"], cwd=str(ROOT), check=True)
+
+    after_diff = git("diff", "HEAD").encode("utf-8")
+    if not sha256_bytes(diff) == sha256_bytes(after_diff):
+        print("worktree changed during build; candidate rejected", file=sys.stderr)
+        return 2
+    after_files = [
+        {"path": p, "sha256": sha256_file(ROOT / p)} for p in allowed_untracked
+    ]
+    if not before_files["included_untracked_files"] == after_files:
+        print("worktree file changed during build; candidate rejected", file=sys.stderr)
+        return 2
+
+    staging = args.output_dir / "staging" / f"tmp-{os.getpid()}"
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True, exist_ok=True)
 
-    # 1. committed snapshot
     proc = subprocess.run(["git", "archive", head], cwd=str(ROOT), capture_output=True, check=True)
     with (staging / "_snapshot.tar").open("wb") as handle:
         handle.write(proc.stdout)
@@ -256,43 +325,43 @@ def main() -> int:
         tf.extractall(staging)
     (staging / "_snapshot.tar").unlink()
 
-    # 2. overlay tracked working-tree changes
     for rel in changed_tracked:
         src = ROOT / rel
         dst = staging / rel
-        if src.is_file():
+        if src.is_file() or src.is_symlink():
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
+            if src.is_symlink():
+                dst.unlink(missing_ok=True)
+                dst.symlink_to(os.readlink(src))
+            else:
+                shutil.copy2(src, dst)
         else:
-            # deleted in working tree -> keep absent
             dst.unlink(missing_ok=True)
 
-    # 3. allowlisted untracked source files
     for rel in allowed_untracked:
         src = ROOT / rel
         dst = staging / rel
+        if not src.exists():
+            continue
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+        if src.is_symlink():
+            dst.unlink(missing_ok=True)
+            dst.symlink_to(os.readlink(src))
+        else:
+            shutil.copy2(src, dst)
 
-    # 4. build web distribution if requested, then stage the dist
-    if args.build_web and not args.skip_build:
-        npm_bin = "npm.cmd" if os.name == "nt" else "npm"
-        subprocess.run([npm_bin, "--prefix", "web", "run", "build"], cwd=str(ROOT), check=True)
     built_dist = ROOT / "web" / "dist"
     if built_dist.is_dir():
         staged_dist = staging / "web" / "dist"
         shutil.rmtree(staged_dist, ignore_errors=True)
         shutil.copytree(built_dist, staged_dist)
 
-    # 4b. 规范化 shell 脚本换行为 LF（Windows 工作树 CRLF 会在 Linux 上
-    #     破坏 set -o pipefail 等解析）。Makefile 同理。
     for script in staging.rglob("*.sh"):
         script.write_bytes(script.read_bytes().replace(b"\r\n", b"\n"))
     makefile = staging / "Makefile"
     if makefile.is_file():
         makefile.write_bytes(makefile.read_bytes().replace(b"\r\n", b"\n"))
 
-    # 5. secret + hygiene scan
     findings = scan_for_secrets(staging)
     if findings:
         print("secret/private scan found violations; candidate rejected:", file=sys.stderr)
@@ -301,52 +370,96 @@ def main() -> int:
         shutil.rmtree(staging, ignore_errors=True)
         return 1
 
-    # 6. Release Manifest
-    included_files = sorted(p.relative_to(staging).as_posix() for p in collect_files(staging))
-    web_dist = staging / "web" / "dist"
+    payload_files = collect_payload_files(staging)
+    payload_tree_digest = tree_digest(payload_files)
+    release_id = f"cand-{payload_tree_digest[:16]}"
+    web_dist_tree_digest = None
+    if (staging / "web" / "dist" / "index.html").is_file():
+        web_files = [
+            row for row in payload_files if row["relative_path"].startswith("web/dist/")
+        ]
+        web_dist_tree_digest = tree_digest(web_files)
+
+    sidecar_lock = staging / "agent_runtime" / "pi-sidecar" / "package-lock.json"
+    migration_plan = staging / "migrations" / "migration-plan.json"
     manifest: dict[str, Any] = {
-        "schema_version": "1.0",
+        "schema_version": "candidate-manifest-v2",
         "release_id": release_id,
         "base_commit": head,
-        "working_tree_fingerprint": fingerprint,
-        "tracked_diff_sha256": fingerprint_input["tracked_diff_sha256"],
-        "included_untracked_files": allowed_untracked,
-        "web_dist_sha256": sha256_file(web_dist / "index.html") if (web_dist / "index.html").is_file() else None,
-        "migration_heads": [p.name for p in sorted((staging / "migrations" / "versions").glob("*.py"))],
-        "file_count": len(included_files),
-        "files": included_files,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "payload_files": payload_files,
+        "payload_tree_digest": payload_tree_digest,
+        "tracked_diff_sha256": sha256_bytes(diff),
+        "included_untracked_files": [
+            {"path": p, "size": (ROOT / p).stat().st_size if (ROOT / p).exists() else 0,
+             "sha256": sha256_file(ROOT / p)} for p in allowed_untracked
+        ],
+        "web_dist_tree_sha256": web_dist_tree_digest,
+        "python_lock_sha256": sha256_file(staging / "requirements.lock") if (staging / "requirements.lock").is_file() else None,
+        "sidecar_package_lock_sha256": sha256_file(sidecar_lock) if sidecar_lock.is_file() else None,
+        "actual_pi_version": "0.83.0",
+        "migration_head": migration_head(staging),
+        "migration_plan_digest": sha256_file(migration_plan) if migration_plan.is_file() else None,
+        "prompt_digest": sha256_file(ROOT / "docs/ai_agent_feature_complete_demo_prompt_v6.md"),
+        "public_contract_digest": sha256_file(ROOT / "benchmarks/agent_beta/contracts/public-contract-v1.json"),
+        "source_date_epoch": int(datetime.now(timezone.utc).timestamp()),
     }
-    manifest_path = staging / "release-manifest.json"
+    manifest_digest = canonical_digest({k: v for k, v in manifest.items() if k != "manifest_digest"})
+    manifest["manifest_digest"] = manifest_digest
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = staging / "candidate-manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 7. tarball with overall hash (recorded in a sidecar, since an archive
-    #    cannot contain a hash of itself).
-    bundle = args.output_dir / f"{release_id}.tar.gz"
-    with tarfile.open(bundle, "w:gz") as tf:
-        for path in collect_files(staging):
-            tf.add(path, arcname=path.relative_to(staging).as_posix())
-    manifest["archive_sha256"] = sha256_file(bundle)
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    sidecar = args.output_dir / f"{release_id}.manifest.json"
-    sidecar.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    archive_path = args.output_dir / f"{release_id}.tar.gz"
+    existing_receipt_path = args.output_dir / f"{release_id}.receipt.json"
+    if archive_path.exists() or (args.output_dir / f"{release_id}.manifest.json").exists():
+        previous_digest = None
+        if existing_receipt_path.exists():
+            previous_digest = json.loads(existing_receipt_path.read_text()).get("archive_sha256")
+        if previous_digest and sha256_file(archive_path) == previous_digest:
+            print(json.dumps({"release_id": release_id, "reused": True}, ensure_ascii=False))
+            return 0
+        print("existing release ID exists without identical verified bytes; refusing to overwrite", file=sys.stderr)
+        return 1
+
+    payload_paths = {row["relative_path"] for row in payload_files}
+    with tarfile.open(archive_path, "w:gz") as tf:
+        for rel in sorted(payload_paths):
+            path = staging / rel
+            if path.is_file() or path.is_symlink():
+                tf.add(path, arcname=rel, recursive=False)
+        tf.add(manifest_path, arcname="candidate-manifest.json")
+    archive_sha256 = sha256_file(archive_path)
+
+    receipt = {
+        "schema_version": "package-receipt-v1",
+        "release_id": release_id,
+        "payload_tree_digest": payload_tree_digest,
+        "manifest_digest": manifest_digest,
+        "archive_sha256": archive_sha256,
+    }
+    existing_receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+    (args.output_dir / f"{release_id}.manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     shutil.rmtree(staging, ignore_errors=True)
 
     summary = {
         "release_id": release_id,
-        "archive": str(bundle.relative_to(args.output_dir)),
-        "archive_sha256": manifest["archive_sha256"],
+        "archive": str(archive_path),
+        "archive_sha256": archive_sha256,
+        "payload_tree_digest": payload_tree_digest,
+        "manifest_digest": manifest_digest,
         "base_commit": head,
-        "working_tree_fingerprint": fingerprint,
         "tracked_files_overlaid": len(changed_tracked),
-        "untracked_files_included": allowed_untracked,
-        "files": manifest["file_count"],
+        "untracked_files_included": len(allowed_untracked),
+        "payload_files": len(payload_files),
+        "web_dist_tree_sha256": web_dist_tree_digest,
+        "migration_head": manifest["migration_head"],
+        "source_date_epoch": manifest["source_date_epoch"],
     }
     if args.verify:
-        verify_errors = verify_archive(
-            bundle, args.python,
-            sidecar=args.output_dir / f"{release_id}.manifest.json",
-        )
+        verify_errors = verify_archive(archive_path, manifest, args.python)
         summary["verify"] = {"ok": not verify_errors, "errors": verify_errors}
         if verify_errors:
             print(json.dumps(summary, ensure_ascii=False, indent=2))

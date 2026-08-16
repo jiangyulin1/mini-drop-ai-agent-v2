@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.database import init_db, reset_engine
-from server.app.main import app
+from server.app.main import app, repo
 from server.app.models import Base
 
 TOKEN = "test-internal-token"
@@ -65,6 +65,8 @@ def test_internal_case_snapshot_returns_projection(client: TestClient):
     data = resp.json()["data"]
     assert data["case_id"] == case["case_id"]
     assert "plan" in data and "attachments" in data
+    assert isinstance(data.get("evidence"), list)
+    assert "process.list" in data.get("query_operations", [])
 
 
 def test_internal_plan_write_requires_stale_check(client: TestClient):
@@ -110,9 +112,44 @@ def test_internal_finish_requires_evidence_refs(client: TestClient):
         headers=_headers(),
     )
     assert missing.status_code == 400
-    ok = client.post(
+    assert missing.json()["detail"] == "NO_EVIDENCE_REFS"
+    unknown = client.post(
         "/internal/agent/tools/finish",
         json={"case_id": case["case_id"], "evidence_ids": ["ev-1"]},
         headers=_headers(),
     )
-    assert ok.status_code == 200
+    assert unknown.status_code == 400
+    assert unknown.json()["detail"].startswith("INVALID_EVIDENCE_REFS")
+
+
+def test_internal_finish_accepts_known_evidence_refs(client: TestClient):
+    case = _create_case(client)
+    repo.upsert_case_attachment(
+        case["case_id"],
+        "tenant-a",
+        {
+            "attachment_id": "attach-valid",
+            "resource_type": "task",
+            "resource_id": "task-valid",
+            "label": "valid task",
+            "source": "user_mention",
+            "status": "ACCEPTED",
+            "evidence_ids": ["ev-valid"],
+        },
+    )
+    ok = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"],
+            "summary": "根因是 CPU 饱和",
+            "evidence_ids": ["ev-valid"],
+        },
+        headers=_headers(),
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["data"]["accepted"] is True
+    events = client.get(f"/api/v1/cases/{case['case_id']}/events").json()["data"]["items"]
+    assert events[-1]["event_type"] == "agent_finish_investigation"
+    updated = client.get(f"/api/v1/cases/{case['case_id']}").json()["data"]
+    assert updated["summary"]["current_finding"]["status"] == "concluded"
+    assert updated["summary"]["current_finding"]["evidence_refs"] == ["ev-valid"]

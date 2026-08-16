@@ -70,5 +70,9 @@ def knowledge_ids() -> set[str]:
 def _terms(value: str) -> set[str]:
     lowered = value.lower()
     ascii_terms = set(re.findall(r"[a-z0-9_.-]{2,}", lowered))
-    chinese_terms = set(re.findall(r"[\u4e00-\u9fff]{2,}", lowered))
+    chinese_runs = re.findall(r"[\u4e00-\u9fff]{2,}", lowered)
+    chinese_terms: set[str] = set(chinese_runs)
+    for run in chinese_runs:
+        chinese_terms.update(run[index:index + 2] for index in range(0, max(1, len(run) - 1)))
+        chinese_terms.update(char for char in run)
     return ascii_terms | chinese_terms

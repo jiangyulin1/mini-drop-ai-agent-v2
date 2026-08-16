@@ -6,9 +6,11 @@
 
 | 文档 | 用途 | 状态 |
 |---|---|---|
-| [`ai_agent_runtime_integration_plan.md`](ai_agent_runtime_integration_plan.md) | 供执行 AI 持续实现的总任务提示词：第二页持续诊断、Pi Runtime、集群/VM、Skill 与逐项验收 | 当前实施与验收真源 |
-| [`drop_ai_exploration_roadmap.md`](drop_ai_exploration_roadmap.md) | 当前项目审核、AI 探索定位、多路线优先级、12 周计划与晋级门槛 | 当前路线决策基线 |
-| [`autonomous_ops_agent_implementation_plan.md`](autonomous_ops_agent_implementation_plan.md) | 持续事故接管、准确率提升、自动处置闭环和分阶段验收 | 当前实施基线 |
+| [`ai_agent_feature_complete_demo_prompt_v6.md`](ai_agent_feature_complete_demo_prompt_v6.md) | v6 审计复位工程提示词：优先收敛 Evidence 可读、唯一 Supervisor、持久 Agent Loop、复合因果、真实前端和三节点验收 | 当前唯一主提示词与最终交付真源 |
+| [`ai_agent_feature_complete_demo_prompt.md`](ai_agent_feature_complete_demo_prompt.md) | v5 历史长版及审计批注，仅用于追溯旧需求和评测设计 | 已由 v6 替代，不再作为执行入口 |
+| [`ai_agent_runtime_integration_plan.md`](ai_agent_runtime_integration_plan.md) | ResourceRef、Evidence、Plan、Runtime、Tool、集群、AC 与 VM 阶梯的历史详细设计素材 | 仅作参考；冲突时以 v6 为准 |
+| [`drop_ai_exploration_roadmap.md`](drop_ai_exploration_roadmap.md) | 项目审核、探索定位、多路线优先级和旧 12 周计划 | 历史决策背景，不是执行路线 |
+| [`autonomous_ops_agent_implementation_plan.md`](autonomous_ops_agent_implementation_plan.md) | 持续事故接管、准确率和自动处置的旧分阶段设计 | 历史设计素材，不是完成度真源 |
 | [`ai_authorization_and_tooling.md`](ai_authorization_and_tooling.md) | Source、Probe、Grant、Policy、Action 和安全执行约束 | 当前安全规范 |
 | [`mcp_integration.md`](mcp_integration.md) | MCP Server、外部 MCP 数据源、部署和安全边界 | 当前集成指南 |
 | [`../benchmarks/lightweight_ai_eval/README.md`](../benchmarks/lightweight_ai_eval/README.md) | 秒级 AI 回归、MCP 安全门禁与 Hyper-V 抽检入口 | 当前评测入口 |
@@ -28,3 +30,4 @@
 - 一次性审计和测试结果写入 `reports/`，不再新增到 `docs/`。
 - 新方案替代旧方案时，直接更新当前基线；需要保留的历史使用 Git 标签或发布记录。
 - 文档不得包含密码、Token、私钥或真实生产凭据。
+- 执行 AI 只应把 `ai_agent_feature_complete_demo_prompt_v6.md` 作为主提示词；其他 AI 设计文档中的固定版本、完成度或固定调查方向不得覆盖 v6。

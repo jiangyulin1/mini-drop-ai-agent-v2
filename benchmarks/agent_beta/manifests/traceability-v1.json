@@ -1,0 +1,224 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-15T10:42:00Z",
+  "note": "完成状态只能由 evaluator 读取真实测试结果晋级；本文件 local_tests 只记录本地回归。",
+  "items": [
+    {
+      "requirement_id": "D01",
+      "public_cases": [
+        "P01"
+      ],
+      "local_tests": [
+        "tests/test_incident_cases.py::test_agent_turn_answers_status_and_persists_both_sides"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D02",
+      "public_cases": [
+        "P02"
+      ],
+      "local_tests": [
+        "tests/test_agent_tool_gateway.py::test_internal_finish_accepts_known_evidence_refs"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D03",
+      "public_cases": [
+        "P03",
+        "P09"
+      ],
+      "local_tests": [
+        "tests/test_agent_runtime_turn_endpoint.py::test_agent_turn_routes_through_agent_runtime_port"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D04",
+      "public_cases": [
+        "P04"
+      ],
+      "local_tests": [
+        "tests/test_plan_driver.py::test_cancelled_step_is_not_dispatched"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D05",
+      "public_cases": [
+        "P05"
+      ],
+      "local_tests": [
+        "tests/test_plan_driver.py::test_cluster_step_fans_out_via_membership"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D06",
+      "public_cases": [
+        "P06"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D07",
+      "public_cases": [
+        "P03",
+        "P05",
+        "P07"
+      ],
+      "local_tests": [
+        "tests/test_plan_driver.py::test_driver_dispatches_read_low_steps_to_tasks"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D08",
+      "public_cases": [
+        "P08"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D09",
+      "public_cases": [
+        "P01",
+        "P08"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D10",
+      "public_cases": [
+        "P08",
+        "P11"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D11",
+      "public_cases": [
+        "P09",
+        "P10"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D12",
+      "public_cases": [
+        "P06",
+        "P08",
+        "P10",
+        "P11"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D13",
+      "public_cases": [
+        "P09",
+        "P10"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D14",
+      "public_cases": [
+        "P04",
+        "P12"
+      ],
+      "local_tests": [
+        "tests/test_agent_runtime_turn_endpoint.py::test_internal_runtime_events_are_deduplicated_by_idempotency_key"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D15",
+      "public_cases": [
+        "P01",
+        "P12"
+      ],
+      "local_tests": [
+        "tests/test_agent_runtime_turn_endpoint.py"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D16",
+      "public_cases": [
+        "P11"
+      ],
+      "local_tests": [
+        "tests/test_agent_runtime.py::test_capacity_assessment_requires_allocatable_inventory_not_utilization"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D17",
+      "public_cases": [
+        "P02",
+        "P06",
+        "P12"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D18",
+      "public_cases": [
+        "P03",
+        "P09",
+        "P10"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    },
+    {
+      "requirement_id": "D19",
+      "public_cases": [
+        "P07",
+        "P12"
+      ],
+      "local_tests": [
+        "tests/test_agent_runtime_turn_endpoint.py::test_agent_turn_fails_closed_when_sidecar_url_missing"
+      ],
+      "vm_evidence": [],
+      "status": "LOCAL_PARTIAL"
+    },
+    {
+      "requirement_id": "D20",
+      "public_cases": [
+        "P12"
+      ],
+      "local_tests": [],
+      "vm_evidence": [],
+      "status": "NOT_STARTED"
+    }
+  ]
+}

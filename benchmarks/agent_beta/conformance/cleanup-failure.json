@@ -1,0 +1,6 @@
+{
+  "fixture_id": "cleanup-failure",
+  "description": "故障未清理/健康探针失败时必须 FAIL",
+  "expected_verdict": "MUST_FAIL",
+  "status": "SPECIFIED"
+}

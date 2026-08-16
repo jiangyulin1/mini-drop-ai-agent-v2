@@ -1,0 +1,92 @@
+schema_version: "1.0"
+suite_id: public-v2
+prompt_file: docs/ai_agent_feature_complete_demo_prompt_v6.md
+cases:
+  - id: P01
+    name: conversation_and_reuse
+    required_realness: R3
+    repeats: 1
+    scoring_profile: FUNCTIONAL_CONTRACT
+    description: ANSWER_ONLY zero side effects; persisted final cites real Projection; @Task/@Collection canonical Evidence and dedupe.
+  - id: P02
+    name: autonomous_single_fault
+    required_realness: R3
+    repeats: 2
+    scoring_profile: CAUSAL_SINGLE
+    description: At least three model_request_id, two Evidence->Wakeup, one Query and one Collector, Oracle frozen allowed/forbidden fork.
+  - id: P03
+    name: interrupt_restart_retarget
+    required_realness: R1
+    repeats: 1
+    scoring_profile: FUNCTIONAL_CONTRACT
+    description: D1-D5 crash points plus one real pause/retarget/restart; no duplicate side effects and old generation fenced.
+  - id: P04
+    name: heterogeneous_cluster
+    required_realness: R4
+    repeats: 1
+    scoring_profile: FUNCTIONAL_CONTRACT
+    description: Three logical roles on two Workers, common baseline plus differential assignments, coverage-limited conclusion.
+  - id: P05
+    name: query_mcp_skill_knowledge
+    required_realness: R1
+    repeats: 1
+    scoring_profile: FUNCTIONAL_CONTRACT
+    description: Four Query positive/negative matrix; one real MCP Evidence and one unavailable Source Gap; Skill/Knowledge traceable.
+  - id: P06
+    name: compound_causal
+    required_realness: R3
+    repeats: 2
+    scoring_profile: CAUSAL_MULTI
+    description: A memory->GC->A latency->B timeout->retry->DB pressure; A Primary, B retry Amplifier, DB never Primary.
+  - id: P07
+    name: precise_gap_distractor_and_healthy
+    required_realness: R3
+    repeats: 2
+    scoring_profile: CAUSAL_PARTIAL
+    description: Masked decisive fact with stronger distractor yields at most PARTIALLY_CONFIRMED and complete Gap; healthy subcase abstains.
+  - id: P08
+    name: capacity_two_phase
+    required_realness: R4
+    repeats: 2
+    scoring_profile: CAPACITY
+    description: INSUFFICIENT_DATA then Query/MCP backfill to FIT and NOT_FIT; no deployment executed.
+  - id: P09
+    name: ux_end_to_end
+    required_realness: R4
+    repeats: 1
+    scoring_profile: UX_CONTRACT
+    description: UX01-UX20 all true over the same Formal run Cases; browser, SSE, refresh, compaction and isolation.
+  - id: P10
+    name: fallback_cleanup
+    required_realness: R4
+    repeats: 1
+    scoring_profile: FUNCTIONAL_CONTRACT
+    description: Provider/MCP/Sidecar failures do not break standalone Drop; deterministic fallback; cleanup and final health pass.
+ux_assertions:
+  UX01: default_route_is_drop_dashboard
+  UX02: ai_page_is_secondary_navigation
+  UX03: drop_task_works_when_sidecar_down
+  UX04: accepted_is_pending_not_answer
+  UX05: persisted_final_visible_after_refresh
+  UX06: three_turn_history_preserved
+  UX07: answer_only_zero_side_effects
+  UX08: task_collection_evidence_mentions_materialized
+  UX09: active_and_next_match_workspace_snapshot
+  UX10: pause_abort_and_zero_new_dispatch
+  UX11: reorder_retarget_conflict_visible
+  UX12: identical_task_id_state_and_cancel_on_both_pages
+  UX13: manual_and_ai_heterogeneous_campaign
+  UX14: inline_visual_visible_without_navigation
+  UX15: sse_replay_no_missing_or_duplicate_event
+  UX16: empty_partial_error_states_have_text
+  UX17: expert_mode_traces_conclusion_to_evidence
+  UX18: concurrent_cases_are_isolated
+  UX19: large_evidence_bundle_is_real_and_usable
+  UX20: forty_turn_compaction_preserves_history_and_lineage
+budget:
+  max_model_turns: 180
+  max_tools: 450
+  max_tasks: 200
+  max_mcp: 60
+  max_tokens: 1500000
+  max_hours: 8

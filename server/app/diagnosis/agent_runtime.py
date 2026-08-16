@@ -33,6 +33,9 @@ class DeploymentRequirements(StrictModel):
     cpu_cores_per_replica: float = Field(default=0, ge=0, le=1024)
     memory_mb_per_replica: int = Field(default=0, ge=0, le=10_000_000)
     disk_mb_per_replica: int = Field(default=0, ge=0, le=100_000_000)
+    cpu_overhead_cores: float = Field(default=0, ge=0, le=1024)
+    memory_overhead_mb: int = Field(default=0, ge=0, le=10_000_000)
+    disk_overhead_mb: int = Field(default=0, ge=0, le=100_000_000)
     safety_margin_ratio: float = Field(default=0.2, ge=0, le=1)
 
     @model_validator(mode="after")
@@ -52,6 +55,21 @@ class AgentTurnRequest(StrictModel):
     execute_safe_tools: bool = True
     max_tool_calls: int = Field(default=4, ge=0, le=16)
     deployment_requirements: Optional[DeploymentRequirements] = None
+    client_command_id: Optional[str] = Field(default=None, max_length=128)
+    requested_disposition: Optional[
+        Literal[
+            "ANSWER_ONLY", "ATTACH_EVIDENCE", "INVESTIGATE",
+            "CORRECT_CONTEXT", "CONTROL", "DEPLOYMENT_ASSESSMENT",
+        ]
+    ] = None
+    references: list[dict[str, Any]] = Field(default_factory=list)
+    after_attach: Optional[Literal["ANSWER_ONLY", "INVESTIGATE"]] = None
+
+
+class DeploymentAssessmentRequest(StrictModel):
+    deployment_requirements: DeploymentRequirements
+    execute_safe_tools: bool = False
+    max_tool_calls: int = Field(default=4, ge=0, le=16)
 
 
 class AgentToolCall(StrictModel):
@@ -97,6 +115,7 @@ class AgentTurnResult(StrictModel):
     status: Literal[
         "answered", "diagnosis_requested", "diagnosis_in_progress",
         "needs_user", "tool_approval_required", "insufficient_data",
+        "runtime_turn_accepted", "runtime_unavailable",
     ]
     assistant_message: str
     decision_summary: list[str] = Field(default_factory=list)
@@ -106,6 +125,7 @@ class AgentTurnResult(StrictModel):
     next_actions: list[dict[str, Any]] = Field(default_factory=list)
     tool_calls: list[AgentToolCall] = Field(default_factory=list)
     deployment_assessment: Optional[DeploymentAssessment] = None
+    side_effect_delta: dict[str, Any] = Field(default_factory=dict)
 
 
 _EXPLAIN_MARKERS = ("为什么", "依据", "证据", "怎么判断", "解释", "报告", "结论")
@@ -316,16 +336,44 @@ def assess_deployment_capacity(
     cpu_need = requirements.cpu_cores_per_replica * margin
     memory_need = requirements.memory_mb_per_replica * margin
     disk_need = requirements.disk_mb_per_replica * margin
+    explicit_inventory = any(
+        key in node
+        for node in inventory
+        for key in ("reserved_cpu_cores", "reserved_memory_mb", "reserved_disk_mb")
+    )
+    explicit_overhead = any((
+        requirements.cpu_overhead_cores,
+        requirements.memory_overhead_mb,
+        requirements.disk_overhead_mb,
+    ))
     eligible: list[str] = []
     rejected: list[dict[str, Any]] = []
     for index, node in enumerate(inventory[:1000]):
         node_id = str(node.get("node_id") or node.get("agent_id") or f"node-{index + 1}")
         reasons: list[str] = []
-        checks = (
-            ("cpu", cpu_need, node.get("allocatable_cpu_cores")),
-            ("memory", memory_need, node.get("allocatable_memory_mb")),
-            ("disk", disk_need, node.get("allocatable_disk_mb")),
-        )
+        if explicit_inventory or explicit_overhead:
+            # P11 固定公式：available = allocatable - reservation - safety_margin
+            # required = per_replica * replicas + deployment_overhead
+            checks = (
+                ("cpu",
+                 requirements.cpu_cores_per_replica * requirements.replicas + requirements.cpu_overhead_cores,
+                 float(node.get("allocatable_cpu_cores") or 0) * (1 - requirements.safety_margin_ratio)
+                 - float(node.get("reserved_cpu_cores") or 0)),
+                ("memory",
+                 requirements.memory_mb_per_replica * requirements.replicas + requirements.memory_overhead_mb,
+                 float(node.get("allocatable_memory_mb") or 0) * (1 - requirements.safety_margin_ratio)
+                 - float(node.get("reserved_memory_mb") or 0)),
+                ("disk",
+                 requirements.disk_mb_per_replica * requirements.replicas + requirements.disk_overhead_mb,
+                 float(node.get("allocatable_disk_mb") or 0) * (1 - requirements.safety_margin_ratio)
+                 - float(node.get("reserved_disk_mb") or 0)),
+            )
+        else:
+            checks = (
+                ("cpu", cpu_need, node.get("allocatable_cpu_cores")),
+                ("memory", memory_need, node.get("allocatable_memory_mb")),
+                ("disk", disk_need, node.get("allocatable_disk_mb")),
+            )
         for resource, need, available in checks:
             if need <= 0:
                 continue

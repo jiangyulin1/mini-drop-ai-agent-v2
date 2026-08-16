@@ -60,6 +60,10 @@ export async function createServer() {
   return server;
 }
 
+function internalToken() {
+  return process.env.MINI_DROP_PI_INTERNAL_TOKEN || "";
+}
+
 async function route(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const path = url.pathname;
@@ -68,9 +72,15 @@ async function route(req, res) {
     json(res, 200, { ok: true, data: {
       status: manager ? "ready" : "degraded",
       runtime_type: "pi",
-      runtime_version: "pi-0.84.0",
+      runtime_version: "pi-0.83.0",
       model_ready: Boolean(manager?.modelRuntime),
     }});
+    return;
+  }
+
+  const token = internalToken();
+  if (token && req.headers["x-internal-token"] !== token) {
+    json(res, 401, { ok: false, error: "INTERNAL_TOKEN_REQUIRED" });
     return;
   }
 
@@ -101,6 +111,11 @@ async function route(req, res) {
     case "resume": {
       const binding = await manager.startOrResume(body.context || { case_id: caseId });
       json(res, 200, { ok: true, data: binding });
+      return;
+    }
+    case "shadow-plan": {
+      const plan = await manager.submitShadowPlan(caseId, body.context || { case_id: caseId });
+      json(res, 200, { ok: true, data: plan });
       return;
     }
     case "turn": {

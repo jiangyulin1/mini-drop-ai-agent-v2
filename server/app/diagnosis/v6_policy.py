@@ -1,0 +1,195 @@
+"""v6 machine policy and deterministic verification helpers.
+
+This module owns turn disposition routing, READ_ONLY tool enforcement and the
+factual part of CausalGraphVerifier/ReportVerifier.  The model may propose
+roles and edges; these functions decide the persisted verification state.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+READ_ONLY_TOOLS = {
+    "get_case_snapshot",
+    "list_case_evidence",
+    "get_evidence_projection",
+    "compare_evidence",
+    "search_knowledge",
+    "get_causal_graph",
+    "get_evidence_gaps",
+}
+
+PROPOSE_ONLY_TOOLS = {
+    "propose_hypothesis_revision",
+    "propose_plan_revision",
+    "propose_campaign_revision",
+    "request_operation",
+    "submit_causal_graph_revision",
+    "submit_repair_recommendations",
+    "finish_investigation",
+}
+
+ALLOWED_DISPOSITIONS = {
+    "ANSWER_ONLY", "ATTACH_EVIDENCE", "INVESTIGATE", "CORRECT_CONTEXT",
+    "CONTROL", "DEPLOYMENT_ASSESSMENT",
+}
+
+POLICIES = {"READ_ONLY", "PROPOSE_ONLY", "AUTO_READ_LOW"}
+
+
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def stable_hash(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def route_disposition(
+    message: str,
+    *,
+    requested_disposition: str | None = None,
+    execute_safe_tools: bool = False,
+    case_state: str = "OPEN",
+) -> tuple[str, str, bool]:
+    """Return (disposition, side_effect_policy, needs_user_confirmation)."""
+    if requested_disposition in ALLOWED_DISPOSITIONS:
+        disposition = requested_disposition
+    else:
+        normalized = " ".join(str(message or "").lower().split())
+        if any(marker in normalized for marker in ("为什么", "这张图", "这条证据", "解释", "说明什么", "判断证据", "只解释", "基于这些数据解释")):
+            disposition = "ANSWER_ONLY"
+        elif any(marker in normalized for marker in ("暂停", "恢复", "停止", "取消", "重排", "禁用", "纠正", "改成", "排除", "降低")):
+            disposition = "CONTROL"
+        elif any(marker in normalized for marker in ("部署", "容量", "承载", "扩容")):
+            disposition = "DEPLOYMENT_ASSESSMENT"
+        else:
+            disposition = "INVESTIGATE"
+
+    if disposition == "ANSWER_ONLY":
+        return disposition, "READ_ONLY", False
+    if disposition in {"CONTROL", "CORRECT_CONTEXT"}:
+        return disposition, "READ_ONLY", False
+    if disposition == "ATTACH_EVIDENCE":
+        return disposition, "READ_ONLY", True
+    if disposition == "DEPLOYMENT_ASSESSMENT":
+        return disposition, "PROPOSE_ONLY", True
+    if disposition == "INVESTIGATE":
+        policy = "AUTO_READ_LOW" if execute_safe_tools else "PROPOSE_ONLY"
+        return disposition, policy, not execute_safe_tools
+    return disposition, "READ_ONLY", True
+
+
+def tool_policy_error(tool_name: str, policy: str) -> str | None:
+    if policy == "READ_ONLY" and tool_name not in READ_ONLY_TOOLS:
+        return "TURN_READ_ONLY"
+    if policy == "PROPOSE_ONLY" and tool_name not in READ_ONLY_TOOLS | PROPOSE_ONLY_TOOLS:
+        return "TURN_PROPOSE_ONLY"
+    return None
+
+
+def field_matches_projection(content: dict[str, Any], field_path: str | None, expected: Any = None) -> tuple[bool, Any]:
+    """Resolve dotted field_path inside a projection content dict."""
+    if not field_path:
+        return False, None
+    current: Any = content
+    for part in field_path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
+        else:
+            return False, None
+    if expected is None:
+        return True, current
+    try:
+        op = str(expected.get("operator") or "eq")
+        target = expected.get("value")
+        if op == "gte":
+            return float(current) >= float(target), current
+        if op == "gt":
+            return float(current) > float(target), current
+        if op == "lte":
+            return float(current) <= float(target), current
+        if op == "lt":
+            return float(current) < float(target), current
+        if op == "eq":
+            return current == target, current
+        if op == "neq":
+            return current != target, current
+        if op == "in":
+            return current in target, current
+        return current == target, current
+    except (TypeError, ValueError):
+        return False, current
+
+
+def verify_claim_binding(
+    evidence: dict[str, Any],
+    projections: list[dict[str, Any]],
+    claim: dict[str, Any],
+) -> tuple[bool, str]:
+    """Factual verification of one ClaimEvidenceBinding."""
+    evidence_id = claim.get("evidence_id")
+    if not evidence_id or evidence.get("status") not in {"ACTIVE"}:
+        return False, "EVIDENCE_NOT_ACTIVE"
+    projection_hash = claim.get("projection_hash")
+    matching = [item for item in projections if item.get("projection_hash") == projection_hash]
+    if not matching:
+        return False, "PROJECTION_HASH_NOT_FOUND"
+    field_path = claim.get("field_path")
+    if field_path:
+        predicate = claim.get("predicate") or {}
+        ok, observed = field_matches_projection(matching[0].get("content") or {}, field_path, predicate)
+        if not ok:
+            return False, "PROJECTION_PREDICATE_FAILED"
+        claim["observed_value"] = {"field_path": field_path, "value": observed}
+    claim["verifier_result"] = "VERIFIED"
+    return True, "VERIFIED"
+
+
+def verify_primary_confirmation(
+    graph: dict[str, Any],
+    conclusion_state: str,
+    *,
+    blocker_gaps: int = 0,
+    required_edge_missing: int = 0,
+    alternative_primary_not_distinguished: bool = False,
+) -> str:
+    """Machine downgrade rule; Verifier owns final state, never model payload."""
+    if conclusion_state != "CONFIRMED":
+        return conclusion_state
+    if blocker_gaps or required_edge_missing or alternative_primary_not_distinguished:
+        return "PARTIALLY_CONFIRMED"
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    primary = [node for node in nodes if node.get("verifier_role") == "PRIMARY_ROOT_CAUSE"]
+    required = [edge for edge in edges if edge.get("verification_state") not in {"OBSERVED", "SUPPORTED"}]
+    if not primary or required:
+        return "PARTIALLY_CONFIRMED"
+    return "CONFIRMED"
+
+
+def side_effect_delta(
+    repo: Any,
+    case_id: str,
+    tenant_id: str,
+    *,
+    plan_revision: int = 0,
+    campaign_revision: int = 0,
+    task_count: int = 0,
+    source_call_count: int = 0,
+    execution_unit_count: int = 0,
+    acquisition_wakeup_count: int = 0,
+) -> dict[str, Any]:
+    """Computed side-effect counters for a Turn's machine assertion."""
+    return {
+        "plan_revision_delta": int(plan_revision or 0),
+        "campaign_revision_delta": int(campaign_revision or 0),
+        "execution_unit_delta": int(execution_unit_count or 0),
+        "task_delta": int(task_count or 0),
+        "source_call_delta": int(source_call_count or 0),
+        "acquisition_wakeup_delta": int(acquisition_wakeup_count or 0),
+    }

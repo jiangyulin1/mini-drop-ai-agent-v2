@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mini-drop.local/schemas/public-contract-v1.schema.json",
+  "title": "Mini-Drop Agent Beta Public Contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_id",
+    "prompt_file",
+    "prompt_sha256",
+    "requirements",
+    "cases",
+    "holdout_slots",
+    "scoring_profiles"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "contract_id": {"const": "public-contract-v1"},
+    "prompt_file": {"type": "string", "minLength": 1},
+    "prompt_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "normative": {"type": "string", "minLength": 1},
+    "requirements": {
+      "type": "array",
+      "minItems": 20,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^D(0[1-9]|1[0-9]|20)$"},
+          "description": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "name", "description", "scoring_profiles",
+          "minimum_realness", "requirements", "repeats"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^P(0[1-9]|1[0-2])$"},
+          "name": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
+          "scoring_profiles": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "minimum_realness": {"enum": ["R0", "R1", "R2", "R3", "R4"]},
+          "requirements": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "pattern": "^D(0[1-9]|1[0-9]|20)$"}
+          },
+          "repeats": {"type": "integer", "minimum": 1, "maximum": 3}
+        }
+      }
+    },
+    "holdout_slots": {
+      "type": "array",
+      "minItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "scoring_profile", "minimum_realness"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^H(0[1-9]|1[0-9]|18[ab]|19)$"},
+          "source": {"type": "string"},
+          "scoring_profile": {"type": "string", "minLength": 1},
+          "minimum_realness": {"enum": ["R0", "R1", "R2", "R3", "R4"]}
+        }
+      }
+    },
+    "scoring_profiles": {
+      "type": "array",
+      "minItems": 6,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "forbidden_contract_drift": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

@@ -120,6 +120,12 @@ def test_agent_turn_answers_status_and_persists_both_sides(client: TestClient):
     assert turn["intent"] == "status"
     assert turn["status"] == "answered"
     assert "当前阶段" in turn["assistant_message"]
+    assert turn["side_effect_delta"] == {
+        "plan_revision": 0,
+        "plan_step_count": 0,
+        "case_task_count": 0,
+        "fanout_run_count": 0,
+    }
 
     events = client.get(f"/api/v1/cases/{case['case_id']}/events").json()["data"]["items"]
     assert [item["event_type"] for item in events][-2:] == ["user_message", "agent_turn_completed"]
@@ -613,3 +619,70 @@ def test_case_initial_tasks_must_overlap_incident_window(client: TestClient):
     created = client.post("/api/v1/cases", json=payload)
     assert created.status_code == 409
     assert "INITIAL_TASK_TIME_RANGE_MISMATCH" in created.json()["detail"]
+
+
+def test_deployment_assessment_endpoint_returns_insufficient_data_without_inventory(client: TestClient):
+    case = client.post("/api/v1/cases", json=_case_payload()).json()["data"]
+    resp = client.post(
+        f"/api/v1/cases/{case['case_id']}/deployment-assessment",
+        json={
+            "deployment_requirements": {
+                "replicas": 2,
+                "cpu_cores_per_replica": 2,
+                "memory_mb_per_replica": 4096,
+            },
+            "execute_safe_tools": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["verdict"] == "insufficient_data"
+
+
+def test_deployment_assessment_endpoint_uses_p11_formula(client: TestClient):
+    created = client.post("/api/v1/cases", json={
+        **_case_payload(),
+        "target_scope": {
+            "cluster_id": "prod-a",
+            "service_id": "checkout",
+            "deployment_inventory": [
+                {
+                    "node_id": "n1",
+                    "allocatable_cpu_cores": 8,
+                    "allocatable_memory_mb": 32768,
+                    "allocatable_disk_mb": 102400,
+                    "reserved_cpu_cores": 1,
+                    "reserved_memory_mb": 4096,
+                    "reserved_disk_mb": 10240,
+                },
+                {
+                    "node_id": "n2",
+                    "allocatable_cpu_cores": 8,
+                    "allocatable_memory_mb": 32768,
+                    "allocatable_disk_mb": 102400,
+                    "reserved_cpu_cores": 1,
+                    "reserved_memory_mb": 4096,
+                    "reserved_disk_mb": 10240,
+                },
+            ],
+        },
+    })
+    assert created.status_code == 200, created.text
+    case = created.json()["data"]
+    resp = client.post(
+        f"/api/v1/cases/{case['case_id']}/deployment-assessment",
+        json={
+            "deployment_requirements": {
+                "replicas": 2,
+                "cpu_cores_per_replica": 1,
+                "memory_mb_per_replica": 2048,
+                "cpu_overhead_cores": 0.5,
+                "memory_overhead_mb": 512,
+                "safety_margin_ratio": 0.1,
+            },
+            "execute_safe_tools": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["eligible_nodes"] == ["n1", "n2"]

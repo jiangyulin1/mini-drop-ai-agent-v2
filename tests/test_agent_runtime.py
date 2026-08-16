@@ -109,3 +109,59 @@ def test_evidence_chain_contains_only_cited_evidence_with_roles():
     assert [item["evidence_id"] for item in chain] == ["ev-1", "ev-2"]
     assert chain[0]["roles"] == ["support:h1"]
     assert chain[1]["roles"] == ["contradiction:h1"]
+
+
+def test_capacity_p11_formula_uses_reservation_and_overhead():
+    requirements = DeploymentRequirements(
+        replicas=2,
+        cpu_cores_per_replica=1,
+        memory_mb_per_replica=1024,
+        cpu_overhead_cores=0.5,
+        safety_margin_ratio=0.1,
+    )
+    result = assess_deployment_capacity(requirements, target_scope={
+        "deployment_inventory": [
+            {
+                "node_id": "n-fit",
+                "allocatable_cpu_cores": 4,
+                "allocatable_memory_mb": 4096,
+                "reserved_cpu_cores": 1.0,
+                "reserved_memory_mb": 512,
+            },
+            {
+                "node_id": "n-nofit",
+                "allocatable_cpu_cores": 3,
+                "allocatable_memory_mb": 4096,
+                "reserved_cpu_cores": 0,
+                "reserved_memory_mb": 0,
+            },
+        ],
+    })
+    # n-fit available cpu = 4*0.9-1 = 2.6 >= required 2*1+0.5 = 2.5
+    # n-nofit available cpu = 2.7 >= 2.5 也 fit，因此这个 case 两个都 fit。
+    assert result.verdict == "ready"
+    assert result.eligible_nodes == ["n-fit", "n-nofit"]
+
+
+def test_capacity_p11_formula_rejects_when_reservation_consumes_margin():
+    requirements = DeploymentRequirements(
+        replicas=2,
+        cpu_cores_per_replica=1,
+        memory_mb_per_replica=1024,
+        cpu_overhead_cores=0.5,
+        safety_margin_ratio=0.1,
+    )
+    result = assess_deployment_capacity(requirements, target_scope={
+        "deployment_inventory": [
+            {
+                "node_id": "n-tight",
+                "allocatable_cpu_cores": 4,
+                "allocatable_memory_mb": 4096,
+                "reserved_cpu_cores": 2.0,
+                "reserved_memory_mb": 512,
+            },
+        ],
+    })
+    # available cpu = 4*0.9-2 = 1.6 < required 2.5
+    assert result.verdict == "not_ready"
+    assert result.rejected_nodes[0]["reasons"] == ["cpu_insufficient"]

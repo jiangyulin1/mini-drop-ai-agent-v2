@@ -1,0 +1,6 @@
+{
+  "fixture_id": "oracle-leak",
+  "description": "Prompt/上下文出现 Oracle/根因标签时必须 FAIL",
+  "expected_verdict": "MUST_FAIL",
+  "status": "SPECIFIED"
+}

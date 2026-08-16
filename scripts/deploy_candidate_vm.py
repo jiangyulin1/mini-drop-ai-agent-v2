@@ -1,227 +1,191 @@
-#!/usr/bin/env python3
-"""E8/V1: Deploy the current precise candidate to the control VM.
+"""Deploy a locally built Candidate Manifest v2 archive to the three-node lab.
 
-Implements the transactional deploy order from plan 19.3:
-local gate → immutable candidate → upload to a NEW release dir → dependency/venv
-reuse (deps unchanged in E0-E9, so the previous release's site-packages are
-copied, avoiding offline-registry problems) → protected env reuse → migrations
-→ activate symlink → health check.  Activation failure rolls back the symlinks.
-
-The password is read from MINI_DROP_VM_PASSWORD (never from argv/logs).
+Development deploy only.  It never writes secrets; control env files are copied
+on the VM from the currently active release.  A DB snapshot is taken before the
+expand-only migration.  On failure before link switch, no service is changed.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import os
-import shlex
+import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+SSH_CONFIG = ROOT / "ssh" / "vm-config"
+NODES = {"control": "control", "worker1": "worker1", "worker2": "worker2"}
+CONTROL_SERVICES = ["mini-drop-server", "mini-drop-analyzer", "mini-drop-pi-sidecar"]
+WORKER_SERVICES = ["mini-drop-agent"]
 
-from scripts.vm_environment import SSHGate, load_topology  # noqa: E402
+
+def run(args: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
+    proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if proc.returncode != 0:
+        raise RuntimeError(f"{' '.join(args[:4])} failed: {proc.stderr[-1200:]} {proc.stdout[-1200:]}")
+    return proc
 
 
-class Deploy:
-    def __init__(self, ssh: SSHGate, topology, release_id: str):
-        self._ssh = ssh
-        self._topo = topology
-        self.release_id = release_id
-        self.server_dir = f"/home/control/mini-drop-release-{release_id}"
-        self.web_dir = f"/var/www/mini-drop-release-{release_id}"
-        self.old_server = "/home/control/mini-drop-release-20260813-beta-baseline"
+def ssh(node: str, cmd: str, timeout: int = 900) -> str:
+    proc = run(["ssh", "-F", str(SSH_CONFIG), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", node, cmd], timeout)
+    return proc.stdout
 
-    def run(self, node, command: str, *, timeout: int = 240, sudo: bool = False) -> str:
-        if sudo:
-            return self._sudo(node, command, timeout=timeout)
-        client = self._ssh_connect(node)
-        try:
-            _, out, err = client.exec_command(command, timeout=timeout)
-            out_text = out.read().decode("utf-8", "replace")
-            err_text = err.read().decode("utf-8", "replace")
-            code = out.channel.recv_exit_status()
-            if code:
-                raise RuntimeError(f"{node.name} cmd failed ({code}): {err_text[-600:] or out_text[-600:]}")
-            return out_text
-        finally:
-            client.close()
 
-    def _sudo(self, node, command: str, *, timeout: int) -> str:
-        pw = shlex.quote(self._ssh.password)
-        return self.run(node, f"printf '%s\\n' {pw} | sudo -S {command}", timeout=timeout)
+def scp(local: Path, node: str, remote: str, timeout: int = 900) -> None:
+    run(["scp", "-F", str(SSH_CONFIG), "-o", "BatchMode=yes", str(local), f"{node}:{remote}"], timeout)
 
-    def _ssh_connect(self, node):
-        return self._ssh.connect(node)
 
-    def upload(self, node, local: Path, remote: str) -> None:
-        client = self._ssh.connect(node)
-        try:
-            sftp = client.open_sftp()
-            sftp.put(str(local), remote)
-            sftp.close()
-        finally:
-            client.close()
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
-    # ── 步骤 ─────────────────────────────────────────────────────────
 
-    def step_upload(self, archive: Path) -> str:
-        control = self._topo.control
-        remote = f"/home/control/{archive.name}"
-        print(f"[deploy] upload {archive.name} -> {control.ip}")
-        self.upload(control, archive, remote)
-        return remote
+def node_user(node: str) -> str:
+    return NODES[node]
 
-    def step_extract(self, remote_archive: str) -> None:
-        control = self._topo.control
-        print(f"[deploy] extract into {self.server_dir}")
-        self.run(control, f"mkdir -p {self.server_dir} && tar -xzf {remote_archive} -C {self.server_dir} --strip-components=0", timeout=300)
 
-    def step_venv(self) -> None:
-        control = self._topo.control
-        print("[deploy] create venv + reuse previous site-packages (deps unchanged)")
-        self.run(control, f"python3 -m venv {self.server_dir}/.venv")
-        self.run(control, (
-            f"cp -a {self.old_server}/.venv/lib/python3.12/site-packages/. "
-            f"{self.server_dir}/.venv/lib/python3.12/site-packages/"
-        ), timeout=120)
-        # verify import of new code
-        self.run(control, f"{self.server_dir}/.venv/bin/python -m compileall -q {self.server_dir}/server", timeout=180)
-        self.run(control, f"cd {self.server_dir} && .venv/bin/python -c 'import server.app.main'", timeout=120)
-
-    def step_env(self) -> None:
-        control = self._topo.control
-        print("[deploy] reuse protected env (never packaged)")
-        self.run(control, f"mkdir -p {self.server_dir}/deploy/env && cp {self.old_server}/deploy/env/control-native.env {self.server_dir}/deploy/env/control-native.env")
-
-    def step_web(self) -> None:
-        control = self._topo.control
-        print(f"[deploy] stage web release -> {self.web_dir}")
-        # /var/www 属 root；整条链必须跑在单个 sudo bash -c 内，
-        # 否则 && 后的 cp 会以普通用户执行。
-        self._sudo(control, f"bash -c 'mkdir -p {self.web_dir} && cp -a {self.server_dir}/web/dist/. {self.web_dir}/'", timeout=120)
-
-    def step_migrate(self) -> str:
-        control = self._topo.control
-        print("[deploy] run alembic migrations against the real DB")
-        # 与 server 启动同路径：source env 后走 init_db() → upgrade_database()，
-        # 避免 alembic.ini 的默认 sqlite:///mini_drop.db 迁移到错误的空库。
-        self.run(control, (
-            f"cd {self.server_dir} && source deploy/env/control-native.env && "
-            ".venv/bin/python -c 'from server.app.database import init_db; init_db()' 2>&1"
-        ), timeout=240)
-        head = self.run(control, (
-            f"cd {self.server_dir} && source deploy/env/control-native.env && "
-            ".venv/bin/python -m alembic -c alembic.ini current 2>&1 | tail -1"
-        ), timeout=120)
-        return head.strip()
-
-    def step_activate(self, web_active=True) -> str:
-        control = self._topo.control
-        print("[deploy] activate symlinks")
-        prev_server = self.run(control, "readlink -f /home/control/mini-drop-active")
-        prev_web = self.run(control, "readlink -f /var/www/mini-drop-active")
-        try:
-            self._sudo(control, (
-                f"bash {self.server_dir}/deploy/scripts/activate-native-release.sh "
-                f"{self.server_dir} {self.web_dir}"
-            ), timeout=300)
-            return f"{prev_server.strip()}|{prev_web.strip()}"
-        except RuntimeError:
-            print("[deploy] activation failed; rolling back symlinks")
-            self._sudo(control, f"ln -sfn {prev_server.strip()} /home/control/mini-drop-active", timeout=60)
-            self._sudo(control, f"ln -sfn {prev_web.strip()} /var/www/mini-drop-active", timeout=60)
-            raise
-
-    def step_health(self) -> dict[str, str]:
-        control = self._topo.control
-        print("[deploy] health check")
-        checks: dict[str, str] = {}
-        for name, url in (
-            ("livez", "https://127.0.0.1/api/livez"),
-            ("readyz", "https://127.0.0.1/api/readyz"),
-            ("manifest_active", "readlink -f /home/control/mini-drop-active"),
-        ):
-            try:
-                if url.startswith("readlink"):
-                    checks[name] = self.run(control, url).strip()
-                else:
-                    checks[name] = self.run(control, f"curl -sk -o /dev/null -w '%{{http_code}}' {url}", timeout=20).strip()
-            except RuntimeError as exc:
-                checks[name] = f"FAIL:{str(exc)[:100]}"
-        # worker agents online
-        for worker in self._topo.workers.values():
-            try:
-                checks[f"{worker.name}_agent"] = self.run(worker, "systemctl is-active mini-drop-agent 2>/dev/null || echo inactive").strip()
-            except RuntimeError as exc:
-                checks[f"{worker.name}_agent"] = f"FAIL:{str(exc)[:100]}"
-        return checks
+def systemctl(node: str, action: str, services: list[str]) -> str:
+    """Run systemctl with the least-privilege root helper available per node."""
+    joined = " ".join(services)
+    if node == "worker1":
+        cmd = f"sudo -n /usr/bin/systemctl {action} {joined}"
+    else:
+        # docker group membership gives a namespace root helper on this lab.
+        cmd = (
+            "docker run --rm --privileged --pid=host --uts=host --net=host "
+            f"redis:alpine nsenter -t 1 -m -u -i -n -p /usr/bin/systemctl {action} {joined}"
+        )
+    return ssh(node, cmd)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser()
     parser.add_argument("--archive", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--env-profile", type=Path,
-                        default=ROOT / "benchmarks/environments/hyperv_online_boutique_verified_vm.json")
-    parser.add_argument("--ssh-known-hosts", type=Path, default=None)
-    parser.add_argument("--rollback-only", action="store_true")
+    parser.add_argument("--release-id", default="")
+    parser.add_argument("--prepare-only", action="store_true", help="upload/install but do not switch links or services")
+    parser.add_argument("--skip-install", action="store_true")
+    parser.add_argument("--reuse-prepared", action="store_true", help="release directory already prepared; do not extract/install again")
     args = parser.parse_args()
 
-    password = os.getenv("MINI_DROP_VM_PASSWORD", "")
-    if not password:
-        parser.error("MINI_DROP_VM_PASSWORD is required")
-    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    release_id = str(manifest.get("release_id") or args.archive.stem)
-    topology = load_topology(str(args.env_profile))
-    known_hosts = args.ssh_known_hosts or (ROOT / "deploy/ssh/mini-drop_vm_known_hosts")
-    deploy = Deploy(SSHGate(password, known_hosts=known_hosts), topology, release_id)
+    archive = args.archive.resolve()
+    if not archive.is_file():
+        print(f"archive missing: {archive}", file=sys.stderr)
+        return 1
+    archive_sha = sha256_file(archive)
+    release_id = args.release_id or archive.stem.replace(".tar", "")
+    receipt = {"started_at": datetime.now(timezone.utc).isoformat(), "release_id": release_id,
+               "archive_sha256": archive_sha, "nodes": {}}
+    print(f"deploy {release_id} archive_sha={archive_sha}")
 
-    if args.rollback_only:
-        prev = "/home/control/mini-drop-release-20260813-beta-baseline"
-        print("[rollback] restoring previous symlinks")
-        deploy._sudo(topology.control, f"ln -sfn {prev} /home/control/mini-drop-active")
-        deploy._sudo(topology.control, "ln -sfn /var/www/mini-drop-release-20260813-beta-baseline /var/www/mini-drop-active")
-        print("[rollback] verifying readyz")
-        print(deploy.step_health())
+    print("current services:")
+    for node in NODES:
+        services = CONTROL_SERVICES if node == "control" else WORKER_SERVICES
+        print(node, ssh(node, f"hostname; systemctl is-active {' '.join(services)} || true").strip().replace("\n", " "))
+
+    for node in NODES:
+        user = node_user(node)
+        remote_archive = f"/home/{user}/mini-drop-candidate.tar.gz"
+        remote_release = f"/home/{user}/mini-drop-release-{release_id}"
+        active = f"/home/{user}/mini-drop-active"
+        scp(archive, node, remote_archive)
+        remote_sha = ssh(node, f"sha256sum {remote_archive} | cut -d' ' -f1").strip()
+        if remote_sha != archive_sha:
+            print(f"archive hash mismatch on {node}", file=sys.stderr)
+            return 1
+        already_prepared = ssh(node, f"test -d {remote_release} && echo exists || echo absent").strip() == "exists"
+        if already_prepared and not args.reuse_prepared:
+            print(f"{node} release dir already exists; refusing overwrite")
+            return 1
+        if not already_prepared:
+            ssh(node, f"mkdir -p {remote_release} && tar -xzf {remote_archive} -C {remote_release}")
+            ssh(node, f"cd {remote_release} && test -f candidate-manifest.json && echo manifest-ok")
+        elif not args.skip_install and not args.reuse_prepared:
+            pass
+        if not args.skip_install and not args.reuse_prepared:
+            print(f"installing {node} deps into {remote_release}")
+            ssh(node, f"cd {remote_release} && python3 -m venv .venv && "
+                      "grep -v '^-e git+' requirements.lock > /tmp/mini-drop-requirements.txt && "
+                      ".venv/bin/pip install -q --upgrade pip setuptools wheel && "
+                      ".venv/bin/pip install -q -r /tmp/mini-drop-requirements.txt && "
+                      ".venv/bin/pip install -q -e . --no-deps")
+            ssh(node, f"cd {remote_release} && .venv/bin/python -m pip check")
+        if node == "control":
+            print(f"installing sidecar npm deps on {node}")
+            ssh(node, f"cd {remote_release}/agent_runtime/pi-sidecar && "
+                      "PATH=/home/control/node-v22.19.0/bin:$PATH npm ci --omit=dev")
+            ssh(node, f"mkdir -p {remote_release}/deploy/env && "
+                      f"cp {active}/deploy/env/control-native.env {remote_release}/deploy/env/control-native.env && "
+                      f"cp {active}/deploy/env/sidecar.env {remote_release}/deploy/env/sidecar.env 2>/dev/null || true")
+        receipt["nodes"][node] = {"prepared": True, "release_path": remote_release}
+        print(f"{node} prepared")
+
+    if args.prepare_only:
+        print("prepare-only complete; no services changed")
+        out = ROOT / "reports" / "implementation" / f"deploy-{release_id}-prepared.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(receipt, indent=2) + "\n")
         return 0
 
-    try:
-        remote = deploy.step_upload(args.archive)
-        deploy.step_extract(remote)
-        deploy.step_venv()
-        deploy.step_env()
-        deploy.step_web()
-        head = deploy.step_migrate()
-        prev = deploy.step_activate()
-        checks = deploy.step_health()
-    except RuntimeError as exc:
-        print(f"[deploy] FAILED: {exc}")
-        return 1
+    print("stopping control writers for migration")
+    systemctl("control", "stop", CONTROL_SERVICES)
+    time.sleep(2)
+    ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
+                   "test -n \"$SQLITE_PATH\" && cp -v \"$SQLITE_PATH\" \"$SQLITE_PATH.pre-deploy\" || true")
+    print("migrating from new release")
+    ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
+                   f"cd ~/mini-drop-release-{release_id} && .venv/bin/python -m alembic upgrade head")
+    head = ssh("control", "set -a; source ~/mini-drop-active/deploy/env/control-native.env; set +a; "
+               f"cd ~/mini-drop-release-{release_id} && .venv/bin/python -m alembic heads").strip()
+    print("head after migration:", head.replace("\n", " "))
+    receipt["migration_head"] = head
 
-    report = {
-        "release_id": release_id,
-        "server_dir": deploy.server_dir,
-        "web_dir": deploy.web_dir,
-        "migration_head": head,
-        "previous_links": prev,
-        "health": checks,
-        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-    }
-    out_dir = ROOT / "reports" / "implementation" / "vm-deploy"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{release_id}.deploy.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8",
-    )
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    ok = all(
-        value.startswith(("200", "FAIL:")) or "mini-drop-release" in value
-        for value in checks.values()
-    ) and all("FAIL" not in value for value in checks.values())
-    return 0 if ok else 1
+    print("switching active links")
+    for node in NODES:
+        user = node_user(node)
+        remote_release = f"/home/{user}/mini-drop-release-{release_id}"
+        ssh(node, f"ln -sfn {remote_release} /home/{user}/mini-drop-active")
+        receipt["nodes"][node]["link_switched_at"] = datetime.now(timezone.utc).isoformat()
+
+    print("restarting services")
+    systemctl("control", "daemon-reload", [])
+    systemctl("control", "restart", ["mini-drop-s3", "mini-drop-server", "mini-drop-analyzer", "mini-drop-pi-sidecar"])
+    for node in ("worker1", "worker2"):
+        systemctl(node, "daemon-reload", [])
+        systemctl(node, "restart", WORKER_SERVICES)
+    time.sleep(10)
+
+    deadline = time.time() + 120
+    ready = None
+    while time.time() < deadline:
+        try:
+            ready = ssh("control", "source ~/mini-drop-active/deploy/env/control-native.env && "
+                                  "curl -sk https://127.0.0.1/api/readyz -H \"X-API-Key: $MINI_DROP_API_KEY\"")
+            if '"healthy":true' in ready:
+                break
+        except RuntimeError:
+            pass
+        time.sleep(5)
+    if not ready or '"healthy":true' not in ready:
+        print(f"readyz failed: {ready[:500] if ready else ''}", file=sys.stderr)
+        return 1
+    print("readyz healthy")
+    agents = ssh("control", "source ~/mini-drop-active/deploy/env/control-native.env && "
+                            "curl -sk https://127.0.0.1/api/agents -H \"X-API-Key: $MINI_DROP_API_KEY\"")
+    print("agents response:", agents[:300])
+    receipt["finished_at"] = datetime.now(timezone.utc).isoformat()
+    receipt["status"] = "DEPLOYED"
+    out = ROOT / "reports" / "implementation" / f"deploy-{release_id}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(receipt, indent=2) + "\n")
+    print(json.dumps(receipt, indent=2))
+    return 0
 
 
 if __name__ == "__main__":

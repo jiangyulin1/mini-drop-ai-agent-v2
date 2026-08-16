@@ -195,6 +195,24 @@ export function eventText(event) {
     case "case_paused": return "诊断已暂停。";
     case "case_resumed": return "诊断已继续。";
     case "case_stopped": return "会话已停止。";
+    case "agent_runtime_turn_submitted":
+      return payload.assistant_message || "已提交给 Agent Runtime 处理。";
+    case "assistant.message":
+      return payload.content || payload.assistant_message || "";
+    case "turn.completed":
+      return `Agent Turn ${payload.turn_id || ""} 已完成`;
+    case "turn.status_changed":
+      return `Turn ${payload.turn_id || ""}：${payload.status || ""}`;
+    case "agent_runtime_turn_rejected":
+      return payload.assistant_message || "Agent Runtime 不可用，本轮未启动调查。";
+    case "agent_finish_investigation":
+      return `已提交结论草稿：${payload.summary || "（无摘要）"}`;
+    case "case_query_task_created":
+      return `已创建只读查询任务：${payload.operation || ""}`;
+    case "case_campaign_created":
+      return `已创建采集 Campaign（Plan revision ${payload.plan_revision || ""}）`;
+    case "deployment_assessment_completed":
+      return `部署承载评估：${payload.verdict || "unknown"}`;
     default: return payload.reason || "";
   }
 }

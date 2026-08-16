@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from server.app.diagnosis.cluster_scope import EnvironmentProfile, TargetResolver
+from server.app.diagnosis.cluster_scope import EnvironmentProfile, MembershipSnapshot, TargetResolver
 from server.app.diagnosis.fanout import FanoutCollectionRun, FanoutCollectionService
 from server.app.diagnosis.investigation_plan import SCHEDULABLE
 
@@ -330,10 +330,50 @@ class PlanDriver:
         # 集群 Fanout Task：更新 Run，不直接完成 Step（Step 由 Run 聚合结果决定）
         run = self._find_fanout_run_for_task(case_id, tenant_id, task_id)
         if run is not None:
+            run_obj = FanoutCollectionRun(**run)
             updated = self._fanout.update_task_outcome(
-                FanoutCollectionRun(**run), task_id, status,
+                run_obj, task_id, status,
                 scope_revision=int(run.get("scope_revision") or 1),
             )
+            # v6 6.3: aggregation is automatic as soon as every ExecutionUnit/Task
+            # has a terminal result.  There is no manual /aggregate dependency.
+            run_after = FanoutCollectionRun(**updated)
+            task_ids = [str(item) for item in (run_after.task_ids or [])]
+            terminal = (
+                len(task_ids) > 0
+                and all(
+                    (run_after.task_statuses or {}).get(tid) in {"DONE", "FAILED", "CANCELLED"}
+                    for tid in task_ids
+                )
+            )
+            if terminal:
+                snapshot = self._repo.get_membership_snapshot(
+                    case_id, tenant_id, run_after.snapshot_id,
+                ) if hasattr(self._repo, "get_membership_snapshot") else None
+                if snapshot:
+                    try:
+                        membership = MembershipSnapshot(
+                            snapshot_id=str(snapshot.get("snapshot_id") or ""),
+                            captured_at=snapshot.get("captured_at") or snapshot.get("created_at"),
+                            environment_id=str(snapshot.get("environment_id") or ""),
+                            cluster_id=str(snapshot.get("cluster_id") or ""),
+                            topology_version=str(snapshot.get("topology_version") or ""),
+                            scope_revision=int(snapshot.get("scope_revision") or 1),
+                            members=snapshot.get("members") or [],
+                        )
+                    except Exception:
+                        membership = None
+                    if membership is not None:
+                        self._fanout.aggregate(
+                            run_after,
+                            membership,
+                            time_aligned=True,
+                        )
+                    refreshed = self._repo.get_fanout_run(
+                        case_id, tenant_id, run_after.run_id,
+                    )
+                    if refreshed:
+                        updated = refreshed
             return self._after_fanout_task(case_id, tenant_id, updated, step_id, principal_id)
         target_status = {"DONE": "COMPLETED", "FAILED": "FAILED", "CANCELLED": "CANCELLED"}.get(status)
         if target_status:

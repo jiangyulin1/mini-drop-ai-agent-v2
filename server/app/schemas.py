@@ -104,6 +104,19 @@ class TaskView(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    origin: Optional[str] = None
+    visibility: Optional[str] = None
+    case_id: Optional[str] = None
+    case_title: Optional[str] = None
+    turn_id: Optional[str] = None
+    plan_step_id: Optional[str] = None
+    step_revision_id: Optional[str] = None
+    campaign_id: Optional[str] = None
+    campaign_revision: Optional[int] = None
+    assignment_id: Optional[str] = None
+    execution_unit_id: Optional[str] = None
+    risk: Optional[str] = None
+    purpose: Optional[str] = None
 
 
 class AgentView(BaseModel):

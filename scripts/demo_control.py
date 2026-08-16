@@ -14,7 +14,6 @@ import json
 import os
 import shlex
 import ssl
-import sys
 import time
 import urllib.request
 

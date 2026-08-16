@@ -1,0 +1,104 @@
+{
+  "schema_version": "1.0",
+  "contract_id": "adapted-contract-v1",
+  "reason": "Current VMs cannot host OpenTelemetry Demo compact profile within memory limits. These cases preserve the same capability intent on the existing Online Boutique v0.8.0 topology.",
+  "cases": [
+    {
+      "id": "A01",
+      "replaces": "P03",
+      "intent": "Single-fault autonomous investigation",
+      "fault": "adservice CPU hotspot on worker1",
+      "assertions": [
+        "Pi creates native query tasks",
+        "Final answer names the faulty service/process",
+        "No shell or arbitrary MCP tool is used",
+        "Fault cleanup and health probe pass"
+      ],
+      "status": "DEFINED"
+    },
+    {
+      "id": "A02",
+      "replaces": "P09-lite",
+      "intent": "Two-hop propagation without GC/retry amplifier",
+      "fault": "cartservice network delay -> checkoutservice latency",
+      "assertions": [
+        "Primary identified as cartservice",
+        "checkoutservice classified as propagation/symptom, not primary",
+        "Direction follows directive order",
+        "Fault cleanup pass"
+      ],
+      "status": "DEFINED"
+    },
+    {
+      "id": "A03",
+      "replaces": "P06-lite",
+      "intent": "Partial cluster coverage blocks global conclusion",
+      "fault": "worker2 agent offline",
+      "assertions": [
+        "Membership snapshot records worker2 unavailable",
+        "AI does not claim global root cause",
+        "Coverage gap is reported"
+      ],
+      "status": "DEFINED"
+    },
+    {
+      "id": "A04",
+      "replaces": "P04",
+      "intent": "Pause/retarget/resume with revision isolation",
+      "assertions": [
+        "Old plan/scope revisions cannot create tasks",
+        "Running task is cancelled on retarget",
+        "Timeline contains pause/resume/correction events"
+      ],
+      "status": "DEFINED"
+    },
+    {
+      "id": "A05",
+      "replaces": "P05/P07-lite",
+      "intent": "Role-based campaign and query gateway on existing topology",
+      "assertions": [
+        "Common sys_metrics baseline compiles",
+        "Gateway/database roles compile to different collectors",
+        "Query positive task DONE",
+        "Dangerous query params rejected"
+      ],
+      "status": "PASS",
+      "evidence": "reports/implementation/public-cases-status.json"
+    },
+    {
+      "id": "A06",
+      "replaces": "P12-lite",
+      "intent": "Service restart and recovery",
+      "assertions": [
+        "Sidecar restarts and becomes ready",
+        "readyz remains healthy",
+        "Workers stay online"
+      ],
+      "status": "PARTIAL",
+      "evidence": "reports/implementation/public-cases-status.json"
+    },
+    {
+      "id": "A07",
+      "replaces": "P11",
+      "intent": "Two-phase capacity assessment",
+      "assertions": [
+        "Missing facts return INSUFFICIENT_DATA",
+        "Completed facts return FIT/NOT_FIT with unit/limiting resource"
+      ],
+      "status": "PASS",
+      "evidence": "reports/implementation/public-cases-status.json"
+    },
+    {
+      "id": "A08",
+      "replaces": "P08-lite",
+      "intent": "Skill/Knowledge constrained strategy without MCP",
+      "assertions": [
+        "Skill selection deterministic",
+        "Knowledge is strategy only, not current evidence",
+        "Directive remains stable across time windows"
+      ],
+      "status": "PASS",
+      "evidence": "tests/test_skill_knowledge.py;reports/implementation/vm-pi-cross-case-stability.json"
+    }
+  ]
+}

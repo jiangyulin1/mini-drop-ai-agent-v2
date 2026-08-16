@@ -29,7 +29,7 @@ from server.app.agent_runtime.port import (
     RuntimeSteer,
 )
 
-PI_RUNTIME_VERSION = "pi-0.84.0"
+PI_RUNTIME_VERSION = "pi-0.83.0"
 
 
 class PiSidecarError(RuntimeError):
@@ -56,6 +56,9 @@ class PiAgentRuntimeAdapter(AgentRuntimePort):
         data = None if body is None else json.dumps(body).encode("utf-8")
         request = urllib.request.Request(url, data=data, method=method)
         request.add_header("Content-Type", "application/json")
+        token = os.getenv("MINI_DROP_PI_INTERNAL_TOKEN", "")
+        if token:
+            request.add_header("X-Internal-Token", token)
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))

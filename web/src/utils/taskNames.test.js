@@ -48,7 +48,7 @@ describe("task display names", () => {
     expect(isUnreadableTaskName("正常任务")).toBe(false);
   });
 
-  it("keeps user collections but hides control-plane probe tasks", () => {
+  it("keeps user collections and AI data tasks, hides only INTERNAL work", () => {
     expect(isUserVisibleTask({
       request_params: { options: { source: "multi_agent_collection" } },
     })).toBe(true);
@@ -56,7 +56,9 @@ describe("task display names", () => {
       request_params: { options: { source: "process_scan_api" } },
     })).toBe(false);
     expect(isUserVisibleTask({
-      request_params: { options: { diagnosis_step_id: "probe-1", registered_probe: true } },
-    })).toBe(false);
+      request_params: { options: { diagnosis_step_id: "probe-1" } },
+    })).toBe(true);
+    expect(isUserVisibleTask({ visibility: "INTERNAL" })).toBe(false);
+    expect(isUserVisibleTask({ visibility: "USER_VISIBLE" })).toBe(true);
   });
 });

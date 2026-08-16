@@ -15,12 +15,17 @@ const LEGACY_NAME_RULES = [
 
 const INTERNAL_TASK_SOURCES = new Set(["process_scan_api", "case_verification"]);
 
-/** Hide control-plane probes from user task lists; they remain available in diagnosis technical details. */
+/**
+ * v6: AI-generated data tasks are first-class user tasks.  Only explicitly
+ * marked INTERNAL control-plane work is hidden from the two Task surfaces.
+ */
 export function isUserVisibleTask(task = {}) {
+  if (task.visibility === "INTERNAL") return false;
+  if (task.visibility === "USER_VISIBLE") return true;
   const options = task.request_params?.options || task.options || {};
-  return !INTERNAL_TASK_SOURCES.has(options.source)
-    && !options.diagnosis_step_id
-    && options.registered_probe !== true;
+  if (options.visibility === "INTERNAL") return false;
+  // Legacy control-plane probes remain hidden; AI diagnosis steps are now visible.
+  return !INTERNAL_TASK_SOURCES.has(options.source) && options.registered_probe !== true;
 }
 
 export function isUnreadableTaskName(value) {

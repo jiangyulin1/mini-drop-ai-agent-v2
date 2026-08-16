@@ -25,8 +25,19 @@ class CaseContextSnapshot(StrictModel):
     case_goal: str = ""
     target_scope: dict[str, Any] = Field(default_factory=dict)
     autonomy_mode: str = "COLLABORATE"
+    case_command_revision: int = 1
+    control_revision: int = 1
     plan_revision: int = 0
-    scope_revision: int = 0
+    scope_revision: int = 1
+    campaign_revision: int = 0
+    evidence_watermark: int = 0
+    investigation_run_id: Optional[str] = None
+    turn_id: Optional[str] = None
+    disposition: Optional[str] = None
+    side_effect_policy: Optional[str] = None
+    context_snapshot_id: Optional[str] = None
+    runtime_generation: int = 0
+    runtime_session_id: str = ""
     hypotheses: list[dict[str, Any]] = Field(default_factory=list)
     evidence_summary: list[dict[str, Any]] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
@@ -34,6 +45,9 @@ class CaseContextSnapshot(StrictModel):
     budget: dict[str, Any] = Field(default_factory=dict)
     recent_user_commands: list[dict[str, Any]] = Field(default_factory=list)
     tool_catalog_summary: list[str] = Field(default_factory=list)
+    knowledge_context: list[dict[str, Any]] = Field(default_factory=list)
+    skill_context: list[dict[str, Any]] = Field(default_factory=list)
+    investigation_directive: dict[str, Any] = Field(default_factory=dict)
 
 
 class RuntimeBinding(StrictModel):

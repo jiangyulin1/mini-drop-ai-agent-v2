@@ -390,6 +390,77 @@ export function runIncidentCaseAgentTurn(caseId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/agent/turn`, payload);
 }
 
+/** G9：独立部署承载评估。 */
+export function assessCaseDeployment(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/deployment-assessment`, payload);
+}
+
+/** G1/G2：Case Agent Runtime Binding/Turns/Events 投影。 */
+export function getCaseAgentRuntimeState(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/agent/runtime-state`);
+}
+
+/** G3：canonical Case Evidence 列表。 */
+export function listCaseEvidence(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence`);
+}
+
+/** G4：注册的低风险 Query 目录。 */
+export function listQueryOperations() {
+  return api.get("/v1/query-operations");
+}
+
+/** G4：把注册 Query 编译为原生 Task。 */
+export function createCaseQuery(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/queries`, payload);
+}
+
+/** G4：人工/AI 共用 Campaign 矩阵 API。 */
+export function createCaseCampaign(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/campaigns`, payload);
+}
+
+export function getCaseCampaign(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/campaigns/current`);
+}
+
+/** v6 canonical workspace / command / projection / causal APIs. */
+export function getCaseWorkspace(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/workspace`);
+}
+
+export function applyCaseCommand(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/commands`, payload);
+}
+
+export function getCaseEvidenceProjections(caseId, evidenceId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/projections`);
+}
+
+export function getCaseCausalGraphs(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/causal-graphs`);
+}
+
+export function getCaseEvidenceGaps(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence-gaps`);
+}
+
+export function getCaseConclusions(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/conclusions`);
+}
+
+export function getCaseRecommendations(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/recommendations`);
+}
+
+export function listAcquisitionOperations() {
+  return api.get("/v1/acquisition-operations");
+}
+
+export function listCaseExecutionUnits(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/execution-units`);
+}
+
 export function correctIncidentCase(caseId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/corrections`, payload);
 }

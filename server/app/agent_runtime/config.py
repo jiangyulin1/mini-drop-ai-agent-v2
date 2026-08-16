@@ -41,7 +41,7 @@ def pi_runtime_url() -> str:
 
 
 def pi_runtime_version() -> str:
-    return os.getenv("MINI_DROP_PI_RUNTIME_VERSION", "0.84.0").strip()
+    return os.getenv("MINI_DROP_PI_RUNTIME_VERSION", "0.83.0").strip()
 
 
 def agent_auto_read_low() -> bool:

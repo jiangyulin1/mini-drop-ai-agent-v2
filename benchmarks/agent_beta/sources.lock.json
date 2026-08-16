@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "status": "PLANNED_NO_DIGEST_VERIFICATION",
+  "note": "No VM/network verification has been performed yet. These are the v5 section 8.2 planned locks only. Every formal run must fill digest/image/source-lock fields and change status to VERIFIED.",
+  "sources": [
+    {
+      "id": "online-boutique",
+      "repo": "https://github.com/GoogleCloudPlatform/microservices-demo",
+      "planned_tag": "v0.8.0",
+      "planned_commit": "d54af3d2510995d33521ac543dd885b150213f95",
+      "license": "Apache-2.0",
+      "use": "三节点 Worker/Cluster Campaign/Control/Recovery/UI",
+      "decision": "REQUIRED",
+      "digest_verified": false
+    },
+    {
+      "id": "opentelemetry-demo",
+      "repo": "https://github.com/open-telemetry/opentelemetry-demo",
+      "planned_tag": "v3.0.0",
+      "planned_commit": "1755859a9de82c2e5e225be68abc401a5ebf2b4f",
+      "license": "Apache-2.0",
+      "use": "P09 compact memory/queue profile；关闭内置 Agent/MCP/Chatbot",
+      "decision": "REQUIRED",
+      "digest_verified": false
+    },
+    {
+      "id": "steadybit-shopping-demo",
+      "repo": "https://github.com/steadybit/shopping-demo",
+      "planned_tag": "steadybit-shopping-demo-1.3.1",
+      "planned_commit": "6b5cddd3f683d5a569a590cc82c136af34826e6d",
+      "license": "Apache-2.0",
+      "use": "retry 放大/timeout/circuit-breaker 变形测试",
+      "decision": "REQUIRED",
+      "digest_verified": false
+    },
+    {
+      "id": "rcaeval",
+      "repo": "https://github.com/phamquiluan/RCAEval",
+      "planned_commit": "4695aa69f4f1f57b9094ca04ff235908b73a8e24",
+      "license": "MIT",
+      "use": "H01-H09 匿名遥测回放 Holdout",
+      "decision": "REQUIRED",
+      "digest_verified": false
+    },
+    {
+      "id": "microsoft-aiopslab",
+      "repo": "https://github.com/microsoft/AIOpsLab",
+      "planned_commit": "b9a814e75a98e670787dac7c2ed6794b4b68dae2",
+      "license": "MIT",
+      "use": "仅方法参考，不作为 Runtime 依赖",
+      "decision": "REFERENCE_ONLY",
+      "digest_verified": false
+    },
+    {
+      "id": "deathstarbench",
+      "repo": "https://github.com/delimitrou/DeathStarBench",
+      "planned_commit": null,
+      "license": "TO_REVIEW",
+      "use": "非阻断未来扩展",
+      "decision": "NON_BLOCKING",
+      "digest_verified": false
+    }
+  ]
+}

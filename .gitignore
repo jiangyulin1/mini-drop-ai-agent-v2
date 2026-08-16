@@ -87,3 +87,11 @@ reports/implementation/
 reports/eval/
 deploy/ssh/
 releases/
+
+# Local rebuild environment symlinks / private lab access
+/.venv
+/web/node_modules
+/agent_runtime/pi-sidecar/node_modules
+/ssh/
+/external-package/
+/hyperv-linux-access.md

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mini-drop.local/schemas/holdout-score-v1.schema.json",
+  "title": "Mini-Drop Agent Beta Holdout Score v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "verdict",
+    "suite_id",
+    "public_contract_digest",
+    "evaluator_build_digest",
+    "source_lock_digest",
+    "candidate_archive_digest",
+    "deployed_release_manifest_digest",
+    "model_manifest_digest",
+    "prompt_manifest_digest",
+    "skill_manifest_digest",
+    "knowledge_manifest_digest",
+    "provider_ledger_root_hash",
+    "evidence_pack_root_hash",
+    "started_at",
+    "finished_at",
+    "case_results",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "suite_id": {"type": "string", "minLength": 1},
+    "verdict": {"enum": ["VERIFIED", "DEVELOPMENT_EVAL", "INVALID", "AWAITING_EXTERNAL_HOLDOUT"]},
+    "public_contract_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "evaluator_build_digest": {"type": "string", "minLength": 1},
+    "source_lock_digest": {"type": "string", "minLength": 1},
+    "candidate_archive_digest": {"type": "string", "minLength": 1},
+    "deployed_release_manifest_digest": {"type": "string", "minLength": 1},
+    "model_manifest_digest": {"type": "string", "minLength": 1},
+    "prompt_manifest_digest": {"type": "string", "minLength": 1},
+    "skill_manifest_digest": {"type": "string", "minLength": 1},
+    "knowledge_manifest_digest": {"type": "string", "minLength": 1},
+    "provider_ledger_root_hash": {"type": "string", "minLength": 1},
+    "evidence_pack_root_hash": {"type": "string", "minLength": 1},
+    "started_at": {"type": "string", "minLength": 1},
+    "finished_at": {"type": "string", "minLength": 1},
+    "case_results": {
+      "type": "array",
+      "minItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["opaque_case_token", "required_h_slot", "scoring_profile", "actual_realness", "case_verdict"],
+        "properties": {
+          "opaque_case_token": {"type": "string", "minLength": 1},
+          "required_h_slot": {"type": "string", "pattern": "^H(0[1-9]|1[0-9]|18[ab]|19)$"},
+          "scoring_profile": {"type": "string", "minLength": 1},
+          "actual_realness": {"enum": ["R0", "R1", "R2", "R3", "R4"]},
+          "case_verdict": {"type": "string", "minLength": 1},
+          "realization_status": {"type": "string"},
+          "attempt_count": {"type": "integer", "minimum": 1},
+          "hard_failures": {"type": "array", "items": {"type": "string"}},
+          "evidence_pack_subtree_hash": {"type": "string"}
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "required": ["algorithm", "public_key_fingerprint", "value"],
+      "properties": {
+        "algorithm": {"const": "Ed25519"},
+        "public_key_fingerprint": {"type": "string", "minLength": 1},
+        "value": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

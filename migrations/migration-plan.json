@@ -1,0 +1,102 @@
+{
+  "schema_version": "migration-plan-v1",
+  "from_head": "0022_case_evidence",
+  "to_head": "0023_v6_agent_core",
+  "rollback_contract": "EXPAND_ONLY_ROLLBACK_SAFE",
+  "migration_files": [
+    {
+      "path": "migrations/versions/0001_baseline_baseline_schema.py",
+      "sha256": "8a4d42d0b0b47a2ca76670d6f4b2ca59e905b203f34a315fba99e5dd57d03fc9"
+    },
+    {
+      "path": "migrations/versions/0002_legacy_release_columns.py",
+      "sha256": "a733de79850ae8ff31ce890a6b4a9a4ff815c84745e001ce00ef482fa49db881"
+    },
+    {
+      "path": "migrations/versions/0003_drop_execution_pipeline.py",
+      "sha256": "f6cb0fba14e565d5b9923141ea7c8961048434632b913ff931fdd6844e9bf554"
+    },
+    {
+      "path": "migrations/versions/0004_task_trace_context.py",
+      "sha256": "2e95bc552b1d15e0724ee89cb239f03b05a4858c780d2f5e85906d1cd8e3853b"
+    },
+    {
+      "path": "migrations/versions/0005_ai_authorization_grants.py",
+      "sha256": "50c654bb2a0513e4e24b33944b70ab902776af09d1bbe9a32eb8e5d80e5c9398"
+    },
+    {
+      "path": "migrations/versions/0006_incident_case_collaboration.py",
+      "sha256": "33af8bdd21e0ccf8fd78dd478169f8af988082eff99186ed0505717aa2a489a6"
+    },
+    {
+      "path": "migrations/versions/0007_case_context_and_model_audit.py",
+      "sha256": "bc5c47d490b4ef1e0e34cc4692ab31c623feed00d026197320c3ba39c6df04dc"
+    },
+    {
+      "path": "migrations/versions/0008_case_hypotheses_and_iterations.py",
+      "sha256": "ba37ca2abaca71e9b8711755317bce4372bddfede2436223e215f09088e073fa"
+    },
+    {
+      "path": "migrations/versions/0009_initial_task_evidence.py",
+      "sha256": "f46476ea02b186bc83041295fab0363441f85e1adb16ef1af970089740fe3e4d"
+    },
+    {
+      "path": "migrations/versions/0010_initial_evidence_fields.py",
+      "sha256": "4cb11d9c540d0241b8ba2a8cfb6aac6b905d1d88d56e7b434cd5a973a824b9fe"
+    },
+    {
+      "path": "migrations/versions/0011_change_registration.py",
+      "sha256": "9894f0af6ac2cbfa6f8815a219c601d08e8f5ab1bc97ded3610877134817b682"
+    },
+    {
+      "path": "migrations/versions/0012_case_recovery_plans.py",
+      "sha256": "7381ded0db2e6b9694dace3f6c961f1e514fe9c8170dca9e944b2b408493e5c9"
+    },
+    {
+      "path": "migrations/versions/0013_target_sessions.py",
+      "sha256": "93d5e503424d1b164382c1d3daf8647148ba33b55a7ed9f4469c004276621c64"
+    },
+    {
+      "path": "migrations/versions/0014_profile_windows.py",
+      "sha256": "cd5d38e1dd95b7e69ed8065b78c0770900430dabb0255d8d805234af3d4429d5"
+    },
+    {
+      "path": "migrations/versions/0015_action_attempts.py",
+      "sha256": "365c09915a3db4f31014423483c5cbf4632709923b6a2be1a0f2d44e5b91cced"
+    },
+    {
+      "path": "migrations/versions/0016_case_supervisor.py",
+      "sha256": "29a43d752c637bc6f97f8385643cbc050e52173c35961aba3c599d6064ae049b"
+    },
+    {
+      "path": "migrations/versions/0017_system_controls.py",
+      "sha256": "97718469889bf8693a81a0dc914c0bcf5b59bfba80d4017c1f94a711b8f0331e"
+    },
+    {
+      "path": "migrations/versions/0018_case_resource_attachments.py",
+      "sha256": "f4aef5c4eeb61adf61d2b24911f11a467b9ea3ffd674c0437464a86bbe6e0dab"
+    },
+    {
+      "path": "migrations/versions/0019_investigation_plans.py",
+      "sha256": "626d5f77619a31bc1c2d0017f7d62cfa82e7716148fd03636265a1a7c72cdb20"
+    },
+    {
+      "path": "migrations/versions/0020_cluster_scope.py",
+      "sha256": "3cc53eed5bc60fe71da5e953c50a5384cc1975ff5d7f0dc14651656670bf8189"
+    },
+    {
+      "path": "migrations/versions/0021_agent_runtime.py",
+      "sha256": "39d5ead5cc3b24814dccac095d2b29c137bb271c700c118d156e1c64bd3a61cb"
+    },
+    {
+      "path": "migrations/versions/0022_case_evidence.py",
+      "sha256": "c2cd8a58c75cf7b392bf55411c551e22a48e05a06c58dce8e70fb334a6c5b11b"
+    },
+    {
+      "path": "migrations/versions/0023_v6_agent_core.py",
+      "sha256": "73dc8e64347c2b80d0e76ad2d84e3d7b10a8fede5b139a684c16ddef669f9993"
+    }
+  ],
+  "migration_tree_digest": "e65177a36ced8036146250e589c28f06609b374dcd96ce6826e5ddd5d9e4821d",
+  "note": "Generated from the current worktree. Verify against actual DB head before deployment."
+}

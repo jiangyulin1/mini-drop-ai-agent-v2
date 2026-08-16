@@ -1,0 +1,21 @@
+[Unit]
+Description=Mini-Drop Pi Agent Runtime Sidecar
+After=network-online.target mini-drop-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=control
+Group=control
+WorkingDirectory=/home/control/mini-drop-active/agent_runtime/pi-sidecar
+EnvironmentFile=/home/control/mini-drop-active/deploy/env/sidecar.env
+Environment=PATH=/home/control/node-v22.19.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/control/node-v22.19.0/bin/node src/server.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillMode=mixed
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

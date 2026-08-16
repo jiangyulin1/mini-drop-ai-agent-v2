@@ -507,6 +507,36 @@ export default function CaseConversation({
                   </Message>
                 );
               }
+              if (event.event_type === "assistant.message") {
+                const payload = event.payload || {};
+                return (
+                  <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
+                    <p className={styles.messageText}>{payload.content || ""}</p>
+                    {(payload.evidence_refs || []).length > 0 && (
+                      <div className={styles.cardDescription}>引用证据：{payload.evidence_refs.slice(0, 4).join("、")}</div>
+                    )}
+                  </Message>
+                );
+              }
+              if (event.event_type === "agent_runtime_turn_submitted") {
+                const payload = event.payload || {};
+                return (
+                  <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
+                    <p className={styles.messageText}>{payload.assistant_message || "已提交给 Agent Runtime 处理。"}</p>
+                    {(payload.next_actions || []).length > 0 && (
+                      <div className={styles.cardDescription}>Turn {payload.turn_id || ""}</div>
+                    )}
+                  </Message>
+                );
+              }
+              if (event.event_type === "agent_runtime_turn_rejected") {
+                const payload = event.payload || {};
+                return (
+                  <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
+                    <p className={styles.messageText}>{payload.assistant_message || "Agent Runtime 不可用，本轮未启动调查。"}</p>
+                  </Message>
+                );
+              }
               const text = eventText(event);
               return text ? <div className={styles.systemEvent} key={event.event_id}>{formatTime(event.created_at)} · {text}</div> : null;
             })}
