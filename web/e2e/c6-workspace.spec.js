@@ -33,10 +33,10 @@ test.describe.serial("C6 real-backend workspace", () => {
     await dismissScopeEditor(page);
 
     await expect(page.getByTestId("canonical-workspace")).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Evidence/ })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Campaign \/ Execution/ })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Causal Graph" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Gap \/ Conclusion/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /调查计划/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /假设/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Evidence/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /因果链与结论/ })).toBeVisible();
     await expect(page.getByText(/^Accepted$/i)).toHaveCount(0);
 
     const turn = await request.post(`/api/v1/cases/${caseId}/agent/turn`, {
@@ -66,7 +66,7 @@ test.describe.serial("C6 real-backend workspace", () => {
     const taskId = process.env.MINI_DROP_C6_TASK_ID;
     expect(taskId, "MINI_DROP_C6_TASK_ID must identify the real seeded Task").toBeTruthy();
     const traffic = observeCanonicalTraffic(page);
-    await page.goto("/");
+    await page.goto("/tasks");
     await expect(page.getByRole("heading", { name: "C6 data-driven task" })).toBeVisible();
 
     const workspaceResponse = page.waitForResponse((response) => (

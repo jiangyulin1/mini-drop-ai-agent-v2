@@ -10,6 +10,19 @@ window.getComputedStyle = (element, pseudoElement) => (
   pseudoElement ? getComputedStyle(element) : getComputedStyle(element, pseudoElement)
 );
 
+if (!window.matchMedia) {
+  window.matchMedia = (query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
+
 afterEach(() => {
   cleanup();
 });

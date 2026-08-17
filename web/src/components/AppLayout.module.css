@@ -153,6 +153,17 @@
   flex-shrink: 0;
 }
 
+.headerActions kbd,
+.shortcuts kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  color: var(--app-text-secondary);
+  background: var(--app-background);
+  font: inherit;
+  font-size: 9px;
+}
+
 .pageIdentity {
   min-width: 0;
   display: flex;
@@ -188,17 +199,17 @@
 }
 
 .content {
-  width: calc(100% - 32px);
-  max-width: 1440px;
+  width: 100%;
+  max-width: none;
   min-height: calc(100vh - var(--app-header-height) - 32px);
   align-self: center;
-  margin: 16px;
-  padding: clamp(16px, 2vw, 24px);
+  margin: 0;
+  padding: 0;
   overflow: visible;
-  border: 1px solid var(--app-border);
-  border-radius: 12px;
-  background: var(--app-surface);
-  box-shadow: 0 8px 30px rgba(16, 24, 40, 0.035);
+  border: 0;
+  border-radius: 0;
+  background: var(--app-background);
+  box-shadow: none;
 }
 
 .workspaceContent {
@@ -206,6 +217,77 @@
   min-height: calc(100vh - var(--app-header-height));
   overflow: hidden;
   background: var(--app-surface);
+}
+
+.globalBar {
+  min-height: 34px;
+  padding: 0 16px;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-surface) 98%, #eaf1ff);
+}
+
+.globalBar > span,
+.globalBar > button {
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 0;
+  border-right: 1px solid var(--app-border);
+  color: var(--app-text-secondary);
+  background: transparent;
+  font-size: 10px;
+}
+
+.globalBar > button {
+  cursor: pointer;
+}
+
+.globalBar b {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.streamButton:hover,
+.globalBar > button:hover {
+  background: rgba(22, 119, 255, 0.05);
+}
+
+.globalAttention b,
+.globalAttention svg {
+  color: #c75b08 !important;
+}
+
+.globalDanger {
+  background: rgba(217, 45, 32, 0.08) !important;
+}
+
+.globalDanger b,
+.globalDanger svg {
+  color: #d92d20 !important;
+}
+
+.commandItem {
+  padding-inline: 10px !important;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.commandItem:hover {
+  background: rgba(22, 119, 255, 0.055);
+}
+
+.shortcuts {
+  padding-top: 10px;
+  display: flex;
+  gap: 14px;
+  border-top: 1px solid var(--app-border);
+  color: var(--app-text-secondary);
+  font-size: 10px;
 }
 
 .skipLink {
@@ -250,11 +332,15 @@
   }
 
   .content {
-    width: calc(100% - 16px);
-    min-height: calc(100vh - var(--app-header-height) - 16px);
-    margin: 8px;
-    padding: 12px;
-    border-radius: 10px;
+    width: 100%;
+    min-height: calc(100vh - var(--app-header-height) - 34px);
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+  }
+
+  .globalBar {
+    padding-inline: 4px;
   }
 }
 

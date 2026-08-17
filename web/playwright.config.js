@@ -9,6 +9,8 @@ export default defineConfig({
   reporter: [["list"], ["json", { outputFile: "test-results/c6-results.json" }]],
   use: {
     baseURL: process.env.MINI_DROP_WEB_BASE_URL || "http://127.0.0.1:5173",
+    // The isolated VM lab terminates TLS with its pinned self-signed certificate.
+    ignoreHTTPSErrors: Boolean(process.env.MINI_DROP_WEB_BASE_URL?.startsWith("https://192.168.")),
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

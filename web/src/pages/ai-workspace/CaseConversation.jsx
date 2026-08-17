@@ -258,6 +258,8 @@ function CurrentResult({
 }
 
 function RecoveryPlanCards({ plans, loading, onAction }) {
+  const [confirmation, setConfirmation] = useState(null);
+  const [confirmationText, setConfirmationText] = useState("");
   if (!(plans || []).length) return null;
   const statusMeta = {
     PROPOSED: ["等待预检", "blue"],
@@ -271,7 +273,21 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
     REJECTED: ["已拒绝", "default"],
     FAILED: ["执行失败", "red"],
   };
+  const expectedConfirmation = confirmation
+    ? `确认执行 ${confirmation.plan.action_id}`
+    : "";
+  const submitRiskAction = async () => {
+    if (!confirmation || confirmationText !== expectedConfirmation) return;
+    await onAction(confirmation.plan, confirmation.action);
+    setConfirmation(null);
+    setConfirmationText("");
+  };
+  const openRiskConfirmation = (plan, action) => {
+    setConfirmation({ plan, action });
+    setConfirmationText("");
+  };
   return (
+    <>
     <Message ai author="Mini-Drop">
       <div className={styles.resultCard}>
         <div className={styles.resultLabel}>受控恢复方案</div>
@@ -296,9 +312,7 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
                     <Button size="small" danger onClick={() => onAction(plan, "reject")}>拒绝</Button>
                   </>}
                   {plan.status === "APPROVED" && (
-                    <Popconfirm title="确认执行已预检并批准的恢复动作？" onConfirm={() => onAction(plan, "execute")}>
-                      <Button size="small" type="primary" loading={loading}>执行</Button>
-                    </Popconfirm>
+                    <Button size="small" danger loading={loading} onClick={() => openRiskConfirmation(plan, "execute")}>进入受控执行</Button>
                   )}
                   {plan.status === "EXECUTED" && <>
                     <Button size="small" type="primary" loading={loading} onClick={() => onAction(plan, "verify")}>服务端验证</Button>
@@ -316,6 +330,42 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
         </div>
       </div>
     </Message>
+    <Modal
+      title="高风险动作确认"
+      open={Boolean(confirmation)}
+      okText="确认并提交执行"
+      cancelText="取消"
+      okButtonProps={{
+        danger: true,
+        disabled: confirmationText !== expectedConfirmation,
+        loading,
+        "aria-label": "确认并提交高风险恢复动作",
+      }}
+      onOk={submitRiskAction}
+      onCancel={() => {
+        setConfirmation(null);
+        setConfirmationText("");
+      }}
+      destroyOnClose
+    >
+      <div className={styles.recommendationList}>
+        <div><strong>动作：</strong>{confirmation?.plan.action_id || "-"}</div>
+        <div><strong>风险：</strong>{confirmation?.plan.risk_level || "高风险受控操作"}</div>
+        <div><strong>预计影响：</strong>{confirmation?.plan.value_after_fix || "以服务端计划为准"}</div>
+        <div><strong>Dry Run：</strong>影响 {confirmation?.plan.dry_run?.candidate_count ?? "未返回"} 项</div>
+        <div><strong>验证方式：</strong>{confirmation?.plan.verification_method || "需服务端验证"}</div>
+        <div><strong>回滚：</strong>{confirmation?.plan.rollback_method || confirmation?.plan.policy?.rollback || "使用计划绑定的服务端回滚动作"}</div>
+        <div><strong>授权：</strong>{confirmation?.plan.policy?.approval_binding ? "已绑定本次审批摘要" : "等待服务端校验 Capability Key"}</div>
+        <Input
+          value={confirmationText}
+          onChange={(event) => setConfirmationText(event.target.value)}
+          placeholder={expectedConfirmation}
+          aria-label="高风险动作确认文本"
+        />
+        <div className={styles.cardDescription}>请输入“{expectedConfirmation}”。提交后仅表示已受理，必须完成服务端验证后才能标记恢复成功。</div>
+      </div>
+    </Modal>
+    </>
   );
 }
 

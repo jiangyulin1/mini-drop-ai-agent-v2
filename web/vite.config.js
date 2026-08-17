@@ -41,6 +41,9 @@ export default defineConfig({
       "/api": {
         target: process.env.MINI_DROP_WEB_API_TARGET || "http://localhost:8191",
         changeOrigin: true,
+        // The three-node lab uses a pinned self-signed development certificate.
+        // Production traffic is served by nginx and never uses this dev proxy.
+        secure: false,
       },
     },
   },

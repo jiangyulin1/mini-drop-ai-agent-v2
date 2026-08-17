@@ -30,25 +30,35 @@ function readableErrorDetail(detail, fallback = "请求失败") {
   return String(detail);
 }
 
-function createApiError(message, { status, code, detail } = {}) {
+function createApiError(message, { status, code, detail, requestId, isTimeout = false } = {}) {
   const error = new Error(message);
   error.name = "ApiError";
   error.status = status;
   error.code = code;
   error.detail = detail;
+  error.requestId = requestId || "";
+  error.isTimeout = isTimeout;
+  error.retryable = isTimeout || !status || status >= 500 || status === 408 || status === 429;
   return error;
 }
 
 function normalizeAxiosError(error) {
   const status = error.response?.status;
   const detail = error.response?.data?.detail ?? error.response?.data?.message;
-  const message = status === 401
-    ? "访问认证失败：请在系统设置中配置 Mini-Drop API Key"
-    : readableErrorDetail(detail, error.message);
+  const isTimeout = error.code === "ECONNABORTED" || /timeout/i.test(error.message || "");
+  const message = status === 401 || status === 403
+    ? `权限不足（HTTP ${status}）：请检查当前角色或访问凭据`
+    : isTimeout
+      ? "请求超时：服务未在预期时间内响应，可稍后重试"
+      : readableErrorDetail(detail, error.message);
   return createApiError(message, {
     status,
     code: error.response?.data?.code,
     detail,
+    requestId: error.response?.headers?.["x-request-id"]
+      || error.response?.data?.request_id
+      || error.response?.data?.requestId,
+    isTimeout,
   });
 }
 
@@ -646,6 +656,16 @@ export function getPresignUrl(bucket, key, expires = 3600) {
 
 export function getAIConfig() {
   return api.get("/ai-config");
+}
+
+/** Agent Runtime 的无敏感配置投影。 */
+export function getAgentRuntimeConfig() {
+  return api.get("/v1/agent-runtime/config");
+}
+
+/** 全局安全控制（暂停、Red Button、自动动作边界）。 */
+export function listSystemControls() {
+  return api.get("/v1/controls");
 }
 
 export function runAIValidation() {

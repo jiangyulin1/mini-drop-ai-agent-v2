@@ -866,8 +866,9 @@ export default function AIDiagnosisWorkspace() {
             onAnalyze={analyzeCollection}
           />
         ) : caseDetail ? (
-          <>
-            <CaseConversation
+          <div className={styles.caseWorkspaceShell}>
+            <div className={styles.conversationPane}>
+              <CaseConversation
               detail={caseDetail}
               events={events}
               assistantMessages={workspace?.messages || []}
@@ -889,10 +890,21 @@ export default function AIDiagnosisWorkspace() {
               onAdvanceAgent={advanceAgent}
               onOpenRecovery={openRecoveryPlan}
               onRecoveryAction={recoveryPlanAction}
-            />
-            <CanonicalCaseWorkspace workspace={workspace} connected={workspaceConnected} />
-            <InvestigationWorkbench caseId={caseDetail.case_id} />
-          </>
+              />
+            </div>
+            <aside className={styles.contextPane} aria-label="Case 调查上下文">
+              <CanonicalCaseWorkspace
+                workspace={workspace}
+                connected={workspaceConnected}
+                caseId={caseDetail.case_id}
+                onRefresh={refreshAll}
+              />
+              <details className={styles.advancedControls}>
+                <summary>高级计划控制与历史审查</summary>
+                <InvestigationWorkbench caseId={caseDetail.case_id} />
+              </details>
+            </aside>
+          </div>
         ) : diagnosis ? (
           <LegacyConversation
             diagnosis={diagnosis}

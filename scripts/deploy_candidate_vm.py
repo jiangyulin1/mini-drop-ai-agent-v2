@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -101,6 +102,16 @@ def systemctl(node: str, action: str, services: list[str]) -> str:
     return ssh(node, cmd)
 
 
+def host_root_shell(node: str, command: str) -> str:
+    """Run a bounded host command through the lab's existing namespace helper."""
+    cmd = (
+        "docker run --rm --privileged --pid=host --uts=host --net=host "
+        "redis:alpine nsenter -t 1 -m -u -i -n -p /bin/sh -c "
+        f"{shlex.quote(command)}"
+    )
+    return ssh(node, cmd)
+
+
 def main() -> int:
     global SSH_CONFIG
     parser = argparse.ArgumentParser()
@@ -176,6 +187,13 @@ def main() -> int:
             ssh(node, f"mkdir -p {remote_release}/deploy/env && "
                       f"cp {active}/deploy/env/control-native.env {remote_release}/deploy/env/control-native.env && "
                       f"cp {active}/deploy/env/sidecar.env {remote_release}/deploy/env/sidecar.env 2>/dev/null || true")
+            web_release = f"/var/www/mini-drop-release-{release_id}"
+            host_root_shell(
+                node,
+                f"test ! -e {web_release} && install -d -m 0755 {web_release} && "
+                f"cp -a {remote_release}/web/dist/. {web_release}/ && "
+                f"test -f {web_release}/index.html",
+            )
         remote_manifest = json.loads(ssh(node, f"cat {remote_release}/candidate-manifest.json"))
         if candidate_identity(remote_manifest) != identity:
             print(f"candidate identity mismatch on {node}", file=sys.stderr)
@@ -207,6 +225,8 @@ def main() -> int:
             "installed_package_version": installed_version,
             "installed_pi_version": installed_pi,
         }
+        if node == "control":
+            receipt["nodes"][node]["web_release_path"] = web_release
         print(f"{node} prepared")
 
     if args.prepare_only:
@@ -225,6 +245,12 @@ def main() -> int:
             return 1
         previous_links[node] = previous
         receipt["nodes"][node]["previous_release_path"] = previous
+
+    previous_web_link = host_root_shell("control", "readlink -f /var/www/mini-drop-active").strip()
+    if not previous_web_link.startswith("/var/www/mini-drop-release-"):
+        print(f"unsafe or missing previous web link: {previous_web_link!r}", file=sys.stderr)
+        return 1
+    receipt["nodes"]["control"]["previous_web_release_path"] = previous_web_link
 
     head = ""
     try:
@@ -255,6 +281,13 @@ def main() -> int:
             remote_release = f"/home/{user}/mini-drop-release-{release_id}"
             ssh(node, f"ln -sfn {remote_release} /home/{user}/mini-drop-active")
             receipt["nodes"][node]["link_switched_at"] = datetime.now(timezone.utc).isoformat()
+        web_release = f"/var/www/mini-drop-release-{release_id}"
+        host_root_shell(
+            "control",
+            f"ln -sfn {web_release} /var/www/mini-drop-active && "
+            f"cmp -s {web_release}/index.html /home/control/mini-drop-active/web/dist/index.html",
+        )
+        receipt["nodes"]["control"]["web_link_switched_at"] = datetime.now(timezone.utc).isoformat()
 
         print("restarting services")
         systemctl("control", "daemon-reload", [])
@@ -294,6 +327,10 @@ def main() -> int:
                 ssh(node, f"ln -sfn {previous} /home/{user}/mini-drop-active")
             except Exception as rollback_exc:  # noqa: BLE001
                 rollback_errors.append(f"{node} link: {rollback_exc}")
+        try:
+            host_root_shell("control", f"ln -sfn {previous_web_link} /var/www/mini-drop-active")
+        except Exception as rollback_exc:  # noqa: BLE001
+            rollback_errors.append(f"control web link: {rollback_exc}")
         try:
             systemctl("control", "restart", [
                 "mini-drop-s3", "mini-drop-server", "mini-drop-analyzer", "mini-drop-pi-sidecar",

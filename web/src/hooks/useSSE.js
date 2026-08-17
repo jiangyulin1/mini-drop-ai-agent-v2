@@ -10,13 +10,15 @@ let reconnectTimer = null;
 let retryCount = 0;
 let lastEventId = "";
 let sharedConnected = false;
+let sharedConnectionState = "connecting";
 let authListenerAttached = false;
 let connecting = false;
 const maxRetryDelay = 30000;
 
-function notifyConnection(connected) {
+function notifyConnection(connected, state = connected ? "connected" : "disconnected") {
   sharedConnected = connected;
-  subscribers.forEach((subscriber) => subscriber.onConnectionChange?.(connected));
+  sharedConnectionState = state;
+  subscribers.forEach((subscriber) => subscriber.onConnectionChange?.(connected, state));
 }
 
 function dispatchEvent(eventType, event) {
@@ -44,7 +46,14 @@ function closeSharedEventSource() {
 async function connectSharedEventSource() {
   if (sharedEventSource || subscribers.size === 0 || connecting) return;
   connecting = true;
-  await ensureEventSourceAuthCookie();
+  notifyConnection(false, retryCount ? "reconnecting" : "connecting");
+  try {
+    await ensureEventSourceAuthCookie();
+  } catch {
+    connecting = false;
+    notifyConnection(false, "polling");
+    return;
+  }
   connecting = false;
   if (sharedEventSource || subscribers.size === 0) return;
 
@@ -53,7 +62,7 @@ async function connectSharedEventSource() {
 
   eventSource.onopen = () => {
     retryCount = 0;
-    notifyConnection(true);
+    notifyConnection(true, "connected");
   };
   eventSource.addEventListener("task_changed", (event) => dispatchEvent("task_changed", event));
   eventSource.addEventListener("agent_status", (event) => dispatchEvent("agent_status", event));
@@ -74,7 +83,7 @@ async function connectSharedEventSource() {
   eventSource.onerror = () => {
     if (sharedEventSource !== eventSource) return;
     closeSharedEventSource();
-    notifyConnection(false);
+    notifyConnection(false, "reconnecting");
     if (subscribers.size === 0) return;
     const delay = Math.min(1000 * (2 ** retryCount), maxRetryDelay);
     retryCount += 1;
@@ -91,7 +100,7 @@ function subscribe(handlers) {
     window.addEventListener("mini-drop:auth-changed", reconnectSharedEventSource);
     authListenerAttached = true;
   }
-  handlers.onConnectionChange?.(sharedConnected);
+  handlers.onConnectionChange?.(sharedConnected, sharedConnectionState);
   clearTimeout(reconnectTimer);
   void connectSharedEventSource();
 
@@ -103,6 +112,7 @@ function subscribe(handlers) {
       retryCount = 0;
       closeSharedEventSource();
       sharedConnected = false;
+      sharedConnectionState = "disconnected";
       window.removeEventListener("mini-drop:auth-changed", reconnectSharedEventSource);
       authListenerAttached = false;
     }
@@ -114,7 +124,7 @@ function reconnectSharedEventSource() {
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   closeSharedEventSource();
-  notifyConnection(false);
+  notifyConnection(false, "reconnecting");
   void connectSharedEventSource();
 }
 
@@ -143,6 +153,7 @@ export default function useSSE({
   onConnectionChange,
 } = {}) {
   const [connected, setConnected] = useState(sharedConnected);
+  const [connectionState, setConnectionState] = useState(sharedConnectionState);
 
   const handlersRef = useRef({ onTaskChanged, onAgentStatus, onDiagnosisComplete, onConnectionChange });
   handlersRef.current = { onTaskChanged, onAgentStatus, onDiagnosisComplete, onConnectionChange };
@@ -152,9 +163,10 @@ export default function useSSE({
       onTaskChanged: (data) => handlersRef.current.onTaskChanged?.(data),
       onAgentStatus: (data) => handlersRef.current.onAgentStatus?.(data),
       onDiagnosisComplete: (data) => handlersRef.current.onDiagnosisComplete?.(data),
-      onConnectionChange: (value) => {
+      onConnectionChange: (value, state) => {
         setConnected(value);
-        handlersRef.current.onConnectionChange?.(value);
+        setConnectionState(state || (value ? "connected" : "disconnected"));
+        handlersRef.current.onConnectionChange?.(value, state);
       },
     };
     return subscribe(subscriber);
@@ -164,5 +176,5 @@ export default function useSSE({
     reconnectSharedEventSource();
   }, []);
 
-  return { connected, reconnect };
+  return { connected, connectionState, reconnect };
 }

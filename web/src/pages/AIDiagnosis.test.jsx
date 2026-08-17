@@ -5,6 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import AIDiagnosis from "./AIDiagnosis";
 import {
   getCaseWorkspace,
+  getCaseHypotheses,
+  getCaseInvestigationPlan,
   getCaseCurrentUnderstanding,
   listAgents,
   listDiagnosisSessions,
@@ -13,6 +15,7 @@ import {
   listTasks,
   listCaseProposals,
   listCaseRecoveryPlans,
+  listCaseEvidenceReviews,
   listRegisteredActions,
   listTargetSessions,
 } from "../api/client";
@@ -40,6 +43,8 @@ vi.mock("../api/client", () => ({
   getCaseCurrentUnderstanding: vi.fn(),
   getIncidentCase: vi.fn(),
   getCaseWorkspace: vi.fn(),
+  getCaseHypotheses: vi.fn(),
+  getCaseInvestigationPlan: vi.fn(),
   getTask: vi.fn(),
   getTaskArtifactContent: vi.fn(),
   getTaskArtifacts: vi.fn(),
@@ -49,6 +54,7 @@ vi.mock("../api/client", () => ({
   listIncidentCases: vi.fn(),
   listCaseProposals: vi.fn(),
   listCaseRecoveryPlans: vi.fn(),
+  listCaseEvidenceReviews: vi.fn(),
   listRegisteredActions: vi.fn(),
   listTargetSessions: vi.fn(),
   listTasks: vi.fn(),
@@ -116,6 +122,9 @@ describe("AIDiagnosis workspace", () => {
         missing: [],
       },
     });
+    getCaseInvestigationPlan.mockResolvedValue({ plan_id: null, steps: [] });
+    getCaseHypotheses.mockResolvedValue({ nodes: [], edges: [] });
+    listCaseEvidenceReviews.mockResolvedValue({ items: [] });
     listCaseProposals.mockResolvedValue({ proposals: [] });
     listCaseRecoveryPlans.mockResolvedValue({ items: [] });
     listRegisteredActions.mockResolvedValue({ items: [] });
@@ -130,8 +139,8 @@ describe("AIDiagnosis workspace", () => {
 
     expect((await screen.findAllByText("service-x CPU 飙高")).length).toBeGreaterThan(0);
     expect(await screen.findByTestId("canonical-workspace")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Campaign \/ Execution/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Causal Graph" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /调查计划/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /因果链与结论/ })).toBeInTheDocument();
     expect(await screen.findByText("设置诊断范围")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看 Worker 状态" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument();

@@ -11,6 +11,7 @@
     "test": "cross-env NODE_ENV=test vitest run",
     "test:e2e:c6": "playwright test e2e/c6-workspace.spec.js",
     "test:e2e:c6:restart": "playwright test e2e/c6-restart.spec.js",
+    "test:e2e:v2-live": "playwright test e2e/v2-live.spec.js",
     "audit:prod": "node scripts/check-audit.mjs"
   },
   "dependencies": {
