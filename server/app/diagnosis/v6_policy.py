@@ -11,25 +11,15 @@ import hashlib
 import json
 from typing import Any
 
-READ_ONLY_TOOLS = {
-    "get_case_snapshot",
-    "list_case_evidence",
-    "get_evidence_projection",
-    "compare_evidence",
-    "search_knowledge",
-    "get_causal_graph",
-    "get_evidence_gaps",
-}
+from server.app.agent_runtime.catalog import (
+    PROPOSE_ONLY_TOOL_NAMES,
+    READ_ONLY_TOOL_NAMES,
+)
+from server.app.agent_runtime.policy import RuntimePolicy, resolve_runtime_policy
 
-PROPOSE_ONLY_TOOLS = {
-    "propose_hypothesis_revision",
-    "propose_plan_revision",
-    "propose_campaign_revision",
-    "request_operation",
-    "submit_causal_graph_revision",
-    "submit_repair_recommendations",
-    "finish_investigation",
-}
+READ_ONLY_TOOLS = set(READ_ONLY_TOOL_NAMES)
+
+PROPOSE_ONLY_TOOLS = set(PROPOSE_ONLY_TOOL_NAMES)
 
 ALLOWED_DISPOSITIONS = {
     "ANSWER_ONLY", "ATTACH_EVIDENCE", "INVESTIGATE", "CORRECT_CONTEXT",
@@ -82,11 +72,22 @@ def route_disposition(
     return disposition, "READ_ONLY", True
 
 
-def tool_policy_error(tool_name: str, policy: str) -> str | None:
-    if policy == "READ_ONLY" and tool_name not in READ_ONLY_TOOLS:
-        return "TURN_READ_ONLY"
-    if policy == "PROPOSE_ONLY" and tool_name not in READ_ONLY_TOOLS | PROPOSE_ONLY_TOOLS:
-        return "TURN_PROPOSE_ONLY"
+def tool_policy_error(tool_name: str, policy: str | RuntimePolicy | dict[str, Any]) -> str | None:
+    try:
+        resolved = (
+            policy if isinstance(policy, RuntimePolicy)
+            else resolve_runtime_policy(
+                {"side_effect_policy": policy} if isinstance(policy, str) else policy,
+            )
+        )
+    except ValueError:
+        return "RUNTIME_POLICY_INVALID"
+    if not resolved.allows_tool(tool_name):
+        if resolved.side_effect_policy == "READ_ONLY":
+            return "TURN_READ_ONLY"
+        if resolved.side_effect_policy == "PROPOSE_ONLY":
+            return "TURN_PROPOSE_ONLY"
+        return "TOOL_DISABLED_BY_RUNTIME_POLICY"
     return None
 
 

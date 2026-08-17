@@ -35,6 +35,11 @@ class CaseContextSnapshot(StrictModel):
     turn_id: Optional[str] = None
     disposition: Optional[str] = None
     side_effect_policy: Optional[str] = None
+    diagnostic_strategy_id: str = "hybrid"
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
+    strategy_guidance: str = ""
+    runtime_policy: dict[str, Any] = Field(default_factory=dict)
+    runtime_options: dict[str, Any] = Field(default_factory=dict)
     context_snapshot_id: Optional[str] = None
     runtime_generation: int = 0
     runtime_session_id: str = ""
@@ -68,6 +73,10 @@ class AgentTurnInput(StrictModel):
     references: list[dict[str, Any]] = Field(default_factory=list)
     requested_mode: Optional[str] = None
     client_command_id: Optional[str] = None
+    diagnostic_strategy_id: str = "hybrid"
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
+    runtime_policy: dict[str, Any] = Field(default_factory=dict)
+    runtime_options: dict[str, Any] = Field(default_factory=dict)
 
 
 class AcceptedTurn(StrictModel):

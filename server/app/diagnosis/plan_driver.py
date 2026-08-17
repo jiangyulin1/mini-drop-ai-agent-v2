@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from server.app.agent_runtime.policy import RuntimePolicy, resolve_runtime_policy
 from server.app.diagnosis.cluster_scope import EnvironmentProfile, MembershipSnapshot, TargetResolver
 from server.app.diagnosis.fanout import FanoutCollectionRun, FanoutCollectionService
 from server.app.diagnosis.investigation_plan import SCHEDULABLE
@@ -56,6 +57,7 @@ class PlanDriver:
     def dispatch_case_ready_steps(
         self, case_id: str, tenant_id: str, *,
         principal_id: str = "mini-drop-plan-driver",
+        runtime_policy: RuntimePolicy | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """调度当前 Plan 中所有就绪的 READ_LOW 步骤（幂等，可在每 tick 调用）。"""
         case = self._repo.get_incident_case(case_id, tenant_id)
@@ -66,6 +68,13 @@ class PlanDriver:
         plan = self._plan_service.read_plan(case_id, tenant_id)
         if plan is None:
             return {"outcome": "NO_PLAN"}
+        policy = resolve_runtime_policy(runtime_policy) if runtime_policy is not None else None
+        if policy is not None and policy.execution_mode != "normal":
+            return {
+                "outcome": "POLICY_BLOCKED",
+                "execution_mode": policy.execution_mode,
+                "reason": "NATIVE_PLAN_DISPATCH_REQUIRES_NORMAL_EXECUTION_MODE",
+            }
         plan_revision = int(plan.get("plan_revision") or 0)
         scope_revision = int(case.get("scope_revision") or 1)
 
@@ -73,6 +82,8 @@ class PlanDriver:
         reused: list[str] = []
         for step in plan.get("steps") or []:
             if step.get("status") not in SCHEDULABLE:
+                continue
+            if policy is not None and "R1" not in policy.allowed_risk_levels:
                 continue
             if step.get("risk") != "READ_LOW":
                 continue  # E4 只自动调度低风险；其余等待审批

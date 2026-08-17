@@ -29,7 +29,12 @@ from server.app.diagnosis.action_registry import (
     DEFAULT_ACTION_REGISTRY,
     evaluate_action,
 )
-from server.app.diagnosis.actuation import ActuationError, ActuationGateway, is_executable
+from server.app.diagnosis.actuation import (
+    ActuationError,
+    ActuationGateway,
+    enforce_runtime_execution_policy,
+    is_executable,
+)
 from server.app.diagnosis.authorization import AuthorizationDecision
 from server.app.diagnosis.approval_binding import (
     seal_approval_binding,
@@ -487,6 +492,14 @@ def execute_case_recovery_plan(
         if approval_error:
             raise HTTPException(status_code=409, detail=approval_error)
     definition = DEFAULT_ACTION_REGISTRY.get(plan["action_id"])
+    try:
+        enforce_runtime_execution_policy(
+            payload.runtime_policy,
+            action_id=plan["action_id"],
+            risk_level="R1" if getattr(getattr(definition, "base_impact_level", None), "value", "I2") == "I1" else "R2",
+        )
+    except ActuationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     policy = evaluate_action(plan["action_id"], ActionEvaluationRequest(
         tenant_id=tenant_id,
         environment=case["environment"],
@@ -800,6 +813,15 @@ def execute_registered_action(
         raise HTTPException(status_code=403, detail="ACTION_TENANT_MISMATCH")
     if not payload.get("dry_run_attempt_id"):
         raise HTTPException(status_code=400, detail="dry_run_attempt_id 必填：必须先 dry-run 再执行")
+    definition = DEFAULT_ACTION_REGISTRY.get(action_id)
+    try:
+        enforce_runtime_execution_policy(
+            payload.get("runtime_policy"),
+            action_id=action_id,
+            risk_level="R1" if getattr(getattr(definition, "base_impact_level", None), "value", "I2") == "I1" else "R2",
+        )
+    except ActuationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     _action_evaluation_allows(action_id, request, payload)
     try:
         result = ACTUATION_GATEWAY.execute(

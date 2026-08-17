@@ -1,0 +1,27 @@
+{
+  "schema_version": "agent-strategy-matrix.v1",
+  "matrix_id": "diagnostic-strategy-smoke-v1",
+  "scenario_root": "golden_scenarios",
+  "scenario_ids": ["self_code_hotspot", "downstream_cpu_hotspot", "shared_io_contention"],
+  "repetitions": 2,
+  "conditions": [
+    {
+      "condition_id": "rule-tree-low",
+      "strategy_id": "rule_tree",
+      "runtime_options": {"reasoning_effort": "low", "prompt_variant": "concise", "seed": 7},
+      "runtime_policy": {"side_effect_policy": "READ_ONLY", "execution_mode": "deny_write"}
+    },
+    {
+      "condition_id": "evidence-first-medium",
+      "strategy_id": "evidence_first",
+      "runtime_options": {"reasoning_effort": "medium", "prompt_variant": "evidence_strict", "seed": 7},
+      "runtime_policy": {"side_effect_policy": "PROPOSE_ONLY", "execution_mode": "dry_run"}
+    },
+    {
+      "condition_id": "hybrid-high",
+      "strategy_id": "hybrid",
+      "runtime_options": {"reasoning_effort": "high", "prompt_variant": "default", "seed": 7},
+      "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW", "execution_mode": "normal"}
+    }
+  ]
+}

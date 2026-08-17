@@ -13,8 +13,11 @@ from urllib.parse import quote as _url_quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from server.app.agent_runtime.catalog import tool_catalog_payload
 from server.app.agent_runtime.config import agent_flags
 from server.app.agent_runtime.dispatcher import active_runtime_info
+from server.app.agent_runtime.options import RuntimeOptions
+from server.app.agent_runtime.policy import RuntimePolicy
 from server.app.artifact_service import (
     evidence_artifact_links,
     inspect_artifact,
@@ -24,6 +27,7 @@ from server.app.diagnosis.audit_trace import build_audit_bundle
 from server.app.diagnosis.probe_registry import list_probes as list_registered_probes
 from server.app.diagnosis.schemas import ApprovalRequest, CreateDiagnosisRequest
 from server.app.diagnosis.source_gateway import SourceQueryRequest
+from server.app.diagnosis.strategies.registry import strategy_catalog
 from server.app.http.auth import (
     extract_api_token as _extract_api_token,
     request_principal as _request_principal,
@@ -450,6 +454,10 @@ def get_agent_runtime_config(request: Request) -> APIResponse:
         "ready": info.get("ready", True),
         "ready_error": info.get("error"),
         "flags": agent_flags(),
+        "available_strategies": strategy_catalog(),
+        "tool_catalog": tool_catalog_payload(include_internal_path=False),
+        "runtime_policy_schema": RuntimePolicy.model_json_schema(),
+        "runtime_options_schema": RuntimeOptions.model_json_schema(),
     })
 
 

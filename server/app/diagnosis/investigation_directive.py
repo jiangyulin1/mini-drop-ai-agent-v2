@@ -20,6 +20,10 @@ from server.app.diagnosis.schemas import StrictModel
 
 class InvestigationDirective(StrictModel):
     directive_key: str
+    strategy_id: str = "hybrid"
+    strategy_version: str = "hybrid.v1"
+    strategy_guidance: str = ""
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
     evidence_order: list[str] = Field(default_factory=list)
     collected_evidence_types: list[str] = Field(default_factory=list)
     missing_evidence_types: list[str] = Field(default_factory=list)

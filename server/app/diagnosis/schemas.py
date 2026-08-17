@@ -8,6 +8,9 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from server.app.agent_runtime.options import RuntimeOptions
+from server.app.agent_runtime.policy import RuntimePolicy
+
 
 class StrictModel(BaseModel):
     """边界对象拒绝未知字段，避免模型输出被静默忽略。"""
@@ -49,6 +52,15 @@ class AnalysisStrategy(str, Enum):
     CONSTRAINED_HYBRID = "CONSTRAINED_HYBRID"
     DECISION_TREE = "DECISION_TREE"
     EXPLORATORY = "EXPLORATORY"
+
+
+class DiagnosticStrategyId(str, Enum):
+    RULE_TREE = "rule_tree"
+    HYPOTHESIS_FIRST = "hypothesis_first"
+    EVIDENCE_FIRST = "evidence_first"
+    CAUSAL_GRAPH = "causal_graph"
+    EXPLORATORY = "exploratory"
+    HYBRID = "hybrid"
 
 
 class EvidenceRole(str, Enum):
@@ -168,6 +180,9 @@ class CreateDiagnosisRequest(StrictModel):
     budget: Optional[DiagnosisBudget] = None
     diagnosis_mode: DiagnosisMode = DiagnosisMode.AUTO
     analysis_strategy: AnalysisStrategy = AnalysisStrategy.CONSTRAINED_HYBRID
+    strategy_id: Optional[DiagnosticStrategyId] = None
+    runtime_policy: Optional[RuntimePolicy] = None
+    runtime_options: Optional[RuntimeOptions] = None
     evidence_time_policy: EvidenceTimePolicy = Field(default_factory=EvidenceTimePolicy)
     evaluation_oracle: Optional[EvaluationOracle] = None
 
@@ -204,6 +219,8 @@ class NormalizedIntent(StrictModel):
     time_range: TimeRange
     diagnosis_mode: DiagnosisMode = DiagnosisMode.LIVE
     analysis_strategy: AnalysisStrategy = AnalysisStrategy.CONSTRAINED_HYBRID
+    diagnostic_strategy_id: DiagnosticStrategyId = DiagnosticStrategyId.HYBRID
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
     evidence_time_policy: EvidenceTimePolicy = Field(default_factory=EvidenceTimePolicy)
     scope: DiagnosisScope = Field(default_factory=DiagnosisScope)
     constraints: DiagnosisConstraints = Field(default_factory=DiagnosisConstraints)

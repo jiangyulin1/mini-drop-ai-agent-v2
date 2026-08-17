@@ -11,14 +11,21 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from server.app.agent_runtime.config import agent_max_active_cases
+from server.app.agent_runtime.catalog import get_tool_spec, tool_catalog_payload
+from server.app.agent_runtime.options import RuntimeOptions, resolve_runtime_options
+from server.app.agent_runtime.policy import (
+    RuntimePolicy,
+    constrain_side_effect_policy,
+    resolve_runtime_policy,
+)
 from server.app.agent_runtime.port import CaseContextSnapshot
 from server.app.application.task_views import task_view as _task_view
-from server.app.diagnosis.investigation_directive import build_directive
 from server.app.diagnosis.investigation_plan import PlanUpdateInput
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.query_registry import QUERY_REGISTRY
 from server.app.diagnosis.skill_registry import SKILL_REGISTRY
-from server.app.diagnosis.v6_policy import PROPOSE_ONLY_TOOLS, READ_ONLY_TOOLS
+from server.app.diagnosis.strategies.registry import get_strategy
+from server.app.diagnosis.v6_policy import READ_ONLY_TOOLS
 from server.app.agent_runtime.shadow import (
     build_deterministic_plan,
     compare_plans,
@@ -151,6 +158,9 @@ def _build_runtime_case_context(
     side_effect_policy: str = "AUTO_READ_LOW",
     turn_id: str | None = None,
     investigation_run_id: str | None = None,
+    runtime_policy: RuntimePolicy | dict[str, Any] | None = None,
+    runtime_options: RuntimeOptions | dict[str, Any] | None = None,
+    strategy_id: str | None = None,
 ) -> CaseContextSnapshot:
     """Build the L0/L1 Case projection handed to an AgentRuntimePort before a Turn."""
     case_id = str(case.get("case_id") or "")
@@ -211,16 +221,21 @@ def _build_runtime_case_context(
          for item in hypotheses],
         limit=3,
     )
-    directive = build_directive(
+    resolved_policy = constrain_side_effect_policy(
+        resolve_runtime_policy(runtime_policy), side_effect_policy,
+    )
+    experimental = resolved_policy.execution_mode in {"dry_run", "sandbox"}
+    resolved_options = resolve_runtime_options(runtime_options, experiment_mode=experimental)
+    strategy = get_strategy(strategy_id or resolved_options.strategy_id)
+    directive = strategy.build_directive(
         goal=str(case.get("problem_description") or ""),
         target_scope=case.get("target_scope") or {},
         evidence_summary=evidence_summary,
         skill_context=selected_skills,
         missing_facts=missing_facts,
+        strategy_params=resolved_options.strategy_params,
     )
-    tool_catalog = sorted(READ_ONLY_TOOLS) if side_effect_policy == "READ_ONLY" else sorted(
-        READ_ONLY_TOOLS | PROPOSE_ONLY_TOOLS
-    )
+    tool_catalog = sorted(resolved_policy.effective_tools())
     return CaseContextSnapshot(
         case_id=case_id,
         tenant_id=tenant_id,
@@ -236,7 +251,12 @@ def _build_runtime_case_context(
         investigation_run_id=investigation_run_id,
         turn_id=turn_id,
         disposition=disposition,
-        side_effect_policy=side_effect_policy,
+        side_effect_policy=resolved_policy.side_effect_policy,
+        diagnostic_strategy_id=strategy.strategy_id,
+        strategy_params=resolved_options.strategy_params,
+        strategy_guidance=strategy.render_prompt_guidance(),
+        runtime_policy=resolved_policy.audit_summary(),
+        runtime_options=resolved_options.audit_summary(),
         context_snapshot_id=None,
         runtime_generation=int(binding.get("runtime_generation") or 1) if binding else 1,
         runtime_session_id=str(binding.get("runtime_session_id") or "") if binding else "",
@@ -282,6 +302,13 @@ def _require_internal_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="INTERNAL_TOKEN_REQUIRED")
 
 
+@router.get("/internal/agent/tools/catalog")
+def internal_tool_catalog(request: Request) -> APIResponse:
+    """Trusted Sidecar discovery surface; metadata never grants permission."""
+    _require_internal_token(request)
+    return APIResponse(data=tool_catalog_payload(include_internal_path=True))
+
+
 def _tool_fence(
     case: dict[str, Any],
     tenant_id: str,
@@ -298,9 +325,16 @@ def _tool_fence(
     # policy from the most recent persisted turn would fence legitimate later
     # turns; a missing envelope field is therefore treated as legacy
     # AUTO_READ_LOW for backward compatibility.
-    policy = "AUTO_READ_LOW"
-    if payload.get("side_effect_policy"):
-        policy = str(payload.get("side_effect_policy"))
+    if get_tool_spec(tool_name) is None:
+        return "TOOL_NOT_REGISTERED"
+    try:
+        policy = resolve_runtime_policy(
+            payload.get("runtime_policy") or {
+                "side_effect_policy": str(payload.get("side_effect_policy") or "AUTO_READ_LOW"),
+            },
+        )
+    except ValueError:
+        return "RUNTIME_POLICY_INVALID"
     policy_error = tool_policy_error(tool_name, policy)
     if policy_error:
         return policy_error
@@ -315,6 +349,14 @@ def _tool_fence(
         if state in {"STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
             return "RUN_TERMINAL"
     return None
+
+
+def _runtime_policy_from_tool_payload(payload: dict[str, Any]) -> RuntimePolicy:
+    return resolve_runtime_policy(
+        payload.get("runtime_policy") or {
+            "side_effect_policy": str(payload.get("side_effect_policy") or "AUTO_READ_LOW"),
+        },
+    )
 
 
 def _runtime_visible_content(payload: dict[str, Any]) -> str:
@@ -599,12 +641,22 @@ def internal_tool_create_query(payload: dict[str, Any], request: Request) -> API
     fence_error = _tool_fence(case, tenant_id, payload, "request_operation")
     if fence_error:
         raise HTTPException(status_code=409, detail=fence_error)
+    operation_id = str(payload.get("operation") or "")
+    operation_spec = QUERY_REGISTRY.get(operation_id)
+    try:
+        runtime_policy = _runtime_policy_from_tool_payload(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="RUNTIME_POLICY_INVALID") from exc
+    if operation_spec is None or not runtime_policy.allows_operation(
+        operation_id, operation_spec.risk,
+    ):
+        raise HTTPException(status_code=403, detail="OPERATION_DISABLED_BY_RUNTIME_POLICY")
     try:
         task, operation_id = _create_case_query_task(
             case,
             tenant_id,
             "mini-drop-pi-runtime",
-            str(payload.get("operation") or ""),
+            operation_id,
             payload.get("parameters") or {},
             idempotency_key=str(payload.get("idempotency_key") or "") or None,
         )
@@ -626,7 +678,11 @@ def internal_tool_upsert_plan(payload: dict[str, Any], request: Request) -> APIR
     if fence_error:
         raise HTTPException(status_code=409, detail=fence_error)
     principal_id = "mini-drop-pi-runtime"
-    plan_payload = {key: value for key, value in payload.items() if key != "case_id"}
+    envelope_fields = {
+        "case_id", "tool", "side_effect_policy", "runtime_policy", "runtime_options",
+        "runtime_generation", "expected_control_revision",
+    }
+    plan_payload = {key: value for key, value in payload.items() if key not in envelope_fields}
     try:
         plan = investigation_plan_service.update_plan(
             case_id,

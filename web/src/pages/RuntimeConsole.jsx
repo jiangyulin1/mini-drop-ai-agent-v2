@@ -66,6 +66,30 @@ export default function RuntimeConsole() {
         <Card title="全局安全控制" extra={<Tag>{controls.length}</Tag>}>
           {controls.length ? controls.map((item, index) => <div className={styles.control} key={item.control_name || item.name || index}><span><strong>{item.control_name || item.name}</strong><small>{item.reason || item.description || "由服务端策略控制"}</small></span><Tooltip title="状态来自 /api/v1/controls"><Tag color={item.enabled ? "orange" : "default"}>{item.enabled ? "已触发" : "未触发"}</Tag></Tooltip></div>) : <Alert type="info" showIcon message="服务端未返回全局控制项" description="这不是成功执行结果；仅表示当前 API 投影为空。" />}
         </Card>
+        <Card title="诊断策略与工具边界" extra={<Tag color="purple">默认 hybrid</Tag>}>
+          <Typography.Paragraph type="secondary">
+            策略决定如何组织调查，Runtime Policy 决定本轮最多可以使用哪些工具；请求只能缩小服务端权限。
+          </Typography.Paragraph>
+          <Space size={[6, 8]} wrap>
+            {(runtime?.available_strategies || []).map((item) => (
+              <Tooltip key={item.strategy_id} title={item.description}>
+                <Tag color={item.strategy_id === "hybrid" ? "purple" : "blue"}>
+                  {item.strategy_id} · {item.strategy_version}
+                </Tag>
+              </Tooltip>
+            ))}
+          </Space>
+          <Divider />
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label="Canonical Tool Catalog">
+              {runtime?.tool_catalog?.tools?.length ?? 0} 个受控工具
+            </Descriptions.Item>
+            <Descriptions.Item label="执行模式">normal / dry_run / sandbox / deny_write</Descriptions.Item>
+            <Descriptions.Item label="生产审计">
+              仅保存决策摘要、工具序列和 Evidence 引用，不保存私有思维链
+            </Descriptions.Item>
+          </Descriptions>
+        </Card>
       </div>
     </div>
   );

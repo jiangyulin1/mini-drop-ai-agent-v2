@@ -100,6 +100,10 @@ class PiAgentRuntimeAdapter(AgentRuntimePort):
                               "references": turn.references,
                               "requested_mode": turn.requested_mode,
                               "client_command_id": turn.client_command_id,
+                              "diagnostic_strategy_id": turn.diagnostic_strategy_id,
+                              "strategy_params": turn.strategy_params,
+                              "runtime_policy": turn.runtime_policy,
+                              "runtime_options": turn.runtime_options,
                               "shadow": self._shadow,
                           })
         return AcceptedTurn(**data)

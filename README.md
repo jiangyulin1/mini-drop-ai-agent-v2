@@ -711,3 +711,11 @@ bpftrace 对演示场景足够——Shell 一行命令即可挂载内核探针�
 ### 为什么 AI 不直接接入火焰图全量数据？
 
 火焰图 JSON 树可能有数千个节点，直接送 LLM Token 消耗巨大且容易产生幻觉。证据采集层提取 TopN + 结构化指标，既能被规则引擎处理，也能高效喂给 LLM。这是"人肉分析→结构化证据→LLM 推理"的工程化思路。
+
+---
+
+## Agent Runtime 扩展指南
+
+- [Canonical Agent Tool Catalog](docs/agent-tool-catalog.md)
+- [诊断策略与 RuntimePolicy 实验](docs/agent-runtime-experiments.md)
+- [跨运行时注册表一致性](docs/registry-consistency.md)

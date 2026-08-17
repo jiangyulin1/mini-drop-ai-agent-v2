@@ -15,7 +15,7 @@ import {
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildToolCatalog } from "./tools.mjs";
+import { buildToolCatalog, fetchToolCatalog } from "./tools.mjs";
 import { EventSpool } from "./event-spool.mjs";
 
 const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
@@ -31,6 +31,7 @@ export class RuntimeManager {
     this.forwardedKeys = new Set(); // idempotency keys already POSTed
     this.lastAnswers = new Map(); // case_id -> last auditable final answer
     this.noSkills = noSkills;
+    this.toolCatalog = null;
     this.eventSpool = eventSpool || new EventSpool(
       process.env.MINI_DROP_PI_EVENT_SPOOL_PATH || join(process.cwd(), "data", "pi-runtime-events.jsonl"),
     );
@@ -59,21 +60,31 @@ export class RuntimeManager {
   async startOrResume(caseContext) {
     const caseId = caseContext.case_id;
     const incomingGeneration = Number(caseContext?.runtime_generation) || 1;
+    let generation = incomingGeneration;
+    const catalog = await this._loadToolCatalog();
     const existing = this.sessions.get(caseId);
     if (existing) {
       // v6 7.1: a Cycle never reuses a stale context.  Refresh the binding
       // with the new Snapshot; if Server rotated generation, discard the old
       // in-memory Pi session and rebuild from the latest Snapshot.
-      if (incomingGeneration > existing.generation) {
+      const optionsChanged = existing.optionSignature !== undefined
+        && existing.optionSignature !== this._optionSignature(caseContext);
+      if (incomingGeneration > existing.generation || optionsChanged) {
+        if (optionsChanged && incomingGeneration <= existing.generation) {
+          generation = existing.generation + 1;
+        }
         this.sessions.delete(caseId);
         this.lastSeq.delete(caseId);
         this.lastAnswers.delete(caseId);
       } else {
         existing.context = caseContext;
+        existing.optionSignature = this._optionSignature(caseContext);
         existing.toolEnvelope.current = this._toolEnvelope(caseContext);
         const activeNames = buildToolCatalog({
           internalBase: this.internalBase,
           sideEffectPolicy: caseContext?.side_effect_policy || "AUTO_READ_LOW",
+          catalog,
+          runtimePolicy: caseContext?.runtime_policy,
           getEnvelope: () => existing.toolEnvelope.current,
         }).map((tool) => tool.name);
         existing.session.setActiveToolsByName(activeNames);
@@ -81,22 +92,31 @@ export class RuntimeManager {
         return this._binding(caseId);
       }
     }
+    if (generation !== incomingGeneration) {
+      caseContext = { ...caseContext, runtime_generation: generation };
+    }
     await this.ensureModelRuntime();
-    const generation = incomingGeneration;
     const toolEnvelope = { current: this._toolEnvelope(caseContext) };
     const tools = buildToolCatalog({
       internalBase: this.internalBase,
       sideEffectPolicy: "AUTO_READ_LOW",
+      catalog,
       getEnvelope: () => toolEnvelope.current,
     });
     const allowedNames = buildToolCatalog({
       internalBase: this.internalBase,
       sideEffectPolicy: caseContext?.side_effect_policy || "AUTO_READ_LOW",
+      catalog,
+      runtimePolicy: caseContext?.runtime_policy,
       getEnvelope: () => toolEnvelope.current,
     }).map((tool) => tool.name);
-    const thinkingLevel = process.env.MINI_DROP_PI_THINKING_LEVEL || "high";
+    const requestedEffort = caseContext?.runtime_options?.reasoning_effort
+      || process.env.MINI_DROP_PI_THINKING_LEVEL || "high";
+    const thinkingLevel = requestedEffort === "none" ? "off" : requestedEffort;
+    const strategy = caseContext?.diagnostic_strategy_id || "hybrid";
+    const promptVariant = caseContext?.runtime_options?.prompt_variant || "default";
     const { session } = await createAgentSession({
-      model: this.selectedModel || this.modelRuntime,
+      model: this._selectedModelFor(caseContext),
       thinkingLevel,
       // Security: built-in shell/file tools are disabled; ONLY Mini-Drop
       // allowlisted custom tools remain available.
@@ -112,7 +132,8 @@ export class RuntimeManager {
         "collection. If evidence is insufficient, report a precise Evidence " +
         "Gap and abstain instead of offering multiple speculative directions. " +
         "Never fabricate evidence. Final answers must be concise and cite " +
-        "evidence_id and projection_hash when evidence is used.",
+        "evidence_id and projection_hash when evidence is used. " +
+        `Diagnostic strategy=${strategy}; prompt_variant=${promptVariant}.`,
       resourceLoader: null,
     });
     this.sessions.set(caseId, {
@@ -123,10 +144,38 @@ export class RuntimeManager {
       currentTurnId: null,
       lastError: "",
       toolEnvelope,
+      optionSignature: this._optionSignature(caseContext),
     });
     this.lastSeq.set(caseId, 0);
     await this.replayPending(caseId);
     return this._binding(caseId);
+  }
+
+  async _loadToolCatalog() {
+    const catalog = await fetchToolCatalog({ internalBase: this.internalBase });
+    if (catalog) this.toolCatalog = catalog;
+    return this.toolCatalog;
+  }
+
+  _optionSignature(context) {
+    return JSON.stringify({
+      strategy: context?.diagnostic_strategy_id || "hybrid",
+      options: context?.runtime_options || {},
+    });
+  }
+
+  _selectedModelFor(context) {
+    const requested = String(context?.runtime_options?.model || "").trim();
+    if (!requested || typeof this.modelRuntime?.getModel !== "function") {
+      return this.selectedModel || this.modelRuntime;
+    }
+    const parts = requested.split("/");
+    const provider = parts.length > 1
+      ? parts.shift()
+      : process.env.MINI_DROP_PI_MODEL_PROVIDER || "deepseek";
+    const model = this.modelRuntime.getModel(provider, parts.join("/"));
+    if (!model) throw new Error(`MODEL_NOT_REGISTERED:${requested}`);
+    return model;
   }
 
   _toolEnvelope(context) {
@@ -135,6 +184,10 @@ export class RuntimeManager {
       runtime_generation: Number(context?.runtime_generation) || 1,
       expected_control_revision: Number(context?.control_revision) || 1,
       expected_scope_revision: Number(context?.scope_revision) || 1,
+      diagnostic_strategy_id: context?.diagnostic_strategy_id || "hybrid",
+      strategy_params: context?.strategy_params || {},
+      runtime_policy: context?.runtime_policy || {},
+      runtime_options: context?.runtime_options || {},
     };
   }
 
@@ -201,6 +254,11 @@ export class RuntimeManager {
       ? `turn-${case_id}-${input.client_command_id}`
       : `turn-${case_id}-${Date.now()}`;
     entry.currentTurnId = turnId;
+    if (input.diagnostic_strategy_id) entry.context.diagnostic_strategy_id = input.diagnostic_strategy_id;
+    if (input.strategy_params) entry.context.strategy_params = input.strategy_params;
+    if (input.runtime_policy) entry.context.runtime_policy = input.runtime_policy;
+    if (input.runtime_options) entry.context.runtime_options = input.runtime_options;
+    entry.toolEnvelope.current = this._toolEnvelope(entry.context);
     const shadow = input.shadow === true;
     if (!shadow) {
       // One Session subscribes exactly once; subsequent turns reuse the same
@@ -229,6 +287,11 @@ export class RuntimeManager {
         skills: (context.skill_context || []).slice(0, 3),
         knowledge: (context.knowledge_context || []).slice(0, 3),
         directive: context.investigation_directive || {},
+        diagnostic_strategy_id: context.diagnostic_strategy_id || "hybrid",
+        strategy_params: context.strategy_params || {},
+        strategy_guidance: context.strategy_guidance || [],
+        runtime_policy: context.runtime_policy || {},
+        runtime_options: context.runtime_options || {},
         previous_answer: String(this.lastAnswers.get(case_id) || "").slice(0, 2000),
       }, null, 2);
       void entry.session.prompt(
@@ -367,6 +430,9 @@ export class RuntimeManager {
     projection.trigger_turn_id = entry.currentTurnId || null;
     projection.side_effect_policy = entry.context?.side_effect_policy || null;
     projection.context_snapshot_id = entry.context?.context_snapshot_id || null;
+    projection.diagnostic_strategy_id = entry.context?.diagnostic_strategy_id || "hybrid";
+    projection.runtime_policy = entry.context?.runtime_policy || {};
+    projection.runtime_options = entry.context?.runtime_options || {};
     const record = {
       case_id,
       runtime_generation: entry.generation,

@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from server.app.agent_runtime.policy import RuntimePolicy, resolve_runtime_policy
+
 TASK_DIR_PATTERN = re.compile(r"^task_[A-Za-z0-9_.-]{6,128}$")
 SWARM_SERVICE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,127}$")
 
@@ -45,6 +47,27 @@ class ActuationError(Exception):
 
 
 # ── 执行状态 ─────────────────────────────────────────────────
+
+
+def enforce_runtime_execution_policy(
+    value: RuntimePolicy | dict[str, Any] | None,
+    *,
+    action_id: str,
+    risk_level: str,
+) -> None:
+    """Apply an optional per-turn policy without changing legacy defaults."""
+    if value is None:
+        return
+    try:
+        policy = resolve_runtime_policy(value)
+    except ValueError as exc:
+        raise ActuationError("INVALID_RUNTIME_POLICY") from exc
+    if policy.execution_mode != "normal":
+        raise ActuationError(f"ACTION_BLOCKED_BY_EXECUTION_MODE:{policy.execution_mode}")
+    if policy.enabled_operations is not None and action_id not in policy.enabled_operations:
+        raise ActuationError("ACTION_NOT_ENABLED_BY_RUNTIME_POLICY")
+    if risk_level not in policy.allowed_risk_levels:
+        raise ActuationError(f"ACTION_RISK_NOT_ALLOWED:{risk_level}")
 
 
 class ActuationStage(str):

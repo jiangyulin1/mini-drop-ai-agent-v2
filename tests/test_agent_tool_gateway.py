@@ -54,6 +54,51 @@ def test_internal_tool_requires_token(client: TestClient):
     assert resp.json()["detail"] == "INTERNAL_TOKEN_REQUIRED"
 
 
+def test_internal_catalog_is_authenticated_and_canonical(client: TestClient):
+    denied = client.get("/internal/agent/tools/catalog")
+    assert denied.status_code == 401
+    response = client.get("/internal/agent/tools/catalog", headers=_headers())
+    assert response.status_code == 200
+    catalog = response.json()["data"]
+    assert catalog["schema_version"] == "tool-catalog.v1"
+    names = {item["name"] for item in catalog["tools"]}
+    assert len(names) == 14
+    assert {"get_case_snapshot", "request_operation", "finish_investigation"} <= names
+
+
+def test_public_runtime_config_exposes_safe_strategy_and_schema_summaries(client: TestClient):
+    response = client.get("/api/v1/agent-runtime/config")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert {item["strategy_id"] for item in data["available_strategies"]} == {
+        "rule_tree", "hypothesis_first", "evidence_first",
+        "causal_graph", "exploratory", "hybrid",
+    }
+    assert len(data["tool_catalog"]["tools"]) == 14
+    assert all("internal_path" not in item for item in data["tool_catalog"]["tools"])
+    assert data["runtime_policy_schema"]["title"] == "RuntimePolicy"
+    assert data["runtime_options_schema"]["title"] == "RuntimeOptions"
+
+
+def test_runtime_policy_can_remove_proposal_tools_at_gateway(client: TestClient):
+    case = _create_case(client)
+    response = client.post(
+        "/internal/agent/tools/plan",
+        json={
+            "case_id": case["case_id"],
+            "goal": "验证 CPU 饱和",
+            "expected_case_row_version": case["row_version"],
+            "expected_scope_revision": case["scope_revision"],
+            "expected_plan_revision": 0,
+            "runtime_policy": {"side_effect_policy": "READ_ONLY"},
+            "steps": [],
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "TURN_READ_ONLY"
+
+
 def test_internal_case_snapshot_returns_projection(client: TestClient):
     case = _create_case(client)
     resp = client.post(

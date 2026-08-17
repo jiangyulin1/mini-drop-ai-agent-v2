@@ -42,10 +42,12 @@ function makeInternalTool(name, label, description, parameters, internalPath, ge
 export function buildToolCatalog({
   internalBase = "http://127.0.0.1:8191",
   sideEffectPolicy = "AUTO_READ_LOW",
+  catalog = null,
+  runtimePolicy = null,
   getEnvelope = () => ({}),
 } = {}) {
   const base = `${internalBase}/internal/agent/tools`;
-  const tools = [
+  const fallbackTools = [
     makeInternalTool(
       "get_case_snapshot",
       "Get Case Snapshot",
@@ -206,10 +208,62 @@ export function buildToolCatalog({
       `${base}/rca-analysis`, getEnvelope,
     ),
   ];
+  const remoteTools = Array.isArray(catalog?.tools)
+    ? catalog.tools
+      .filter((spec) => spec?.enabled_by_default !== false && ALLOWED_TOOL_NAMES.includes(spec?.name))
+      .map((spec) => makeInternalTool(
+        spec.name,
+        spec.name.split("_").map((part) => part[0]?.toUpperCase() + part.slice(1)).join(" "),
+        String(spec.description || spec.name),
+        spec.parameters || { type: "object", additionalProperties: false },
+        `${internalBase}${spec.internal_path}`,
+        getEnvelope,
+      ))
+    : [];
+  const tools = remoteTools.length === ALLOWED_TOOL_NAMES.length ? remoteTools : fallbackTools;
+  const effectiveNames = Array.isArray(runtimePolicy?.effective_tools)
+    ? new Set(runtimePolicy.effective_tools)
+    : null;
+  if (effectiveNames) {
+    return tools.filter((tool) => effectiveNames.has(tool.name));
+  }
   if (sideEffectPolicy === "READ_ONLY") {
     return tools.filter((tool) => READ_ONLY_TOOL_NAMES.has(tool.name));
   }
   return tools;
+}
+
+/** Fetch the canonical catalog. Catalog metadata never grants authority. */
+export async function fetchToolCatalog({
+  internalBase = "http://127.0.0.1:8191",
+  timeoutMs = 3000,
+} = {}) {
+  const token = process.env.MINI_DROP_PI_INTERNAL_TOKEN || "";
+  if (!token) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${internalBase}/internal/agent/tools/catalog`, {
+      headers: { "X-Internal-Token": token },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const catalog = payload?.data || payload;
+    if (catalog?.schema_version !== "tool-catalog.v1" || !Array.isArray(catalog.tools)) return null;
+    const names = new Set(catalog.tools.map((item) => item?.name));
+    if (names.size !== ALLOWED_TOOL_NAMES.length || !ALLOWED_TOOL_NAMES.every((name) => names.has(name))) {
+      return null;
+    }
+    if (catalog.tools.some((item) => typeof item?.internal_path !== "string" || !item.internal_path.startsWith("/internal/agent/tools/"))) {
+      return null;
+    }
+    return catalog;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const READ_ONLY_TOOL_NAMES = new Set([

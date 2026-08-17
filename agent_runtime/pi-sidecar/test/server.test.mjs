@@ -11,7 +11,7 @@ import { EventSpool } from "../src/event-spool.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildToolCatalog, ALLOWED_TOOL_NAMES } from "../src/tools.mjs";
+import { buildToolCatalog, fetchToolCatalog, ALLOWED_TOOL_NAMES } from "../src/tools.mjs";
 
 let server;
 let base;
@@ -142,6 +142,49 @@ test("internal tool calls send X-Internal-Token when configured", async () => {
   } finally {
     delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("canonical catalog metadata builds tools but cannot elevate runtime policy", () => {
+  const catalog = {
+    schema_version: "tool-catalog.v1",
+    tools: ALLOWED_TOOL_NAMES.map((name) => ({
+      name,
+      description: `canonical ${name}`,
+      parameters: { type: "object", additionalProperties: false },
+      internal_path: `/internal/agent/tools/${name}`,
+      enabled_by_default: true,
+    })),
+  };
+  const tools = buildToolCatalog({
+    catalog,
+    runtimePolicy: { effective_tools: ["get_case_snapshot"] },
+  });
+  assert.deepEqual(tools.map((tool) => tool.name), ["get_case_snapshot"]);
+  assert.equal(tools[0].description, "canonical get_case_snapshot");
+});
+
+test("catalog fetch validates the complete compatibility set and auth", async () => {
+  const originalFetch = globalThis.fetch;
+  process.env.MINI_DROP_PI_INTERNAL_TOKEN = "catalog-test";
+  let receivedHeaders;
+  globalThis.fetch = async (_url, options) => {
+    receivedHeaders = options.headers;
+    return new Response(JSON.stringify({ ok: true, data: {
+      schema_version: "tool-catalog.v1",
+      tools: ALLOWED_TOOL_NAMES.map((name) => ({
+        name,
+        internal_path: `/internal/agent/tools/${name}`,
+      })),
+    } }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const catalog = await fetchToolCatalog({ internalBase: "http://control" });
+    assert.equal(catalog.tools.length, ALLOWED_TOOL_NAMES.length);
+    assert.equal(receivedHeaders["X-Internal-Token"], "catalog-test");
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
   }
 });
 

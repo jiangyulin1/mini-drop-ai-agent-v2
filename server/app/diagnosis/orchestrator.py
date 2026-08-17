@@ -37,6 +37,7 @@ from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.probe_registry import choose_probe_ids, get_probe, list_probes
 from server.app.diagnosis.report_verifier import evidence_integrity_hash, verify_report
 from server.app.diagnosis.reasoner import assess_with_reasoner
+from server.app.diagnosis.strategies.registry import get_strategy, normalize_strategy_id
 from server.app.diagnosis.root_entity_resolver import resolve_root_entity
 from server.app.diagnosis.schemas import (
     ApprovalRequest,
@@ -973,7 +974,10 @@ class DiagnosisOrchestrator:
         strategy = session.get("normalized_intent", {}).get(
             "analysis_strategy", "CONSTRAINED_HYBRID",
         )
-        if strategy == "DECISION_TREE":
+        strategy_id = normalize_strategy_id(
+            session.get("normalized_intent", {}).get("diagnostic_strategy_id") or strategy
+        )
+        if strategy_id == "rule_tree":
             return False
         if int(session.get("risk_budget", {}).get("max_medium_risk_probes", 0)) <= 0:
             return False
@@ -1022,39 +1026,40 @@ class DiagnosisOrchestrator:
         strategy = session.get("normalized_intent", {}).get(
             "analysis_strategy", "CONSTRAINED_HYBRID",
         )
-        if strategy == "EXPLORATORY":
-            probe_ids = [item.probe_id for item in list_probes()]
-        elif strategy == "DECISION_TREE":
-            # 决策树路径保持静态映射，便于确定性复现。
-            probe_ids = choose_probe_ids(symptom)
-        else:
-            # 主路径：首轮先做低成本广度扫描（host 指标 + 日志），把定向探针
-            # （runtime_snapshot / memory_map / connection_probe）留给自适应补证轮，
-            # 避免对每个目标都铺昂贵探针。广度探针不可用时退回契约缺失事实选探针。
-            available = self._available_probes_for_scope(instances)
-            breadth = [
-                probe_id for probe_id in ("host_process_metrics", "process_log_scan")
-                if any(item.probe_id == probe_id for item in available)
+        normalized_intent = session.get("normalized_intent", {})
+        strategy_id = normalize_strategy_id(
+            normalized_intent.get("diagnostic_strategy_id") or strategy
+        )
+        diagnostic_strategy = get_strategy(strategy_id)
+        available = self._available_probes_for_scope(
+            instances, allow_r2=strategy_id == "rule_tree",
+        )
+        probe_ids = diagnostic_strategy.plan_initial_probes(
+            symptom=symptom,
+            target_scope=target_scope,
+            hypotheses=(session.get("hypothesis_graph") or {}).get("hypotheses", []),
+            available_probe_ids=[item.probe_id for item in available],
+            strategy_params=normalized_intent.get("strategy_params") or {},
+        )
+        if not probe_ids:
+            # Registry strategies remain bounded by the deterministic adaptive planner.
+            candidates = build_probe_candidates(
+                symptom=symptom,
+                hypotheses=(session.get("hypothesis_graph") or {}).get("hypotheses", []),
+                observations=[],
+                scope=target_scope,
+                available_probes=available,
+                targets=instances,
+                round_number=1,
+                connection_endpoints=self._resolve_endpoint_targets(target_scope),
+            )
+            selected = select_probe_actions(candidates, max_actions=2)
+            probe_ids = [str(item["source_id"]) for item in selected]
+        if not probe_ids:
+            probe_ids = [
+                item for item in choose_probe_ids(symptom)
+                if item in {probe.probe_id for probe in available}
             ]
-            if breadth:
-                probe_ids = breadth
-            else:
-                hypotheses = (session.get("hypothesis_graph") or {}).get("hypotheses", [])
-                candidates = build_probe_candidates(
-                    symptom=symptom,
-                    hypotheses=hypotheses,
-                    observations=[],
-                    scope=target_scope,
-                    available_probes=available,
-                    targets=instances,
-                    round_number=1,
-                    connection_endpoints=self._resolve_endpoint_targets(target_scope),
-                )
-                selected = select_probe_actions(candidates, max_actions=2)
-                probe_ids = [str(item["source_id"]) for item in selected]
-                if not probe_ids:
-                    # 兼容回退：契约没有可用探针时退回静态映射。
-                    probe_ids = choose_probe_ids(symptom)
         planned: list[ProbePlan] = []
         planned_duration = 0
         duration_limit = min(budget.max_duration_minutes * 60, budget.max_total_probe_cpu_seconds)
@@ -1062,7 +1067,7 @@ class DiagnosisOrchestrator:
             for probe_id in probe_ids:
                 definition = get_probe(probe_id)
                 if definition.risk_level == "R2" and (
-                    strategy != "DECISION_TREE" or index > 0
+                    strategy_id != "rule_tree" or index > 0
                 ):
                     # R2 is selected adaptively after the all-target R1 round.
                     continue
@@ -1078,7 +1083,7 @@ class DiagnosisOrchestrator:
                     parameters={"duration_sec": duration, "sample_rate": definition.default_sample_rate},
                     reason=(
                         f"固定决策树路径：用于验证 {', '.join(definition.applicable_hypotheses[:3])}"
-                        if strategy == "DECISION_TREE"
+                        if strategy_id == "rule_tree"
                         else f"用于区分 {', '.join(definition.applicable_hypotheses[:3])} 等候选假设"
                     ),
                     risk_level=definition.risk_level,
@@ -1893,6 +1898,9 @@ class DiagnosisOrchestrator:
                 "planner": str(session.get("planner_version") or PLANNER_VERSION),
                 "feature_builder": "normalized-observation.v1",
             },
+            diagnostic_strategy_id=(session.get("normalized_intent") or {}).get(
+                "diagnostic_strategy_id", "hybrid",
+            ),
         )
         assessment = decision.assessment or assess_cluster(scope, observations)
         assessment["reasoner"] = {

@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Request
 
 from server.app.agent_runtime.config import AgentRuntimeMode, runtime_mode
 from server.app.agent_runtime.dispatcher import get_runtime
+from server.app.agent_runtime.options import resolve_runtime_options
+from server.app.agent_runtime.policy import constrain_side_effect_policy, resolve_runtime_policy
 from server.app.agent_runtime.port import AgentTurnInput
 from server.app.ai_provider import model_audit_scope
 from server.app.case_collaboration import (
@@ -45,6 +47,7 @@ from server.app.diagnosis.proposal_card import build_proposal_cards
 from server.app.diagnosis.reference_resolver import ResourceRef
 from server.app.diagnosis.schemas import CreateDiagnosisRequest, TERMINAL_DIAGNOSIS_STATUSES
 from server.app.diagnosis.v6_policy import route_disposition
+from server.app.diagnosis.strategies.registry import get_strategy, normalize_strategy_id
 from server.app.http.auth import (
     request_principal as _request_principal,
     request_tenant as _request_tenant,
@@ -440,6 +443,9 @@ def start_case_diagnosis(
         "budget": payload.budget.model_dump(mode="json") if payload.budget else None,
         "analysis_strategy": payload.analysis_strategy.value,
         "evidence_time_policy": payload.evidence_time_policy.model_dump(mode="json"),
+        "strategy_id": payload.strategy_id,
+        "runtime_policy": payload.runtime_policy.model_dump(mode="json") if payload.runtime_policy else None,
+        "runtime_options": payload.runtime_options.model_dump(mode="json") if payload.runtime_options else None,
     })
     diagnosis: dict[str, Any] | None = None
     try:
@@ -728,6 +734,35 @@ def run_incident_case_agent_turn(
             "AUTO_READ_LOW" if payload.execute_safe_tools else "PROPOSE_ONLY"
         )
 
+    requested_policy = payload.runtime_policy
+    requested_execution_mode = (
+        requested_policy.execution_mode if requested_policy is not None else "normal"
+    )
+    experiment_mode = requested_execution_mode in {"dry_run", "sandbox"}
+    try:
+        effective_policy = constrain_side_effect_policy(
+            resolve_runtime_policy(requested_policy, experiment_mode=experiment_mode),
+            side_effect_policy,
+        )
+        effective_options = resolve_runtime_options(
+            payload.runtime_options,
+            experiment_mode=experiment_mode,
+        )
+        requested_strategy_id = normalize_strategy_id(
+            payload.strategy_id or effective_options.strategy_id
+        )
+        if (
+            payload.strategy_id
+            and payload.runtime_options
+            and normalize_strategy_id(payload.runtime_options.strategy_id) != requested_strategy_id
+        ):
+            raise ValueError("STRATEGY_ID_CONFLICT")
+        strategy = get_strategy(requested_strategy_id)
+        effective_options = effective_options.model_copy(update={"strategy_id": strategy.strategy_id})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    side_effect_policy = effective_policy.side_effect_policy
+
     terminal = case["state"] in {"STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}
     if terminal and disposition not in {"ANSWER_ONLY", "ATTACH_EVIDENCE"}:
         raise HTTPException(status_code=409, detail="CASE_TERMINAL_NEW_INVESTIGATION_REQUIRES_NEW_RUN")
@@ -771,6 +806,9 @@ def run_incident_case_agent_turn(
             runtime = get_runtime()
             binding = runtime.start_or_resume(_build_runtime_case_context(
                 case, tenant_id, disposition=disposition, side_effect_policy=side_effect_policy,
+                runtime_policy=effective_policy,
+                runtime_options=effective_options,
+                strategy_id=strategy.strategy_id,
             ))
             if hasattr(repo, "upsert_agent_runtime_binding"):
                 repo.upsert_agent_runtime_binding(
@@ -793,6 +831,10 @@ def run_incident_case_agent_turn(
                     references=payload.model_dump(mode="json").get("references", []),
                     requested_mode=payload.intent.value if payload.intent else None,
                     client_command_id=None,
+                    diagnostic_strategy_id=strategy.strategy_id,
+                    strategy_params=effective_options.strategy_params,
+                    runtime_policy=effective_policy.audit_summary(),
+                    runtime_options=effective_options.audit_summary(),
                 ),
             )
             if hasattr(repo, "record_agent_runtime_turn"):
@@ -843,7 +885,15 @@ def run_incident_case_agent_turn(
                 client_command_id=payload.client_command_id,
             )
         else:
-            return _runtime_accepted_response(case_id, tenant_id, accepted, intent)
+            return _runtime_accepted_response(
+                case_id,
+                tenant_id,
+                accepted,
+                intent,
+                strategy_id=strategy.strategy_id,
+                runtime_options=effective_options.audit_summary(),
+                policy_used=effective_policy.audit_summary(),
+            )
 
     case = repo.get_incident_case(case_id, tenant_id) or case
     graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
@@ -971,7 +1021,12 @@ def run_incident_case_agent_turn(
                     try:
                         started = start_case_diagnosis(
                             case_id,
-                            StartCaseDiagnosisRequest(expected_row_version=case.get("row_version")),
+                            StartCaseDiagnosisRequest(
+                                expected_row_version=case.get("row_version"),
+                                strategy_id=strategy.strategy_id,
+                                runtime_policy=effective_policy,
+                                runtime_options=effective_options,
+                            ),
                             request,
                         ).data
                     except HTTPException as exc:
@@ -1009,6 +1064,9 @@ def run_incident_case_agent_turn(
         tool_calls=tool_calls,
         deployment_assessment=deployment_assessment,
         side_effect_delta=side_effect_delta,
+        strategy_id=strategy.strategy_id,
+        runtime_options=effective_options.audit_summary(),
+        policy_used=effective_policy.audit_summary(),
     )
     persisted_message = repo.add_assistant_message(
         case_id=case_id,
@@ -1041,6 +1099,10 @@ def _runtime_accepted_response(
     tenant_id: str,
     accepted,
     intent: AgentTurnIntent,
+    *,
+    strategy_id: str = "hybrid",
+    runtime_options: dict[str, Any] | None = None,
+    policy_used: dict[str, Any] | None = None,
 ) -> APIResponse:
     result = AgentTurnResult(
         turn_id=accepted.turn_id,
@@ -1061,6 +1123,9 @@ def _runtime_accepted_response(
             "turn_id": accepted.turn_id,
             "mode": accepted.mode,
         }],
+        strategy_id=strategy_id,
+        runtime_options=runtime_options or {},
+        policy_used=policy_used or {},
     )
     repo.record_case_event(
         case_id,

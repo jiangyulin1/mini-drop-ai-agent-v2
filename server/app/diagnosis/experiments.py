@@ -33,6 +33,9 @@ class ExperimentSpec(StrictModel):
     feature_version: str = Field(min_length=1, max_length=64)
     planner_version: str = Field(min_length=1, max_length=64)
     toolset_version: str = Field(min_length=1, max_length=64)
+    strategy: dict[str, Any] = Field(default_factory=dict)
+    runtime_policy: dict[str, Any] = Field(default_factory=dict)
+    runtime_options: dict[str, Any] = Field(default_factory=dict)
 
 
 def sha256_file(path: Path) -> str:

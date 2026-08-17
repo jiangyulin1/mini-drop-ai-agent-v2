@@ -40,6 +40,10 @@ jobs:
         run: uv run --locked python scripts/check_migrations.py
       - name: Validate diagnosis testsets
         run: uv run --locked python scripts/validate_testsets.py testsets
+      - name: Check cross-runtime registry consistency
+        run: uv run --locked python scripts/check_registry_consistency.py
+      - name: Validate Agent strategy experiment matrix
+        run: uv run --locked python scripts/run_agent_strategy_matrix.py --matrix benchmarks/agent_strategy_matrix.example.json --validate-only
       - name: Validate Online Boutique compose
         if: runner.os == 'Linux'
         run: docker compose -f testsets/real/online-boutique/deploy/docker-compose.trimmed.yaml config --quiet

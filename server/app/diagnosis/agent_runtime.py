@@ -16,6 +16,8 @@ from uuid import uuid4
 
 from pydantic import Field, model_validator
 
+from server.app.agent_runtime.options import RuntimeOptions
+from server.app.agent_runtime.policy import RuntimePolicy
 from server.app.diagnosis.schemas import StrictModel
 from server.app.diagnosis.source_gateway import SourceGatewayError, SourceQueryRequest
 
@@ -64,6 +66,9 @@ class AgentTurnRequest(StrictModel):
     ] = None
     references: list[dict[str, Any]] = Field(default_factory=list)
     after_attach: Optional[Literal["ANSWER_ONLY", "INVESTIGATE"]] = None
+    strategy_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_]{1,63}$")
+    runtime_policy: Optional[RuntimePolicy] = None
+    runtime_options: Optional[RuntimeOptions] = None
 
 
 class DeploymentAssessmentRequest(StrictModel):
@@ -126,6 +131,9 @@ class AgentTurnResult(StrictModel):
     tool_calls: list[AgentToolCall] = Field(default_factory=list)
     deployment_assessment: Optional[DeploymentAssessment] = None
     side_effect_delta: dict[str, Any] = Field(default_factory=dict)
+    strategy_id: str = "hybrid"
+    runtime_options: dict[str, Any] = Field(default_factory=dict)
+    policy_used: dict[str, Any] = Field(default_factory=dict)
 
 
 _EXPLAIN_MARKERS = ("为什么", "依据", "证据", "怎么判断", "解释", "报告", "结论")

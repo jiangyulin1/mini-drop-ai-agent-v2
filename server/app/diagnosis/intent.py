@@ -10,10 +10,12 @@ from server.app.ai_context import ContextBudget, optimize_evidence_context
 from server.app.ai_provider import chat_completions, get_ai_settings, is_feature_enabled
 from server.app.diagnosis.schemas import (
     CreateDiagnosisRequest,
+    DiagnosticStrategyId,
     DiagnosisMode,
     NormalizedIntent,
     TimeRange,
 )
+from server.app.diagnosis.strategies.registry import normalize_strategy_id
 from server.app.prometheus_metrics import record_context_optimization
 
 
@@ -113,6 +115,10 @@ def parse_diagnosis_intent(
         # 模式和时间策略属于可信请求策略，不能由模型放宽。
         intent.diagnosis_mode = _resolve_mode(request, intent.time_range)
         intent.analysis_strategy = request.analysis_strategy
+        intent.diagnostic_strategy_id = _request_strategy_id(request)
+        intent.strategy_params = dict(
+            request.runtime_options.strategy_params if request.runtime_options else {}
+        )
         intent.evidence_time_policy = request.evidence_time_policy
         if intent.diagnosis_mode == DiagnosisMode.REPRODUCTION:
             intent.evidence_time_policy.allow_reproduction_evidence = True
@@ -197,6 +203,8 @@ def _fallback_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
         time_range=time_range,
         diagnosis_mode=mode,
         analysis_strategy=request.analysis_strategy,
+        diagnostic_strategy_id=_request_strategy_id(request),
+        strategy_params=dict(request.runtime_options.strategy_params if request.runtime_options else {}),
         evidence_time_policy=policy,
         scope={"self": True, "same_host": True, "downstream_hops": 1},
         constraints={
@@ -206,6 +214,14 @@ def _fallback_intent(request: CreateDiagnosisRequest) -> NormalizedIntent:
         },
         ambiguities=ambiguities,
     )
+
+
+def _request_strategy_id(request: CreateDiagnosisRequest) -> DiagnosticStrategyId:
+    if request.strategy_id is not None:
+        return request.strategy_id
+    if request.runtime_options is not None:
+        return DiagnosticStrategyId(normalize_strategy_id(request.runtime_options.strategy_id))
+    return DiagnosticStrategyId(normalize_strategy_id(request.analysis_strategy.value))
 
 
 def _resolve_mode(request: CreateDiagnosisRequest, time_range: TimeRange) -> DiagnosisMode:

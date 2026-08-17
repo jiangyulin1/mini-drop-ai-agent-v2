@@ -91,8 +91,9 @@ def assess_with_reasoner(
     policy: dict[str, Any] | None = None,
     remaining_budget: dict[str, int] | None = None,
     versions: dict[str, str] | None = None,
+    diagnostic_strategy_id: str | None = None,
 ) -> ReasonerDecision:
-    return reasoner.decide(ReasonerInput(
+    decision = reasoner.decide(ReasonerInput(
         intent=intent or {},
         scope=scope,
         hypotheses=hypotheses or [],
@@ -102,3 +103,12 @@ def assess_with_reasoner(
         remaining_budget=remaining_budget or {},
         versions=versions or {},
     ))
+    if diagnostic_strategy_id:
+        from server.app.diagnosis.strategies.registry import get_strategy
+
+        strategy = get_strategy(diagnostic_strategy_id)
+        decision = decision.model_copy(update={
+            "strategy_id": strategy.strategy_id,
+            "strategy_version": strategy.strategy_version,
+        })
+    return decision

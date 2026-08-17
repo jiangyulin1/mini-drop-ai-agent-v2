@@ -14,11 +14,14 @@ from server.app.capability_tokens import canonical_hash
 from server.app.diagnosis.current_understanding import derive_current_understanding
 from server.app.diagnosis.schemas import (
     AnalysisStrategy,
+    DiagnosticStrategyId,
     DiagnosisBudget,
     EvidenceTimePolicy,
     StrictModel,
     TimeRange,
 )
+from server.app.agent_runtime.options import RuntimeOptions
+from server.app.agent_runtime.policy import RuntimePolicy
 
 
 class CaseRunMode(str, Enum):
@@ -141,6 +144,7 @@ class RecoveryPlanDecisionRequest(StrictModel):
 
 class RecoveryPlanExecuteRequest(StrictModel):
     expected_plan_version: int = Field(ge=0)
+    runtime_policy: Optional[RuntimePolicy] = None
 
 
 class CaseMessageRequest(StrictModel):
@@ -250,6 +254,9 @@ class StartCaseDiagnosisRequest(StrictModel):
     budget: Optional[DiagnosisBudget] = None
     analysis_strategy: AnalysisStrategy = AnalysisStrategy.CONSTRAINED_HYBRID
     evidence_time_policy: EvidenceTimePolicy = Field(default_factory=EvidenceTimePolicy)
+    strategy_id: Optional[DiagnosticStrategyId] = None
+    runtime_policy: Optional[RuntimePolicy] = None
+    runtime_options: Optional[RuntimeOptions] = None
     expected_row_version: Optional[int] = Field(default=None, ge=0)
 
 

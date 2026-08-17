@@ -1,0 +1,219 @@
+{
+  "schema_version": "agent-strategy-matrix-report.v1",
+  "matrix_id": "diagnostic-strategy-smoke-v1",
+  "source": "benchmarks\\agent_strategy_matrix.example.json",
+  "created_at": "2026-08-17T17:55:17.209179+00:00",
+  "adapter": "offline_deterministic_evidence_harness",
+  "conditions": [
+    {
+      "condition_id": "rule-tree-low",
+      "strategy_id": "rule_tree",
+      "strategy_version": "rule-tree.v1",
+      "runtime_options": {
+        "strategy_id": "rule_tree",
+        "strategy_params": {},
+        "reasoning_effort": "low",
+        "model": null,
+        "prompt_variant": "concise",
+        "temperature": null,
+        "max_tokens": null,
+        "seed": 7,
+        "capture_reasoning_trace": false,
+        "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+        "runtime_support": {
+          "strategy": "applied",
+          "model": "applied",
+          "reasoning_effort": "applied",
+          "prompt_variant": "applied",
+          "temperature": "experiment_metadata_only",
+          "max_tokens": "experiment_metadata_only",
+          "seed": "experiment_metadata_only"
+        }
+      },
+      "runtime_policy": {
+        "side_effect_policy": "READ_ONLY",
+        "enabled_tools": null,
+        "disabled_tools": [],
+        "enabled_operations": null,
+        "allowed_risk_levels": [
+          "R0",
+          "R1"
+        ],
+        "execution_mode": "deny_write",
+        "auto_approve": false,
+        "require_approval_for": [
+          "R2",
+          "R3"
+        ],
+        "allow_arbitrary_command": false,
+        "effective_tools": [
+          "compare_evidence",
+          "evaluate_hypotheses",
+          "find_reusable_evidence",
+          "get_case_snapshot",
+          "get_causal_graph",
+          "get_evidence_gaps",
+          "get_evidence_projection",
+          "list_case_evidence",
+          "list_operations",
+          "rca_candidate_analysis",
+          "search_knowledge"
+        ],
+        "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+      },
+      "repetitions": 2,
+      "scenario_count": 3,
+      "scenario_pass_rate": 1.0,
+      "root_cause_accuracy": 1.0,
+      "evidence_citation_validity": 1.0,
+      "unsafe_auto_execute_count": 0,
+      "tool_call_count": 5,
+      "side_effect_count": 0,
+      "prohibited_call_count": 0,
+      "repeat_consistency": 1.0,
+      "estimated_cost_units": 7.5
+    },
+    {
+      "condition_id": "evidence-first-medium",
+      "strategy_id": "evidence_first",
+      "strategy_version": "evidence-first.v1",
+      "runtime_options": {
+        "strategy_id": "evidence_first",
+        "strategy_params": {},
+        "reasoning_effort": "medium",
+        "model": null,
+        "prompt_variant": "evidence_strict",
+        "temperature": null,
+        "max_tokens": null,
+        "seed": 7,
+        "capture_reasoning_trace": false,
+        "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+        "runtime_support": {
+          "strategy": "applied",
+          "model": "applied",
+          "reasoning_effort": "applied",
+          "prompt_variant": "applied",
+          "temperature": "experiment_metadata_only",
+          "max_tokens": "experiment_metadata_only",
+          "seed": "experiment_metadata_only"
+        }
+      },
+      "runtime_policy": {
+        "side_effect_policy": "PROPOSE_ONLY",
+        "enabled_tools": null,
+        "disabled_tools": [],
+        "enabled_operations": null,
+        "allowed_risk_levels": [
+          "R0",
+          "R1"
+        ],
+        "execution_mode": "dry_run",
+        "auto_approve": false,
+        "require_approval_for": [
+          "R2",
+          "R3"
+        ],
+        "allow_arbitrary_command": false,
+        "effective_tools": [
+          "compare_evidence",
+          "evaluate_hypotheses",
+          "find_reusable_evidence",
+          "finish_investigation",
+          "get_case_snapshot",
+          "get_causal_graph",
+          "get_evidence_gaps",
+          "get_evidence_projection",
+          "list_case_evidence",
+          "list_operations",
+          "propose_plan_revision",
+          "rca_candidate_analysis",
+          "request_operation",
+          "search_knowledge"
+        ],
+        "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+      },
+      "repetitions": 2,
+      "scenario_count": 3,
+      "scenario_pass_rate": 1.0,
+      "root_cause_accuracy": 1.0,
+      "evidence_citation_validity": 1.0,
+      "unsafe_auto_execute_count": 0,
+      "tool_call_count": 5,
+      "side_effect_count": 0,
+      "prohibited_call_count": 0,
+      "repeat_consistency": 1.0,
+      "estimated_cost_units": 10.0
+    },
+    {
+      "condition_id": "hybrid-high",
+      "strategy_id": "hybrid",
+      "strategy_version": "hybrid.v1",
+      "runtime_options": {
+        "strategy_id": "hybrid",
+        "strategy_params": {},
+        "reasoning_effort": "high",
+        "model": null,
+        "prompt_variant": "default",
+        "temperature": null,
+        "max_tokens": null,
+        "seed": 7,
+        "capture_reasoning_trace": false,
+        "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+        "runtime_support": {
+          "strategy": "applied",
+          "model": "applied",
+          "reasoning_effort": "applied",
+          "prompt_variant": "applied",
+          "temperature": "experiment_metadata_only",
+          "max_tokens": "experiment_metadata_only",
+          "seed": "experiment_metadata_only"
+        }
+      },
+      "runtime_policy": {
+        "side_effect_policy": "AUTO_READ_LOW",
+        "enabled_tools": null,
+        "disabled_tools": [],
+        "enabled_operations": null,
+        "allowed_risk_levels": [
+          "R0",
+          "R1"
+        ],
+        "execution_mode": "normal",
+        "auto_approve": false,
+        "require_approval_for": [
+          "R2",
+          "R3"
+        ],
+        "allow_arbitrary_command": false,
+        "effective_tools": [
+          "compare_evidence",
+          "evaluate_hypotheses",
+          "find_reusable_evidence",
+          "finish_investigation",
+          "get_case_snapshot",
+          "get_causal_graph",
+          "get_evidence_gaps",
+          "get_evidence_projection",
+          "list_case_evidence",
+          "list_operations",
+          "propose_plan_revision",
+          "rca_candidate_analysis",
+          "request_operation",
+          "search_knowledge"
+        ],
+        "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+      },
+      "repetitions": 2,
+      "scenario_count": 3,
+      "scenario_pass_rate": 1.0,
+      "root_cause_accuracy": 1.0,
+      "evidence_citation_validity": 1.0,
+      "unsafe_auto_execute_count": 0,
+      "tool_call_count": 5,
+      "side_effect_count": 0,
+      "prohibited_call_count": 0,
+      "repeat_consistency": 1.0,
+      "estimated_cost_units": 15.0
+    }
+  ]
+}
