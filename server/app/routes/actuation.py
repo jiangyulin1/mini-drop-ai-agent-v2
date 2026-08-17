@@ -58,6 +58,7 @@ from server.app.http.auth import (
 )
 from server.app.logging_utils import log_event
 from server.app.runtime_services import (
+    case_supervision_repository,
     diagnosis_orchestrator,
     fanout_service,
     investigation_plan_service,
@@ -231,7 +232,7 @@ AUTONOMOUS_AGENT = AutonomousIncidentAgent(
     ),
 )
 CASE_SUPERVISOR = CaseSupervisor(
-    repo,
+    case_supervision_repository,
     AUTONOMOUS_AGENT,
     diagnosis_orchestrator,
     lease_ttl_seconds=max(10, min(int(os.getenv("MINI_DROP_CASE_LEASE_TTL_SECONDS", "120")), 600)),

@@ -8,8 +8,9 @@ import pytest
 
 from server.app.database import init_db, reset_engine
 from server.app.diagnosis.case_supervisor import CaseSupervisor
-from server.app.main import app, repo
+from server.app.main import repo
 from server.app.models import Base
+from server.app.runtime_services import current_application_services
 
 
 @pytest.fixture(autouse=True)
@@ -51,8 +52,6 @@ class _FakeAgent:
 
 def test_lease_prevents_concurrent_advance():
     case_id = _create_case()
-    agent = _FakeAgent()
-    supervisor = CaseSupervisor(repo, agent, None, lease_ttl_seconds=60)
     owner = "supervisor-1"
     assert repo.acquire_case_lease(case_id, "tenant-a", owner=owner, ttl_seconds=60)
     # 同一 owner 可续期；不同 owner 被拒绝。
@@ -88,6 +87,24 @@ def test_scan_and_advance_steps_unleased_cases():
     # 推进后释放租约，可再次推进。
     supervisor.scan_and_advance("tenant-a")
     assert agent.steps.count(case_id) == 2
+
+
+def test_application_case_supervision_boundary_supports_background_scan():
+    """Production composition must not route supervisor calls to the frozen facade."""
+    case_id = _create_case()
+    services = current_application_services()
+    agent = _FakeAgent()
+    supervisor = CaseSupervisor(
+        services.case_supervision_repository,
+        agent,
+        None,
+        lease_ttl_seconds=60,
+    )
+
+    outcomes = supervisor.scan_and_advance("tenant-a")
+
+    assert outcomes == [{"case_id": case_id, "outcome": "DIAGNOSING", "loop": {}}]
+    assert agent.steps == [case_id]
 
 
 def test_pause_stops_scan():

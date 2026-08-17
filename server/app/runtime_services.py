@@ -13,6 +13,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from server.app.application.case_supervision_repository import CaseSupervisionRepository
 from server.app.application.repository_facade import RepositoryApplicationFacade
 from server.app.diagnosis import DiagnosisOrchestrator
 from server.app.diagnosis.case_evidence import CaseEvidenceService
@@ -31,6 +32,7 @@ from server.app.sql_repository import SqlRepository
 class ApplicationServices:
     persistence_adapter: Any
     repository: RepositoryApplicationFacade
+    case_supervision_repository: CaseSupervisionRepository
     diagnosis_orchestrator: DiagnosisOrchestrator
     mcp_client_manager: MCPClientManager
     source_gateway: SourceGateway
@@ -48,6 +50,7 @@ def build_application_services(repository: Any | None = None) -> ApplicationServ
 
     concrete_repository = repository or SqlRepository()
     repository_facade = RepositoryApplicationFacade(concrete_repository)
+    case_supervision_repository = CaseSupervisionRepository(concrete_repository)
     diagnosis_orchestrator = DiagnosisOrchestrator(concrete_repository)
     try:
         mcp_client_manager = MCPClientManager()
@@ -83,6 +86,7 @@ def build_application_services(repository: Any | None = None) -> ApplicationServ
     return ApplicationServices(
         persistence_adapter=concrete_repository,
         repository=repository_facade,
+        case_supervision_repository=case_supervision_repository,
         diagnosis_orchestrator=diagnosis_orchestrator,
         mcp_client_manager=mcp_client_manager,
         source_gateway=source_gateway,
@@ -145,6 +149,7 @@ class _ServiceProxy:
 # Frozen compatibility names.  HTTP and background execution bind the correct
 # application graph before these are resolved.
 repo = _ServiceProxy("repository")
+case_supervision_repository = _ServiceProxy("case_supervision_repository")
 diagnosis_orchestrator = _ServiceProxy("diagnosis_orchestrator")
 mcp_client_manager = _ServiceProxy("mcp_client_manager")
 source_gateway = _ServiceProxy("source_gateway")
