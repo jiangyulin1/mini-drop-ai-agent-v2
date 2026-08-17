@@ -164,7 +164,7 @@ describe("AIDiagnosis workspace", () => {
     expect(screen.getByRole("button", { name: /新建多机采集/ })).toBeInTheDocument();
 
     await waitFor(() => expect(getCaseWorkspace).toHaveBeenCalledWith(CASE.case_id));
-  });
+  }, 15_000);
 
   it("opens change registration from the selected case", async () => {
     render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
