@@ -383,7 +383,8 @@ def main() -> int:
     args = parser.parse_args()
     python_path = Path(args.python)
     if python_path.exists():
-        args.python = str(python_path.resolve())
+        # Keep the venv symlink path so subprocesses retain venv site-packages.
+        args.python = str(python_path.absolute())
 
     head = git("rev-parse", "HEAD").strip()
     diff = git("diff", "HEAD").encode("utf-8")
