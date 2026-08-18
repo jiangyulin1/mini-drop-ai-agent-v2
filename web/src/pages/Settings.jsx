@@ -246,8 +246,6 @@ export default function Settings() {
             </Descriptions.Item>
             <Descriptions.Item label="功能开关" span={2}>
               <Space wrap>
-                {featureStatus(aiConfig.features?.nlp)}
-                <Typography.Text style={{ fontSize: FONT_SIZES.sm }}>NLP 自然语言</Typography.Text>
                 {featureStatus(aiConfig.features?.rca)}
                 <Typography.Text style={{ fontSize: FONT_SIZES.sm }}>RCA 智能归因</Typography.Text>
                 {featureStatus(aiConfig.features?.summarize)}

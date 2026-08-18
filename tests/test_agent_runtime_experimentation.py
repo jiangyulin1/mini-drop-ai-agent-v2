@@ -44,6 +44,15 @@ def test_runtime_policy_can_only_shrink_the_code_owned_boundary():
         RuntimePolicy(allowed_risk_levels={"R0", "R3"})
 
 
+def test_runtime_policy_resolution_ignores_audit_derived_fields():
+    base = RuntimePolicy(side_effect_policy="PROPOSE_ONLY")
+    audit = base.audit_summary()
+    assert "effective_tools" in audit and "permission_boundary" in audit
+    resolved = resolve_runtime_policy(audit)
+    assert resolved.side_effect_policy == "PROPOSE_ONLY"
+    assert resolved.audit_summary()["effective_tools"] == sorted(base.effective_tools())
+
+
 def test_experimental_flags_are_rejected_in_production_resolution():
     with pytest.raises(ValueError, match="AUTO_APPROVE_EXPERIMENT_ONLY"):
         resolve_runtime_policy({"auto_approve": True})

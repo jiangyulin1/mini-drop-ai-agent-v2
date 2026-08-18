@@ -1193,8 +1193,15 @@ class DiagnosisOrchestrator:
         instances = target_scope.get("instances", [])
         available = self._available_probes_for_scope(instances)
         present_facts = list(budget_used.get("collected_facts") or [])
+        normalized_intent = session.get("normalized_intent") or {}
+        strategy_id = normalize_strategy_id(
+            normalized_intent.get("diagnostic_strategy_id")
+            or normalized_intent.get("analysis_strategy")
+            or "CONSTRAINED_HYBRID",
+        )
+        diagnostic_strategy = get_strategy(strategy_id)
         candidates = build_probe_candidates(
-            symptom=(session.get("normalized_intent") or {}).get("symptom", ""),
+            symptom=normalized_intent.get("symptom", ""),
             hypotheses=(session.get("hypothesis_graph") or {}).get("hypotheses", []),
             observations=[],
             scope=target_scope,
@@ -1207,6 +1214,35 @@ class DiagnosisOrchestrator:
         if not candidates:
             return False
         collected = {item["probe_id"] for item in probes}
+        candidate_missing: list[str] = []
+        for candidate in candidates:
+            candidate_missing.extend(
+                (candidate.parameters.get("missing_facts") or [])
+                if isinstance(candidate.parameters, dict)
+                else []
+            )
+        stop_decision = diagnostic_strategy.should_stop(
+            symptom=normalized_intent.get("symptom", ""),
+            hypotheses=(session.get("hypothesis_graph") or {}).get("hypotheses", []),
+            missing_facts=list(dict.fromkeys(candidate_missing)),
+            no_progress_cycles=int(budget_used.get("no_progress_cycles") or 0),
+            strategy_params=normalized_intent.get("strategy_params") or {},
+        )
+        if stop_decision.get("stop"):
+            return False
+        selected_ids = diagnostic_strategy.select_next_probes(
+            symptom=normalized_intent.get("symptom", ""),
+            hypotheses=(session.get("hypothesis_graph") or {}).get("hypotheses", []),
+            candidate_probe_ids=[str(item.source_id) for item in candidates],
+            completed_probe_ids=collected,
+            available_probe_ids=[item.probe_id for item in available],
+            strategy_params=normalized_intent.get("strategy_params") or {},
+        )
+        if selected_ids:
+            selected_set = set(selected_ids)
+            candidates = [item for item in candidates if item.source_id in selected_set]
+        if not candidates:
+            return False
         selected = select_probe_actions(candidates, max_actions=1, exclude_probe_ids=collected)
         if not selected:
             return False

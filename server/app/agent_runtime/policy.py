@@ -87,6 +87,9 @@ def resolve_runtime_policy(
     *,
     experiment_mode: bool = False,
 ) -> RuntimePolicy:
+    if isinstance(value, dict):
+        allowed = set(RuntimePolicy.model_fields)
+        value = {key: item for key, item in value.items() if key in allowed}
     policy = value if isinstance(value, RuntimePolicy) else RuntimePolicy.model_validate(value or {})
     if policy.auto_approve and not experiment_mode:
         raise ValueError("AUTO_APPROVE_EXPERIMENT_ONLY")

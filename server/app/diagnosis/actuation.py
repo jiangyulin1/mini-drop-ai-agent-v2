@@ -66,7 +66,10 @@ def enforce_runtime_execution_policy(
         raise ActuationError(f"ACTION_BLOCKED_BY_EXECUTION_MODE:{policy.execution_mode}")
     if policy.enabled_operations is not None and action_id not in policy.enabled_operations:
         raise ActuationError("ACTION_NOT_ENABLED_BY_RUNTIME_POLICY")
-    if risk_level not in policy.allowed_risk_levels:
+    normalized_risk = str(risk_level).upper().replace("READ_LOW", "R1")
+    normalized_risk = normalized_risk.replace("READ_ELEVATED", "R2").replace("READ_HIGH", "R2")
+    normalized_risk = normalized_risk.replace("MUTATE", "R3").replace("WRITE", "R3")
+    if normalized_risk not in policy.allowed_risk_levels:
         raise ActuationError(f"ACTION_RISK_NOT_ALLOWED:{risk_level}")
 
 

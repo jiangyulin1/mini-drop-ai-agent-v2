@@ -20,6 +20,7 @@ from server.app.agent_runtime.policy import (
 )
 from server.app.agent_runtime.port import CaseContextSnapshot
 from server.app.application.task_views import task_view as _task_view
+from server.app.diagnosis.actuation import ActuationError, enforce_runtime_execution_policy
 from server.app.diagnosis.investigation_plan import PlanUpdateInput
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.query_registry import QUERY_REGISTRY
@@ -338,6 +339,8 @@ def _tool_fence(
     policy_error = tool_policy_error(tool_name, policy)
     if policy_error:
         return policy_error
+    if tool_name not in read_only_tools and policy.execution_mode == "deny_write":
+        return "WRITE_DENIED_BY_RUNTIME_POLICY"
     supplied_generation = payload.get("runtime_generation")
     if supplied_generation is not None and binding is not None:
         if int(supplied_generation) != int(binding.get("runtime_generation") or 0):
@@ -651,6 +654,14 @@ def internal_tool_create_query(payload: dict[str, Any], request: Request) -> API
         operation_id, operation_spec.risk,
     ):
         raise HTTPException(status_code=403, detail="OPERATION_DISABLED_BY_RUNTIME_POLICY")
+    try:
+        enforce_runtime_execution_policy(
+            runtime_policy,
+            action_id=operation_id,
+            risk_level=operation_spec.risk,
+        )
+    except ActuationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     try:
         task, operation_id = _create_case_query_task(
             case,
