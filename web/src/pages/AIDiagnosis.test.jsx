@@ -16,6 +16,7 @@ import {
   listCaseProposals,
   listCaseRecoveryPlans,
   listCaseEvidenceReviews,
+  listAcquisitionOperations,
   listRegisteredActions,
   listTargetSessions,
 } from "../api/client";
@@ -55,6 +56,7 @@ vi.mock("../api/client", () => ({
   listCaseProposals: vi.fn(),
   listCaseRecoveryPlans: vi.fn(),
   listCaseEvidenceReviews: vi.fn(),
+  listAcquisitionOperations: vi.fn(),
   listRegisteredActions: vi.fn(),
   listTargetSessions: vi.fn(),
   listTasks: vi.fn(),
@@ -125,6 +127,7 @@ describe("AIDiagnosis workspace", () => {
     getCaseInvestigationPlan.mockResolvedValue({ plan_id: null, steps: [] });
     getCaseHypotheses.mockResolvedValue({ nodes: [], edges: [] });
     listCaseEvidenceReviews.mockResolvedValue({ items: [] });
+    listAcquisitionOperations.mockResolvedValue({ items: [] });
     listCaseProposals.mockResolvedValue({ proposals: [] });
     listCaseRecoveryPlans.mockResolvedValue({ items: [] });
     listRegisteredActions.mockResolvedValue({ items: [] });
@@ -144,8 +147,8 @@ describe("AIDiagnosis workspace", () => {
     expect(await screen.findByText("设置诊断范围")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看 Worker 状态" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /服务检测/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /长期目标/ })).toBeInTheDocument();
+    // Setup actions moved behind the settings menu to keep the toolbar focused.
+    expect(screen.getByRole("button", { name: "设置与检测" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /范围与服务关系/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^诊断数据$/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /能力与准确率/ }));
@@ -176,7 +179,8 @@ describe("AIDiagnosis workspace", () => {
 
   it("opens long-lived target creation", async () => {
     render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
-    fireEvent.click(await screen.findByRole("button", { name: "长期目标" }));
+    fireEvent.mouseEnter(await screen.findByRole("button", { name: "设置与检测" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "长期目标" }));
     expect(await screen.findByText(/长期目标会积累信号/)).toBeInTheDocument();
     expect(screen.getByLabelText("服务标识")).toBeInTheDocument();
   });

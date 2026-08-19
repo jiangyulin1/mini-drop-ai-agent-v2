@@ -6,6 +6,7 @@ import {
   cancelCasePlanStep,
   createCaseFanout,
   getCaseInvestigationPlan,
+  listAcquisitionOperations,
   listCaseEvidenceReviews,
   listCaseFanoutRuns,
   removeCasePlanStep,
@@ -13,6 +14,7 @@ import {
   retargetCasePlanStep,
   reviewCaseEvidence,
 } from "../api/client";
+import { EVIDENCE_TRUST, PLAN_STATUS, RISK_LEVEL } from "../utils/opsMappings";
 
 const RUNNING_STATES = new Set(["RUNNING", "DISPATCHING", "CANCEL_REQUESTED"]);
 const NEXT_STATES = new Set(["QUEUED", "WAITING_APPROVAL", "DRAFT"]);
@@ -20,15 +22,6 @@ const HISTORY_STATES = new Set([
   "COMPLETED", "FAILED", "CANCELLED", "REMOVED_BY_USER", "SUPERSEDED",
   "SKIPPED_REUSED", "BLOCKED",
 ]);
-
-const RISK_LABEL = { READ_LOW: "低风险", READ_ELEVATED: "中风险", WRITE: "高风险" };
-const STATUS_LABEL = {
-  DRAFT: "草稿", QUEUED: "待执行", WAITING_APPROVAL: "待审批",
-  DISPATCHING: "派发中", RUNNING: "进行中", CANCEL_REQUESTED: "取消中",
-  COMPLETED: "已完成", FAILED: "失败", CANCELLED: "已取消",
-  REMOVED_BY_USER: "已移除", SUPERSEDED: "已取代", SKIPPED_REUSED: "复用跳过",
-  BLOCKED: "受阻",
-};
 
 /**
  * E5 调查工作台：用户能看懂、参与和控制低风险调查计划。
@@ -44,7 +37,28 @@ export default function InvestigationWorkbench({ caseId }) {
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [dragIndex, setDragIndex] = useState(null);
+  const [collectors, setCollectors] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => listAcquisitionOperations?.())
+      .then((resp) => {
+        if (cancelled) return;
+        const items = resp?.items || resp?.data?.items || [];
+        const ids = items
+          .map((item) => item.collector_id || item.operation_id || item.id)
+          .filter(Boolean);
+        setCollectors([...new Set(ids)].sort());
+      })
+      .catch(() => {
+        // Retargeting stays unavailable rather than falling back to free text.
+        if (!cancelled) setCollectors([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!caseId) return;
@@ -93,13 +107,15 @@ export default function InvestigationWorkbench({ caseId }) {
   }, [steps]);
 
   const runAction = async (fn, successMessage) => {
+    setNotice("");
+    setError("");
     try {
       await fn();
       await refresh();
+      if (successMessage) setNotice(successMessage);
     } catch (err) {
       setError(String(err?.message || err));
     }
-    if (successMessage) setError(successMessage);
   };
 
   const handleDrop = (targetIndex) => {
@@ -147,9 +163,9 @@ export default function InvestigationWorkbench({ caseId }) {
     >
       <div className="iw-step-head">
         <span className="iw-step-collector">{step.collector_id || step.kind}</span>
-        <span className="iw-tag">{RISK_LABEL[step.risk] || step.risk}</span>
+        <span className="iw-tag">{RISK_LEVEL[step.risk]?.label || step.risk}</span>
         <span className="iw-tag" data-status={step.status}>
-          {STATUS_LABEL[step.status] || step.status}
+          {PLAN_STATUS[step.status]?.label || step.status}
         </span>
         <span className="iw-priority">P{step.priority ?? 0}</span>
       </div>
@@ -178,14 +194,26 @@ export default function InvestigationWorkbench({ caseId }) {
         )}
         {NEXT_STATES.has(step.status) && (
           <>
-            <button onClick={() => {
-              const collector = window.prompt("新的采集器（collector_id）", step.collector_id);
-              if (collector) {
+            {/* Pick from the registered collectors instead of asking the user
+                to recall and type a collector_id. */}
+            <select
+              className="iw-retarget"
+              aria-label="改目标采集器"
+              value=""
+              onChange={(event) => {
+                const collector = event.target.value;
+                event.target.value = "";
+                if (!collector || collector === step.collector_id) return;
                 runAction(() => retargetCasePlanStep(caseId, step.step_id, {
                   collector_id: collector,
                 }), `已改目标：${collector}`);
-              }
-            }}>改目标</button>
+              }}
+            >
+              <option value="">改目标…</option>
+              {collectors
+                .filter((item) => item !== step.collector_id)
+                .map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
             <button onClick={() => fanoutStep(step)}>集群扇出</button>
           </>
         )}
@@ -204,6 +232,7 @@ export default function InvestigationWorkbench({ caseId }) {
         </div>
       )}
       {error && !offline && <div className="iw-error">{error}</div>}
+      {notice && !error && <div className="iw-notice">{notice}</div>}
 
       <div className="iw-plan-header">
         <strong>调查计划</strong>
@@ -242,16 +271,20 @@ export default function InvestigationWorkbench({ caseId }) {
           reviews.map((review) => (
             <div className="iw-review-row" key={review.review_id}>
               <span className="iw-review-id">{review.evidence_id}</span>
-              <span className="iw-tag" data-status={review.decision}>{review.decision}</span>
+              <span className="iw-tag" data-status={review.decision}>
+                {EVIDENCE_TRUST[review.decision]?.label || review.decision}
+              </span>
               <span className="iw-review-reason">{review.reason || review.reason_code || ""}</span>
+              {/* Act on the evidence in front of you -- never ask the user to
+                  retype an opaque evidence id. */}
+              <span className="iw-review-actions">
+                <button onClick={() => reviewEvidence(review.evidence_id, "TRUSTED")}>信任</button>
+                <button onClick={() => reviewEvidence(review.evidence_id, "LOW_TRUST")}>降信任</button>
+                <button onClick={() => reviewEvidence(review.evidence_id, "EXCLUDED")}>排除</button>
+              </span>
             </div>
           ))
         )}
-        <div className="iw-review-actions">
-          <button onClick={() => reviewEvidence(prompt("证据 ID"), "TRUSTED")}>信任证据</button>
-          <button onClick={() => reviewEvidence(prompt("证据 ID"), "LOW_TRUST")}>降信任</button>
-          <button onClick={() => reviewEvidence(prompt("证据 ID"), "EXCLUDED")}>排除证据</button>
-        </div>
       </div>
 
       <div className="iw-fanout" aria-label="集群扇出运行">

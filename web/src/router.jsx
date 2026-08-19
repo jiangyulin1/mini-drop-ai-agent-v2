@@ -37,10 +37,12 @@ export default function Router() {
             path="/cases"
             element={<Lazy><AIDiagnosis /></Lazy>}
           />
-          <Route path="/ai-diagnosis" element={<Lazy><AIDiagnosis /></Lazy>} />
+          {/* Legacy aliases: redirect so layout, sidebar highlighting and
+              browser history all resolve to a single canonical URL. */}
+          <Route path="/ai-diagnosis" element={<Navigate to="/cases" replace />} />
           <Route
             path="/ai-cases"
-            element={<Lazy><AIDiagnosis /></Lazy>}
+            element={<Navigate to="/cases" replace />}
           />
           <Route
             path="/diagnoses"

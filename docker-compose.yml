@@ -63,7 +63,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mini_drop:mini_drop@postgres:5432/mini_drop}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-mini_drop}:${POSTGRES_PASSWORD:-mini_drop}@postgres:5432/${POSTGRES_DB:-mini_drop}}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-mini_drop}
@@ -106,7 +106,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mini_drop:mini_drop@postgres:5432/mini_drop}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-mini_drop}:${POSTGRES_PASSWORD:-mini_drop}@postgres:5432/${POSTGRES_DB:-mini_drop}}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-mini_drop}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-mini_drop_secret}
@@ -140,7 +140,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mini_drop:mini_drop@postgres:5432/mini_drop}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-mini_drop}:${POSTGRES_PASSWORD:-mini_drop}@postgres:5432/${POSTGRES_DB:-mini_drop}}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-mini_drop}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-mini_drop_secret}

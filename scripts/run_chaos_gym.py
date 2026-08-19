@@ -54,6 +54,16 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
     return errors
 
 
+def target_service_id(manifest: dict[str, Any]) -> str:
+    """Scope id the runner registers, and therefore the id attribution returns.
+
+    `root_cause_entity` is the ground-truth *entity*.  The server resolves a
+    self-inflicted fault to the target service id, so ground truth and scope
+    have to live in the same namespace or the comparison can never succeed.
+    """
+    return str(manifest.get("root_cause_entity") or "chaos-gym-target")
+
+
 def evaluate_offline(manifest: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     conclusion = result.get("conclusion") or {}
     actual_root = str(conclusion.get("root_cause_entity") or "")
@@ -69,6 +79,17 @@ def evaluate_offline(manifest: dict[str, Any], result: dict[str, Any]) -> dict[s
     required_probe_recall = (
         len(expected_probes & probes) / len(expected_probes) if expected_probes else 1.0
     )
+
+    # Entity attribution answers "which service"; the code-path signature
+    # answers "which function".  Scoring them separately keeps a correct
+    # service-level hit from being masked by missing symbol-level detail.
+    signature = str(manifest.get("root_cause_signature") or "")
+    report_text = " ".join(str(value) for value in (
+        conclusion.get("report_text"),
+        conclusion.get("summary"),
+        conclusion.get("statement"),
+    ) if value)
+    code_path_hit = bool(signature) and signature.lower() in report_text.lower()
 
     actions = result.get("actions") or []
     forbidden = set(manifest.get("forbidden_actions") or [])
@@ -90,6 +111,7 @@ def evaluate_offline(manifest: dict[str, Any], result: dict[str, Any]) -> dict[s
         "fault_id": manifest.get("fault_id"),
         "fault_type": manifest.get("fault_type"),
         "strict_rca_hit": strict_rca_hit,
+        "code_path_hit": code_path_hit,
         "citation_valid": citation_valid,
         "required_probe_recall": round(required_probe_recall, 4),
         "forbidden_ratio": round(forbidden_ratio, 4),
@@ -105,14 +127,16 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"# Chaos Gym Report: {report.get('run_id', 'unknown')}",
         "",
         f"- Mode: {report.get('mode')}",
+        f"- Started: {report.get('started_at')}",
         f"- Finished: {report.get('finished_at')}",
         "",
-        "| Fault | Strict RCA | Citation | Probe Recall | Forbidden | Pareto |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Fault | Strict RCA | Code path | Citation | Probe Recall | Forbidden | Pareto |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for row in report.get("results", []):
         lines.append(
-            f"| {row['fault_id']} | {row['strict_rca_hit']} | {row['citation_valid']} | "
+            f"| {row['fault_id']} | {row['strict_rca_hit']} | {row.get('code_path_hit', False)} | "
+            f"{row['citation_valid']} | "
             f"{row['required_probe_recall']:.3f} | {row['forbidden_ratio']:.3f} | {row['pareto_score']:.3f} |"
         )
     return "\n".join(lines) + "\n"
@@ -156,12 +180,20 @@ def run_live(
     if errors:
         raise ValueError("; ".join(errors))
 
+    # Stamp the start before injecting.  Taking both timestamps at return time
+    # reported a run duration of microseconds and made the latency columns
+    # meaningless.
+    started_at = datetime.now(timezone.utc).isoformat()
+
     inject_proc = None
     if inject_command:
         print(f"[chaos-gym] injecting: {inject_command}", flush=True)
         inject_proc = subprocess.Popen(inject_command, shell=True, cwd=str(ROOT))
 
-    target_scope: dict[str, Any] = {"service_id": "chaos-gym-target"}
+    # Register the scope under the ground-truth entity id so a correct
+    # attribution is actually comparable to the manifest.
+    service_id = target_service_id(manifest)
+    target_scope: dict[str, Any] = {"service_id": service_id}
     if target_agent and target_pid:
         host_id = target_agent
         try:
@@ -173,7 +205,7 @@ def run_live(
         except Exception:
             pass
         target_scope["instances"] = [{
-            "service_id": "chaos-gym-target",
+            "service_id": service_id,
             "instance_id": f"chaos-{target_agent}",
             "host_id": host_id,
             "agent_id": target_agent,
@@ -297,7 +329,7 @@ def run_live(
             "run_id": f"live-{case_id}",
             "mode": "live",
             "case_id": case_id,
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at,
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "results": [evaluation],
         }

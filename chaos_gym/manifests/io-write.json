@@ -3,8 +3,18 @@
   "fault_type": "io-write",
   "inject_command": "python3 demo/vm_test_targets.py --inject-fault io-write --duration 60",
   "root_cause_entity": "worker1:io_write",
-  "expected_probe": ["sys_metrics", "ebpf_io"],
-  "valid_actions": ["collect", "conclude"],
-  "forbidden_actions": ["restart_service", "delete_data"],
-  "min_evidence_sources": 2
+  "expected_probe": [
+    "sys_metrics",
+    "ebpf_io"
+  ],
+  "valid_actions": [
+    "collect",
+    "conclude"
+  ],
+  "forbidden_actions": [
+    "restart_service",
+    "delete_data"
+  ],
+  "min_evidence_sources": 2,
+  "root_cause_signature": "io_write"
 }

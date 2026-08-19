@@ -1,3 +1,5 @@
+import { EVENT_TYPE } from "../../utils/opsMappings";
+
 export const TERMINAL_DIAGNOSIS = new Set([
   "COMPLETED",
   "INSUFFICIENT_EVIDENCE",
@@ -192,6 +194,9 @@ export function eventText(event) {
   switch (event?.event_type) {
     case "case_corrected": return "范围或目标已更新，旧结论不再使用。";
     case "diagnosis_started": return "已开始一轮诊断。";
+    case "diagnosis_created": return "诊断会话已创建。";
+    case "diagnosis_paused": return "诊断已暂停。";
+    case "diagnosis_resumed": return "诊断已继续。";
     case "case_paused": return "诊断已暂停。";
     case "case_resumed": return "诊断已继续。";
     case "case_stopped": return "会话已停止。";
@@ -213,7 +218,57 @@ export function eventText(event) {
       return `已创建采集 Campaign（Plan revision ${payload.plan_revision || ""}）`;
     case "deployment_assessment_completed":
       return `部署承载评估：${payload.verdict || "unknown"}`;
-    default: return payload.reason || "";
+    case "plan_updated":
+      return `调查计划已更新${payload.plan_revision ? `（第 ${payload.plan_revision} 版）` : ""}`;
+    case "task_created":
+      return `已创建采集任务：${payload.collector_id || payload.operation || payload.task_id || ""}`;
+    case "tool_called":
+      return `调用工具：${payload.tool_name || payload.tool || ""}`;
+    case "evidence_committed":
+      return `新证据到达：${payload.evidence_id || ""}`;
+    case "evidence_reviewed":
+      return `证据审查：${payload.evidence_id || ""} → ${payload.decision || ""}`;
+    case "hypothesis_updated":
+    case "hypothesis_graph_updated":
+      return "假设图已更新。";
+    case "fanout_created":
+      return `已创建集群扇出：${payload.strategy || ""}`;
+    case "fanout_aggregated":
+      return `扇出结果已汇总${payload.coverage ? `（覆盖率 ${Math.round(payload.coverage * 100)}%）` : ""}`;
+    case "step_cancelled":
+      return `已取消调查步骤：${payload.collector_id || payload.step_id || ""}`;
+    case "step_removed":
+      return `已移除调查步骤：${payload.collector_id || payload.step_id || ""}`;
+    case "resource_attached":
+      return `已关联资源：${payload.resource_id || payload.task_id || ""}`;
+    case "recovery_plan_created":
+      return `已生成恢复方案：${payload.action_id || ""}`;
+    case "verification_completed":
+      return `恢复验证完成：${payload.verdict || payload.status || ""}`;
+    case "recovery_verified":
+      return "恢复已通过验证。";
+    case "recovery_failed":
+      return `恢复验证未通过：${payload.reason || ""}`;
+    case "manual_action":
+      return `人工操作已记录：${payload.summary || payload.action || ""}`;
+    case "context_packet_created":
+      return "已构建本轮上下文包。";
+    case "investigation_iteration_completed":
+      return "本轮调查迭代已结束。";
+    case "agent_target_refreshed":
+      return "调查目标已刷新。";
+    case "approval_requested":
+      return `等待审批：${payload.action_id || payload.step_id || ""}`;
+    case "control.applied":
+      return `控制指令已生效：${payload.command || ""}`;
+    default: {
+      if (payload.reason) return payload.reason;
+      // Never swallow an event silently -- an unlabelled step still tells the
+      // user the agent is working.  Fall back to the shared vocabulary.
+      const known = EVENT_TYPE[String(event?.event_type || "").toLowerCase()];
+      if (known) return known.label;
+      return event?.event_type ? `系统事件：${event.event_type}` : "";
+    }
   }
 }
 

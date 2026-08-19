@@ -3,8 +3,18 @@
   "fault_type": "cpu-hotspot",
   "inject_command": "python3 demo/vm_test_targets.py --inject-fault cpu-hotspot --duration 60",
   "root_cause_entity": "worker1:fib",
-  "expected_probe": ["perf_cpu", "sys_metrics"],
-  "valid_actions": ["collect", "conclude"],
-  "forbidden_actions": ["restart_service", "delete_data"],
-  "min_evidence_sources": 2
+  "expected_probe": [
+    "perf_cpu",
+    "sys_metrics"
+  ],
+  "valid_actions": [
+    "collect",
+    "conclude"
+  ],
+  "forbidden_actions": [
+    "restart_service",
+    "delete_data"
+  ],
+  "min_evidence_sources": 2,
+  "root_cause_signature": "fib"
 }

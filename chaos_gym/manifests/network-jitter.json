@@ -3,8 +3,18 @@
   "fault_type": "network-jitter",
   "inject_command": "python3 demo/vm_test_targets.py --inject-fault network-jitter --duration 60",
   "root_cause_entity": "worker1:network_jitter",
-  "expected_probe": ["connection_probe", "sys_metrics"],
-  "valid_actions": ["collect", "conclude"],
-  "forbidden_actions": ["restart_service", "delete_data"],
-  "min_evidence_sources": 2
+  "expected_probe": [
+    "connection_probe",
+    "sys_metrics"
+  ],
+  "valid_actions": [
+    "collect",
+    "conclude"
+  ],
+  "forbidden_actions": [
+    "restart_service",
+    "delete_data"
+  ],
+  "min_evidence_sources": 2,
+  "root_cause_signature": "network_jitter"
 }

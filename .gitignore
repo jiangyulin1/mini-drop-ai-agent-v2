@@ -99,3 +99,6 @@ releases/
 /ssh/
 /external-package/
 /hyperv-linux-access.md
+
+# Lab environment guide contains server credentials; keep it out of the repo.
+docs/cloud-lab-environment-guide*.md

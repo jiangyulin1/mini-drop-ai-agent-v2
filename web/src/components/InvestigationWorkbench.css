@@ -1,98 +1,130 @@
-.workbench {
+/* Scoped with an `iw-` prefix: this stylesheet is imported globally, so bare
+   class names like `.error` / `.tag` / `.empty` would leak into every page.
+   Colors come from the app-level CSS variables so the panel follows the
+   light/dark theme instead of staying permanently light. */
+
+.iw-workbench {
   font-size: 13px;
-  color: var(--text-primary, #1f2937);
+  color: var(--app-text, #1f2937);
 }
 
-.loading, .offline, .error {
+.iw-loading, .iw-offline, .iw-error {
   padding: 12px;
   border-radius: 8px;
 }
-.loading { color: var(--text-secondary, #6b7280); }
-.offline { background: #fef3c7; color: #92400e; margin-bottom: 8px; }
-.error { background: #fee2e2; color: #991b1b; margin-bottom: 8px; }
+.iw-loading { color: var(--app-text-secondary, #6b7280); }
+.iw-offline {
+  background: var(--app-warning-surface, #fef3c7);
+  color: var(--app-warning-text, #92400e);
+  margin-bottom: 8px;
+}
+.iw-error {
+  background: var(--app-danger-surface, #fee2e2);
+  color: var(--app-danger-text, #991b1b);
+  margin-bottom: 8px;
+}
+.iw-notice {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--app-success-surface, #d1fae5);
+  color: var(--app-success-text, #065f46);
+  margin-bottom: 8px;
+}
 
-.planHeader {
+.iw-plan-header {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 8px 4px;
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  border-bottom: 1px solid var(--app-border, #e5e7eb);
 }
-.planHeader strong { font-size: 14px; }
-.planHeader span { color: var(--text-secondary, #6b7280); flex: 1; }
-.planHeader button {
-  border: 1px solid var(--border, #e5e7eb);
-  background: #fff;
+.iw-plan-header strong { font-size: 14px; }
+.iw-plan-header span { color: var(--app-text-secondary, #6b7280); flex: 1; }
+.iw-plan-header button {
+  border: 1px solid var(--app-border, #e5e7eb);
+  background: var(--app-surface, #fff);
+  color: inherit;
   border-radius: 6px;
   padding: 4px 10px;
   cursor: pointer;
 }
 
-.groups { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
-.group h4, .evidence h4, .fanout h4 {
+.iw-groups { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
+.iw-group h4, .iw-evidence h4, .iw-fanout h4 {
   margin: 0 0 6px; font-size: 12px; text-transform: uppercase;
-  color: var(--text-secondary, #6b7280);
+  color: var(--app-text-secondary, #6b7280);
 }
-.empty { color: var(--text-secondary, #9ca3af); font-style: italic; }
+.iw-empty { color: var(--app-text-secondary, #9ca3af); font-style: italic; }
 
-.stepCard {
-  border: 1px solid var(--border, #e5e7eb);
+.iw-step-card {
+  border: 1px solid var(--app-border, #e5e7eb);
   border-left: 3px solid #9ca3af;
   border-radius: 8px;
   padding: 8px 10px;
   margin-bottom: 8px;
-  background: #fff;
+  background: var(--app-surface, #fff);
 }
-.stepCard[data-status="RUNNING"], .stepCard[data-status="DISPATCHING"] {
+.iw-step-card[data-status="RUNNING"], .iw-step-card[data-status="DISPATCHING"] {
   border-left-color: #3b82f6;
 }
-.stepCard[data-status="COMPLETED"] { border-left-color: #10b981; }
-.stepCard[data-status="CANCELLED"] { border-left-color: #ef4444; }
-.stepCard[data-status="SKIPPED_REUSED"] { border-left-color: #f59e0b; }
+.iw-step-card[data-status="COMPLETED"] { border-left-color: #10b981; }
+.iw-step-card[data-status="CANCELLED"] { border-left-color: #ef4444; }
+.iw-step-card[data-status="SKIPPED_REUSED"] { border-left-color: #f59e0b; }
 
-.stepHead { display: flex; align-items: center; gap: 8px; }
-.stepCollector { font-weight: 600; }
-.tag {
+.iw-step-head { display: flex; align-items: center; gap: 8px; }
+.iw-step-collector { font-weight: 600; }
+.iw-tag {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 10px;
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--app-surface-subtle, #f3f4f6);
+  color: var(--app-text-secondary, #374151);
 }
-.tag[data-status="RUNNING"] { background: #dbeafe; color: #1e40af; }
-.tag[data-status="COMPLETED"] { background: #d1fae5; color: #065f46; }
-.tag[data-status="CANCELLED"], .tag[data-status="FAILED"] { background: #fee2e2; color: #991b1b; }
-.tag[data-status="SKIPPED_REUSED"] { background: #fef3c7; color: #92400e; }
-.priority { margin-left: auto; color: var(--text-secondary, #6b7280); }
+.iw-tag[data-status="RUNNING"] { background: #dbeafe; color: #1e40af; }
+.iw-tag[data-status="COMPLETED"] { background: #d1fae5; color: #065f46; }
+.iw-tag[data-status="CANCELLED"], .iw-tag[data-status="FAILED"] { background: #fee2e2; color: #991b1b; }
+.iw-tag[data-status="SKIPPED_REUSED"] { background: #fef3c7; color: #92400e; }
+.iw-priority { margin-left: auto; color: var(--app-text-secondary, #6b7280); }
 
-.stepPurpose { margin-top: 4px; color: #374151; }
-.stepMeta { margin-top: 2px; color: var(--text-secondary, #6b7280); font-size: 12px; }
-.stepActions { margin-top: 6px; display: flex; gap: 8px; align-items: center; }
-.stepActions button {
-  border: 1px solid var(--border, #e5e7eb);
-  background: #f9fafb;
+.iw-step-purpose { margin-top: 4px; color: var(--app-text, #374151); }
+.iw-step-meta { margin-top: 2px; color: var(--app-text-secondary, #6b7280); font-size: 12px; }
+.iw-step-actions { margin-top: 6px; display: flex; gap: 8px; align-items: center; }
+.iw-step-actions button {
+  border: 1px solid var(--app-border, #e5e7eb);
+  background: var(--app-surface-subtle, #f9fafb);
+  color: inherit;
   border-radius: 6px;
   padding: 2px 8px;
   font-size: 12px;
   cursor: pointer;
 }
-.stepActions button:hover { background: #eef2ff; }
-.dragHint { margin-left: auto; color: #9ca3af; font-size: 11px; }
-
-.evidence, .fanout { margin-top: 16px; }
-.reviewRow, .fanoutRow {
-  display: flex; gap: 8px; align-items: center;
-  padding: 4px 0; border-bottom: 1px dashed var(--border, #e5e7eb);
+.iw-step-actions button:hover { background: var(--app-surface-hover, #eef2ff); }
+.iw-retarget {
+  border: 1px solid var(--app-border, #e5e7eb);
+  background: var(--app-surface-subtle, #f9fafb);
+  color: inherit;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
 }
-.reviewId { font-family: monospace; }
-.reviewReason, .fanoutConclusion { color: var(--text-secondary, #6b7280); }
-.reviewActions { margin-top: 8px; display: flex; gap: 8px; }
-.reviewActions button, .fanoutRow {
+.iw-drag-hint { margin-left: auto; color: var(--app-text-secondary, #9ca3af); font-size: 11px; }
+
+.iw-evidence, .iw-fanout { margin-top: 16px; }
+.iw-review-row, .iw-fanout-row {
+  display: flex; gap: 8px; align-items: center;
+  padding: 4px 0; border-bottom: 1px dashed var(--app-border, #e5e7eb);
+}
+.iw-review-id { font-family: monospace; }
+.iw-review-reason, .iw-fanout-conclusion { color: var(--app-text-secondary, #6b7280); }
+.iw-review-actions { margin-top: 8px; display: flex; gap: 8px; }
+.iw-review-actions button, .iw-fanout-row {
   font-size: 12px;
 }
-.reviewActions button {
-  border: 1px solid var(--border, #e5e7eb);
-  background: #f9fafb;
+.iw-review-actions button {
+  border: 1px solid var(--app-border, #e5e7eb);
+  background: var(--app-surface-subtle, #f9fafb);
+  color: inherit;
   border-radius: 6px;
   padding: 3px 10px;
   cursor: pointer;

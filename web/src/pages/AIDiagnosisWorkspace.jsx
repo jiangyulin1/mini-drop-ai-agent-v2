@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
+  Dropdown,
   Form,
   Input,
   Modal,
@@ -17,6 +18,7 @@ import {
   DatabaseOutlined,
   ExperimentOutlined,
   MessageOutlined,
+  MoreOutlined,
   PlusOutlined,
   QuestionCircleOutlined,
   RightOutlined,
@@ -93,7 +95,6 @@ function createCaseTitle(problem, serviceId) {
 }
 
 export default function AIDiagnosisWorkspace() {
-  const [mode, setMode] = useState("ai");
   const [agents, setAgents] = useState([]);
   const [cases, setCases] = useState([]);
   const [legacySessions, setLegacySessions] = useState([]);
@@ -116,6 +117,10 @@ export default function AIDiagnosisWorkspace() {
   const [workerLoading, setWorkerLoading] = useState(false);
   const [validationLoading, setValidationLoading] = useState(false);
   const [messageDrafts, setMessageDrafts] = useState({});
+  // A submitted turn only returns an acknowledgement; the real answer arrives
+  // 60-120s later over the event stream.  Track it so the conversation can show
+  // that the agent is still working instead of looking like nothing happened.
+  const [pendingTurn, setPendingTurn] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [legacyOpen, setLegacyOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
@@ -134,6 +139,17 @@ export default function AIDiagnosisWorkspace() {
   const [targetForm] = Form.useForm();
   const newRunMode = Form.useWatch("run_mode", newForm);
   const [searchParams, setSearchParams] = useSearchParams();
+  // Keep the view in the URL so a refresh, a bookmark, or a shared link all
+  // land back on the same pane instead of silently reverting.
+  const mode = searchParams.get("view") === "data" ? "data" : "ai";
+  const setMode = useCallback((next) => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      if (next === "data") params.set("view", "data");
+      else params.delete("view");
+      return params;
+    }, { replace: true });
+  }, [setSearchParams]);
   const handledFromTask = useRef("");
   const handledCaseLink = useRef("");
   const listRequestSequence = useRef(0);
@@ -145,7 +161,10 @@ export default function AIDiagnosisWorkspace() {
   const chooseSelection = useCallback((key) => {
     selectedKeyRef.current = key;
     setSelectedKey(key);
-  }, []);
+    // Picking another case should land on its conversation; staying on the raw
+    // data console makes the click look like it did nothing.
+    setMode("ai");
+  }, [setMode]);
 
   const updateMessageText = useCallback((value) => {
     const key = selectedKeyRef.current;
@@ -273,6 +292,22 @@ export default function AIDiagnosisWorkspace() {
 
   useEffect(() => { refreshLists(); }, [refreshLists]);
   useEffect(() => { loadSelection(selectedKey); }, [loadSelection, selectedKey]);
+  // Retire the pending marker when the runtime's answer lands, when the case
+  // reaches a terminal state, or when the user navigates away.
+  useEffect(() => {
+    if (!pendingTurn) return;
+    if (!selectedKey.startsWith("case:") || selectedKey.slice(5) !== pendingTurn.caseId) {
+      setPendingTurn(null);
+      return;
+    }
+    const answered = (workspace?.messages || []).some((item) => {
+      const role = item.role || item.message_type || "";
+      const created = Date.parse(item.created_at || item.timestamp || "") || 0;
+      return role.toLowerCase().includes("assistant") && created >= pendingTurn.startedAt - 1000;
+    });
+    const settled = !workspace?.active_turn && answered;
+    if (settled) setPendingTurn(null);
+  }, [pendingTurn, selectedKey, workspace]);
   useEffect(() => {
     const caseId = searchParams.get("caseId") || "";
     if (!caseId || loading || handledCaseLink.current === caseId) return;
@@ -284,53 +319,99 @@ export default function AIDiagnosisWorkspace() {
     if (!selectedKey.startsWith("case:") || workspaceStreamSeed?.caseId !== selectedKey.slice(5)) return undefined;
     let closed = false;
     let source = null;
+    let retryTimer;
+    let retryCount = 0;
+    // Resume from the highest sequence we have rendered so a reconnect does not
+    // replay or skip events.
+    let afterSeq = Number(workspaceStreamSeed.afterSeq || 0);
     const key = selectedKey;
-    void ensureEventSourceAuthCookie().then(() => {
+    const caseId = workspaceStreamSeed.caseId;
+
+    const scheduleReconnect = () => {
       if (closed) return;
-      source = createCaseEventSource(workspaceStreamSeed.caseId, workspaceStreamSeed.afterSeq);
-      source.onopen = () => { if (!closed) setWorkspaceConnected(true); };
-      source.onerror = () => { if (!closed) setWorkspaceConnected(false); };
-      source.addEventListener("case_event", (event) => {
+      // Native EventSource stops retrying once the server closes the stream (or
+      // an idle proxy times it out), so reconnect explicitly with backoff.
+      const delay = Math.min(1000 * (2 ** retryCount), 30000);
+      retryCount += 1;
+      window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(connect, delay);
+    };
+
+    const connect = () => {
+      if (closed) return;
+      void ensureEventSourceAuthCookie().then(() => {
         if (closed) return;
-        try {
-          const item = JSON.parse(event.data);
-          setEvents((current) => {
+        source = createCaseEventSource(caseId, afterSeq);
+        source.onopen = () => {
+          if (closed) return;
+          retryCount = 0;
+          setWorkspaceConnected(true);
+        };
+        source.onerror = () => {
+          if (closed) return;
+          setWorkspaceConnected(false);
+          source?.close();
+          source = null;
+          scheduleReconnect();
+        };
+        source.addEventListener("case_event", (event) => {
+          if (closed) return;
+          try {
+            const item = JSON.parse(event.data);
             const seq = Number(item.case_event_seq || event.lastEventId || 0);
-            if (current.some((entry) => (
-              (item.event_id && entry.event_id === item.event_id)
-              || (seq > 0 && Number(entry.case_event_seq || 0) === seq)
-            ))) return current;
-            return [...current, item].sort((a, b) => Number(a.case_event_seq || 0) - Number(b.case_event_seq || 0));
-          });
-          void loadSelection(key, { quiet: true });
-        } catch {
-          // A malformed frame must not tear down the durable stream.
-        }
+            if (seq > afterSeq) afterSeq = seq;
+            setEvents((current) => {
+              if (current.some((entry) => (
+                (item.event_id && entry.event_id === item.event_id)
+                || (seq > 0 && Number(entry.case_event_seq || 0) === seq)
+              ))) return current;
+              return [...current, item].sort((a, b) => Number(a.case_event_seq || 0) - Number(b.case_event_seq || 0));
+            });
+            void loadSelection(key, { quiet: true });
+          } catch {
+            // A malformed frame must not tear down the durable stream.
+          }
+        });
+      }).catch(() => {
+        if (closed) return;
+        setWorkspaceConnected(false);
+        scheduleReconnect();
       });
-    }).catch(() => setWorkspaceConnected(false));
+    };
+
+    connect();
     return () => {
       closed = true;
+      window.clearTimeout(retryTimer);
       source?.close();
       setWorkspaceConnected(false);
     };
   }, [loadSelection, selectedKey, workspaceStreamSeed]);
   useEffect(() => {
-    if (!selectedKey || actionLoading) return undefined;
+    if (!selectedKey) return undefined;
     let cancelled = false;
     let timer;
+    // Poll as a safety net for the event stream.  It must keep running while an
+    // action is in flight -- that is exactly when the runtime is producing the
+    // answer the user is waiting for.  A live stream only needs a slow heartbeat.
+    const interval = () => (workspaceConnected ? 30000 : 5000);
     const poll = async () => {
+      if (document.visibilityState === "hidden") {
+        if (!cancelled) timer = window.setTimeout(poll, interval());
+        return;
+      }
       await Promise.allSettled([
         refreshLists({ quiet: true }),
         loadSelection(selectedKey, { quiet: true }),
       ]);
-      if (!cancelled) timer = window.setTimeout(poll, 5000);
+      if (!cancelled) timer = window.setTimeout(poll, interval());
     };
-    timer = window.setTimeout(poll, 5000);
+    timer = window.setTimeout(poll, interval());
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [actionLoading, loadSelection, refreshLists, selectedKey]);
+  }, [loadSelection, refreshLists, selectedKey, workspaceConnected]);
 
   const filteredCases = useMemo(() => {
     const query = searchText.trim().toLowerCase();
@@ -650,22 +731,30 @@ export default function AIDiagnosisWorkspace() {
   async function sendAndAnalyze() {
     const content = messageText.trim();
     if (!content || !caseDetail) return;
+    const caseId = caseDetail.case_id;
     setActionLoading(true);
     try {
-      const turn = await runIncidentCaseAgentTurn(caseDetail.case_id, {
+      const turn = await runIncidentCaseAgentTurn(caseId, {
         message: content,
         execute_safe_tools: true,
       });
       updateMessageText("");
-      await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${caseDetail.case_id}`)]);
+      // The runtime answers asynchronously.  Keep a pending marker so the
+      // conversation renders live progress until the turn completes.
+      const turnId = turn?.next_actions?.find((item) => item.turn_id)?.turn_id || turn?.turn_id || "";
+      if (turn?.status !== "needs_user") {
+        setPendingTurn({ caseId, turnId, message: content, startedAt: Date.now() });
+      }
+      await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${caseId}`)]);
       if (turn.status === "needs_user" && !caseHasInstances(caseDetail)) {
-        const current = await getIncidentCase(caseDetail.case_id);
+        const current = await getIncidentCase(caseId);
         setCaseDetail(current);
         openScopeEditor(current, { autoSearch: Boolean(current.target_scope?.service_id) });
       }
     } catch (error) {
+      setPendingTurn(null);
       message.error(`发送失败：${error.message}`);
-      await loadSelection(`case:${caseDetail.case_id}`, { quiet: true });
+      await loadSelection(`case:${caseId}`, { quiet: true });
     } finally {
       setActionLoading(false);
     }
@@ -813,12 +902,26 @@ export default function AIDiagnosisWorkspace() {
         <Tooltip title="查看能力、准确率和适用范围">
           <Button size="small" aria-label="能力与准确率" icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)} />
         </Tooltip>
-        <Button size="small" onClick={() => setTargetOpen(true)}>长期目标</Button>
         {caseDetail && <Button size="small" onClick={openChangeRegistration}>登记变更</Button>}
         {caseDetail && registeredActions.length > 0 && !["RESOLVED", "STOPPED"].includes(caseDetail.state) && (
           <Button size="small" onClick={openRecoveryPlan}>恢复方案</Button>
         )}
-        <Button size="small" icon={<ExperimentOutlined />} loading={validationLoading} onClick={validateAIService}>服务检测</Button>
+        {/* Setup and self-check actions are rare next to the investigation
+            controls, so they live behind one menu instead of the top bar. */}
+        <Dropdown
+          menu={{
+            items: [
+              { key: "targets", label: "长期目标" },
+              { key: "validate", label: validationLoading ? "服务检测中…" : "服务连通性检测", icon: <ExperimentOutlined />, disabled: validationLoading },
+            ],
+            onClick: ({ key }) => {
+              if (key === "targets") setTargetOpen(true);
+              if (key === "validate") void validateAIService();
+            },
+          }}
+        >
+          <Button size="small" icon={<MoreOutlined />} aria-label="设置与检测" />
+        </Dropdown>
         <WorkerStatus agents={agents} loading={workerLoading} onRefresh={refreshWorkers} />
       </header>
 
@@ -878,6 +981,8 @@ export default function AIDiagnosisWorkspace() {
               recoveryPlans={recoveryPlans}
               loading={detailLoading}
               actionLoading={actionLoading}
+              pendingTurn={pendingTurn && pendingTurn.caseId === caseDetail.case_id ? pendingTurn : null}
+              streamConnected={workspaceConnected}
               messageText={messageText}
               onMessageChange={updateMessageText}
               onSend={sendAndAnalyze}

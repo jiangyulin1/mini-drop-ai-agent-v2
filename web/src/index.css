@@ -11,10 +11,20 @@ body,
   --app-background: #f4f6f8;
   --app-surface: #ffffff;
   --app-surface-subtle: #f7f8fa;
+  --app-surface-hover: #eef2ff;
   --app-border: #e6e9ef;
   --app-text: #182230;
   --app-text-secondary: #667085;
   --app-shadow: rgba(16, 24, 40, 0.08);
+  /* Semantic status surfaces, shared by panels that render their own alerts. */
+  --app-danger-surface: #fee2e2;
+  --app-danger-text: #991b1b;
+  --app-warning-surface: #fef3c7;
+  --app-warning-text: #92400e;
+  --app-success-surface: #d1fae5;
+  --app-success-text: #065f46;
+  --app-accent-surface: #eaf1ff;
+  --app-accent-text: #2256a3;
 }
 
 html[data-theme="dark"] {
@@ -22,10 +32,19 @@ html[data-theme="dark"] {
   --app-background: #101319;
   --app-surface: #181c23;
   --app-surface-subtle: #20252e;
+  --app-surface-hover: #262c38;
   --app-border: #303641;
   --app-text: rgba(255, 255, 255, 0.88);
   --app-text-secondary: rgba(255, 255, 255, 0.58);
   --app-shadow: rgba(0, 0, 0, 0.28);
+  --app-danger-surface: #3a1d1d;
+  --app-danger-text: #fca5a5;
+  --app-warning-surface: #3a2f16;
+  --app-warning-text: #fcd34d;
+  --app-success-surface: #14312a;
+  --app-success-text: #6ee7b7;
+  --app-accent-surface: #1e2a3d;
+  --app-accent-text: #93b4f5;
 }
 
 body {

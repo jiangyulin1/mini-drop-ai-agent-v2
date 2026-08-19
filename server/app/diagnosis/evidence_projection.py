@@ -1,9 +1,10 @@
 """Deterministic, versioned EvidenceProjection parsers (v6 5.2).
 
-The parser never invents numbers.  It extracts values present in the Artifact
-metadata and emits a bounded projection that the Pi Runtime can read through
-the read-only Tool Gateway.  Interpretation hints are marked as derived and
-are excluded from claim verification unless a concrete field binding is made.
+The parser never invents numbers.  It extracts values present in the stored
+Artifact body (falling back to Artifact metadata when the object cannot be
+read) and emits a bounded projection that the Pi Runtime can read through the
+read-only Tool Gateway.  Interpretation hints are marked as derived and are
+excluded from claim verification unless a concrete field binding is made.
 """
 
 from __future__ import annotations
@@ -18,6 +19,10 @@ MAX_SAMPLES = 20
 MAX_TOP_ITEMS = 10
 MAX_LOG_EVENTS = 12
 MAX_ERRORS = 10
+# Upper bound for pulling a stored artifact body into memory for projection.
+# Larger objects keep the metadata-only projection and stay reachable through
+# the raw_ref locator.
+MAX_RAW_FETCH_BYTES = 8 * 1024 * 1024
 
 
 def _utc(value: Any) -> str | None:
@@ -224,12 +229,48 @@ def build_evidence_projection(
     }
 
 
+def _load_raw_artifact_body(artifact: dict[str, Any]) -> dict[str, Any] | None:
+    """Read the stored artifact JSON body, or ``None`` when it is unavailable.
+
+    Artifact ``metadata`` only carries scalar counters recorded at upload time
+    (e.g. ``process_count``); the detail arrays that make a projection useful
+    (``processes``, ``connections``, ``samples`` …) only exist in the stored
+    object.  Projecting metadata alone silently produced empty ``top_items``,
+    so the model could never see the offending process.
+
+    Storage is best-effort here: a missing or unreadable object degrades to the
+    metadata-only projection rather than failing evidence materialization.
+    """
+
+    bucket = str(artifact.get("bucket") or "")
+    object_key = str(artifact.get("object_key") or "")
+    if not bucket or not object_key:
+        return None
+    size = int(artifact.get("size_bytes") or artifact.get("size") or 0)
+    if size > MAX_RAW_FETCH_BYTES:
+        return None
+    try:
+        from server.app.storage import read_object_bytes
+
+        payload = json.loads(read_object_bytes(bucket, object_key))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def project_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     metadata = artifact.get("metadata") or {}
     raw_locator = artifact.get("identity_key") or artifact.get("object_key") or str(artifact.get("id") or "")
+    # Prefer the stored body; metadata stays as the fallback and as a source of
+    # fields the collector records outside the artifact payload.
+    raw_body = _load_raw_artifact_body(artifact)
+    if raw_body is not None:
+        source = {**raw_body, **{k: v for k, v in metadata.items() if k not in raw_body}}
+    else:
+        source = metadata
     return build_evidence_projection(
         artifact.get("artifact_type") or "raw",
-        metadata,
+        source,
         source_bytes=int(artifact.get("size_bytes") or artifact.get("size") or 0),
         raw_locator=str(raw_locator),
     )

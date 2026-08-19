@@ -55,6 +55,14 @@ export const RISK_LEVEL = {
   DESTRUCTIVE: entry("危险操作", "red", "不可逆或影响范围较大，禁止弱确认"),
 };
 
+/** Server-side R0-R3 risk codes, rendered for operators rather than raw. */
+export const RISK_CODE = {
+  R0: entry("无风险", "blue", "只读取已有数据，不接触目标进程"),
+  R1: entry("低风险", "blue", "短时只读采集，不修改目标状态"),
+  R2: entry("中风险", "orange", "有可观测开销，仅授权执行一次"),
+  R3: entry("高风险", "red", "会改变运行状态，必须人工审批并可回滚"),
+};
+
 export const EVENT_TYPE = {
   case_created: entry("Case 创建", "blue"),
   user_message: entry("用户消息", "blue"),
@@ -95,6 +103,10 @@ export function evidenceTrust(value) {
 
 export function riskLevel(value) {
   return mappingOf(RISK_LEVEL, value, "风险未声明");
+}
+
+export function riskCode(value) {
+  return mappingOf(RISK_CODE, value, "风险未声明");
 }
 
 export function eventType(value) {

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Dropdown,
@@ -11,6 +11,7 @@ import {
   message,
 } from "antd";
 import { verifyCaseRecovery } from "../../api/client";
+import { riskCode } from "../../utils/opsMappings";
 import {
   CheckOutlined,
   DatabaseOutlined,
@@ -297,7 +298,9 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
             return (
               <div className={styles.recommendationCard} key={plan.recovery_plan_id}>
                 <div className={styles.recommendationHead}>
-                  <span className={styles.recommendationTitle}>{plan.action_id}</span>
+                  <span className={styles.recommendationTitle} title={plan.action_id}>
+                    {plan.title || plan.summary || plan.action_name || plan.action_id}
+                  </span>
                   <Tag color={meta[1]}>{meta[0]}</Tag>
                 </div>
                 <div className={styles.cardDescription}>{plan.value_after_fix}</div>
@@ -346,7 +349,7 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
         setConfirmation(null);
         setConfirmationText("");
       }}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.recommendationList}>
         <div><strong>动作：</strong>{confirmation?.plan.action_id || "-"}</div>
@@ -369,6 +372,43 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
   );
 }
 
+/**
+ * Live placeholder for a submitted turn.
+ *
+ * The turn endpoint only acknowledges receipt; the runtime keeps working for
+ * another 60-120s.  Without this the send button simply stops spinning and the
+ * conversation looks like the message vanished.
+ */
+function PendingTurnMessage({ pendingTurn, streamConnected }) {
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.round((Date.now() - pendingTurn.startedAt) / 1000)));
+
+  useEffect(() => {
+    setElapsed(Math.max(0, Math.round((Date.now() - pendingTurn.startedAt) / 1000)));
+    const timer = window.setInterval(() => {
+      setElapsed(Math.max(0, Math.round((Date.now() - pendingTurn.startedAt) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [pendingTurn.startedAt]);
+
+  const hint = elapsed < 20
+    ? "正在读取案件上下文并选择探针…"
+    : elapsed < 60
+      ? "正在采集证据，通常需要 1-2 分钟。"
+      : "仍在调查中。采集与推理较慢时可继续等待，期间可以随时补充信息。";
+
+  return (
+    <Message ai author="Mini-Drop" time={new Date(pendingTurn.startedAt).toISOString()}>
+      <p className={styles.messageText}>已收到，正在调查。</p>
+      <div className={styles.progressCard}>
+        <Spin size="small" />
+        <span className={styles.progressText}>{hint}</span>
+        <Tag color="processing">已用时 {elapsed} 秒</Tag>
+        {!streamConnected && <Tag color="warning">实时连接中断，正在轮询</Tag>}
+      </div>
+    </Message>
+  );
+}
+
 export default function CaseConversation({
   detail,
   events,
@@ -379,6 +419,8 @@ export default function CaseConversation({
   recoveryPlans,
   loading,
   actionLoading,
+  pendingTurn = null,
+  streamConnected = false,
   messageText,
   onMessageChange,
   onSend,
@@ -647,7 +689,11 @@ export default function CaseConversation({
               </Message>
             )}
 
-            {diagnosisRunning && (
+            {pendingTurn && (
+              <PendingTurnMessage pendingTurn={pendingTurn} streamConnected={streamConnected} />
+            )}
+
+            {diagnosisRunning && !pendingTurn && (
               <Message ai author="Mini-Drop" time={detail.updated_at}>
                 <p className={styles.messageText}>诊断正在进行。</p>
                 <div className={styles.progressCard}><Spin size="small" /><span className={styles.progressText}>{status.label}</span><Tag color={status.color}>{diagnosis.evidence?.length || 0} 条证据</Tag></div>
@@ -661,7 +707,7 @@ export default function CaseConversation({
                   <div className={styles.cardBody}>
                     <div className={styles.cardEyebrow}>等待确认</div>
                     <div className={styles.cardTitle}>{PROBE_LABELS[probe.probe_id] || probe.probe_id}</div>
-                    <div className={styles.cardDescription}>{probe.reason} · 约 {probe.parameters?.duration_sec || 0} 秒 · {probe.risk_level === "R2" ? "中风险，仅执行一次" : probe.risk_level}</div>
+                    <div className={styles.cardDescription}>{probe.reason} · 约 {probe.parameters?.duration_sec || 0} 秒 · {riskCode(probe.risk_level).label}{probe.risk_level === "R2" ? "，仅执行一次" : ""}</div>
                   </div>
                   <div className={styles.cardActions}>
                     {probe.risk_level === "R2" ? (

@@ -54,9 +54,9 @@ describe("InvestigationWorkbench", () => {
     expect(screen.getByText("log_scan")).toBeInTheDocument();
     expect(screen.getByText("perf_cpu")).toBeInTheDocument();
     // 状态标签
-    expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getByText("执行中")).toBeInTheDocument();
     expect(screen.getByText("待执行")).toBeInTheDocument();
-    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.getByText("证据已提交")).toBeInTheDocument();
     // 集群策略可见
     expect(screen.getByText("集群策略：REPRESENTATIVE")).toBeInTheDocument();
   });
@@ -86,7 +86,8 @@ describe("InvestigationWorkbench", () => {
     render(<InvestigationWorkbench caseId="case-1" />);
     await waitFor(() => expect(screen.getByText("证据审查（1）")).toBeInTheDocument());
     expect(screen.getByText("ev-1")).toBeInTheDocument();
-    expect(screen.getByText("TRUSTED")).toBeInTheDocument();
+    // Trust decisions render through the shared opsMappings vocabulary.
+    expect(screen.getByText("可信")).toBeInTheDocument();
     expect(screen.getByText("ALL_IN_SCOPE")).toBeInTheDocument();
     expect(screen.getByText("覆盖率 67%")).toBeInTheDocument();
     expect(screen.getByText("fault-domain")).toBeInTheDocument();
