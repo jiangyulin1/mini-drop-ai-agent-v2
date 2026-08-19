@@ -765,8 +765,7 @@ def internal_tool_rca_analysis(payload: dict[str, Any], request: Request) -> API
     })
 
 
-@router.post("/internal/agent/tools/finish")
-def internal_tool_finish(payload: dict[str, Any], request: Request) -> APIResponse:
+def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> APIResponse:
     """结构化结论提交；必须引用真实存在的 Evidence ID，并落审计事件。"""
     _require_internal_token(request)
     case_id = str(payload.get("case_id") or "")
@@ -932,6 +931,28 @@ def internal_tool_finish(payload: dict[str, Any], request: Request) -> APIRespon
         "conclusion_id": conclusion.get("conclusion_id") if conclusion else None,
         "event_type": "agent_finish_investigation",
     })
+
+
+@router.post("/internal/agent/tools/finish")
+def internal_tool_finish(payload: dict[str, Any], request: Request) -> APIResponse:
+    """Route wrapper that records structured diagnostics for finish failures."""
+    try:
+        return _internal_tool_finish_impl(payload, request)
+    except HTTPException as exc:
+        if exc.status_code == 400:
+            log_event(
+                "error",
+                "finish_investigation_rejected",
+                detail=str(exc.detail)[:500],
+                case_id=str(payload.get("case_id") or ""),
+                evidence_ids=[str(item) for item in (payload.get("evidence_ids") or [])][:10],
+                claims_keys=[
+                    sorted(str(key) for key in (claim or {}).keys())
+                    for claim in (payload.get("claims") or [])[:10]
+                ],
+                state=str(payload.get("state") or ""),
+            )
+        raise
 
 
 @router.get("/internal/agent/tools/health")
