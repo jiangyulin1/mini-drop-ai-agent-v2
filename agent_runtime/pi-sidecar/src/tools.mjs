@@ -28,7 +28,20 @@ function makeInternalTool(name, label, description, parameters, internalPath, ge
         body: JSON.stringify({ ...params, tool: name, ...(getEnvelope?.() || {}) }),
       });
       if (!resp.ok) {
-        return { content: [{ type: "text", text: `tool ${name} failed: ${resp.status}` }], details: {} };
+        let bodyText = "";
+        try {
+          bodyText = await resp.text();
+        } catch {
+          bodyText = "";
+        }
+        const detail = bodyText.slice(0, 1000);
+        return {
+          content: [{
+            type: "text",
+            text: `tool ${name} failed: HTTP ${resp.status}${detail ? `: ${detail}` : ""}`,
+          }],
+          details: { http_status: resp.status, error_body: detail },
+        };
       }
       const payload = await resp.json();
       return {

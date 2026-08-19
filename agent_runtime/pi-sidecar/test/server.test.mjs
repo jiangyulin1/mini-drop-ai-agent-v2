@@ -439,3 +439,31 @@ test("message_end event carries per-call model usage and cost delta", async () =
     globalThis.fetch = originalFetch;
   }
 });
+
+test("internal tool error includes server response detail", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody = null;
+  globalThis.fetch = async (_url, options) => {
+    capturedBody = options.body;
+    return new Response(JSON.stringify({ detail: "OPERATION_DISABLED_BY_RUNTIME_POLICY" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    process.env.MINI_DROP_PI_INTERNAL_TOKEN = "test-token";
+    const tools = buildToolCatalog({
+      internalBase: "http://127.0.0.1:1",
+      getEnvelope: () => ({ side_effect_policy: "PROPOSE_ONLY" }),
+    });
+    const tool = tools.find((t) => t.name === "request_operation");
+    const result = await tool.execute("call-1", { case_id: "case-a", operation: "system.metrics" });
+    const text = result.content[0].text;
+    assert.match(text, /HTTP 403/);
+    assert.match(text, /OPERATION_DISABLED_BY_RUNTIME_POLICY/);
+    assert.equal(result.details.http_status, 403);
+  } finally {
+    delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
+    globalThis.fetch = originalFetch;
+  }
+});

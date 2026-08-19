@@ -1,0 +1,30 @@
+{
+  "schema_version": "agent-strategy-matrix.v1",
+  "matrix_id": "live-pi-multi-v1",
+  "scenario_root": "golden_scenarios",
+  "scenario_ids": ["self_code_hotspot"],
+  "repetitions": 1,
+  "conditions": [
+    {
+      "condition_id": "rule-tree-cpu-hotspot",
+      "strategy_id": "rule_tree",
+      "strategy_params": {},
+      "runtime_options": {"reasoning_effort": "low", "prompt_variant": "concise", "seed": 7},
+      "runtime_policy": {"side_effect_policy": "PROPOSE_ONLY", "execution_mode": "normal"}
+    },
+    {
+      "condition_id": "hypothesis-first-cpu-hotspot",
+      "strategy_id": "hypothesis_first",
+      "strategy_params": {"max_hypotheses": 3},
+      "runtime_options": {"reasoning_effort": "medium", "prompt_variant": "default", "seed": 7},
+      "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW", "execution_mode": "normal"}
+    },
+    {
+      "condition_id": "hybrid-high-cpu-hotspot",
+      "strategy_id": "hybrid",
+      "strategy_params": {},
+      "runtime_options": {"reasoning_effort": "high", "prompt_variant": "default", "seed": 7},
+      "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW", "execution_mode": "normal"}
+    }
+  ]
+}

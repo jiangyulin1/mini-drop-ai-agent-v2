@@ -241,3 +241,41 @@ def test_operation_risk_in_require_approval_for_is_rejected_at_gateway(client: T
     )
     assert resp.status_code == 403
     assert resp.json()["detail"] == "OPERATION_REQUIRES_APPROVAL"
+
+
+def test_finish_autofills_single_projection_hash_when_claim_omits_it(client: TestClient):
+    case = _create_case(client)
+    repo.upsert_case_evidence(
+        case_id=case["case_id"],
+        tenant_id="tenant-a",
+        evidence_id="ev-auto-proj",
+        attachment_id=None,
+        task_id=None,
+        artifact_id=None,
+        artifact_type="sys_metrics",
+        collector_id="sys_metrics",
+        source_type="task_artifact",
+        target_ref="task:auto",
+        content_hash="content-hash",
+        projection_hash="will-be-replaced",
+        time_window={},
+    )
+    repo.upsert_evidence_projection(
+        evidence_id="ev-auto-proj",
+        case_id=case["case_id"],
+        tenant_id="tenant-a",
+        projection_kind="TOP_ITEMS",
+        content={"summary": "cpu 100%"},
+    )
+    resp = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"],
+            "summary": "结论：CPU 热点",
+            "evidence_ids": ["ev-auto-proj"],
+            "claims": [{"evidence_id": "ev-auto-proj"}],
+        },
+        headers=_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["accepted"] is True

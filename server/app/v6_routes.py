@@ -849,6 +849,20 @@ def internal_tool_finish(payload: dict[str, Any], request: Request) -> APIRespon
         if evidence is None:
             claim_errors.append(f"INVALID_EVIDENCE:{claim.get('evidence_id')}")
             continue
+        # If the model omits projection_hash but the Evidence has exactly one
+        # canonical projection, fill it server-side.  This removes a common
+        # first-attempt failure without weakening verification: ambiguous
+        # multi-projection cases still require an explicit hash.
+        if not claim.get("projection_hash"):
+            candidate_projections = [
+                item for item in projections
+                if item.get("evidence_id") == claim.get("evidence_id")
+            ]
+            if len(candidate_projections) == 1:
+                claim["projection_hash"] = candidate_projections[0].get("projection_hash")
+            else:
+                claim_errors.append(f"PROJECTION_HASH_REQUIRED:{claim.get('evidence_id')}:{len(candidate_projections)}")
+                continue
         ok, code = verify_claim_binding(evidence, projections, claim)
         if not ok:
             claim_errors.append(f"{code}:{claim.get('evidence_id')}:{claim.get('field_path') or 'id'}")
