@@ -1,0 +1,44 @@
+{
+  "started_at": "2026-08-19T05:36:22.236901+00:00",
+  "finished_at": "2026-08-19T05:36:22.237034+00:00",
+  "case_id": "case_20260819_053054_6420bfb790",
+  "fault": "cpu-hotspot",
+  "injector_pid": 0,
+  "settled": true,
+  "tools": [
+    "compare_evidence",
+    "connection_probe",
+    "evaluate_hypotheses",
+    "find_reusable_evidence",
+    "get_case_snapshot",
+    "get_evidence_gaps",
+    "get_evidence_projection",
+    "list_case_evidence",
+    "list_operations",
+    "log_scan",
+    "process_scan",
+    "request_operation",
+    "search_knowledge",
+    "sys_metrics"
+  ],
+  "operations": [
+    "process.list",
+    "service.connection",
+    "service.logs",
+    "system.metrics"
+  ],
+  "final_answer": "## Projection 已读取，内容无变化\n\n`ev-e0f9ecb75d4ed7dbd96ca997`（process_scan #2，`task_20260819_053325_9450aa`，窗口 05:33:32）：\n- process_count=115\n- **top_items 为空**（无 CPU Top 进程）\n- projection_hash `7261c988...` 未变化\n\n### 结论（维持不变，abstain）\n全部 5 项证据已逐一复读、无变化：目标进程 1 线程/3 FD/20.8MB RSS、宿主 2 核负载 0.62→0.92 未饱和、两次进程扫描均无 CPU Top 项、无日志文件。**现有证据不支持\"目标进程当前存在 cpu-hotspot\"的根因断言，不指向任何具体代码路径。**\n\n### 证据依据（引用相同 Evidence ID）\n`ev-0441e1f1`、`ev-4ce1fae7`（sys_metrics）、`ev-9a78f56b`、`ev-e0f9ecb7`（process_scan）、`ev-8d05aca4`（log_scan）\n\n### 仍缺失的事实\n- 目标进程 CPU% 时间序列与 user/sys 拆分\n- perf/火焰图 Profile（`perf_cpu` 未注册，无法采样）\n- 故障窗口变更/部署记录\n- `service.connection` 探测结果（未返回）\n\n### 下一步\n1. 热点复发窗口内抓取 CPU Profile（perf/flamegraph）证明热点归属；\n2. 拉取故障时间窗变更记录判断是否新出现；\n3. 持续无法采样则维持 Gap 输出，需更高权限探针或人工介入。\n\n无新事实，结论与措辞保持不变。",
+  "scores": {
+    "fault": "cpu-hotspot",
+    "tool_recall": 0.667,
+    "used_relevant_tools": [
+      "process_scan",
+      "sys_metrics"
+    ],
+    "missing_relevant_tools": [
+      "perf_cpu"
+    ],
+    "final_answer_mentions_fault": true,
+    "forbidden_tool_used": false
+  }
+}
