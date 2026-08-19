@@ -279,3 +279,45 @@ def test_finish_autofills_single_projection_hash_when_claim_omits_it(client: Tes
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["data"]["accepted"] is True
+
+
+def test_finish_accepts_model_friendly_claim_shapes(client: TestClient):
+    case = _create_case(client)
+    repo.upsert_case_evidence(
+        case_id=case["case_id"],
+        tenant_id="tenant-a",
+        evidence_id="ev-friendly",
+        attachment_id=None,
+        task_id=None,
+        artifact_id=None,
+        artifact_type="sys_metrics",
+        collector_id="sys_metrics",
+        source_type="task_artifact",
+        target_ref="task:friendly",
+        content_hash="content-hash",
+        projection_hash="will-be-replaced",
+        time_window={},
+    )
+    repo.upsert_evidence_projection(
+        evidence_id="ev-friendly",
+        case_id=case["case_id"],
+        tenant_id="tenant-a",
+        projection_kind="TOP_ITEMS",
+        content={"summary": "cpu 100%"},
+    )
+    resp = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"],
+            "summary": "结论：CPU 热点",
+            "evidence_ids": ["ev-friendly"],
+            "claims": [
+                {"claim": "CPU hotspot", "confidence": 0.9, "supporting_evidence": ["ev-friendly"]},
+                {"evidence_ids": ["ev-friendly"], "text": "user-mode spin"},
+                {"evidence": "ev-friendly"},
+            ],
+        },
+        headers=_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["accepted"] is True

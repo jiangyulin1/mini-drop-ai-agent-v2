@@ -842,6 +842,42 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
                 "support_kind": "SUPPORTS",
                 "event_window": evidence.get("time_window") or {},
             })
+    # Normalize model-friendly claim shapes into the canonical verifier schema.
+    # DeepSeek/Pi often emits `supporting_evidence`, `evidence_ids` or `evidence`
+    # instead of the server's `evidence_id` field.  Normalizing here keeps the
+    # verifier strict about projection binding while forgiving the transport shape.
+    normalized_claims: list[dict[str, Any]] = []
+    for claim in claims:
+        raw_ids: list[str] = []
+        direct = claim.get("evidence_id")
+        if direct:
+            raw_ids.append(str(direct))
+        for key in ("evidence_ids", "supporting_evidence", "evidence"):
+            value = claim.get(key)
+            if isinstance(value, str) and str(value).strip():
+                raw_ids.append(str(value).strip())
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and str(item).strip():
+                        raw_ids.append(str(item).strip())
+                    elif isinstance(item, dict):
+                        nested = item.get("evidence_id") or item.get("id")
+                        if nested:
+                            raw_ids.append(str(nested))
+        seen: set[str] = set()
+        raw_ids = [item for item in raw_ids if not (item in seen or seen.add(item))]
+        if not raw_ids:
+            normalized_claims.append(claim)
+            continue
+        for evidence_id in raw_ids:
+            canonical = {
+                key: value for key, value in claim.items()
+                if key not in {"evidence_ids", "supporting_evidence", "evidence"}
+            }
+            canonical["evidence_id"] = evidence_id
+            normalized_claims.append(canonical)
+    claims = normalized_claims
+
     claim_errors: list[str] = []
     for claim in claims:
         evidence = repo.get_case_evidence(case_id, tenant_id, str(claim.get("evidence_id") or ""))
