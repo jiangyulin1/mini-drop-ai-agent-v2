@@ -198,3 +198,46 @@ def test_internal_finish_accepts_known_evidence_refs(client: TestClient):
     updated = client.get(f"/api/v1/cases/{case['case_id']}").json()["data"]
     assert updated["summary"]["current_finding"]["status"] == "concluded"
     assert updated["summary"]["current_finding"]["evidence_refs"] == ["ev-valid"]
+
+
+def test_tool_policy_error_enforces_needs_approval(monkeypatch):
+    from server.app.agent_runtime.catalog import ToolSpec
+    from server.app.agent_runtime.policy import RuntimePolicy
+    from server.app.diagnosis import v6_policy
+
+    fake_spec = ToolSpec(
+        name="request_operation",
+        description="sensitive operation request",
+        parameters={"type": "object"},
+        internal_path="/internal/agent/tools/query",
+        policy="PROPOSE_ONLY",
+        needs_approval=True,
+    )
+    monkeypatch.setattr(v6_policy, "get_tool_spec", lambda name: fake_spec if name == "request_operation" else None)
+
+    policy = RuntimePolicy(side_effect_policy="PROPOSE_ONLY")
+    assert v6_policy.tool_policy_error("request_operation", policy) == "TOOL_REQUIRES_APPROVAL"
+
+    auto = RuntimePolicy(side_effect_policy="PROPOSE_ONLY", auto_approve=True)
+    assert v6_policy.tool_policy_error("request_operation", auto) is None
+
+
+def test_operation_risk_in_require_approval_for_is_rejected_at_gateway(client: TestClient):
+    case = _create_case(client)
+    resp = client.post(
+        "/internal/agent/tools/query",
+        json={
+            "case_id": case["case_id"],
+            "operation": "system.metrics",
+            "parameters": {},
+            "runtime_policy": {
+                "side_effect_policy": "AUTO_READ_LOW",
+                "allowed_risk_levels": ["R1"],
+                "require_approval_for": ["R1"],
+                "auto_approve": False,
+            },
+        },
+        headers=_headers(),
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "OPERATION_REQUIRES_APPROVAL"

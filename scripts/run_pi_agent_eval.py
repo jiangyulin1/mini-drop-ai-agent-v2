@@ -53,7 +53,16 @@ def start_fault(host: str, user: str, password: str, fault: str, duration: int) 
     return int(pid_line.strip())
 
 
-def create_case_and_turn(control_url: str, agent_id: str, pid: int, fault: str) -> tuple[str, str]:
+def create_case_and_turn(
+    control_url: str,
+    agent_id: str,
+    pid: int,
+    fault: str,
+    *,
+    strategy_id: str | None = None,
+    runtime_options: dict[str, Any] | None = None,
+    runtime_policy: dict[str, Any] | None = None,
+) -> tuple[str, str]:
     with urllib.request.urlopen(f"{control_url.rstrip('/')}/api/agents", timeout=10) as resp:
         agents = json.load(resp)["data"]["items"]
     host_id = next((a["hostname"] for a in agents if a["id"] == agent_id), agent_id)
@@ -80,11 +89,17 @@ def create_case_and_turn(control_url: str, agent_id: str, pid: int, fault: str) 
     case = http_json(f"{control_url.rstrip('/')}/api/v1/cases", "POST", payload)["data"]
     case_id = case["case_id"]
 
-    turn = {
+    turn: dict[str, Any] = {
         "message": f"目标进程出现 {fault} 故障，请开始调查并定位根因",
         "intent": "investigate",
         "execute_safe_tools": True,
     }
+    if strategy_id:
+        turn["strategy_id"] = strategy_id
+    if runtime_options:
+        turn["runtime_options"] = runtime_options
+    if runtime_policy:
+        turn["runtime_policy"] = runtime_policy
     http_json(f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/agent/turn", "POST", turn)
     return case_id, turn["message"]
 

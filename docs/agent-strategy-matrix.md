@@ -70,10 +70,27 @@ python scripts/run_agent_strategy_matrix.py \
   --output-dir reports/strategy-matrix
 ```
 
+跑 live Pi 矩阵（读取 `model-attempts` 的真实 token/cost）：
+
+```bash
+python scripts/run_agent_strategy_matrix.py \
+  --matrix benchmarks/agent_experiments/matrix.json \
+  --live \
+  --control-url http://47.112.10.137 \
+  --worker-host <worker-ip> \
+  --worker-user root \
+  --worker-password <password> \
+  --agent-id linux-worker-1 \
+  --fault cpu-hotspot \
+  --duration 360 \
+  --output-dir reports/strategy-matrix-live
+```
+
 输出：
 
 - `reports/strategy-matrix/strategy_matrix.json`
 - `reports/strategy-matrix/strategy_matrix.md`
+- live 模式额外在报告里写入 `model_attempt_count` / `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` / `cost` / `latency_ms`
 
 ## 3. 报告指标
 
@@ -86,14 +103,19 @@ python scripts/run_agent_strategy_matrix.py \
 | `side_effect_count` | 副作用/写入类动作次数 |
 | `prohibited_call_count` | 被策略禁止的调用次数 |
 | `repeat_consistency` | 重复实验间结果一致性 |
-| `estimated_cost_units` | 按工具调用数和 reasoning effort 估算的成本单位 |
+| `estimated_cost_units` | 离线模式：按工具调用数和 reasoning effort 估算的成本单位 |
+| `model_attempt_count` | live 模式：`model-attempts` 审计条数 |
+| `input_tokens` / `output_tokens` | live 模式：实际 token 用量 |
+| `cache_read_tokens` / `cache_write_tokens` | live 模式：缓存 token 用量 |
+| `cost` | live 模式：模型调用实际成本 |
+| `latency_ms` | live 模式：模型调用累计耗时 |
 
 ## 4. 约束
 
 - `strategy_id` 必须来自注册表，不能由模型自由声明。
 - `RuntimePolicy` 只能缩小权限，不能扩大权限。
 - `capture_reasoning_trace` 不允许写入矩阵报告；实验报告只保存决策摘要、工具调用序列和最终答案。
-- 当前 `run_agent_strategy_matrix.py` 默认使用离线确定性 Evidence harness。要测量真实 Pi 的延迟、token 和 provider 成本，需要单独在隔离 VM profile 中跑 live Pi 矩阵。
+- 默认使用离线确定性 Evidence harness；加 `--live` 可连接真实 Pi 环境并读取 `model-attempts` 的 token/cost。live 模式需要 `--worker-host` / `--worker-password` 和可达的 control plane。
 
 ## 5. CI
 

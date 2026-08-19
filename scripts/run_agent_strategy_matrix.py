@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
 
 from server.app.agent_runtime.options import resolve_runtime_options
 from server.app.agent_runtime.policy import resolve_runtime_policy
@@ -124,20 +127,130 @@ def run_matrix(matrix: dict[str, Any], source: Path) -> dict[str, Any]:
     }
 
 
+def _sum_model_attempts(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "attempt_count": len(attempts),
+        "input_tokens": sum(int(item.get("input_tokens") or 0) for item in attempts),
+        "output_tokens": sum(int(item.get("output_tokens") or 0) for item in attempts),
+        "cache_read_tokens": sum(int(item.get("cache_read_tokens") or 0) for item in attempts),
+        "cache_write_tokens": sum(int(item.get("cache_write_tokens") or 0) for item in attempts),
+        "cost": round(sum(float(item.get("cost") or 0.0) for item in attempts), 6),
+        "latency_ms": sum(int(item.get("latency_ms") or 0) for item in attempts),
+    }
+
+
+def run_live_matrix(
+    matrix: dict[str, Any],
+    source: Path,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    """Run one Pi live evaluation per matrix condition on a single injected fault.
+
+    Requires a reachable Mini-Drop control plane and a worker that can run the
+    fault injector.  Token/cost are read from the persisted model-attempts audit.
+    """
+    import run_pi_agent_eval as live
+
+    rows: list[dict[str, Any]] = []
+    repetitions = int(matrix.get("repetitions", 1))
+    for condition in matrix["conditions"]:
+        strategy = get_strategy(condition.get("strategy_id"))
+        options = resolve_runtime_options({
+            **(condition.get("runtime_options") or {}),
+            "strategy_id": strategy.strategy_id,
+            "strategy_params": condition.get("strategy_params") or {},
+        }, experiment_mode=True)
+        policy = resolve_runtime_policy(condition.get("runtime_policy"), experiment_mode=True)
+        runs: list[dict[str, Any]] = []
+        for rep in range(repetitions):
+            pid = live.start_fault(
+                args.worker_host, args.worker_user, args.worker_password,
+                args.fault, args.duration,
+            )
+            case_id, _ = live.create_case_and_turn(
+                args.control_url,
+                args.agent_id,
+                pid,
+                args.fault,
+                strategy_id=strategy.strategy_id,
+                runtime_options=options.model_dump(mode="json"),
+                runtime_policy=policy.model_dump(mode="json"),
+            )
+            result = live.wait_for_settle(args.control_url, case_id, args.timeout)
+            scores = live.score(result["tools"], result["final_answer"], args.fault)
+            try:
+                attempts = live.http_json(
+                    f"{args.control_url.rstrip('/')}/api/v1/cases/{case_id}/model-attempts",
+                )["data"]["items"]
+            except Exception:
+                attempts = []
+            usage = _sum_model_attempts(attempts)
+            runs.append({
+                "case_id": case_id,
+                "settled": result["settled"],
+                "tool_call_count": len(result["tools"]),
+                "root_cause_accuracy": 1.0 if scores["final_answer_mentions_fault"] else 0.0,
+                "tool_recall": scores["tool_recall"],
+                "prohibited_call_count": 1 if scores["forbidden_tool_used"] else 0,
+                "final_answer": result["final_answer"],
+                "usage": usage,
+            })
+        row = {
+            "condition_id": condition["condition_id"],
+            "strategy_id": strategy.strategy_id,
+            "strategy_version": strategy.strategy_version,
+            "runtime_options": options.audit_summary(),
+            "runtime_policy": policy.audit_summary(),
+            "repetitions": repetitions,
+            "fault": args.fault,
+            "scenario_count": 1,
+            "scenario_pass_rate": round(sum(item["root_cause_accuracy"] for item in runs) / len(runs), 3),
+            "root_cause_accuracy": round(sum(item["root_cause_accuracy"] for item in runs) / len(runs), 3),
+            "evidence_citation_validity": 0.0,
+            "tool_call_count": sum(item["tool_call_count"] for item in runs),
+            "side_effect_count": 0,
+            "prohibited_call_count": sum(item["prohibited_call_count"] for item in runs),
+            "settled": all(item["settled"] for item in runs),
+            "repeat_consistency": 1.0,
+            "model_attempt_count": sum(item["usage"]["attempt_count"] for item in runs),
+            "input_tokens": sum(item["usage"]["input_tokens"] for item in runs),
+            "output_tokens": sum(item["usage"]["output_tokens"] for item in runs),
+            "cache_read_tokens": sum(item["usage"]["cache_read_tokens"] for item in runs),
+            "cache_write_tokens": sum(item["usage"]["cache_write_tokens"] for item in runs),
+            "cost": round(sum(item["usage"]["cost"] for item in runs), 6),
+            "latency_ms": sum(item["usage"]["latency_ms"] for item in runs),
+            "runs": runs,
+        }
+        if repetitions > 1:
+            outputs = [json.dumps(item["final_answer"], sort_keys=True, ensure_ascii=False) for item in runs]
+            row["repeat_consistency"] = round(sum(value == outputs[0] for value in outputs) / len(outputs), 3)
+        rows.append(row)
+    return {
+        "schema_version": "agent-strategy-matrix-report.v1",
+        "matrix_id": matrix.get("matrix_id"),
+        "source": str(source.relative_to(ROOT)),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "adapter": "live_pi_evidence_harness",
+        "conditions": rows,
+    }
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     lines = [
         f"# Agent strategy matrix: {report['matrix_id']}", "",
-        "| Condition | Strategy | Pass rate | Root accuracy | Evidence validity | Tools | Side effects | Consistency | Cost units |",
+        "| Condition | Strategy | Pass rate | Root accuracy | Evidence validity | Tools | Side effects | Consistency | Cost |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in report["conditions"]:
+        cost = row.get("cost", row.get("estimated_cost_units", 0.0))
         lines.append(
             f"| {row['condition_id']} | {row['strategy_id']} | {row['scenario_pass_rate']:.3f} | "
             f"{row['root_cause_accuracy']:.3f} | {row['evidence_citation_validity']:.3f} | "
             f"{row['tool_call_count']} | {row['side_effect_count']} | {row['repeat_consistency']:.3f} | "
-            f"{row['estimated_cost_units']:.3f} |"
+            f"{float(cost):.6f} |"
         )
-    lines.extend(["", "> Offline harness measures deterministic projection quality; live Pi latency/token cost requires a VM profile.", ""])
+    adapter = report.get("adapter", "offline")
+    lines.extend(["", f"> Harness: {adapter}. Live Pi token/cost is read from model-attempts audit.", ""])
     return "\n".join(lines)
 
 
@@ -146,6 +259,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--matrix", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "reports" / "strategy-matrix")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--live", action="store_true", help="run live Pi evaluations against a worker fault")
+    parser.add_argument("--control-url", default=os.getenv("MINI_DROP_CONTROL_URL", "http://47.112.10.137"))
+    parser.add_argument("--worker-host", default=os.getenv("PI_EVAL_WORKER_HOST", ""))
+    parser.add_argument("--worker-user", default=os.getenv("PI_EVAL_WORKER_USER", "root"))
+    parser.add_argument("--worker-password", default=os.getenv("PI_EVAL_WORKER_PASSWORD", ""))
+    parser.add_argument("--agent-id", default=os.getenv("PI_EVAL_AGENT_ID", "linux-worker-1"))
+    parser.add_argument("--fault", default=os.getenv("PI_EVAL_FAULT", "cpu-hotspot"))
+    parser.add_argument("--duration", type=int, default=int(os.getenv("PI_EVAL_DURATION", "360")))
+    parser.add_argument("--timeout", type=float, default=float(os.getenv("PI_EVAL_TIMEOUT", "600")))
     args = parser.parse_args(argv)
     matrix_path = args.matrix.resolve()
     matrix, errors = load_and_validate(matrix_path)
@@ -156,7 +278,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.validate_only:
         print(f"OK: {matrix.get('matrix_id')} ({len(matrix['conditions'])} conditions)")
         return 0
-    report = run_matrix(matrix, matrix_path)
+    if args.live:
+        if not args.worker_host or not args.worker_password:
+            print("ERROR: --worker-host and --worker-password are required in --live mode", file=sys.stderr)
+            return 2
+        report = run_live_matrix(matrix, matrix_path, args)
+    else:
+        report = run_matrix(matrix, matrix_path)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "strategy_matrix.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (args.output_dir / "strategy_matrix.md").write_text(render_markdown(report), encoding="utf-8")

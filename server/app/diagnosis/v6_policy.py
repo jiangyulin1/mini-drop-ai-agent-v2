@@ -14,6 +14,7 @@ from typing import Any
 from server.app.agent_runtime.catalog import (
     PROPOSE_ONLY_TOOL_NAMES,
     READ_ONLY_TOOL_NAMES,
+    get_tool_spec,
 )
 from server.app.agent_runtime.policy import RuntimePolicy, resolve_runtime_policy
 
@@ -88,6 +89,9 @@ def tool_policy_error(tool_name: str, policy: str | RuntimePolicy | dict[str, An
         if resolved.side_effect_policy == "PROPOSE_ONLY":
             return "TURN_PROPOSE_ONLY"
         return "TOOL_DISABLED_BY_RUNTIME_POLICY"
+    spec = get_tool_spec(tool_name)
+    if spec is not None and spec.needs_approval and not resolved.auto_approve:
+        return "TOOL_REQUIRES_APPROVAL"
     return None
 
 

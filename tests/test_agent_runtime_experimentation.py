@@ -105,3 +105,10 @@ def test_native_actuation_honors_optional_execution_policy():
         )
     with pytest.raises(ActuationError, match="ACTION_RISK_NOT_ALLOWED"):
         enforce_runtime_execution_policy({}, action_id="elevated.action", risk_level="R2")
+
+
+def test_runtime_options_temperature_max_tokens_seed_are_explicit_metadata_only():
+    audit = RuntimeOptions(temperature=0.2, max_tokens=2048, seed=7).audit_summary()
+    assert audit["runtime_support"]["temperature"] == "experiment_metadata_only"
+    assert audit["runtime_support"]["max_tokens"] == "experiment_metadata_only"
+    assert audit["runtime_support"]["seed"] == "experiment_metadata_only"

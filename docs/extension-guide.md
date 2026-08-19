@@ -36,6 +36,8 @@
 
 工具元数据只是发现契约，不能用来提升权限。服务端必须再次根据本地注册表和 `RuntimePolicy` 做最终判定。
 
+敏感工具可设置 `needs_approval=True`；Tool Gateway 会在 `RuntimePolicy.auto_approve=False` 时返回 `TOOL_REQUIRES_APPROVAL`。`auto_approve` 仅实验模式可用，且不能移除 R3 审批。
+
 ## 3. 新增 DiagnosticStrategy
 
 1. 在 `server/app/diagnosis/strategies/` 下新建策略文件，继承或实现 `BaseDiagnosticStrategy` / `DiagnosticStrategy` Protocol。
@@ -55,7 +57,7 @@
 4. 补充测试：默认值兼容旧行为、非法值被拒绝、权限只能缩小。
 5. 更新 `docs/runtime-policy.md` / `docs/agent-runtime-experiments.md`。
 
-注意：`RuntimePolicy` 中 `allow_arbitrary_command` 永远不允许；`auto_approve` 只允许实验模式，且不能移除 R3 审批。
+注意：`RuntimePolicy` 中 `allow_arbitrary_command` 永远不允许；`auto_approve` 只允许实验模式，且不能移除 R3 审批。Query 操作若落在 `require_approval_for` 且未开启 `auto_approve`，Gateway 返回 `OPERATION_REQUIRES_APPROVAL`。
 
 ## 5. 新增 Probe / Collector / TaskKind / QueryOperation
 

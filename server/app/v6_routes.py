@@ -655,6 +655,12 @@ def internal_tool_create_query(payload: dict[str, Any], request: Request) -> API
         operation_id, operation_spec.risk,
     ):
         raise HTTPException(status_code=403, detail="OPERATION_DISABLED_BY_RUNTIME_POLICY")
+    normalized_risk = str(operation_spec.risk).upper()
+    normalized_risk = normalized_risk.replace("READ_LOW", "R1")
+    normalized_risk = normalized_risk.replace("READ_ELEVATED", "R2").replace("READ_HIGH", "R2")
+    normalized_risk = normalized_risk.replace("MUTATE", "R3").replace("WRITE", "R3")
+    if normalized_risk in runtime_policy.require_approval_for and not runtime_policy.auto_approve:
+        raise HTTPException(status_code=403, detail="OPERATION_REQUIRES_APPROVAL")
     try:
         enforce_runtime_execution_policy(
             runtime_policy,
