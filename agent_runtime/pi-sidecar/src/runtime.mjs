@@ -12,6 +12,7 @@ import {
   SessionManager,
   defineTool,
 } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,8 @@ export class RuntimeManager {
     this.lastSeq = new Map(); // case_id -> event seq
     this.forwardedKeys = new Set(); // idempotency keys already POSTed
     this.lastAnswers = new Map(); // case_id -> last auditable final answer
+    this.lastUsage = new Map(); // case_id -> cumulative SessionStats token/cost snapshot
+    this.messageStarts = new Map(); // case_id -> message_start wall-clock ms
     this.noSkills = noSkills;
     this.toolCatalog = null;
     this.eventSpool = eventSpool || new EventSpool(
@@ -76,6 +79,8 @@ export class RuntimeManager {
         this.sessions.delete(caseId);
         this.lastSeq.delete(caseId);
         this.lastAnswers.delete(caseId);
+        this.lastUsage.delete(caseId);
+        this.messageStarts.delete(caseId);
       } else {
         existing.context = caseContext;
         existing.optionSignature = this._optionSignature(caseContext);
@@ -355,6 +360,9 @@ export class RuntimeManager {
     if (event.type.startsWith("thinking")) return; // never keep private reasoning
     const seq = (this.lastSeq.get(case_id) || 0) + 1;
     this.lastSeq.set(case_id, seq);
+    if (event.type === "message_start") {
+      this.messageStarts.set(case_id, Date.now());
+    }
   }
 
   _auditProjection(event) {
@@ -393,6 +401,78 @@ export class RuntimeManager {
     return payload;
   }
 
+  /**
+   * Capture auditable token/cost usage for a completed model response.
+   *
+   * The Pi SDK exposes cumulative session stats; per-call usage is derived as
+   * the delta between the previous snapshot and the snapshot after message_end.
+   * No private reasoning or raw credentials are included.
+   */
+  _modelAttemptForEvent(case_id, entry, event) {
+    if (event.type !== "message_end") return null;
+    if (typeof entry.session?.getSessionStats !== "function") return null;
+    let stats;
+    try {
+      stats = entry.session.getSessionStats();
+    } catch {
+      return null;
+    }
+    const previous = this.lastUsage.get(case_id);
+    const tokens = stats.tokens || {};
+    const input = Math.max(0, (tokens.input || 0) - (previous?.tokens?.input || 0));
+    const output = Math.max(0, (tokens.output || 0) - (previous?.tokens?.output || 0));
+    const cacheRead = Math.max(0, (tokens.cacheRead || 0) - (previous?.tokens?.cacheRead || 0));
+    const cacheWrite = Math.max(0, (tokens.cacheWrite || 0) - (previous?.tokens?.cacheWrite || 0));
+    const cost = Math.max(0, (stats.cost || 0) - (previous?.cost || 0));
+    this.lastUsage.set(case_id, { tokens: { ...tokens }, cost: stats.cost || 0 });
+
+    const startedMs = this.messageStarts.get(case_id);
+    const finishedAt = new Date().toISOString();
+    const startedAt = startedMs ? new Date(startedMs).toISOString() : finishedAt;
+    const latencyMs = startedMs ? Math.max(0, Date.now() - startedMs) : 0;
+    this.messageStarts.delete(case_id);
+
+    const model = entry.session.model;
+    const provider = model?.provider || process.env.MINI_DROP_PI_MODEL_PROVIDER || "deepseek";
+    const modelId = model?.id || process.env.MINI_DROP_PI_MODEL || "deepseek-v4-flash";
+    const modelName = model?.name || modelId;
+    const configFingerprint = createHash("sha256")
+      .update(JSON.stringify({
+        provider,
+        model: modelId,
+        thinkingLevel: entry.context?.runtime_options?.reasoning_effort
+          || process.env.MINI_DROP_PI_THINKING_LEVEL || "high",
+        strategy: entry.context?.diagnostic_strategy_id || "hybrid",
+        options: entry.context?.runtime_options || {},
+      }))
+      .digest("hex");
+
+    return {
+      provider,
+      model: modelId,
+      model_snapshot: modelName,
+      prompt_version: "pi-runtime.v1",
+      output_schema: "runtime-event.v1",
+      status: "SUCCEEDED",
+      latency_ms: latencyMs,
+      input_tokens: input || null,
+      output_tokens: output || null,
+      cache_read_tokens: cacheRead || null,
+      cache_write_tokens: cacheWrite || null,
+      cost: cost || null,
+      retry_count: 0,
+      turn_id: entry.currentTurnId || null,
+      context_packet_id: entry.context?.context_packet_id || null,
+      context_snapshot_id: entry.context?.context_snapshot_id || null,
+      config_fingerprint: configFingerprint,
+      tool_catalog_version: this.toolCatalog?.schema_version || "tool-catalog.v1",
+      started_at: startedAt,
+      finished_at: finishedAt,
+      response_hash: null,
+      error_code: null,
+    };
+  }
+
   async _forwardEvent(case_id, entry, event) {
     if (!event || typeof event.type !== "string") return;
     if (event.type.startsWith("thinking")) return;
@@ -415,6 +495,8 @@ export class RuntimeManager {
       return;
     }
     const projection = this._auditProjection(event);
+    const modelAttempt = this._modelAttemptForEvent(case_id, entry, event);
+    if (modelAttempt) projection.model_attempt = modelAttempt;
     if (event.type === "turn_end") {
       try {
         const message = JSON.parse(projection.message || "{}");

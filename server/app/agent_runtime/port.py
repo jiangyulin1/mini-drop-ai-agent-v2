@@ -40,6 +40,7 @@ class CaseContextSnapshot(StrictModel):
     strategy_guidance: str = ""
     runtime_policy: dict[str, Any] = Field(default_factory=dict)
     runtime_options: dict[str, Any] = Field(default_factory=dict)
+    context_packet_id: Optional[str] = None
     context_snapshot_id: Optional[str] = None
     runtime_generation: int = 0
     runtime_session_id: str = ""

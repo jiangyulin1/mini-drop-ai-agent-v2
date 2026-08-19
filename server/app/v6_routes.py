@@ -36,6 +36,7 @@ from server.app.http.auth import (
     request_tenant as _request_tenant,
     require_role as _require_role,
 )
+from server.app.logging_utils import log_event
 from server.app.runtime_services import (
     case_evidence_service,
     diagnosis_orchestrator,
@@ -980,6 +981,32 @@ def internal_runtime_events(
         stored.append(persisted_event)
         if persisted_event.get("duplicate"):
             continue
+        model_attempt_payload = payload_json.get("model_attempt")
+        if (
+            isinstance(model_attempt_payload, dict)
+            and hasattr(repo, "record_model_attempt")
+        ):
+            try:
+                repo.record_model_attempt({
+                    **model_attempt_payload,
+                    "case_id": case_id,
+                    "tenant_id": tenant_id,
+                    "context_packet_id": (
+                        model_attempt_payload.get("context_packet_id")
+                        or payload_json.get("context_packet_id")
+                    ),
+                    "idempotency_key": str(raw.get("idempotency_key") or "")
+                        or f"runtime-event:{case_id}:{generation}:{event_seq}:{event_type}",
+                })
+            except Exception as exc:
+                # Audit persistence must never break event ingestion/replay.
+                log_event(
+                    "error",
+                    "model_attempt_record_failed",
+                    error_type=type(exc).__name__,
+                    error=str(exc)[:500],
+                    case_id=case_id,
+                )
         max_seq = max(max_seq, event_seq)
         if event_type in {"turn_end", "assistant.completed", "final"}:
             text = _runtime_visible_content(payload_json)

@@ -13,6 +13,7 @@ from server.app.agent_runtime.options import resolve_runtime_options
 from server.app.agent_runtime.policy import constrain_side_effect_policy, resolve_runtime_policy
 from server.app.agent_runtime.port import AgentTurnInput
 from server.app.ai_provider import model_audit_scope
+from server.app.capability_tokens import canonical_hash
 from server.app.case_collaboration import (
     CaseMessageRequest,
     EvidenceReviewRequest,
@@ -804,12 +805,32 @@ def run_incident_case_agent_turn(
     if runtime_mode() in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
         try:
             runtime = get_runtime()
-            binding = runtime.start_or_resume(_build_runtime_case_context(
+            runtime_context = _build_runtime_case_context(
                 case, tenant_id, disposition=disposition, side_effect_policy=side_effect_policy,
                 runtime_policy=effective_policy,
                 runtime_options=effective_options,
                 strategy_id=strategy.strategy_id,
-            ))
+            )
+            packet_payload = runtime_context.model_dump(mode="json")
+            packet = repo.create_context_packet({
+                "case_id": case_id,
+                "tenant_id": tenant_id,
+                "schema_version": "case-context.v1",
+                "purpose": "runtime_turn",
+                "iteration_no": 0,
+                "payload": packet_payload,
+                "projection_stats": {},
+                "source_versions": {
+                    "context_builder": "runtime-turn.v1",
+                    "source_registry": "source-registry.v1",
+                },
+                "content_hash": canonical_hash(packet_payload),
+                "created_by": principal_id,
+            })
+            runtime_context = runtime_context.model_copy(update={
+                "context_packet_id": packet["context_packet_id"],
+            })
+            binding = runtime.start_or_resume(runtime_context)
             if hasattr(repo, "upsert_agent_runtime_binding"):
                 repo.upsert_agent_runtime_binding(
                     case_id,

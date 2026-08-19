@@ -804,8 +804,16 @@ class ModelAttemptModel(Base):
     latency_ms = Column(Integer, nullable=False, default=0)
     input_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
+    cost = Column(Float, nullable=True)
+    retry_count = Column(Integer, nullable=True, default=0)
     response_hash = Column(String(64), nullable=True)
     error_code = Column(String(128), nullable=True)
+    turn_id = Column(String(128), nullable=True)
+    context_snapshot_id = Column(String(128), nullable=True)
+    config_fingerprint = Column(String(128), nullable=True)
+    tool_catalog_version = Column(String(128), nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -824,8 +832,16 @@ class ModelAttemptModel(Base):
             "latency_ms": self.latency_ms,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+            "cost": self.cost,
+            "retry_count": self.retry_count,
             "response_hash": self.response_hash,
             "error_code": self.error_code,
+            "turn_id": self.turn_id,
+            "context_snapshot_id": self.context_snapshot_id,
+            "config_fingerprint": self.config_fingerprint,
+            "tool_catalog_version": self.tool_catalog_version,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }

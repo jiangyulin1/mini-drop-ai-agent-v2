@@ -127,7 +127,7 @@ def _create_case(client: TestClient) -> dict:
 
 @pytest.mark.parametrize("mode", ["pi", "pi_shadow"])
 def test_agent_turn_routes_through_agent_runtime_port(client, monkeypatch, mode):
-    with _start_sidecar(monkeypatch, mode) as sidecar_url:
+    with _start_sidecar(monkeypatch, mode) as _sidecar_url:
         case = _create_case(client)
         resp = client.post(
             f"/api/v1/cases/{case['case_id']}/agent/turn",
@@ -158,6 +158,28 @@ def test_agent_turn_routes_through_agent_runtime_port(client, monkeypatch, mode)
         ]
         # Cycle refreshes keep the same live Sidecar session/generation.
         assert resume_requests[-1][2]["context"]["runtime_generation"] == 1
+
+
+def test_agent_turn_creates_runtime_context_packet_for_model_audit(client, monkeypatch):
+    with _start_sidecar(monkeypatch, "pi"):
+        case = _create_case(client)
+        resp = client.post(
+            f"/api/v1/cases/{case['case_id']}/agent/turn",
+            json={"message": "商城变慢，请自行定位"},
+        )
+        assert resp.status_code == 200, resp.text
+        packets = client.get(
+            f"/api/v1/cases/{case['case_id']}/context-packets",
+        ).json()["data"]["items"]
+        assert len(packets) == 1
+        assert packets[0]["purpose"] == "runtime_turn"
+        resume_requests = [
+            item for item in MockSidecarHandler.received
+            if item[0].endswith("/resume")
+        ]
+        assert resume_requests
+        sent_context = resume_requests[-1][2]["context"]
+        assert sent_context["context_packet_id"] == packets[0]["context_packet_id"]
 
 
 def test_sidecar_restart_rotates_runtime_generation(client, monkeypatch):

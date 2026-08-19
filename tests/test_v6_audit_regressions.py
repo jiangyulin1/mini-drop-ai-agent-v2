@@ -426,3 +426,96 @@ def test_evidence_upsert_never_reassigns_another_case(client):
             content_hash="x",
             projection_hash="y",
         )
+
+
+def test_runtime_event_model_attempt_is_persisted_idempotently(client):
+    case = _create_case(client)
+    packet = repo.create_context_packet({
+        "case_id": case["case_id"],
+        "tenant_id": "tenant-a",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "payload": {"case_id": case["case_id"], "scope": {}},
+        "projection_stats": {},
+        "source_versions": {"context_builder": "runtime-turn.v1"},
+        "content_hash": "0" * 64,
+        "created_by": "test",
+    })
+    repo.upsert_agent_runtime_binding(
+        case["case_id"],
+        "tenant-a",
+        runtime_type="pi",
+        runtime_version="pi-0.83.0",
+        runtime_session_id="sess-audit",
+        runtime_generation=1,
+        status="READY",
+    )
+    event_payload = {
+        "runtime_generation": 1,
+        "events": [{
+            "event_id": "evt-model-attempt-1",
+            "event_seq": 1,
+            "event_type": "message_end",
+            "idempotency_key": "runtime-event:audit:1:1:message_end",
+            "payload": {
+                "context_packet_id": packet["context_packet_id"],
+                "trigger_turn_id": "turn-audit-1",
+                "text": "model answer",
+                "model_attempt": {
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "model_snapshot": "deepseek-v4-flash",
+                    "prompt_version": "pi-runtime.v1",
+                    "output_schema": "runtime-event.v1",
+                    "status": "SUCCEEDED",
+                    "latency_ms": 432,
+                    "input_tokens": 1200,
+                    "output_tokens": 340,
+                    "cache_read_tokens": 100,
+                    "cache_write_tokens": 50,
+                    "cost": 0.00234,
+                    "retry_count": 0,
+                    "turn_id": "turn-audit-1",
+                    "context_snapshot_id": "snap-audit-1",
+                    "config_fingerprint": "a" * 64,
+                    "tool_catalog_version": "tool-catalog.v1",
+                    "started_at": "2026-08-19T08:00:00Z",
+                    "finished_at": "2026-08-19T08:00:01Z",
+                    "response_hash": None,
+                    "error_code": None,
+                },
+            },
+        }],
+    }
+    first = client.post(
+        f"/internal/runtime/v1/cases/{case['case_id']}/events",
+        json=event_payload,
+        headers=_headers(),
+    )
+    assert first.status_code == 200, first.text
+    attempts = client.get(
+        f"/api/v1/cases/{case['case_id']}/model-attempts",
+    ).json()["data"]["items"]
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    assert attempt["status"] == "SUCCEEDED"
+    assert attempt["provider"] == "deepseek"
+    assert attempt["input_tokens"] == 1200
+    assert attempt["output_tokens"] == 340
+    assert attempt["cache_read_tokens"] == 100
+    assert attempt["cache_write_tokens"] == 50
+    assert attempt["cost"] == 0.00234
+    assert attempt["turn_id"] == "turn-audit-1"
+    assert attempt["context_snapshot_id"] == "snap-audit-1"
+
+    replay = client.post(
+        f"/internal/runtime/v1/cases/{case['case_id']}/events",
+        json=event_payload,
+        headers=_headers(),
+    )
+    assert replay.status_code == 200, replay.text
+    attempts = client.get(
+        f"/api/v1/cases/{case['case_id']}/model-attempts",
+    ).json()["data"]["items"]
+    assert len(attempts) == 1

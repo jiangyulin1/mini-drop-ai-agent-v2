@@ -144,6 +144,15 @@ def _parse_aware_datetime(value: Any) -> datetime | None:
         return None
 
 
+def _optional_positive_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
 class SqlRepository(SqlRepositoryV6Mixin):
     """SQLAlchemy 持久化 Repository。"""
 
@@ -2568,6 +2577,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
             return [row.to_dict() for row in rows]
 
     def record_model_attempt(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = now_utc()
         with self._write_session() as session:
             packet = session.query(ContextPacketModel).filter(
                 ContextPacketModel.id == payload["context_packet_id"],
@@ -2576,8 +2586,20 @@ class SqlRepository(SqlRepositoryV6Mixin):
             ).first()
             if packet is None:
                 raise ValueError("CONTEXT_PACKET_NOT_FOUND")
+            idempotency_key = payload.get("idempotency_key")
+            attempt_id = payload.get("model_attempt_id")
+            if not attempt_id:
+                if idempotency_key:
+                    attempt_id = f"model_attempt_{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()[:24]}"
+                else:
+                    attempt_id = f"model_attempt_{uuid4().hex}"
+            existing = session.get(ModelAttemptModel, attempt_id)
+            if existing is not None:
+                return existing.to_dict()
+            started_at = _parse_aware_datetime(payload.get("started_at")) or now
+            finished_at = _parse_aware_datetime(payload.get("finished_at")) or started_at
             attempt = ModelAttemptModel(
-                id=f"model_attempt_{uuid4().hex}",
+                id=attempt_id,
                 context_packet_id=packet.id,
                 case_id=packet.case_id,
                 tenant_id=packet.tenant_id,
@@ -2587,13 +2609,21 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 prompt_version=payload["prompt_version"],
                 output_schema=payload["output_schema"],
                 status=payload["status"],
-                latency_ms=max(0, int(payload.get("latency_ms", 0))),
-                input_tokens=payload.get("input_tokens"),
-                output_tokens=payload.get("output_tokens"),
+                latency_ms=max(0, int(payload.get("latency_ms", 0) or 0)),
+                input_tokens=_optional_positive_int(payload.get("input_tokens")),
+                output_tokens=_optional_positive_int(payload.get("output_tokens")),
+                cache_read_tokens=_optional_positive_int(payload.get("cache_read_tokens")),
+                cache_write_tokens=_optional_positive_int(payload.get("cache_write_tokens")),
+                cost=float(payload["cost"]) if payload.get("cost") is not None else None,
+                retry_count=max(0, int(payload.get("retry_count", 0) or 0)),
                 response_hash=payload.get("response_hash"),
                 error_code=payload.get("error_code"),
-                started_at=payload["started_at"],
-                finished_at=payload["finished_at"],
+                turn_id=payload.get("turn_id"),
+                context_snapshot_id=payload.get("context_snapshot_id"),
+                config_fingerprint=payload.get("config_fingerprint"),
+                tool_catalog_version=payload.get("tool_catalog_version"),
+                started_at=started_at,
+                finished_at=finished_at,
             )
             session.add(attempt)
             session.flush()

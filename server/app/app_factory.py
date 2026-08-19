@@ -47,6 +47,7 @@ from server.app.artifact_service import (
 )
 from server.app.ai_provider import get_ai_settings, model_audit_scope
 from server.app.ai_validation import AIValidationBusy, run_ai_validation_suite
+from server.app.capability_tokens import canonical_hash
 from server.app.database import init_db, new_session
 from server.app.event_bus import BUS
 from server.app.flamegraph_parser import extract_top_functions_from_svg
@@ -557,6 +558,26 @@ def _deliver_one_wakeup(
         side_effect_policy="AUTO_READ_LOW",
         investigation_run_id=run.get("run_id"),
     )
+    context_payload = context.model_dump(mode="json")
+    packet = repo.create_context_packet({
+        "case_id": case_id,
+        "tenant_id": tenant_id,
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_wakeup",
+        "iteration_no": 0,
+        "payload": context_payload,
+        "projection_stats": {},
+        "source_versions": {
+            "context_builder": "runtime-wakeup.v1",
+            "source_registry": "source-registry.v1",
+        },
+        "content_hash": canonical_hash(context_payload),
+        "created_by": "mini-drop-agent-runtime",
+    }) if hasattr(repo, "create_context_packet") else None
+    if packet:
+        context = context.model_copy(update={
+            "context_packet_id": packet["context_packet_id"],
+        })
     snapshot = repo.create_case_context_snapshot(
         case_id=case_id,
         tenant_id=tenant_id,
@@ -596,13 +617,7 @@ def _deliver_one_wakeup(
     try:
         runtime = get_runtime()
         if hasattr(runtime, "start_or_resume"):
-            runtime.start_or_resume(_build_runtime_case_context(
-                case,
-                tenant_id,
-                disposition="INVESTIGATE",
-                side_effect_policy="AUTO_READ_LOW",
-                investigation_run_id=run.get("run_id"),
-            ))
+            runtime.start_or_resume(context)
         runtime.follow_up(
             case_id,
             RuntimeFollowUp(

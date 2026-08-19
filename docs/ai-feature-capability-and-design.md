@@ -227,7 +227,7 @@ AgentRuntimePort（可替换运行时）
 - ⏳ Pi 模式下 `temperature` / `max_tokens` / `seed` 的 SDK 真实生效
 - ⏳ 更多真实 Case / Problem Registry 数据
 - ⏳ 成本与延迟指标纳入矩阵报告
-- ⏳ 可观测性：Sidecar 事件、token 消耗、模型调用审计
+- ✅ 可观测性：Sidecar 事件、token 消耗、模型调用审计（`message_end` 上报 usage/cost）
 
 ---
 

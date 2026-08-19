@@ -360,3 +360,82 @@ test("runtime caches last final answer for repeat-question stability", async () 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("message_end event carries per-call model usage and cost delta", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return new Response(JSON.stringify({ ok: true, data: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    process.env.MINI_DROP_PI_INTERNAL_TOKEN = "test-token";
+    const manager = new RuntimeManager({
+      modelRuntime: {},
+      internalBase: "http://127.0.0.1:8191",
+      eventSpool: new EventSpool(null),
+    });
+    const firstStats = { tokens: { input: 1000, output: 200, cacheRead: 50, cacheWrite: 20 }, cost: 0.01 };
+    manager.sessions.set("case-usage", {
+      generation: 1,
+      currentTurnId: "turn-u1",
+      context: {
+        context_packet_id: "packet-u1",
+        context_snapshot_id: "snap-u1",
+        diagnostic_strategy_id: "hybrid",
+        runtime_options: { reasoning_effort: "high" },
+      },
+      session: {
+        model: { provider: "deepseek", id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+        getSessionStats: () => firstStats,
+      },
+    });
+    manager.lastSeq.set("case-usage", 0);
+    manager._observe("case-usage", { type: "message_start" });
+    await manager._forwardEvent("case-usage", manager.sessions.get("case-usage"), {
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "first answer" }] },
+    });
+    assert.equal(requests.length, 1);
+    const firstBody = JSON.parse(requests[0].options.body);
+    const firstAttempt = firstBody.events[0].payload.model_attempt;
+    assert.ok(firstAttempt, "message_end should carry model_attempt");
+    assert.equal(firstAttempt.provider, "deepseek");
+    assert.equal(firstAttempt.model, "deepseek-v4-flash");
+    assert.equal(firstAttempt.input_tokens, 1000);
+    assert.equal(firstAttempt.output_tokens, 200);
+    assert.equal(firstAttempt.cache_read_tokens, 50);
+    assert.equal(firstAttempt.cache_write_tokens, 20);
+    assert.equal(firstAttempt.cost, 0.01);
+    assert.equal(firstAttempt.turn_id, "turn-u1");
+    assert.equal(firstAttempt.context_packet_id, "packet-u1");
+    assert.equal(firstAttempt.context_snapshot_id, "snap-u1");
+    assert.equal(firstAttempt.tool_catalog_version, "tool-catalog.v1");
+    assert.ok(firstAttempt.config_fingerprint);
+    assert.ok(firstAttempt.started_at);
+    assert.ok(firstAttempt.finished_at);
+
+    // Second model response: stats are cumulative, so the audit must be delta.
+    const secondStats = { tokens: { input: 1600, output: 500, cacheRead: 80, cacheWrite: 40 }, cost: 0.023 };
+    manager.sessions.get("case-usage").session.getSessionStats = () => secondStats;
+    manager._observe("case-usage", { type: "message_start" });
+    await manager._forwardEvent("case-usage", manager.sessions.get("case-usage"), {
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "second answer" }] },
+    });
+    assert.equal(requests.length, 2);
+    const secondBody = JSON.parse(requests[1].options.body);
+    const secondAttempt = secondBody.events[0].payload.model_attempt;
+    assert.equal(secondAttempt.input_tokens, 600);
+    assert.equal(secondAttempt.output_tokens, 300);
+    assert.equal(secondAttempt.cache_read_tokens, 30);
+    assert.equal(secondAttempt.cache_write_tokens, 20);
+    assert.ok(Math.abs(secondAttempt.cost - 0.013) < 1e-9);
+  } finally {
+    delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
+    globalThis.fetch = originalFetch;
+  }
+});
