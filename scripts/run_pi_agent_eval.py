@@ -116,6 +116,7 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
     tools: list[str] = []
     operations: list[str] = []
     final_text = ""
+    conclusion_text = ""
     settled = False
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -146,7 +147,13 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
                     mapped = OPERATION_TO_TOOL.get(op)
                     if mapped and mapped not in tools:
                         tools.append(mapped)
-            if etype in ("assistant.message", "turn.completed", "agent_settled") and payload.get("content"):
+            if etype == "agent_finish_investigation" and payload.get("summary"):
+                # The persisted conclusion is the authoritative final answer.
+                # A later assistant retry/rejection message must not overwrite it.
+                conclusion_text = payload["summary"]
+                final_text = conclusion_text
+                settled = True
+            elif etype in ("assistant.message", "turn.completed", "agent_settled") and payload.get("content") and not conclusion_text:
                 final_text = payload["content"]
             if etype in ("agent_settled", "agent_finish_investigation"):
                 settled = True

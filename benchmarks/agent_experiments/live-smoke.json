@@ -1,0 +1,23 @@
+{
+  "schema_version": "agent-strategy-matrix.v1",
+  "matrix_id": "live-pi-smoke-v1",
+  "scenario_root": "golden_scenarios",
+  "scenario_ids": ["self_code_hotspot"],
+  "repetitions": 1,
+  "conditions": [
+    {
+      "condition_id": "hybrid-high-cpu-hotspot",
+      "strategy_id": "hybrid",
+      "strategy_params": {},
+      "runtime_options": {
+        "reasoning_effort": "high",
+        "prompt_variant": "default",
+        "seed": 7
+      },
+      "runtime_policy": {
+        "side_effect_policy": "AUTO_READ_LOW",
+        "execution_mode": "normal"
+      }
+    }
+  ]
+}
