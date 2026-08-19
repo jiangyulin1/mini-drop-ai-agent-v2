@@ -6,6 +6,8 @@ Mini-Drop 的能力由多个明确注册表组成：Control 的 TaskKind/Probe/E
 
 ```bash
 python scripts/check_registry_consistency.py
+# 兼容别名：
+python scripts/check_capability_registry.py
 ```
 
 检查器会验证：

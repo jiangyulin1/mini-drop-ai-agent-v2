@@ -1,0 +1,101 @@
+{
+  "schema_version": "agent-strategy-matrix.v1",
+  "matrix_id": "agent-strategy-matrix-canonical-v1",
+  "scenario_root": "golden_scenarios",
+  "scenario_ids": [
+    "self_code_hotspot",
+    "downstream_cpu_hotspot",
+    "shared_io_contention",
+    "memory_leak",
+    "mysql_lock_wait",
+    "network_packet_loss",
+    "same_host_cpu_noise"
+  ],
+  "repetitions": 1,
+  "conditions": [
+    {
+      "condition_id": "rule-tree-readonly",
+      "strategy_id": "rule_tree",
+      "strategy_params": {},
+      "runtime_options": {
+        "reasoning_effort": "low",
+        "prompt_variant": "concise",
+        "seed": 7
+      },
+      "runtime_policy": {
+        "side_effect_policy": "READ_ONLY",
+        "execution_mode": "deny_write"
+      }
+    },
+    {
+      "condition_id": "hypothesis-first-medium",
+      "strategy_id": "hypothesis_first",
+      "strategy_params": {"max_hypotheses": 3},
+      "runtime_options": {
+        "reasoning_effort": "medium",
+        "prompt_variant": "default",
+        "seed": 7
+      },
+      "runtime_policy": {
+        "side_effect_policy": "PROPOSE_ONLY",
+        "execution_mode": "dry_run"
+      }
+    },
+    {
+      "condition_id": "evidence-first-medium",
+      "strategy_id": "evidence_first",
+      "strategy_params": {},
+      "runtime_options": {
+        "reasoning_effort": "medium",
+        "prompt_variant": "evidence_strict",
+        "seed": 7
+      },
+      "runtime_policy": {
+        "side_effect_policy": "PROPOSE_ONLY",
+        "execution_mode": "dry_run"
+      }
+    },
+    {
+      "condition_id": "causal-graph-medium",
+      "strategy_id": "causal_graph",
+      "strategy_params": {},
+      "runtime_options": {
+        "reasoning_effort": "medium",
+        "prompt_variant": "default",
+        "seed": 7
+      },
+      "runtime_policy": {
+        "side_effect_policy": "PROPOSE_ONLY",
+        "execution_mode": "deny_write"
+      }
+    },
+    {
+      "condition_id": "exploratory-low",
+      "strategy_id": "exploratory",
+      "strategy_params": {},
+      "runtime_options": {
+        "reasoning_effort": "low",
+        "prompt_variant": "concise",
+        "seed": 7
+      },
+      "runtime_policy": {
+        "side_effect_policy": "READ_ONLY",
+        "execution_mode": "sandbox"
+      }
+    },
+    {
+      "condition_id": "hybrid-high",
+      "strategy_id": "hybrid",
+      "strategy_params": {},
+      "runtime_options": {
+        "reasoning_effort": "high",
+        "prompt_variant": "default",
+        "seed": 7
+      },
+      "runtime_policy": {
+        "side_effect_policy": "AUTO_READ_LOW",
+        "execution_mode": "normal"
+      }
+    }
+  ]
+}

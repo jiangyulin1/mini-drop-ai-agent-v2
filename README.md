@@ -716,6 +716,10 @@ bpftrace 对演示场景足够——Shell 一行命令即可挂载内核探针�
 
 ## Agent Runtime 扩展指南
 
+- [AI 功能介绍、能力边界与设计方案](docs/ai-feature-capability-and-design.md)
 - [Canonical Agent Tool Catalog](docs/agent-tool-catalog.md)
 - [诊断策略与 RuntimePolicy 实验](docs/agent-runtime-experiments.md)
+- [Agent 策略矩阵实验](docs/agent-strategy-matrix.md)
+- [RuntimePolicy 运行权限策略](docs/runtime-policy.md)
+- [能力扩展指南](docs/extension-guide.md)
 - [跨运行时注册表一致性](docs/registry-consistency.md)
