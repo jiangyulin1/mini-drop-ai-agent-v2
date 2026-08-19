@@ -1,0 +1,11 @@
+{
+  "fault_id": "network-jitter-001",
+  "conclusion": {
+    "root_cause_entity": "worker1:network_jitter",
+    "classification": "network_degradation",
+    "evidence_refs": ["ev-1", "ev-2"]
+  },
+  "evidence": ["ev-1", "ev-2"],
+  "probes": ["connection_probe", "sys_metrics"],
+  "actions": [{"action_id": "collect", "auto_execute": false}]
+}

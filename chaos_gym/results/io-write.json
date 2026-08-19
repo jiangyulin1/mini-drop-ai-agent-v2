@@ -1,0 +1,11 @@
+{
+  "fault_id": "io-write-001",
+  "conclusion": {
+    "root_cause_entity": "worker1:io_write",
+    "classification": "host_disk_contention",
+    "evidence_refs": ["ev-1", "ev-2"]
+  },
+  "evidence": ["ev-1", "ev-2"],
+  "probes": ["sys_metrics", "ebpf_io"],
+  "actions": [{"action_id": "collect", "auto_execute": false}]
+}

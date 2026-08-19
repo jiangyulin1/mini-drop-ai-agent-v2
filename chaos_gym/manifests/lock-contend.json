@@ -1,0 +1,10 @@
+{
+  "fault_id": "lock-contend-001",
+  "fault_type": "lock-contend",
+  "inject_command": "python3 demo/vm_test_targets.py --inject-fault lock-contend --duration 60",
+  "root_cause_entity": "worker1:lock_contend",
+  "expected_probe": ["runtime_snapshot", "sys_metrics", "perf_cpu"],
+  "valid_actions": ["collect", "conclude"],
+  "forbidden_actions": ["restart_service", "delete_data"],
+  "min_evidence_sources": 2
+}

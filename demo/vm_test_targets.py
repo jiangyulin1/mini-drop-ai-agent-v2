@@ -305,5 +305,106 @@ def main():
     print(f"[test-target] done")
 
 
+# ═══════════════════════════════════════════════════════════════
+# Chaos Injector 统一故障注入接口
+# ═══════════════════════════════════════════════════════════════
+
+FAULT_ALIASES = {
+    "cpu-hotspot": "cpu-fib",
+    "cpu-contention": "cpu-loop",
+    "cpu-sort": "cpu-sort",
+    "io-write": "io-write",
+    "io-hang": "io-dd",
+    "memory-leak": "memory-leak",
+    "memory-stable": "memory-stable",
+    "fd-leak": "fd-leak",
+    "fd-stable": "fd-stable",
+    "thread-spawn": "thread-spawn",
+    "thread-pool": "thread-pool",
+    "lock-contend": "lock-contend",
+    "network-http": "network-http",
+    "network-jitter": "network-jitter",
+    "python-cpu": "python-cpu",
+    "python-multi": "python-multi",
+}
+
+
+def run_network_jitter(duration: int):
+    """通过 tc netem 注入网络抖动；需要 root 权限，失败时降级为 network-http。"""
+    if os.geteuid() != 0:
+        print("[network-jitter] not root; fallback to network-http", flush=True)
+        run_network_http(duration)
+        return
+    dev = os.getenv("MINI_DROP_NET_DEV", "eth0")
+    try:
+        subprocess.run(["tc", "qdisc", "add", "dev", dev, "root", "netem", "delay", "100ms", "10ms", "loss", "2%"],
+                       check=True, capture_output=True, timeout=10)
+        print(f"[network-jitter] injected on {dev}", flush=True)
+        time.sleep(duration)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[network-jitter] failed: {exc}; fallback to network-http", flush=True)
+        run_network_http(duration)
+    finally:
+        try:
+            subprocess.run(["tc", "qdisc", "del", "dev", dev, "root"], check=False, capture_output=True, timeout=10)
+        except Exception:
+            pass
+
+
+SCENARIOS["network-jitter"] = run_network_jitter
+
+
+def list_faults() -> list[str]:
+    return sorted(FAULT_ALIASES)
+
+
+def inject_fault(fault_type: str, duration: int) -> None:
+    normalized = fault_type.strip().lower().replace("_", "-")
+    if normalized not in FAULT_ALIASES:
+        raise ValueError(f"Unknown fault type: {fault_type}. Available: {', '.join(list_faults())}")
+    scenario = FAULT_ALIASES[normalized]
+    print(f"[chaos-injector] fault={normalized} scenario={scenario} duration={duration}s pid={os.getpid()}", flush=True)
+    SCENARIOS[scenario](duration)
+    print(f"[chaos-injector] done fault={normalized}", flush=True)
+
+
+def main_chaos(argv: list[str]) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="Mini-Drop Chaos Injector / VM test target")
+    parser.add_argument("--inject-fault", help="Fault type to inject")
+    parser.add_argument("--duration", type=int, default=30, help="Duration in seconds")
+    parser.add_argument("--list-faults", action="store_true", help="List available fault types")
+    args, rest = parser.parse_known_args(argv)
+
+    if args.list_faults:
+        print("\n".join(list_faults()))
+        return 0
+
+    # 兼容旧用法: python vm_test_targets.py <scenario> [duration]
+    if args.inject_fault is None and rest:
+        scenario = rest[0]
+        duration = int(rest[1]) if len(rest) > 1 else 30
+        if scenario not in SCENARIOS:
+            print(f"Unknown scenario: {scenario}", file=sys.stderr)
+            return 1
+        print(f"[test-target] scenario={scenario} duration={duration}s pid={os.getpid()}", flush=True)
+        SCENARIOS[scenario](duration)
+        print("[test-target] done")
+        return 0
+
+    if args.inject_fault is None:
+        parser.print_help()
+        return 1
+
+    try:
+        inject_fault(args.inject_fault, args.duration)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main_chaos(sys.argv[1:]))

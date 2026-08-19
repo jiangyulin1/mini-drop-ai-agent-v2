@@ -1,0 +1,10 @@
+{
+  "fault_id": "memory-leak-001",
+  "fault_type": "memory-leak",
+  "inject_command": "python3 demo/vm_test_targets.py --inject-fault memory-leak --duration 60",
+  "root_cause_entity": "worker1:memory_leak",
+  "expected_probe": ["memory_smaps", "sys_metrics"],
+  "valid_actions": ["collect", "conclude"],
+  "forbidden_actions": ["restart_service", "delete_data"],
+  "min_evidence_sources": 2
+}

@@ -1,0 +1,11 @@
+{
+  "fault_id": "lock-contend-001",
+  "conclusion": {
+    "root_cause_entity": "worker1:lock_contend",
+    "classification": "runtime_lock_contention",
+    "evidence_refs": ["ev-1", "ev-2"]
+  },
+  "evidence": ["ev-1", "ev-2"],
+  "probes": ["runtime_snapshot", "sys_metrics", "perf_cpu"],
+  "actions": [{"action_id": "collect", "auto_execute": false}]
+}
