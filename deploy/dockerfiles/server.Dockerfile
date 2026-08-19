@@ -1,10 +1,12 @@
 # Mini-Drop Server Dockerfile
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
+    apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     gosu \
+    linux-perf \
     perl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -19,8 +21,10 @@ COPY agent/ ./agent/
 COPY analyzer/ ./analyzer/
 COPY mini_drop_observability/ ./mini_drop_observability/
 COPY migrations/ ./migrations/
+COPY knowledge/ ./knowledge/
 
-RUN pip install --no-cache-dir -e ".[mcp]" "grpcio-tools>=1.80,<1.81"
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip install --no-cache-dir -e ".[mcp]" "grpcio-tools>=1.80,<1.81"
 
 COPY proto/ ./proto/
 RUN cd proto && bash compile.sh

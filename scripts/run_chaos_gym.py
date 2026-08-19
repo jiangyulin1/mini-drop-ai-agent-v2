@@ -146,6 +146,8 @@ def run_live(
     manifest_path: Path,
     inject_command: str | None,
     *,
+    target_agent: str | None = None,
+    target_pid: int | None = None,
     poll_interval: float = 5.0,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
@@ -159,18 +161,49 @@ def run_live(
         print(f"[chaos-gym] injecting: {inject_command}", flush=True)
         inject_proc = subprocess.Popen(inject_command, shell=True, cwd=str(ROOT))
 
+    target_scope: dict[str, Any] = {"service_id": "chaos-gym-target"}
+    if target_agent and target_pid:
+        host_id = target_agent
+        try:
+            agents = _http_json(f"{control_url.rstrip('/')}/api/agents")["data"]["items"]
+            for agent in agents:
+                if agent.get("id") == target_agent and agent.get("hostname"):
+                    host_id = agent["hostname"]
+                    break
+        except Exception:
+            pass
+        target_scope["instances"] = [{
+            "service_id": "chaos-gym-target",
+            "instance_id": f"chaos-{target_agent}",
+            "host_id": host_id,
+            "agent_id": target_agent,
+            "pid": int(target_pid),
+            "environment": "chaos-gym",
+        }]
     case_payload = {
         "title": f"chaos-gym-{manifest['fault_id']}",
         "problem_description": f"自动注入故障 {manifest['fault_type']}，请定位根因",
         "recovery_goal": "定位根因",
         "run_mode": "COLLABORATE",
         "environment": "chaos-gym",
-        "target_scope": {"service_id": "chaos-gym-target"},
+        "target_scope": target_scope,
     }
     try:
         created = _http_json(f"{control_url.rstrip('/')}/api/v1/cases", method="POST", payload=case_payload)
         case_id = created["data"]["case_id"]
         print(f"[chaos-gym] case created: {case_id}", flush=True)
+
+        turn_payload = {
+            "message": f"自动注入故障 {manifest['fault_type']}，请开始调查并定位根因",
+            "intent": "investigate",
+            "execute_safe_tools": True,
+        }
+        _http_json(
+            f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/agent/turn",
+            method="POST",
+            payload=turn_payload,
+        )
+        print(f"[chaos-gym] agent turn submitted for case {case_id}", flush=True)
 
         deadline = time.time() + timeout
         terminal_states = {
@@ -178,6 +211,7 @@ def run_live(
             "BUDGET_EXHAUSTED", "FAILED", "USER_CANCELED",
         }
         diagnosis = None
+        scope_confirmed = False
         while time.time() < deadline:
             case = _http_json(f"{control_url.rstrip('/')}/api/v1/cases/{case_id}")["data"]
             diagnosis_id = case.get("diagnosis_session_id")
@@ -186,10 +220,54 @@ def run_live(
                 if diag.get("status") in terminal_states:
                     diagnosis = diag
                     break
+                if diag.get("status") == "WAITING_APPROVAL":
+                    for probe in diag.get("probes") or []:
+                        if probe.get("status") == "WAITING_APPROVAL":
+                            approval_payload = {
+                                "step_id": probe.get("step_id"),
+                                "decision": "approve",
+                                "scope": "single_execution",
+                                "approver_id": "chaos-gym",
+                            }
+                            try:
+                                _http_json(
+                                    f"{control_url.rstrip('/')}/api/v1/diagnoses/{diagnosis_id}/approvals",
+                                    method="POST",
+                                    payload=approval_payload,
+                                )
+                                print(f"[chaos-gym] approved probe {probe.get('probe_id')}", flush=True)
+                            except Exception:
+                                pass
+                if diag.get("status") == "NEEDS_SCOPE_CONFIRMATION" and not scope_confirmed:
+                    correction_payload = {
+                        "target_scope": target_scope,
+                        "reason": "chaos gym automatic scope confirmation",
+                    }
+                    _http_json(
+                        f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/corrections",
+                        method="POST",
+                        payload=correction_payload,
+                    )
+                    confirm_payload = {
+                        "message": "已确认目标实例和 PID，请继续调查并定位根因",
+                        "intent": "investigate",
+                        "execute_safe_tools": True,
+                    }
+                    _http_json(
+                        f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/agent/turn",
+                        method="POST",
+                        payload=confirm_payload,
+                    )
+                    scope_confirmed = True
+                    print(f"[chaos-gym] scope correction and confirmation sent for case {case_id}", flush=True)
             time.sleep(poll_interval)
 
         if diagnosis is None:
             raise TimeoutError(f"case {case_id} did not reach terminal state in {timeout}s")
+
+        # Re-fetch once after terminal to avoid reading a half-populated snapshot.
+        time.sleep(poll_interval)
+        diagnosis = _http_json(f"{control_url.rstrip('/')}/api/v1/diagnoses/{diagnosis['diagnosis_id']}")["data"]
 
         conclusion = diagnosis.get("latest_conclusion") or {}
         evidence = diagnosis.get("evidence") or []
@@ -204,7 +282,11 @@ def run_live(
                     or ""
                 ),
                 "classification": (conclusion.get("cluster_assessment") or {}).get("classification"),
-                "evidence_refs": conclusion.get("evidence_refs") or [],
+                "evidence_refs": (
+                    conclusion.get("evidence_refs")
+                    or (conclusion.get("cluster_assessment") or {}).get("evidence_refs")
+                    or []
+                ),
             },
             "evidence": [item.get("evidence_id") for item in evidence if item.get("evidence_id")],
             "probes": [str(item) for item in probes if item],
@@ -235,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--result", type=Path, default=None, help="offline result JSON")
     parser.add_argument("--control-url", default="http://127.0.0.1")
     parser.add_argument("--inject-command", default=None)
+    parser.add_argument("--target-agent", default=None, help="target worker agent id, e.g. linux-worker-1")
+    parser.add_argument("--target-pid", type=int, default=None, help="target process pid under fault")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--poll-interval", type=float, default=5.0)
     parser.add_argument("--timeout", type=float, default=300.0)
@@ -250,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
             args.control_url,
             args.manifest.resolve(),
             args.inject_command,
+            target_agent=args.target_agent,
+            target_pid=args.target_pid,
             poll_interval=args.poll_interval,
             timeout=args.timeout,
         )

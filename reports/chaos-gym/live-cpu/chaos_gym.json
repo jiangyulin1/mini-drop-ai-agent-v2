@@ -1,0 +1,21 @@
+{
+  "run_id": "live-case_20260819_024713_7c797bc7b0",
+  "mode": "live",
+  "case_id": "case_20260819_024713_7c797bc7b0",
+  "started_at": "2026-08-19T02:47:44.774319+00:00",
+  "finished_at": "2026-08-19T02:47:44.774446+00:00",
+  "results": [
+    {
+      "fault_id": "cpu-hotspot-001",
+      "fault_type": "cpu-hotspot",
+      "strict_rca_hit": false,
+      "citation_valid": true,
+      "required_probe_recall": 0.0,
+      "forbidden_ratio": 0.0,
+      "forbidden_seen": [],
+      "pareto_score": 0.3,
+      "actual_root_cause_entity": "chaos-gym-target",
+      "expected_root_cause_entity": "worker1:fib"
+    }
+  ]
+}
