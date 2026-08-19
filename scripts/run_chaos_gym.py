@@ -88,6 +88,7 @@ def evaluate_offline(manifest: dict[str, Any], result: dict[str, Any]) -> dict[s
         conclusion.get("report_text"),
         conclusion.get("summary"),
         conclusion.get("statement"),
+        result.get("report_text"),
     ) if value)
     code_path_hit = bool(signature) and signature.lower() in report_text.lower()
 
@@ -163,6 +164,40 @@ def _http_json(url: str, method: str = "GET", payload: dict | None = None, timeo
     req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _workspace_root_entity(conclusion: dict[str, Any], manifest: dict[str, Any]) -> str:
+    """Resolve the attributed entity from a v6 Case conclusion.
+
+    The Pi runtime records causes as structured lists; fall back to matching
+    the ground-truth id inside the report text so a correct attribution is not
+    lost just because it was phrased in prose.
+    """
+    for key in ("primary_root_causes", "ranked_primary_candidates"):
+        for item in conclusion.get(key) or []:
+            if isinstance(item, dict):
+                entity = item.get("root_entity") or item.get("entity") or item.get("target_ref")
+                if entity:
+                    return str(entity)
+            elif item:
+                return str(item)
+    expected = str(manifest.get("root_cause_entity") or "")
+    report = str(conclusion.get("report_text") or "")
+    return expected if expected and expected in report else ""
+
+
+def _workspace_probes(workspace: dict[str, Any]) -> list[str]:
+    probes = {
+        str(step.get("collector_id") or step.get("kind"))
+        for step in (workspace.get("plan") or {}).get("steps") or []
+        if step.get("collector_id") or step.get("kind")
+    }
+    probes.update(
+        str(item.get("collector_id") or item.get("artifact_type"))
+        for item in workspace.get("evidence") or []
+        if item.get("collector_id") or item.get("artifact_type")
+    )
+    return sorted(probes)
 
 
 def run_live(
@@ -243,9 +278,21 @@ def run_live(
             "BUDGET_EXHAUSTED", "FAILED", "USER_CANCELED",
         }
         diagnosis = None
+        workspace_result = None
         scope_confirmed = False
         while time.time() < deadline:
             case = _http_json(f"{control_url.rstrip('/')}/api/v1/cases/{case_id}")["data"]
+            # The Pi runtime concludes through the Case workspace and never
+            # opens a legacy diagnosis session, so poll both surfaces.
+            try:
+                workspace = _http_json(
+                    f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/workspace"
+                )["data"]
+            except Exception:
+                workspace = None
+            if workspace and workspace.get("conclusion"):
+                workspace_result = workspace
+                break
             diagnosis_id = case.get("diagnosis_session_id")
             if diagnosis_id:
                 diag = _http_json(f"{control_url.rstrip('/')}/api/v1/diagnoses/{diagnosis_id}")["data"]
@@ -294,36 +341,67 @@ def run_live(
                     print(f"[chaos-gym] scope correction and confirmation sent for case {case_id}", flush=True)
             time.sleep(poll_interval)
 
-        if diagnosis is None:
+        if diagnosis is None and workspace_result is None:
             raise TimeoutError(f"case {case_id} did not reach terminal state in {timeout}s")
 
         # Re-fetch once after terminal to avoid reading a half-populated snapshot.
         time.sleep(poll_interval)
-        diagnosis = _http_json(f"{control_url.rstrip('/')}/api/v1/diagnoses/{diagnosis['diagnosis_id']}")["data"]
 
-        conclusion = diagnosis.get("latest_conclusion") or {}
-        evidence = diagnosis.get("evidence") or []
-        probes = [item.get("probe_id") or item.get("collector_id") for item in diagnosis.get("probes") or []]
-        actions = conclusion.get("actions") or []
-        result = {
-            "fault_id": manifest["fault_id"],
-            "conclusion": {
-                "root_cause_entity": (
-                    (conclusion.get("cluster_assessment") or {}).get("root_entity")
-                    or (conclusion.get("root_location") or {}).get("target_ref")
-                    or ""
-                ),
-                "classification": (conclusion.get("cluster_assessment") or {}).get("classification"),
-                "evidence_refs": (
-                    conclusion.get("evidence_refs")
-                    or (conclusion.get("cluster_assessment") or {}).get("evidence_refs")
-                    or []
-                ),
-            },
-            "evidence": [item.get("evidence_id") for item in evidence if item.get("evidence_id")],
-            "probes": [str(item) for item in probes if item],
-            "actions": actions,
-        }
+        if workspace_result is not None:
+            workspace = _http_json(
+                f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/workspace"
+            )["data"]
+            conclusion = workspace.get("conclusion") or {}
+            evidence_ids = [
+                item.get("evidence_id")
+                for item in workspace.get("evidence") or []
+                if item.get("evidence_id")
+            ]
+            # Claim bindings carry the evidence the verifier actually accepted.
+            cited = [
+                claim.get("evidence_id")
+                for claim in conclusion.get("claims") or []
+                if claim.get("evidence_id")
+            ]
+            result = {
+                "fault_id": manifest["fault_id"],
+                "conclusion": {
+                    "root_cause_entity": _workspace_root_entity(conclusion, manifest),
+                    "classification": conclusion.get("state"),
+                    "evidence_refs": cited,
+                    "report_text": conclusion.get("report_text") or "",
+                },
+                "evidence": evidence_ids,
+                "probes": _workspace_probes(workspace),
+                "actions": conclusion.get("actions") or [],
+            }
+        else:
+            diagnosis = _http_json(f"{control_url.rstrip('/')}/api/v1/diagnoses/{diagnosis['diagnosis_id']}")["data"]
+
+            conclusion = diagnosis.get("latest_conclusion") or {}
+            evidence = diagnosis.get("evidence") or []
+            probes = [item.get("probe_id") or item.get("collector_id") for item in diagnosis.get("probes") or []]
+            actions = conclusion.get("actions") or []
+            result = {
+                "fault_id": manifest["fault_id"],
+                "conclusion": {
+                    "root_cause_entity": (
+                        (conclusion.get("cluster_assessment") or {}).get("root_entity")
+                        or (conclusion.get("root_location") or {}).get("target_ref")
+                        or ""
+                    ),
+                    "classification": (conclusion.get("cluster_assessment") or {}).get("classification"),
+                    "evidence_refs": (
+                        conclusion.get("evidence_refs")
+                        or (conclusion.get("cluster_assessment") or {}).get("evidence_refs")
+                        or []
+                    ),
+                    "report_text": conclusion.get("summary") or "",
+                },
+                "evidence": [item.get("evidence_id") for item in evidence if item.get("evidence_id")],
+                "probes": [str(item) for item in probes if item],
+                "actions": actions,
+            }
         evaluation = evaluate_offline(manifest, result)
         return {
             "run_id": f"live-{case_id}",
