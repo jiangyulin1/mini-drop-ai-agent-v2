@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from server.app.agent_runtime.dispatcher import reset_runtime
 from server.app.database import init_db, reset_engine
-from server.app.main import PLAN_DRIVER, app, repo
+from server.app.main import app, repo
 from server.app.models import Base
 from server.app.schemas import CreateTaskRequest
 from server.app.state_machine import Actor, TaskStatus
@@ -238,8 +238,14 @@ def test_pi_runtime_longitudinal_chain_with_follow_up_and_stop(client: TestClien
 
         # 2. Simulated Pi tool call through internal gateway creates a native task.
         query = client.post(
-            "/internal/agent/tools/query",
-            json={"case_id": case["case_id"], "operation": "process.list", "parameters": {}},
+            "/internal/agent/tools/collection-proposal",
+            json={
+                "case_id": case["case_id"], "collector_id": "process_scan",
+                "target_selector": {"agent_id": "agent-x", "target_pid": 1},
+                "parameters": {},
+                "information_goal": "将服务或主机目标解析为具体 Linux 进程",
+                "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+            },
             headers={"X-Internal-Token": TOKEN},
         )
         assert query.status_code == 200, query.text
@@ -269,8 +275,14 @@ def test_pi_runtime_longitudinal_chain_with_follow_up_and_stop(client: TestClien
     # 5. Create another active query then stop Case; stop cancels native Task.
     with _pi_sidecar(monkeypatch):
         query2 = client.post(
-            "/internal/agent/tools/query",
-            json={"case_id": case["case_id"], "operation": "system.metrics", "parameters": {}},
+            "/internal/agent/tools/collection-proposal",
+            json={
+                "case_id": case["case_id"], "collector_id": "sys_metrics",
+                "target_selector": {"agent_id": "agent-x", "target_pid": 1},
+                "parameters": {},
+                "information_goal": "主机和目标进程资源饱和度",
+                "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+            },
             headers={"X-Internal-Token": TOKEN},
         )
         assert query2.status_code == 200, query2.text

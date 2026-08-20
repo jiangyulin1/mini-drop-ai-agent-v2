@@ -1,4 +1,4 @@
-"""E9: rca 候选归因分析器作为只读 Tool 暴露，不产生 Task、不捏造证据。"""
+"""Legacy RCA stays offline and is not exposed to the AI runtime."""
 
 from __future__ import annotations
 
@@ -38,36 +38,28 @@ def _headers() -> dict:
     return {"X-Internal-Token": TOKEN}
 
 
-def test_rca_tool_requires_internal_token(client: TestClient):
+def test_legacy_rca_tool_has_no_route_without_internal_token(client: TestClient):
     resp = client.post("/internal/agent/tools/rca-analysis", json={})
-    assert resp.status_code in {401, 403}
+    assert resp.status_code == 404
 
 
-def test_rca_tool_returns_structured_candidates(client: TestClient):
+def test_legacy_rca_tool_has_no_route_with_internal_token(client: TestClient):
     resp = client.post("/internal/agent/tools/rca-analysis", json={
         "task_metadata": {"collector_type": "sys_metrics", "status": "DONE"},
         "top_functions": [{"function": "checkout_payment", "cpu_percent": 90.0}],
         "sys_metrics": {"cpu_percent": 85.0},
     }, headers=_headers())
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert "candidates" in data
-    assert isinstance(data["candidates"], list)
-    # 候选携带证据引用与缺失证据，但绝不新增任务
-    for candidate in data["candidates"]:
-        assert "candidate_id" in candidate
-        assert "evidence_refs" in candidate
-        assert "missing_evidence" in candidate
+    assert resp.status_code == 404
     tasks = client.get("/api/tasks").json()["data"]["items"]
     assert tasks == []
 
 
-def test_rca_tool_is_read_only_no_task_created(client: TestClient):
+def test_legacy_rca_tool_is_not_exposed_and_creates_no_task(client: TestClient):
     before = client.get("/api/tasks").json()["data"]["items"]
     resp = client.post("/internal/agent/tools/rca-analysis", json={
         "task_metadata": {"collector_type": "perf_cpu", "status": "DONE"},
         "top_functions": [{"function": "process_loop", "cpu_percent": 99.0}],
     }, headers=_headers())
-    assert resp.status_code == 200
+    assert resp.status_code == 404
     after = client.get("/api/tasks").json()["data"]["items"]
     assert len(after) == len(before) == 0

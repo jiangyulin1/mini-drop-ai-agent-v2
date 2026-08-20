@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">🔥 Mini-Drop</h1>
-  <p align="center"><strong>轻量级 Linux 性能诊断平台</strong> — 火焰图 · eBPF · AI 归因 · 自然语言采集</p>
+  <p align="center"><strong>轻量级 Linux 性能诊断平台</strong> — 火焰图 · eBPF · Evidence 调查 · 自然语言采集</p>
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 - [整体架构](#整体架构)
 - [核心流程](#核心流程)
 - [采集器](#采集器)
-- [任务级智能归因](#任务级智能归因兼容路径)
+- [任务级规则归因](#任务级规则归因兼容路径)
 - [任务状态机](#任务状态机)
 - [Web 前端](#web-前端)
 - [自然语言采集](#自然语言采集)
@@ -74,7 +74,7 @@ python dev.py test        # 运行测试
   - Web UI 指定目标 PID、采样率、时长，通过 Server 下发任务给 Agent。
   - Agent 在目标主机上执行 perf、eBPF、运行时快照、日志、内存和持续采样，产物上传 MinIO。
   - Analyzer 将 perf.data 转为 D3 交互式火焰图 + ECharts TopN 热点排行。
-  - 5 层智能归因引擎，LLM 辅助推理但受 Schema 硬约束，每条 claim 可追溯到原始证据。
+  - 受控 Case/Evidence 调查链路；Pi 模式下模型只能调用已注册工具并提交有证据引用的结论。
   - 自然语言采集——用户输入"mysqld CPU 飙高"，系统自动匹配进程、选采集器、定参数。
 - **运行形态**：React SPA 前端 + FastAPI/gRPC 控制面 + gRPC Agent 采集端 + 独立 Analyzer Worker + PostgreSQL 持久化 + MinIO 对象存储。
 
@@ -83,13 +83,13 @@ python dev.py test        # 运行测试
 - **分体部署架构**：Web/Server/DB/MinIO 跑在 Docker 里，Agent 裸机运行且需要 `privileged` + `pid:host`。权限隔离明确，Agent 可独立升级重启，不影响 Web 服务。
 - **gRPC 契约优先**：5 个 `.proto` 文件定义全部通信接口，强类型编译期发现字段不匹配，二进制序列化比 JSON 小 3-5 倍。
 - **采集器即插件**：所有采集器实现 `Collector(Protocol)` 协议——新增采集器只需实现 `collect(task) → CollectorResult`，Server 不绑定具体工具。
-- **工具驱动的 AI 归因**：LLM 不直接输出自由文本。5 层管线——证据采集 → 候选生成 → 五维置信度校准 → LLM 推理（Few-Shot + Schema 硬约束 + 自修复）→ 修复计划。`rules.json` 外部化，不开 IDE 即可扩展诊断场景。
-- **持续事故 Case**：保存范围、候选、Evidence、调查迭代、Action、验证和回滚状态；当前能力、缺口和实施门禁见 [`docs/autonomous_ops_agent_implementation_plan.md`](docs/autonomous_ops_agent_implementation_plan.md)。
+- **Evidence 驱动的 AI 调查**：Pi 模式读取 canonical Evidence、识别缺口并提出受控采集；服务端负责 scope、权限、审批、引用和副作用校验。旧 `rules.json` 候选排序仅作为兼容基线，不属于生产 AI Runtime。
+- **持续 Evidence Case**：保存范围、信息目标、采集提案、原生 Task、Evidence、人工 Review 和受引用分析；当前能力与门禁见 [`docs/ai_collector_architecture_and_migration_plan.md`](docs/ai_collector_architecture_and_migration_plan.md)。
 - **自然语言采集**：用户描述意图 → LLM function calling 解析 → `/proc` PID 匹配 → 参数 clamp 安全范围 → 自动创建任务。
 - **可恢复执行流水线**：Task 保留兼容聚合状态，同时持久化 `collection_status` 与 `analysis_status`；每次下发创建唯一 `TaskAttempt`，采集成功后投递带租约的 `AnalysisJob`，结果重放不会重复写入。
 - **真实运行中取消**：Server 将取消指令通过心跳下发，Agent 终止采集进程组、持久化取消结果并安全重放；排队超时、Agent 失联和 Analyzer 租约过期均有确定性恢复路径。
 - **输入完整性门禁**：Analyzer 执行前校验制品可用性、登记大小与 SHA-256，并限制最大输入；只有仍持有租约的 Worker 才能提交结果。
-- **AI 开关分层降级**：`none` / `nlp-only` / `rca-only` / `full` 四级可切换，不配 API Key 时火焰图等核心功能不受影响，AI 自动降级为纯规则引擎。
+- **AI 开关分层降级**：不配 API Key 时采集、火焰图和 Evidence 工作台继续可用；确定性规则输出必须标为兼容基线，不能作为 AI 结果上报。
 - **eBPF 零侵入观测**：bpftrace 内核探针实时采集块设备 IO 延迟分布，不改代码、不重启服务。Web 端 ECharts histogram 绿→红渐变着色 + P50/P95/P99 分位估算。
 - **交互式火焰图 + TopN 联动**：D3 火焰图支持缩放、搜索、hover 详情；点击 TopN 柱状图的函数名，火焰图自动高亮对应栈帧。
 
@@ -207,9 +207,9 @@ flowchart LR
 
 Agent 启动 `bpftrace io_latency.bt -o io_latency.txt` → 脚本挂载 `kprobe:blk_mq_start_request` 记录提交时间戳 → 挂载 `kprobe:blk_account_io_done` 计算 `(nsecs - start) / 1000` μs 延迟 → `interval:s:1` 定时打印 histogram → Agent SIGTERM 终止 bpftrace → 解析 regex 提取区间计数 → 输出 `ebpf_metrics.json`（`{io_latency_us: {"[32,64)": 9, ...}}`）→ Web 端 EBPFHistogram 组件渲染 ECharts 柱状图 + P50/P95/P99 分位。
 
-### 3) 智能归因链路
+### 3) 兼容规则归因链路（不计作 AI）
 
-触发诊断 → 证据采集层从产物提取结构化数据（TopN 热点、占比、采样数、栈深度、IO P99、RSS 趋势）→ 候选生成层匹配 `rules.json` 生成候选原因 → 置信度校准层五维打分 → 低于阈值剪枝 → 高置信度候选 + 原始证据发给 LLM → Few-Shot + JSON Schema 硬约束 + tool_choice → 输出校验（Schema + evidence_refs 完整性）→ 失败自动重试 2 次 → 修复计划（紧急/高/中三级风险 + 预估工作量）→ 用户标注反馈回写校准层权重。
+触发兼容诊断 → 从产物提取结构化数据 → `rules.json` 生成候选 → 固定权重校准和排序 → 可选 LLM 在既有候选内整理输出 → 引用校验。候选、排名和默认结论均由规则链决定，因此该链只用于历史读取和离线控制组，不用于证明 AI 准确率。
 
 ### 4) 自然语言采集链路
 
@@ -242,7 +242,7 @@ class Collector(Protocol):
 
 ---
 
-## 任务级智能归因（兼容路径）
+## 任务级规则归因（兼容路径）
 
 ```
 ┌──────────┐    ┌───────────┐    ┌──────────┐    ┌────────┐    ┌──────────┐
@@ -266,27 +266,20 @@ class Collector(Protocol):
 
 **约束：** 每条 claim 必须带 `evidence_refs`；未配置 AI Key 时 → 规则引擎独立输出降级报告，火焰图等核心功能不受影响。
 
-该路径保留用于单个已完成 Task 的事后归因。跨服务事故统一进入 Case 调查链路，不再在这条兼容路径上继续扩展自动处置能力。
+该路径保留用于单个已完成 Task 的历史结果读取和离线规则基线。跨服务事故统一进入 Case/Evidence 调查链路，不再在这条兼容路径上扩展 AI 或自动处置能力。
 
-### AI 集群诊断控制层
+### Case/Evidence 调查控制层
 
-`/api/v1/diagnoses` 是独立于单个 Task 的可恢复诊断会话，覆盖自然语言意图、历史拓扑快照、候选假设、已有证据复用、受控探针、预算、单次审批、证据血缘和等级置信报告。模型负责理解、规划和解释；实际信息读取、采集与变更必须经过服务端注册表、Policy Engine 和独立执行边界。
+`/api/v1/cases` 是当前主线；`/api/v1/diagnoses` 仅保留旧规则结果的兼容读取。Pi Runtime 读取 canonical Evidence 和 Collector Catalog，由模型选择信息目标并提出 `CollectorProposal`；确定性 Supervisor 校验 schema、scope、capability、风险、审批、幂等与预算后，才创建唯一 `CollectionRequest -> Task`。
 
-当前轻量版由请求上下文提供服务实例与宿主机映射；没有可靠映射时进入 `NEEDS_SCOPE_CONFIRMATION`，不会向 Agent 扩散采集。后台扫描器使用持久化状态和短租约恢复会话，完成的探针通过 `diagnosis_step_id` 幂等关联，避免重复下发。
+每个 Case 默认最多创建 8 个实际采集请求、累计预留 240 秒，RuntimePolicy 只能收紧该上限。重复提案复用原 Request/Task 且不重复消耗预算；多 Worker 部署时，预算会在数据库事务中锁定 Case 后再次校验。模型分析必须引用 Evidence 的 projection hash 与具体字段/文本跨度，人工将 Evidence 标记为 `LOW_TRUST`、`EXCLUDED` 或恢复后，会使相关 AnalysisRun 失效或改变可引用状态。
 
-诊断结论包含 `cluster_assessment` 和贡献原因，会把目标实例、同宿主机实例和一跳下游实例的证据放在同一时间与拓扑范围内比较。模糊输入不会扩大采集范围；模型只能选择 Registry 中的 Probe 或 Action，授权、执行和验证由确定性组件完成。
+未配置 Pi 时系统返回 `AI_RUNTIME_NOT_CONFIGURED`，仍可人工采集、预览、下载和治理 Evidence，但不会回退到规则根因排名。自动恢复和旧因果归因不属于当前产品主线。
 
-产品目标是生产级、多租户、多集群服务；当前三节点 Hyper-V 集群只是首个实验 `EnvironmentProfile`。授权体系借鉴成熟编码 Agent 的“模型规划、Harness 控制、Sandbox 强制、越界审批”机制：AI 可在明确 Grant 内自动读取信息和执行经过注册、预检查、可回滚、可验证的低风险修复，任何越界或信息不足都会升级审批或拒绝。完整设计见 [`docs/ai_authorization_and_tooling.md`](docs/ai_authorization_and_tooling.md)。
-
-代码已经提供 `/api/v1/identity`、`/api/v1/sources`、`/api/v1/sources/{source_id}/query`、`/api/v1/grants`、`/api/v1/policy/evaluate-source` 和 `/api/v1/actions`。Source Gateway 使用服务端派生主体、持久化 Grant、短期 Capability Token 和原子查询预算，输出带查询指纹、原始/投影哈希与策略轨迹的 EvidenceEnvelope；内置信息源不会返回凭据引用。Action Registry 已包含少量受限执行动作，但只允许逐动作、逐环境晋级，不代表通用生产自治。授权与执行约束见 [`docs/ai_authorization_and_tooling.md`](docs/ai_authorization_and_tooling.md)。
-
-Case 协作层已经提供 `/api/v1/cases` 聚合对象、租户隔离的不可变时间线、五块首页摘要、消息与范围修正、乐观版本控制，以及 Pause/Resume/Stop。关联的 DiagnosisSession 会随 Case 暂停和恢复；Stop 会先取消关联诊断，再原子撤销该租户下绑定此 Case 的有效 Grant，避免后台调查或信息读取在用户停止后继续。Case 启动诊断前会持久化 `case-context.v1`；模型调用审计只保存 Provider、模型快照、Prompt/Schema 版本、Token、耗时、状态和响应哈希，不保存原始思维链。候选原因已规范化为租户级 HypothesisNode/Edge，保留开放集 `OTHER_UNKNOWN`，并通过 InvestigationIteration 记录候选变化、可行动作、确定性 Policy、成本、结果和停止判断；硬约束失败的动作不会进入信息增益排序。当前租户由服务端 `MINI_DROP_API_TENANT_ID` 绑定，客户端请求体不能自行切换租户。
-
-AI 的目标是持续推进并验证恢复的事故 Case。当前 90 轮正式评测的运行级严格根因命中为 48.9%，正确拒答、证据引用和运行轨迹较完整，但持续补证、根因实体、复合故障和自主恢复仍需按实施方案推进。完整设计和分阶段门禁见 [`docs/autonomous_ops_agent_implementation_plan.md`](docs/autonomous_ops_agent_implementation_plan.md)。在运行正式对比实验前，可先检查测试集是否存在答案泄漏、不可执行 Fixture 或环境缺失的数据源：
+AI 的目标是在受控范围和预算内选择高信息增益 Collector，形成 canonical Evidence，并输出带字段引用的事实、冲突、限制和下一信息目标。历史 90 轮评测的 48.9% 是旧规则归因链的运行级控制组结果，不是当前 AI 正确率；在 `collector_agent_v1` 达到独立 holdout 数量和安全门禁前，项目不声明正式 AI 准确率。当前架构基线与分阶段门禁见 [`docs/ai_collector_architecture_and_migration_plan.md`](docs/ai_collector_architecture_and_migration_plan.md)。新的本地评测可先验证公私隔离、Catalog/Evidence hash 和评分合同：
 
 ```bash
-python scripts/audit_diagnosis_dataset.py /path/to/dataset \
-  --output-dir reports/eval/dataset-audit
+uv run python scripts/run_collector_agent_eval.py --validate-only
 ```
 
 ---
@@ -312,7 +305,7 @@ PENDING → RUNNING → UPLOADING → ANALYZING → DONE
 | 页面 | 路由 | 功能 |
 |------|------|------|
 | 任务面板 | `/` | 统计卡片、NLP 输入、任务搜索/排序/删除、Agent 列表、SSE 实时通知 |
-| 任务详情 | `/task/:id` | D3 交互式火焰图 + ECharts TopN 联动、eBPF IO Histogram、状态时间线、AI 归因 |
+| 任务详情 | `/task/:id` | D3 交互式火焰图 + ECharts TopN 联动、eBPF IO Histogram、状态时间线、兼容规则归因 |
 | AI 集群诊断 | `/ai-diagnosis` | 自然语言诊断、拓扑目标、假设、受控探针审批、证据血缘与等级置信报告 |
 | AI Case 工作台 | `/ai-cases` | 创建 Case、五块恢复摘要、消息/修正、Pause/Resume/Stop、候选/迭代、时间线与模型审计 |
 | 诊断历史 | `/diagnoses` | 全量诊断记录、置信度筛选、搜索过滤 |
@@ -585,7 +578,7 @@ MINI_DROP_AI_ENABLED=rca-only  → nlp=off, rca=on,  summarize=off
 MINI_DROP_AI_ENABLED=full      → nlp=on,  rca=on,  summarize=on
 ```
 
-不配 API Key 时核心采集/火焰图功能不受影响，AI 功能自动降级为规则引擎。
+不配模型 Runtime 时核心采集、火焰图和 Evidence 工作台不受影响；AI 调查明确显示未配置，不会降级成规则引擎并伪装为 AI。
 
 ### MCP 能力接入
 
@@ -653,7 +646,7 @@ mini-drop/
 │   ├── grpc_server.py    gRPC 后台线程启动（共进程）
 │   ├── grpc_services/    gRPC 服务实现
 │   ├── nlp/              自然语言意图解析 + 进程 PID 匹配 + AI 总结 + 追问
-│   ├── rca/              5 层归因引擎（evidence → candidates → calibrator → LLM → repair）
+│   ├── rca/              兼容规则基线（待新 Evidence 主链完成后迁出生产包）
 │   ├── diagnosis/        集群诊断会话（intent → topology → hypotheses → probes → evidence）
 │   ├── models.py         SQLAlchemy ORM 模型
 │   ├── sql_repository.py 数据库仓储层（读写分离 + TTL 缓存 + 级联删除）
@@ -683,9 +676,9 @@ mini-drop/
 
 - **gRPC 契约优先** — proto 是 Server ↔ Agent 唯一契约来源
 - **采集器即插件** — 统一 `Collector(Protocol)` 接口，Server 不绑定工具
-- **LLM 工具约束** — AI 只能调预定义 tool，不做自由决策；输出过 Schema + 引用校验
-- **归因可追溯** — 每条 claim 带 `evidence_refs`，指向原始证据字段
-- **多机因果区分** — 目标实例、同宿主实例和下游实例一起比较，避免把最先告警节点误判为根因
+- **LLM 工具约束** — AI 只能调用预定义 Tool；采集提案和结论必须通过 Schema、Policy 与引用校验
+- **结论可追溯** — 每条 claim 带 `evidence_refs`，指向原始证据字段
+- **多机 Evidence 对比** — 在同一时间与身份范围内比较目标、同宿主和下游 Evidence，不自动生成根因排名
 - **人机协同执行** — 模糊自然语言只生成带注释的可审核命令，高风险变更始终人工确认
 - **状态机驱动** — `ALLOWED_TRANSITIONS` 白名单，每步迁移必带 `reason` + `actor`
 - **降级友好** — AI 不可用时核心功能不受影响
@@ -715,6 +708,8 @@ bpftrace 对演示场景足够——Shell 一行命令即可挂载内核探针�
 ---
 
 ## Agent Runtime 扩展指南
+
+真实 Linux 快照评测使用 `scripts/capture_live_collector_suite.py` 在隔离节点上运行有界负载并冻结 `/proc`、日志、TCP 探测和 `py-spy` 证据。它会验证故障进程已经清理，再由 `build` 子命令将公共 Evidence 与私有 Oracle 分目录写入；同一会话生成的数据只能作为开发评测，不能冒充独立 holdout。多轮结果使用 `scripts/aggregate_collector_agent_eval.py` 聚合为 JSON/CSV，同时保留样本量与 Wilson 区间。
 
 - [AI 功能介绍、能力边界与设计方案](docs/ai-feature-capability-and-design.md)
 - [Canonical Agent Tool Catalog](docs/agent-tool-catalog.md)

@@ -161,6 +161,7 @@ export default function OperationsOverview() {
   const controlsPaused = data.controls.some((item) => item.enabled && /pause|stop|red/i.test(item.control_name || item.name || ""));
   const analyzerHealthy = checks.analyzer?.status === "ok";
   const runtimeHealthy = data.runtime?.ready === true;
+  const aiReady = data.runtime?.ai_ready === true || (data.runtime?.mode === "pi" && runtimeHealthy);
   const overallHealthy = data.health?.healthy && runtimeHealthy && derived.online.length > 0;
   const activity = [...data.logs].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, 8);
 
@@ -206,7 +207,7 @@ export default function OperationsOverview() {
           </Card>
         </Col>
         <Col xs={24} xl={9}>
-          <Card className={styles.primaryCard} title={<Space><RobotOutlined />Agent 自治能力</Space>} extra={<Tag color={runtimeHealthy ? "purple" : "red"}>{data.runtime?.mode || "unknown"}</Tag>}>
+          <Card className={styles.primaryCard} title={<Space><RobotOutlined />Agent 采集能力</Space>} extra={<Tag color={aiReady ? "purple" : "default"}>{aiReady ? "AI 已就绪" : "AI 未配置"}</Tag>}>
             <div className={styles.runtimeIdentity}>
               <div><span>Runtime</span><strong>{data.runtime?.runtime_type || "—"}</strong></div>
               <div><span>版本</span><strong>{data.runtime?.runtime_version || flags.pi_runtime_version || "—"}</strong></div>

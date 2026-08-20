@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from server.app.database import init_db, reset_engine
 from server.app.main import app, repo
 from server.app.models import Base
+from server.app.runtime_services import evidence_analysis_service
 from server.app.schemas import CreateTaskRequest
 from server.app.state_machine import Actor, TaskStatus
 
@@ -193,3 +194,252 @@ def test_excluding_supporting_evidence_appends_downgraded_conclusion(client: Tes
     assert downgraded["state"] == "INSUFFICIENT_EVIDENCE"
     assert downgraded["verifier_version"] == "causal-report-verifier.v2-revalidation"
     assert downgraded["claim_evidence_bindings"][0]["verifier_result"] == "EVIDENCE_EXCLUDED"
+
+
+def test_case_evidence_detail_preview_and_download_contract(client: TestClient):
+    task_id = _done_task_with_artifact()
+    case = _create_case(client)
+    attached = client.post(
+        f"/api/v1/cases/{case['case_id']}/attachments",
+        json={"references": [{"type": "task", "id": task_id}]},
+    ).json()["data"]["items"][0]
+    evidence_id = attached["evidence_ids"][0]
+
+    detail = client.get(f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}")
+    assert detail.status_code == 200, detail.text
+    detail_data = detail.json()["data"]
+    assert detail_data["collector_spec"]["collector_id"] == "sys_metrics"
+    assert detail_data["projections"][0]["projection_hash"]
+    assert detail_data["analyses"] == []
+
+    preview = client.get(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/preview",
+        params={"max_bytes": 65536},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["data"]["projection_hash"]
+    assert preview.json()["data"]["content"] is not None
+
+    raw = client.get(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/download",
+        params={"format": "raw"},
+    )
+    assert raw.status_code == 200, raw.text
+    assert raw.content
+    bundle = client.get(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/download",
+        params={"format": "bundle"},
+    )
+    assert bundle.status_code == 200, bundle.text
+    assert bundle.headers["content-type"].startswith("application/zip")
+
+
+def test_evidence_analysis_requires_valid_field_citation_and_review_marks_stale(client: TestClient):
+    task_id = _done_task_with_artifact()
+    case = _create_case(client)
+    attached = client.post(
+        f"/api/v1/cases/{case['case_id']}/attachments",
+        json={"references": [{"type": "task", "id": task_id}]},
+    ).json()["data"]["items"][0]
+    evidence_id = attached["evidence_ids"][0]
+    run = evidence_analysis_service.create_run(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
+        mode="SINGLE", explicit_single=True,
+    )
+    projection = repo.list_evidence_projections(case["case_id"], "tenant-a", evidence_id)[-1]
+
+    invalid = client.post(
+        "/internal/agent/tools/evidence-analysis",
+        json={
+            "case_id": case["case_id"], "analysis_run_id": run["analysis_run_id"],
+            "facts": [{
+                "claim": "CPU 使用率较高",
+                "citations": [{
+                    "evidence_id": evidence_id,
+                    "projection_hash": projection["projection_hash"],
+                    "field_path": "does.not.exist",
+                }],
+            }],
+            "runtime_policy": {"side_effect_policy": "READ_ONLY"},
+        },
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert invalid.status_code == 409
+    assert "FIELD_PATH_NOT_FOUND" in invalid.json()["detail"]
+
+    completed = client.post(
+        "/internal/agent/tools/evidence-analysis",
+        json={
+            "case_id": case["case_id"], "analysis_run_id": run["analysis_run_id"],
+            "facts": [{
+                "claim": "该证据已成功形成确定性摘要",
+                "citations": [{
+                    "evidence_id": evidence_id,
+                    "projection_hash": projection["projection_hash"],
+                    "field_path": "summary",
+                }],
+            }],
+            "limitations": ["单一时间窗"],
+            "runtime_policy": {"side_effect_policy": "READ_ONLY"},
+        },
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["data"]["status"] == "COMPLETED"
+
+    review = client.post(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
+        json={"evidence_id": evidence_id, "decision": "LOW_TRUST", "reason": "sample window too short"},
+    )
+    assert review.status_code == 200, review.text
+    analyses = client.get(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/analyses",
+    ).json()["data"]["items"]
+    assert analyses[0]["input_state"] == "STALE_INPUT"
+
+
+def test_evidence_analysis_reuses_identical_pinned_input(client: TestClient):
+    task_id = _done_task_with_artifact()
+    case = _create_case(client)
+    evidence_id = client.post(
+        f"/api/v1/cases/{case['case_id']}/attachments",
+        json={"references": [{"type": "task", "id": task_id}]},
+    ).json()["data"]["items"][0]["evidence_ids"][0]
+
+    first = evidence_analysis_service.create_run(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
+        mode="SINGLE", model_config_id="model-a", explicit_single=True,
+    )
+    duplicate = evidence_analysis_service.create_run(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
+        mode="SINGLE", model_config_id="model-a", explicit_single=True,
+    )
+
+    assert first["reused"] is False
+    assert duplicate["reused"] is True
+    assert duplicate["analysis_run_id"] == first["analysis_run_id"]
+    assert duplicate["input_fingerprint"] == first["input_fingerprint"]
+    assert len(repo.list_evidence_analysis_runs(case["case_id"], "tenant-a")) == 1
+
+
+def test_evidence_analysis_rejects_completion_after_review_revision(client: TestClient):
+    task_id = _done_task_with_artifact()
+    case = _create_case(client)
+    evidence_id = client.post(
+        f"/api/v1/cases/{case['case_id']}/attachments",
+        json={"references": [{"type": "task", "id": task_id}]},
+    ).json()["data"]["items"][0]["evidence_ids"][0]
+    run = evidence_analysis_service.create_run(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
+        mode="SINGLE", explicit_single=True,
+    )
+    projection = repo.list_evidence_projections(case["case_id"], "tenant-a", evidence_id)[-1]
+
+    review = client.post(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
+        json={"evidence_id": evidence_id, "decision": "TRUSTED", "reason": "human verified"},
+    )
+    assert review.status_code == 200, review.text
+
+    with pytest.raises(ValueError, match="ANALYSIS_INPUT_STALE"):
+        evidence_analysis_service.complete_run(
+            analysis_run_id=run["analysis_run_id"], case_id=case["case_id"],
+            tenant_id="tenant-a", facts=[{
+                "claim": "old model result",
+                "citations": [{
+                    "evidence_id": evidence_id,
+                    "projection_hash": projection["projection_hash"],
+                    "field_path": "summary",
+                }],
+            }],
+        )
+    stored = evidence_analysis_service.get_run(
+        run["analysis_run_id"], case["case_id"], "tenant-a",
+    )
+    assert stored["status"] == "QUEUED"
+    assert stored["input_state"] == "STALE_INPUT"
+
+
+def test_evidence_analysis_rejects_changed_projection_and_accepts_array_paths(client: TestClient):
+    task_id = _done_task_with_artifact()
+    case = _create_case(client)
+    evidence_id = client.post(
+        f"/api/v1/cases/{case['case_id']}/attachments",
+        json={"references": [{"type": "task", "id": task_id}]},
+    ).json()["data"]["items"][0]["evidence_ids"][0]
+    projection = repo.upsert_evidence_projection(
+        evidence_id=evidence_id, case_id=case["case_id"], tenant_id="tenant-a",
+        projection_kind="ARRAY_TEST", projection_version=2,
+        content={"items": [{"value": "cpu-hot"}]},
+    )
+    run = evidence_analysis_service.create_run(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
+        mode="SINGLE", explicit_single=True,
+    )
+    completed = evidence_analysis_service.complete_run(
+        analysis_run_id=run["analysis_run_id"], case_id=case["case_id"],
+        tenant_id="tenant-a", facts=[{
+            "claim": "top item is CPU hot",
+            "citations": [{
+                "evidence_id": evidence_id,
+                "projection_hash": projection["projection_hash"],
+                "field_path": "projection.items[0].value",
+                "quote": "cpu-hot", "start": 0, "end": 7,
+            }],
+        }],
+    )
+    assert completed["status"] == "COMPLETED"
+
+    next_run = evidence_analysis_service.create_run(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
+        mode="SINGLE", prompt_version="evidence-analysis.v2", explicit_single=True,
+    )
+    repo.upsert_evidence_projection(
+        evidence_id=evidence_id, case_id=case["case_id"], tenant_id="tenant-a",
+        projection_kind="ARRAY_TEST", projection_version=2,
+        content={"items": [{"value": "io-hot"}]},
+    )
+    with pytest.raises(ValueError, match="ANALYSIS_INPUT_STALE"):
+        evidence_analysis_service.complete_run(
+            analysis_run_id=next_run["analysis_run_id"], case_id=case["case_id"],
+            tenant_id="tenant-a", facts=[{
+                "claim": "stale CPU result",
+                "citations": [{
+                    "evidence_id": evidence_id,
+                    "projection_hash": projection["projection_hash"],
+                    "field_path": "items[0].value",
+                }],
+            }],
+        )
+
+
+def test_explicit_single_analysis_can_explain_excluded_evidence(client: TestClient):
+    task_id = _done_task_with_artifact()
+    case = _create_case(client)
+    evidence_id = client.post(
+        f"/api/v1/cases/{case['case_id']}/attachments",
+        json={"references": [{"type": "task", "id": task_id}]},
+    ).json()["data"]["items"][0]["evidence_ids"][0]
+    review = client.post(
+        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
+        json={"evidence_id": evidence_id, "decision": "EXCLUDED", "reason": "known outlier"},
+    )
+    assert review.status_code == 200, review.text
+    run = evidence_analysis_service.create_run(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
+        mode="SINGLE", explicit_single=True,
+    )
+    projection = repo.list_evidence_projections(case["case_id"], "tenant-a", evidence_id)[-1]
+    result = evidence_analysis_service.complete_run(
+        analysis_run_id=run["analysis_run_id"], case_id=case["case_id"],
+        tenant_id="tenant-a", facts=[{
+            "claim": "excluded evidence remains independently explainable",
+            "citations": [{
+                "evidence_id": evidence_id,
+                "projection_hash": projection["projection_hash"],
+                "field_path": "summary",
+            }],
+        }],
+    )
+    assert run["input_state"] == "EXCLUDED_INPUT"
+    assert result["status"] == "COMPLETED"

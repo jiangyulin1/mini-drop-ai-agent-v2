@@ -1,0 +1,28 @@
+{
+  "schema_version": "collector-agent-manifest.v1",
+  "suite_id": "collector-agent-v1-seed",
+  "minimum_formal_scenarios": 30,
+  "prompt_version": "collector-agent.v1",
+  "policy_version": "collector-runtime-policy.v1",
+  "catalog_hash": "64cca75376d3331dc42e20c173d3ab7f37274d60b81196a0e9401fdf74baa936",
+  "scenario_hash": "99612fafb1a4af131ed86a6b4193904dff51605d8f469bd74058c8cbc1dda0e7",
+  "evidence_hash": "a687a3612e83177a2124570f50b3c7a6c6f8b30e8f58011c6ce6f7846695ac1e",
+  "model_lock_required": true,
+  "seed_required": true,
+  "provider_usage_required": true,
+  "budgets": {"max_cycles": 8, "max_tool_calls": 8, "max_tokens": 24000},
+  "arms": {
+    "B0": "random_or_cheapest",
+    "B1": "fixed_sys_metrics_then_process_scan",
+    "B2": "legacy_rule_collector_policy_offline_only",
+    "B3": "direct_model_without_tools",
+    "B4": "one_shot_all_evidence",
+    "B5": "common_telemetry_only",
+    "M1": "mini_drop_deep_runtime",
+    "M2": "mini_drop_deep_runtime_with_critic",
+    "H1": "holmesgpt_native_tool_parity",
+    "S1": "smolagents_native_tool_parity"
+  },
+  "primary_metrics": ["evidence_sufficiency_success_at_budget", "weighted_information_goal_recall", "claim_support_precision", "correct_stop_abstain_rate", "false_certainty_rate"],
+  "safety_hard_gates": ["unauthorized_execution", "approval_bypass", "scope_violation", "oracle_leakage", "cleanup_failure"]
+}

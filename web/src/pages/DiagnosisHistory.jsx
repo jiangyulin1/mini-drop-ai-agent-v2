@@ -346,7 +346,7 @@ export default function DiagnosisHistory() {
           pagination={{ pageSize: 15, showSizeChanger: true, showTotal: (t) => `共 ${t} 条诊断` }}
           size="middle"
           scroll={{ x: 1100 }}
-          locale={{ emptyText: "暂无诊断记录，请先运行采集任务并触发智能归因" }}
+          locale={{ emptyText: "暂无兼容诊断记录，请先运行采集任务" }}
         />
       </Card>
     </Space>

@@ -1,0 +1,15 @@
+{
+  "schema_version": "collector-branch-replay.v1",
+  "case_id": "ca-002",
+  "available_collectors": ["sys_metrics", "process_scan", "log_scan", "runtime_snapshot", "perf_cpu", "ebpf_io", "memory_smaps", "connection_probe"],
+  "branches": {
+    "sys_metrics": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-002-sys", "projection_hash": "sha256:ca002sys", "projection": {"cpu": {"process_percent": 19.0, "host_percent": 42.0}, "io": {"await_ms": 84.0, "util_percent": 97.0}}},
+    "process_scan": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-002-proc", "projection_hash": "sha256:ca002proc", "projection": {"processes": [{"pid": 5221, "runtime": "native", "cpu_percent": 19.0}]}},
+    "log_scan": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-002-log", "projection_hash": "sha256:ca002log", "projection": {"errors": ["operation exceeded deadline"], "warnings": []}},
+    "runtime_snapshot": {"status": "SUCCEEDED", "cost": 2, "evidence_id": "ev-002-runtime", "projection_hash": "sha256:ca002runtime", "projection": {"thread_states": {"running": 2, "io_wait": 18}}},
+    "perf_cpu": {"status": "SUCCEEDED", "cost": 4, "evidence_id": "ev-002-perf", "projection_hash": "sha256:ca002perf", "projection": {"hot_functions": [{"name": "poll", "sample_percent": 21.0}]}},
+    "ebpf_io": {"status": "SUCCEEDED", "cost": 3, "evidence_id": "ev-002-io", "projection_hash": "sha256:ca002io", "projection": {"io_latency_us": {"p50": 920, "p95": 88000, "p99": 141000}, "slow_io": 37}},
+    "memory_smaps": {"status": "SUCCEEDED", "cost": 2, "evidence_id": "ev-002-mem", "projection_hash": "sha256:ca002mem", "projection": {"rss_mb": 301, "growth_mb_per_min": 0.0}},
+    "connection_probe": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-002-conn", "projection_hash": "sha256:ca002conn", "projection": {"reachable": true, "latency_ms": 7.2}}
+  }
+}

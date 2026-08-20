@@ -44,6 +44,11 @@ class CaseContextSnapshot(StrictModel):
     context_snapshot_id: Optional[str] = None
     runtime_generation: int = 0
     runtime_session_id: str = ""
+    collection_proposals: list[dict[str, Any]] = Field(default_factory=list)
+    collection_requests: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_analyses: list[dict[str, Any]] = Field(default_factory=list)
+    information_goals: list[str] = Field(default_factory=list)
+    # Deprecated compatibility fields stay empty in production Collector Agent contexts.
     hypotheses: list[dict[str, Any]] = Field(default_factory=list)
     evidence_summary: list[dict[str, Any]] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)

@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import Field
 
+from mini_drop_contracts import list_collector_specs
 from server.app.diagnosis.schemas import StrictModel
 
 QUERY_RISK = "READ_LOW"
@@ -31,49 +32,26 @@ def _schema(props: dict[str, Any]) -> dict[str, Any]:
     return {"type": "object", "additionalProperties": False, "properties": props}
 
 
-QUERY_OPERATIONS: tuple[QueryOperation, ...] = (
-    QueryOperation(
-        operation_id="process.list",
-        display_name="进程清单",
-        description="读取 Worker 上全部进程候选（PID、命令行、CPU、内存）。",
-        collector_id="process_scan",
-        parameter_schema=_schema({}),
-        default_duration_sec=2,
-        default_sample_rate=1,
-    ),
-    QueryOperation(
-        operation_id="system.metrics",
-        display_name="系统指标",
-        description="读取主机与目标进程 CPU、负载、线程、FD、网络等指标。",
-        collector_id="sys_metrics",
-        parameter_schema=_schema({
-            "target_ref": {"type": "string", "maxLength": 256},
-        }),
-        default_duration_sec=15,
-        default_sample_rate=11,
-    ),
-    QueryOperation(
-        operation_id="service.connection",
-        display_name="服务连通性",
-        description="对受控目标端点执行 TCP/HTTP 只读连通性探测。",
-        collector_id="connection_probe",
-        parameter_schema=_schema({
-            "target_ref": {"type": "string", "maxLength": 256},
-        }),
-        default_duration_sec=10,
-        default_sample_rate=1,
-    ),
-    QueryOperation(
-        operation_id="service.logs",
-        display_name="服务日志",
-        description="读取目标进程日志尾部并提取错误/警告模式。",
-        collector_id="log_scan",
-        parameter_schema=_schema({
-            "target_ref": {"type": "string", "maxLength": 256},
-        }),
-        default_duration_sec=2,
-        default_sample_rate=1,
-    ),
+def _operation_from_spec(spec: Any) -> QueryOperation:
+    parameters = {} if spec.semantic_operation == "process.list" else {
+        "target_ref": {"type": "string", "maxLength": 256},
+    }
+    return QueryOperation(
+        operation_id=str(spec.semantic_operation),
+        display_name=spec.display_name,
+        description=spec.description,
+        collector_id=spec.collector_id,
+        risk="READ_LOW" if spec.risk_level == "R1" else "READ_ELEVATED",
+        parameter_schema=_schema(parameters),
+        default_duration_sec=spec.default_duration,
+        default_sample_rate=spec.default_sample_rate,
+    )
+
+
+QUERY_OPERATIONS: tuple[QueryOperation, ...] = tuple(
+    _operation_from_spec(spec)
+    for spec in list_collector_specs()
+    if spec.semantic_operation
 )
 
 

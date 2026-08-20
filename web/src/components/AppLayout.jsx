@@ -39,10 +39,10 @@ const { useBreakpoint } = Grid;
 
 const NAV_ITEMS = [
   { key: "/", icon: <DashboardOutlined />, label: "总览", title: "总览 / Overview", description: "系统健康、调查态势与待处理事项" },
-  { key: "/cases", icon: <RobotOutlined />, label: "事件调查", title: "事件调查 / Cases", description: "以 Incident Case 为中心持续调查" },
+  { key: "/cases", icon: <RobotOutlined />, label: "AI Evidence 调查", title: "AI Evidence 调查 / Cases", description: "受控采集、证据分析与人工治理" },
   { key: "/tasks", icon: <FileSearchOutlined />, label: "任务与证据", title: "任务与证据", description: "采集任务、状态机和 Artifact" },
   { key: "/agents", icon: <CloudServerOutlined />, label: "节点与 Agent", title: "节点与 Agent", description: "Control、Worker 与能力差异" },
-  { key: "/diagnoses", icon: <ClockCircleOutlined />, label: "诊断历史", title: "诊断历史", description: "查看已完成的归因记录" },
+  { key: "/diagnoses", icon: <ClockCircleOutlined />, label: "旧诊断记录", title: "旧诊断记录", description: "只读查看历史规则归因结果" },
   { key: "/audit", icon: <AuditOutlined />, label: "审计与安全", title: "审计与安全", description: "关键操作、状态变化和安全事件" },
   { key: "/runtime", icon: <SettingOutlined />, label: "Runtime 与设置", title: "Runtime 与设置", description: "Pi Runtime、功能边界和运行配置" },
   { key: "/about", icon: <InfoCircleOutlined />, label: "系统说明", title: "关于 Mini-Drop Agent", description: "证据驱动与有监督自治设计" },
@@ -109,6 +109,7 @@ export default function AppLayout() {
   const activeCases=global.cases.filter((item)=>isActiveCase(item.state));
   const approvals=activeCases.filter((item)=>item.state==="WAITING_APPROVAL"||item.summary?.need_you?.required).length;
   const controlTriggered=Array.isArray(global.controls)&&global.controls.some((item)=>item.enabled&&/pause|stop|red/i.test(item.control_name||item.name||""));
+  const aiStatus=global.runtime?.ai_ready?"AI 已就绪":global.runtime?.mode==="deterministic"?"AI 未配置":"AI 异常";
   const commands=NAV_ITEMS.filter((item)=>!commandSearch||`${item.label} ${item.title} ${item.description}`.toLowerCase().includes(commandSearch.toLowerCase()));
 
   const renderSidebar=(compact=false)=><div className={styles.sidebarInner}>
@@ -124,7 +125,7 @@ export default function AppLayout() {
       <Drawer open={isMobile&&mobileMenuOpen} onClose={()=>setMobileMenuOpen(false)} placement="left" width={264} closable={false} styles={{body:{padding:0,background:"#0b1220"}}}>{renderSidebar(false)}</Drawer>
       <Layout className={styles.mainLayout}>
         <Header className={styles.header}><div className={styles.headerMain}>{isMobile&&<Button type="text" icon={<MenuUnfoldOutlined/>} aria-label="打开导航菜单" onClick={()=>setMobileMenuOpen(true)}/>}<div className={styles.pageIdentity}><strong>{currentMeta.title}</strong>{!isCaseWorkspace&&<span>{currentMeta.description}</span>}</div></div><div className={styles.headerActions}><Button size="small" type="text" icon={<SearchOutlined/>} onClick={()=>setCommandOpen(true)} aria-label="打开命令面板"><span className={styles.actionLabel}>命令</span><kbd>⌘K</kbd></Button><Tooltip title={darkMode?"切换亮色模式":"切换暗色模式"}><Button size="small" type="text" aria-label={darkMode?"切换亮色模式":"切换暗色模式"} icon={darkMode?<BulbFilled className={styles.themeIconActive}/>:<BulbOutlined/>} onClick={toggleDarkMode}/></Tooltip></div></Header>
-        <div className={styles.globalBar} aria-label="全局运行状态"><span><Badge status={global.health?.healthy?"success":"error"}/><b>{global.cases[0]?.environment||"production"}</b></span><Tooltip title="Server / Database / Storage / Analyzer 综合健康"><span><DatabaseOutlined/><b>服务 {global.health?.healthy?"健康":"异常"}</b></span></Tooltip><span><RobotOutlined/><b>Pi {global.runtime?.ready?"ready":"not ready"}</b></span><span><CloudServerOutlined/><b>Worker {onlineWorkers}/{effectiveWorkers.length}</b></span><span><FileSearchOutlined/><b>Case {activeCases.length}</b></span><span className={approvals?styles.globalAttention:""}><SafetyCertificateOutlined/><b>审批 {approvals}</b></span><button type="button" onClick={sseConnected?undefined:reconnect} className={styles.streamButton}><WifiOutlined/><b>{sseConnected?"实时已连接":connectionState==="reconnecting"?"正在重连":"轮询降级"}</b></button><span className={controlTriggered?styles.globalDanger:""}><ApiOutlined/><b>{controlTriggered?"Red Button 已触发":"全局控制正常"}</b></span><button type="button" onClick={()=>goTo("/settings")}><SafetyCertificateOutlined/><b>{global.user?.role||"未认证"}</b></button></div>
+        <div className={styles.globalBar} aria-label="全局运行状态"><span><Badge status={global.health?.healthy?"success":"error"}/><b>{global.cases[0]?.environment||"production"}</b></span><Tooltip title="Server / Database / Storage / Analyzer 综合健康"><span><DatabaseOutlined/><b>服务 {global.health?.healthy?"健康":"异常"}</b></span></Tooltip><span><RobotOutlined/><b>{aiStatus}</b></span><span><CloudServerOutlined/><b>Worker {onlineWorkers}/{effectiveWorkers.length}</b></span><span><FileSearchOutlined/><b>Case {activeCases.length}</b></span><span className={approvals?styles.globalAttention:""}><SafetyCertificateOutlined/><b>审批 {approvals}</b></span><button type="button" onClick={sseConnected?undefined:reconnect} className={styles.streamButton}><WifiOutlined/><b>{sseConnected?"实时已连接":connectionState==="reconnecting"?"正在重连":"轮询降级"}</b></button><span className={controlTriggered?styles.globalDanger:""}><ApiOutlined/><b>{controlTriggered?"Red Button 已触发":"全局控制正常"}</b></span><button type="button" onClick={()=>goTo("/settings")}><SafetyCertificateOutlined/><b>{global.user?.role||"未认证"}</b></button></div>
         <Content id="main-content" role="main" className={isCaseWorkspace?styles.workspaceContent:styles.content}><ErrorBoundary key={location.pathname}><Outlet/></ErrorBoundary></Content>
       </Layout>
     </Layout>

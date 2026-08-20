@@ -113,8 +113,8 @@ describe("AIDiagnosis workspace", () => {
       revisions: { case_command: 1, control: 1, scope: 1, plan: 0 },
       case: CASE,
       engine: { state: "IDLE" },
-      plan: {}, campaign: {}, executions: [], evidence: [], causal_graph: {},
-      evidence_gaps: [], conclusion: null, recommendations: [], messages: [],
+      plan: {}, campaign: {}, collection_proposals: [], collection_requests: [],
+      evidence: [], evidence_analyses: [], messages: [],
       last_event_seq: 0,
     });
     getCaseCurrentUnderstanding.mockResolvedValue({
@@ -142,8 +142,8 @@ describe("AIDiagnosis workspace", () => {
 
     expect((await screen.findAllByText("service-x CPU 飙高")).length).toBeGreaterThan(0);
     expect(await screen.findByTestId("canonical-workspace")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /调查计划/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /因果链与结论/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /信息目标/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /受引用分析/ })).toBeInTheDocument();
     expect(await screen.findByText("设置诊断范围")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看 Worker 状态" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /更多/ })).toBeInTheDocument();
@@ -151,9 +151,9 @@ describe("AIDiagnosis workspace", () => {
     expect(screen.getByRole("button", { name: "设置与检测" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /范围与服务关系/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^诊断数据$/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /能力与准确率/ }));
-    expect(await screen.findByText(/严格根因准确率 80%/)).toBeInTheDocument();
-    expect(screen.getByText(/连续两次通过才判定恢复/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /能力与评测状态/ }));
+    expect(await screen.findByText(/当前没有可用于对外声明的 AI 正确率/)).toBeInTheDocument();
+    expect(screen.getByText(/规则不再生成在线根因候选或排名/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /关\s*闭/ }));
     expect(screen.getByRole("button", { name: /发送并分析/ })).toBeDisabled();
 
@@ -162,8 +162,8 @@ describe("AIDiagnosis workspace", () => {
     expect(screen.getByLabelText("worker1 手动 PID")).toBeInTheDocument();
     expect(screen.getByText("服务关系")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /诊断数据台/ }));
-    expect(await screen.findByRole("heading", { name: "诊断数据台" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Evidence 数据台/ }));
+    expect(await screen.findByRole("heading", { name: "Evidence 数据台" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /新建多机采集/ })).toBeInTheDocument();
 
     await waitFor(() => expect(getCaseWorkspace).toHaveBeenCalledWith(CASE.case_id));

@@ -204,7 +204,7 @@ class TestTaskKinds:
         assert any(item["key"] == "connection_probe" for item in data["items"])
         perf = next(item for item in data["items"] if item["key"] == "perf_cpu")
         assert perf["defaults"]["sample_rate"] == 99
-        assert perf["parameter_schema"]["duration_sec"]["maximum"] == 120
+        assert perf["parameter_schema"]["duration_sec"]["maximum"] == 60
         assert perf["presentation"]["flamegraph"] is True
 
     def test_task_kinds_filter_by_agent_capability(self, client: TestClient):

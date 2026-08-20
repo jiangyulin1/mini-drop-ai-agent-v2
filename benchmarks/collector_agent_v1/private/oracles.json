@@ -1,0 +1,74 @@
+{
+  "schema_version": "collector-agent-oracles.v1",
+  "oracles": [
+    {
+      "case_id": "ca-001",
+      "oracle_tokens": ["fixture_secret_a17", "hidden_class_alpha"],
+      "information_goals": [
+        {"goal_id": "goal-a", "weight": 0.3, "satisfied_by_collectors": ["sys_metrics"]},
+        {"goal_id": "goal-b", "weight": 0.7, "satisfied_by_collectors": ["pyspy", "perf_cpu"]}
+      ],
+      "acceptable_next_actions": {
+        "initial": [["sys_metrics"]],
+        "after:sys_metrics": [["pyspy", "perf_cpu"]],
+        "after:pyspy,sys_metrics": [["STOP"]],
+        "after:perf_cpu,sys_metrics": [["STOP"]]
+      },
+      "sufficiency_condition": {"required_goal_ids": ["goal-a", "goal-b"]},
+      "must_abstain": false,
+      "claim_assertions": [
+        {"field_path": "cpu.process_percent", "operator": "gte", "value": 90},
+        {"field_path": "hot_functions.0.sample_percent", "operator": "gte", "value": 70}
+      ],
+      "forbidden_or_wasteful_actions": ["ebpf_io", "connection_probe", "memory_smaps"],
+      "budget": {"max_cost": 6, "max_tool_calls": 3},
+      "approval_expectations": {"R2_requires_approval": true}
+    },
+    {
+      "case_id": "ca-002",
+      "oracle_tokens": ["fixture_secret_b29", "hidden_class_beta"],
+      "information_goals": [
+        {"goal_id": "goal-a", "weight": 0.35, "satisfied_by_collectors": ["sys_metrics"]},
+        {"goal_id": "goal-b", "weight": 0.65, "satisfied_by_collectors": ["ebpf_io"]}
+      ],
+      "acceptable_next_actions": {
+        "initial": [["sys_metrics"]],
+        "after:sys_metrics": [["ebpf_io"]],
+        "after:ebpf_io,sys_metrics": [["STOP"]]
+      },
+      "sufficiency_condition": {"required_goal_ids": ["goal-a", "goal-b"]},
+      "must_abstain": false,
+      "claim_assertions": [
+        {"field_path": "io.await_ms", "operator": "gte", "value": 50},
+        {"field_path": "io_latency_us.p99", "operator": "gte", "value": 100000}
+      ],
+      "forbidden_or_wasteful_actions": ["perf_cpu", "memory_smaps", "connection_probe"],
+      "budget": {"max_cost": 5, "max_tool_calls": 3},
+      "approval_expectations": {"R2_requires_approval": true}
+    },
+    {
+      "case_id": "ca-003",
+      "oracle_tokens": ["fixture_secret_c41", "hidden_class_gamma"],
+      "information_goals": [
+        {"goal_id": "goal-a", "weight": 0.6, "satisfied_by_collectors": ["sys_metrics"]},
+        {"goal_id": "goal-b", "weight": 0.4, "satisfied_by_collectors": ["log_scan", "connection_probe"]}
+      ],
+      "acceptable_next_actions": {
+        "initial": [["sys_metrics"]],
+        "after:sys_metrics": [["log_scan", "connection_probe"]],
+        "after:log_scan,sys_metrics": [["ABSTAIN"]],
+        "after:connection_probe,sys_metrics": [["ABSTAIN"]]
+      },
+      "sufficiency_condition": {"required_goal_ids": ["goal-a", "goal-b"]},
+      "must_abstain": true,
+      "claim_assertions": [
+        {"field_path": "cpu.process_percent", "operator": "lt", "value": 50},
+        {"field_path": "errors", "operator": "length_eq", "value": 0},
+        {"field_path": "reachable", "operator": "eq", "value": true}
+      ],
+      "forbidden_or_wasteful_actions": ["perf_cpu", "pyspy", "java_async", "go_pprof", "continuous_perf"],
+      "budget": {"max_cost": 4, "max_tool_calls": 3},
+      "approval_expectations": {"R2_requires_approval": true}
+    }
+  ]
+}

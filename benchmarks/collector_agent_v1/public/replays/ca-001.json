@@ -1,0 +1,15 @@
+{
+  "schema_version": "collector-branch-replay.v1",
+  "case_id": "ca-001",
+  "available_collectors": ["sys_metrics", "process_scan", "log_scan", "runtime_snapshot", "pyspy", "perf_cpu", "memory_smaps", "connection_probe"],
+  "branches": {
+    "sys_metrics": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-001-sys", "projection_hash": "sha256:ca001sys", "projection": {"cpu": {"process_percent": 92.4, "host_percent": 61.0}, "load": {"one_minute": 7.8}, "io": {"await_ms": 1.2}}},
+    "process_scan": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-001-proc", "projection_hash": "sha256:ca001proc", "projection": {"processes": [{"pid": 4107, "runtime": "python", "cpu_percent": 91.8}]}},
+    "log_scan": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-001-log", "projection_hash": "sha256:ca001log", "projection": {"errors": [], "warnings": ["request exceeded local latency objective"]}},
+    "runtime_snapshot": {"status": "SUCCEEDED", "cost": 2, "evidence_id": "ev-001-runtime", "projection_hash": "sha256:ca001runtime", "projection": {"runtime": "python", "thread_states": {"running": 1, "sleeping": 11}}},
+    "pyspy": {"status": "SUCCEEDED", "cost": 3, "evidence_id": "ev-001-py", "projection_hash": "sha256:ca001py", "projection": {"hot_functions": [{"name": "worker.compute_batch", "sample_percent": 78.2}], "gil": {"held_percent": 81.0}}},
+    "perf_cpu": {"status": "SUCCEEDED", "cost": 4, "evidence_id": "ev-001-perf", "projection_hash": "sha256:ca001perf", "projection": {"hot_functions": [{"name": "PyEval_EvalFrameDefault", "sample_percent": 74.5}], "cpu_mode": {"user_percent": 95.0, "kernel_percent": 5.0}}},
+    "memory_smaps": {"status": "SUCCEEDED", "cost": 2, "evidence_id": "ev-001-mem", "projection_hash": "sha256:ca001mem", "projection": {"rss_mb": 418, "growth_mb_per_min": 0.2}},
+    "connection_probe": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-001-conn", "projection_hash": "sha256:ca001conn", "projection": {"reachable": true, "latency_ms": 3.1}}
+  }
+}

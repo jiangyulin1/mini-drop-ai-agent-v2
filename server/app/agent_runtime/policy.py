@@ -26,6 +26,8 @@ class RuntimePolicy(BaseModel):
     auto_approve: bool = False
     require_approval_for: frozenset[str] = Field(default_factory=lambda: frozenset({"R2", "R3"}))
     allow_arbitrary_command: bool = False
+    max_collection_requests: int = Field(default=8, ge=1, le=8)
+    max_collection_duration_sec: int = Field(default=240, ge=1, le=240)
 
     @field_validator("enabled_tools", "disabled_tools", "enabled_operations", mode="before")
     @classmethod

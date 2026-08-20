@@ -55,8 +55,11 @@ micro-drop = "server.app.cli:main"
 mini-drop-mcp = "server.app.mcp_integration.server:main"
 
 [tool.setuptools.packages.find]
-include = ["server*", "agent*", "analyzer*", "mini_drop_observability*"]
+include = ["server*", "agent*", "analyzer*", "mini_drop_observability*", "mini_drop_contracts*"]
 exclude = ["web*", "demo*", "deploy*", "docs*", "tests*"]
+
+[tool.setuptools.package-data]
+mini_drop_contracts = ["catalog/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

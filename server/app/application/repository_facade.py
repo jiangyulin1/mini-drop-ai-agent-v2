@@ -36,7 +36,8 @@ FROZEN_REPOSITORY_SURFACE = frozenset({
     "list_assistant_messages", "list_authorization_grants", "list_case_events",
     "list_case_evidence", "list_case_recovery_plans", "list_change_records",
     "list_context_packets", "list_diagnoses_for_task", "list_diagnosis_history",
-    "list_evidence_gaps", "list_evidence_projections", "list_execution_units",
+    "list_collection_proposals", "list_collection_requests",
+    "list_evidence_analysis_runs", "list_evidence_gaps", "list_evidence_projections", "list_execution_units",
     "list_fanout_runs", "list_incident_cases", "list_investigation_iterations",
     "list_investigation_runs", "list_model_attempts", "list_operation_specs",
     "list_profile_windows", "list_repair_recommendations", "list_runtime_wakeups",
@@ -54,7 +55,7 @@ FROZEN_REPOSITORY_SURFACE = frozenset({
     "sync_case_hypothesis_graph", "tasks", "transition_agent_cycle",
     "transition_case_recovery_plan", "transition_incident_case",
     "transition_model_request", "transition_target_session", "transition_task",
-    "update_case_instance_pid", "update_plan_step", "upsert_agent_runtime_binding",
+    "attach_evidence_analysis_turn", "update_case_instance_pid", "update_plan_step", "upsert_agent_runtime_binding",
 })
 
 

@@ -111,7 +111,7 @@ def test_query_without_online_agent_returns_conflict(client: TestClient):
     assert resp.json()["detail"] == "QUERY_TARGET_UNAVAILABLE"
 
 
-def test_internal_query_tool_creates_native_task(client: TestClient):
+def test_internal_query_tool_is_retired_from_ai_catalog(client: TestClient):
     repo.register_agent(
         "agent-q3", "node-q3", "192.168.50.12", version="0.3.0",
         capabilities=["process_scan"],
@@ -122,46 +122,6 @@ def test_internal_query_tool_creates_native_task(client: TestClient):
         json={"case_id": case["case_id"], "operation": "process.list", "parameters": {}},
         headers={"X-Internal-Token": "test-token"},
     )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    task = repo.tasks[data["task"]["id"]]
-    assert task.collector_type == "process_scan"
-    options = task.request_params.get("options")
-    assert options["created_by"] == "mini-drop-pi-runtime"
-
-
-def test_internal_query_tool_respects_dry_run_and_deny_write(client: TestClient):
-    repo.register_agent(
-        "agent-q4", "node-q4", "192.168.50.13", version="0.3.0",
-        capabilities=["process_scan"],
-    )
-    case = _create_case(client)
-    before = len(repo.tasks)
-
-    dry = client.post(
-        "/internal/agent/tools/query",
-        json={
-            "case_id": case["case_id"],
-            "operation": "process.list",
-            "parameters": {},
-            "runtime_policy": {"execution_mode": "dry_run"},
-        },
-        headers={"X-Internal-Token": "test-token"},
-    )
-    assert dry.status_code == 403, dry.text
-    assert dry.json()["detail"].startswith("ACTION_BLOCKED_BY_EXECUTION_MODE")
-    assert len(repo.tasks) == before
-
-    denied = client.post(
-        "/internal/agent/tools/query",
-        json={
-            "case_id": case["case_id"],
-            "operation": "process.list",
-            "parameters": {},
-            "runtime_policy": {"execution_mode": "deny_write"},
-        },
-        headers={"X-Internal-Token": "test-token"},
-    )
-    assert denied.status_code == 409, denied.text
-    assert denied.json()["detail"] == "WRITE_DENIED_BY_RUNTIME_POLICY"
-    assert len(repo.tasks) == before
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "TOOL_NOT_REGISTERED"
+    assert not repo.tasks

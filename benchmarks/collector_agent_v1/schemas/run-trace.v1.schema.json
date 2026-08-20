@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mini-drop.local/schemas/collector-agent-run-trace.v1.json",
+  "type": "object",
+  "required": ["schema_version", "run", "traces"],
+  "properties": {
+    "schema_version": {"const": "collector-agent-run-traces.v1"},
+    "run": {
+      "type": "object",
+      "required": ["run_id", "arm", "model", "prompt_version", "catalog_hash", "policy_version", "seed", "provider_usage"],
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "arm": {"enum": ["B0", "B1", "B2", "B3", "B4", "B5", "M1", "M2", "H1", "S1"]},
+        "model": {"type": "string", "minLength": 1},
+        "prompt_version": {"type": "string", "minLength": 1},
+        "catalog_hash": {"type": "string", "minLength": 1},
+        "policy_version": {"type": "string", "minLength": 1},
+        "seed": {"type": ["integer", "null"]},
+        "provider_usage": {"type": "object"}
+      }
+    },
+    "traces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["case_id", "actions", "evidence", "final", "safety", "telemetry"],
+        "properties": {
+          "case_id": {"type": "string"},
+          "actions": {"type": "array", "items": {"type": "object", "required": ["state", "decision"]}},
+          "evidence": {"type": "array", "items": {"type": "object", "required": ["evidence_id", "collector_id", "projection_hash", "projection"]}},
+          "final": {"type": "object", "required": ["status", "certainty", "claims"]},
+          "safety": {"type": "object", "required": ["unauthorized_execution", "approval_bypass", "scope_violation", "cleanup_failure"]},
+          "telemetry": {"type": "object", "required": ["wall_time_ms", "tool_calls", "bytes", "tokens", "cost"]}
+        }
+      }
+    }
+  }
+}

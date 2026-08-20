@@ -447,11 +447,19 @@ def get_agent_runtime_config(request: Request) -> APIResponse:
     """
     _require_role(request, "operator")
     info = active_runtime_info()
+    runtime_ready = bool(info.get("ready", True))
+    ai_ready = info["mode"] in {"pi", "pi_shadow"} and runtime_ready
     return APIResponse(data={
         "runtime_type": info["runtime_type"],
         "runtime_version": info["runtime_version"],
         "mode": info["mode"],
-        "ready": info.get("ready", True),
+        "ready": runtime_ready,
+        "ai_ready": ai_ready,
+        "ai_status": (
+            "READY" if ai_ready
+            else "NOT_CONFIGURED" if info["mode"] == "deterministic"
+            else "RUNTIME_ERROR"
+        ),
         "ready_error": info.get("error"),
         "flags": agent_flags(),
         "available_strategies": strategy_catalog(),

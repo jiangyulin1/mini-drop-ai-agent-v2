@@ -7,6 +7,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+PRODUCTION_RUNTIME_STRATEGY_ID = "hybrid"
+
+
 class RuntimeOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -43,9 +46,17 @@ def resolve_runtime_options(
     experiment_mode: bool = False,
 ) -> RuntimeOptions:
     options = value if isinstance(value, RuntimeOptions) else RuntimeOptions.model_validate(value or {})
-    from server.app.diagnosis.strategies.registry import get_strategy
-
-    get_strategy(options.strategy_id)
+    ensure_runtime_strategy_allowed(options.strategy_id, experiment_mode=experiment_mode)
     if options.capture_reasoning_trace and not experiment_mode:
         raise ValueError("REASONING_TRACE_EXPERIMENT_ONLY")
     return options
+
+
+def ensure_runtime_strategy_allowed(strategy_id: str | None, *, experiment_mode: bool = False):
+    """Keep strategy variants in the experiment harness, not the production API."""
+    from server.app.diagnosis.strategies.registry import get_strategy
+
+    strategy = get_strategy(strategy_id)
+    if not experiment_mode and strategy.strategy_id != PRODUCTION_RUNTIME_STRATEGY_ID:
+        raise ValueError(f"DIAGNOSTIC_STRATEGY_EXPERIMENT_ONLY:{strategy.strategy_id}")
+    return strategy

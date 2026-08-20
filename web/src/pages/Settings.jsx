@@ -247,7 +247,7 @@ export default function Settings() {
             <Descriptions.Item label="功能开关" span={2}>
               <Space wrap>
                 {featureStatus(aiConfig.features?.rca)}
-                <Typography.Text style={{ fontSize: FONT_SIZES.sm }}>RCA 智能归因</Typography.Text>
+                <Typography.Text style={{ fontSize: FONT_SIZES.sm }}>兼容规则归因</Typography.Text>
                 {featureStatus(aiConfig.features?.summarize)}
                 <Typography.Text style={{ fontSize: FONT_SIZES.sm }}>AI 总结</Typography.Text>
               </Space>

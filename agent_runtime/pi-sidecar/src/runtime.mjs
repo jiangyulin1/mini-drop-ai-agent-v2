@@ -118,7 +118,6 @@ export class RuntimeManager {
     const requestedEffort = caseContext?.runtime_options?.reasoning_effort
       || process.env.MINI_DROP_PI_THINKING_LEVEL || "high";
     const thinkingLevel = requestedEffort === "none" ? "off" : requestedEffort;
-    const strategy = caseContext?.diagnostic_strategy_id || "hybrid";
     const promptVariant = caseContext?.runtime_options?.prompt_variant || "default";
     const { session } = await createAgentSession({
       model: this._selectedModelFor(caseContext),
@@ -130,15 +129,17 @@ export class RuntimeManager {
       customTools: tools,
       sessionManager: SessionManager.inMemory(),
       systemPrompt:
-        "You are the Mini-Drop AI Investigator. You must investigate from " +
-        "registered Case/Evidence/Plan state, never from shell/file access. " +
+        "You are the Mini-Drop Evidence-native AI Collector Agent. Investigate " +
+        "only from registered Case, Collector Catalog, Evidence and analysis state; " +
+        "never use shell/file access. " +
         "Always read the Case Snapshot and existing Evidence before answering. " +
         "For READ_ONLY turns use only read-only tools and never request data " +
         "collection. If evidence is insufficient, report a precise Evidence " +
-        "Gap and abstain instead of offering multiple speculative directions. " +
-        "Never fabricate evidence. Final answers must be concise and cite " +
-        "evidence_id and projection_hash when evidence is used. " +
-        `Diagnostic strategy=${strategy}; prompt_variant=${promptVariant}.`,
+        "Gap and either propose one high-information Collector or abstain. Stop " +
+        "when evidence is sufficient, budget is exhausted, scope/approval blocks " +
+        "progress, or another collection would add no information. Never fabricate " +
+        "evidence. Final claims must cite evidence_id, projection_hash and exact " +
+        `field/span support. prompt_variant=${promptVariant}.`,
       resourceLoader: null,
     });
     this.sessions.set(caseId, {
@@ -164,7 +165,6 @@ export class RuntimeManager {
 
   _optionSignature(context) {
     return JSON.stringify({
-      strategy: context?.diagnostic_strategy_id || "hybrid",
       options: context?.runtime_options || {},
     });
   }
@@ -259,8 +259,6 @@ export class RuntimeManager {
       ? `turn-${case_id}-${input.client_command_id}`
       : `turn-${case_id}-${Date.now()}`;
     entry.currentTurnId = turnId;
-    if (input.diagnostic_strategy_id) entry.context.diagnostic_strategy_id = input.diagnostic_strategy_id;
-    if (input.strategy_params) entry.context.strategy_params = input.strategy_params;
     if (input.runtime_policy) entry.context.runtime_policy = input.runtime_policy;
     if (input.runtime_options) entry.context.runtime_options = input.runtime_options;
     entry.toolEnvelope.current = this._toolEnvelope(entry.context);
@@ -288,13 +286,13 @@ export class RuntimeManager {
         side_effect_policy: policy,
         evidence_watermark: context.evidence_watermark || 0,
         evidence_summary: (context.evidence_summary || []).slice(0, 12),
-        missing_facts: context.missing_facts || [],
-        skills: (context.skill_context || []).slice(0, 3),
-        knowledge: (context.knowledge_context || []).slice(0, 3),
+        evidence_analyses: (context.evidence_analyses || []).slice(-10),
+        information_goals: context.information_goals || context.missing_facts || [],
+        collection_proposals: (context.collection_proposals || []).slice(-12),
+        collection_requests: (context.collection_requests || []).slice(-12),
+        running_task_ids: context.running_task_ids || [],
+        budget: context.budget || {},
         directive: context.investigation_directive || {},
-        diagnostic_strategy_id: context.diagnostic_strategy_id || "hybrid",
-        strategy_params: context.strategy_params || {},
-        strategy_guidance: context.strategy_guidance || [],
         runtime_policy: context.runtime_policy || {},
         runtime_options: context.runtime_options || {},
         previous_answer: String(this.lastAnswers.get(case_id) || "").slice(0, 2000),
@@ -304,7 +302,7 @@ export class RuntimeManager {
         `side_effect_policy=${policy}. ` +
         (policy === "READ_ONLY"
           ? "This is a READ_ONLY turn: use only read-only tools. Never request data collection, plan execution or any mutation."
-          : "Choose the next action from observed Evidence/Gap/Skill and registered Operations. Do not follow a fixed collector order.") +
+          : "Choose the next information goal and action from observed Evidence and the live Collector Catalog. Do not follow a fixed collector order.") +
         `\n\n[CaseContext]\n${contextBlock}\n\n[User]\n${input.message}`,
       ).catch((err) => {
         entry.lastError = String(err);

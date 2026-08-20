@@ -9,7 +9,7 @@ from server.app.database import init_db, reset_engine
 from server.app.diagnosis.investigation_directive import build_directive
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.skill_registry import SKILL_REGISTRY
-from server.app.main import app, repo
+from server.app.main import app
 from server.app.models import Base
 
 
@@ -60,7 +60,7 @@ def _reset_repo(monkeypatch):
     reset_engine()
 
 
-def test_runtime_case_context_contains_skill_and_knowledge(client: TestClient):
+def test_runtime_case_context_excludes_legacy_skill_and_knowledge_rules(client: TestClient):
     created = client.post("/api/v1/cases", json={
         "title": "skill-knowledge-context",
         "problem_description": "checkout 服务 CPU 飙高，火焰图显示热点集中在序列化",
@@ -73,14 +73,13 @@ def test_runtime_case_context_contains_skill_and_knowledge(client: TestClient):
     case = created.json()["data"]
     from server.app.main import _build_runtime_case_context
     snapshot = _build_runtime_case_context(case, "tenant-a")
-    assert snapshot.skill_context
-    assert snapshot.skill_context[0]["skill_id"] == "answer_stability"
-    assert any(item["skill_id"] == "linux_cpu_diagnosis" for item in snapshot.skill_context)
-    assert snapshot.knowledge_context
-    assert any("CPU" in item["title"] for item in snapshot.knowledge_context)
-    assert snapshot.investigation_directive["answer_policy"] == "evidence_driven_free_within_policy"
-    assert snapshot.investigation_directive["next_action"] is None
-    assert snapshot.investigation_directive["evidence_order"] == []
+    assert snapshot.hypotheses == []
+    assert snapshot.skill_context == []
+    assert snapshot.knowledge_context == []
+    assert snapshot.investigation_directive["kind"] == "EVIDENCE_NATIVE_COLLECTOR_AGENT"
+    assert "no_new_evidence_after_two_cycles" in snapshot.investigation_directive["stop_conditions"]
+    assert snapshot.budget["max_collection_requests"] == 8
+    assert snapshot.budget["max_collection_duration_sec"] == 240
 
 
 def test_directive_is_stable_across_time_windows_for_same_unresolved_issue():

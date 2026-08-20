@@ -1,0 +1,114 @@
+{
+  "schema_version": "collector-catalog.v1",
+  "collectors": [
+    {
+      "collector_id": "perf_cpu", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "CPU 火焰图", "description": "使用 perf 采样目标进程调用栈，区分用户态、内核态热点与锁竞争。", "result_label": "交互式 CPU 火焰图 + TopN 热点",
+      "information_goals": ["目标进程用户态与内核态 CPU 分解", "热点调用栈与锁竞争位置"], "output_signals": ["stack_samples", "hot_functions", "cpu_mode"],
+      "target_types": ["linux_process"], "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":60,"default":15},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":99}},"required":["target_pid"]},
+      "risk_level": "R2", "required_capabilities": ["perf_cpu"], "default_duration": 15, "max_duration": 60, "default_sample_rate": 99,
+      "estimated_overhead": {"cpu_percent":"2-8","disk_mb":"20-200"}, "max_result_bytes": 209715200,
+      "artifact_types": ["raw","flamegraph_json","flamegraph_svg","top_json","suggestions_md"], "projection_kind": "profile_summary", "projection_version": "1.0",
+      "preview_modes": ["flamegraph","json","text"], "download_supported": true, "enabled": true, "presentation": {"color":"blue","flamegraph":true}
+    },
+    {
+      "collector_id": "pyspy", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "Python 火焰图", "description": "无侵入采样 Python 进程调用栈。", "result_label": "Python 调用栈火焰图",
+      "information_goals": ["Python 解释器热点调用栈", "GIL 相关执行热点"], "output_signals": ["python_stacks", "hot_functions"], "target_types": ["python_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":60,"default":15},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":99}},"required":["target_pid"]},
+      "risk_level": "R2", "required_capabilities": ["pyspy"], "default_duration": 15, "max_duration": 60, "default_sample_rate": 99,
+      "estimated_overhead": {"cpu_percent":"1-5","disk_mb":"5-100"}, "max_result_bytes": 104857600, "artifact_types": ["flamegraph_svg"], "projection_kind": "profile_summary", "projection_version": "1.0",
+      "preview_modes": ["flamegraph"], "download_supported": true, "enabled": true, "presentation": {"color":"purple","flamegraph":true}
+    },
+    {
+      "collector_id": "continuous_perf", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "持续火焰图", "description": "按时间窗口连续采集 perf，观察热点变化。", "result_label": "按窗口切分的火焰图 + 趋势",
+      "information_goals": ["热点调用栈的时间变化", "间歇性 CPU 异常"], "output_signals": ["window_profiles", "trend"], "target_types": ["linux_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":5,"maximum":600,"default":60},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":49}},"required":["target_pid"]},
+      "risk_level": "R2", "required_capabilities": ["continuous_perf"], "default_duration": 60, "max_duration": 600, "default_sample_rate": 49,
+      "estimated_overhead": {"cpu_percent":"2-8","disk_mb":"50-500"}, "max_result_bytes": 524288000, "artifact_types": ["continuous_window","continuous_summary","flamegraph_svg"], "projection_kind": "profile_timeline", "projection_version": "1.0",
+      "preview_modes": ["timeline","flamegraph","json"], "download_supported": true, "enabled": true, "presentation": {"color":"cyan","flamegraph":true}
+    },
+    {
+      "collector_id": "java_async", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "Java 火焰图", "description": "使用 async-profiler 采集 JVM CPU 与运行时调用栈。", "result_label": "async-profiler Java 火焰图",
+      "information_goals": ["JVM 热点调用栈", "Java 锁与运行时开销"], "output_signals": ["java_stacks", "hot_methods"], "target_types": ["jvm_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":60,"default":15},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":99}},"required":["target_pid"]},
+      "risk_level": "R2", "required_capabilities": ["java_async"], "default_duration": 15, "max_duration": 60, "default_sample_rate": 99,
+      "estimated_overhead": {"cpu_percent":"2-8","disk_mb":"20-200"}, "max_result_bytes": 209715200, "artifact_types": ["flamegraph_html","flamegraph_svg","jfr"], "projection_kind": "profile_summary", "projection_version": "1.0",
+      "preview_modes": ["sandbox_html","flamegraph"], "download_supported": true, "enabled": true, "presentation": {"color":"magenta","flamegraph":true}
+    },
+    {
+      "collector_id": "go_pprof", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "Go pprof", "description": "抓取受控 Go pprof CPU Profile。", "result_label": "Go pprof 数据（环境支持时生成火焰图）",
+      "information_goals": ["Go 进程 CPU 热点", "goroutine 执行路径"], "output_signals": ["pprof_samples", "hot_functions"], "target_types": ["go_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":60,"default":15},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":99}},"required":["target_pid"]},
+      "risk_level": "R2", "required_capabilities": ["go_pprof"], "default_duration": 15, "max_duration": 60, "default_sample_rate": 99,
+      "estimated_overhead": {"cpu_percent":"1-5","disk_mb":"5-100"}, "max_result_bytes": 104857600, "artifact_types": ["pprof_raw","flamegraph_svg"], "projection_kind": "profile_summary", "projection_version": "1.0",
+      "preview_modes": ["flamegraph","binary_summary"], "download_supported": true, "enabled": true, "presentation": {"color":"geekblue","flamegraph":true}
+    },
+    {
+      "collector_id": "ebpf_io", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "I/O 延迟图", "description": "使用 eBPF/bpftrace 观察块设备延迟分布。", "result_label": "eBPF I/O 延迟直方图",
+      "information_goals": ["块设备 I/O 延迟分布", "宿主机 I/O 争用"], "output_signals": ["io_latency_histogram", "slow_io"], "target_types": ["linux_host","linux_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":60,"default":15},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":11}},"required":["target_pid"]},
+      "risk_level": "R2", "required_capabilities": ["ebpf_io"], "default_duration": 15, "max_duration": 60, "default_sample_rate": 11,
+      "estimated_overhead": {"cpu_percent":"1-5","disk_mb":"<50"}, "max_result_bytes": 52428800, "artifact_types": ["ebpf_metrics","ebpf_raw"], "projection_kind": "io_summary", "projection_version": "1.0",
+      "preview_modes": ["histogram","text"], "download_supported": true, "enabled": true, "presentation": {"color":"green","flamegraph":false}
+    },
+    {
+      "collector_id": "memory_smaps", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "内存趋势", "description": "采样进程 smaps，观察 RSS、PSS 与 Swap。", "result_label": "RSS / PSS / Swap 趋势图",
+      "information_goals": ["进程内存构成与增长", "Swap 和匿名页压力"], "output_signals": ["rss","pss","swap","memory_trend"], "target_types": ["linux_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":30,"default":15},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":11}},"required":["target_pid"]},
+      "risk_level": "R1", "required_capabilities": ["memory_smaps"], "default_duration": 15, "max_duration": 30, "default_sample_rate": 11,
+      "estimated_overhead": {"cpu_percent":"<2","disk_mb":"<20"}, "max_result_bytes": 20971520, "artifact_types": ["memory_json"], "projection_kind": "metric_summary", "projection_version": "1.0",
+      "preview_modes": ["chart","json"], "download_supported": true, "enabled": true, "presentation": {"color":"orange","flamegraph":false}
+    },
+    {
+      "collector_id": "sys_metrics", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "系统指标", "description": "低开销采集主机与进程 CPU、负载、线程、FD、网络和 I/O。", "result_label": "CPU / 负载 / 线程 / FD / 网络多维图",
+      "information_goals": ["主机和目标进程资源饱和度", "CPU、内存、I/O 与网络的低开销基线"], "output_signals": ["cpu","load","threads","fd","network","io"], "target_types": ["linux_host","linux_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":30,"default":15},"sample_rate":{"type":"integer","minimum":1,"maximum":10000,"default":11}},"required":["target_pid"]},
+      "risk_level": "R1", "required_capabilities": ["sys_metrics"], "default_duration": 15, "max_duration": 30, "default_sample_rate": 11,
+      "estimated_overhead": {"cpu_percent":"<2","disk_mb":"<10"}, "max_result_bytes": 20971520, "artifact_types": ["sys_metrics"], "projection_kind": "metric_summary", "projection_version": "1.0",
+      "preview_modes": ["chart","json"], "download_supported": true, "enabled": true, "presentation": {"color":"gold","flamegraph":false}, "semantic_operation": "system.metrics"
+    },
+    {
+      "collector_id": "process_scan", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "进程扫描", "description": "列出 Worker 上的受限进程候选，不执行任意命令。", "result_label": "全机进程候选清单",
+      "information_goals": ["将服务或主机目标解析为具体 Linux 进程"], "output_signals": ["pid","command","cpu","memory"], "target_types": ["linux_host"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304,"default":1},"duration_sec":{"type":"integer","minimum":1,"maximum":5,"default":2},"sample_rate":{"type":"integer","minimum":1,"maximum":1,"default":1}}},
+      "risk_level": "R1", "required_capabilities": ["process_scan"], "default_duration": 2, "max_duration": 5, "default_sample_rate": 1,
+      "estimated_overhead": {"cpu_percent":"<1","disk_mb":"<1"}, "max_result_bytes": 5242880, "artifact_types": ["process_scan"], "projection_kind": "process_inventory", "projection_version": "1.0",
+      "preview_modes": ["table","json"], "download_supported": true, "enabled": true, "presentation": {"color":"lime","flamegraph":false}, "semantic_operation": "process.list"
+    },
+    {
+      "collector_id": "log_scan", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "日志扫描", "description": "读取目标进程日志尾部并提取错误与警告模式。", "result_label": "目标进程日志尾部与错误行",
+      "information_goals": ["目标进程近期错误与超时模式", "应用日志中的故障时间线"], "output_signals": ["error_patterns","warning_patterns","log_timestamps"], "target_types": ["linux_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":5,"default":2},"sample_rate":{"type":"integer","minimum":1,"maximum":1,"default":1}},"required":["target_pid"]},
+      "risk_level": "R1", "required_capabilities": ["log_scan"], "default_duration": 2, "max_duration": 5, "default_sample_rate": 1,
+      "estimated_overhead": {"cpu_percent":"<1","disk_mb":"<1"}, "max_result_bytes": 5242880, "artifact_types": ["log_scan"], "projection_kind": "log_summary", "projection_version": "1.0",
+      "preview_modes": ["text","json"], "download_supported": true, "enabled": true, "presentation": {"color":"volcano","flamegraph":false}, "semantic_operation": "service.logs"
+    },
+    {
+      "collector_id": "runtime_snapshot", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "运行时快照", "description": "只读 /proc，识别运行时、线程阻塞和锁等待。", "result_label": "线程状态、锁等待与运行时类型",
+      "information_goals": ["运行时类型与线程状态", "锁等待、futex、park 与运行时停顿"], "output_signals": ["runtime","thread_states","lock_waits"], "target_types": ["linux_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":30,"default":5},"sample_rate":{"type":"integer","minimum":1,"maximum":1,"default":1}},"required":["target_pid"]},
+      "risk_level": "R1", "required_capabilities": ["runtime_snapshot"], "default_duration": 5, "max_duration": 30, "default_sample_rate": 1,
+      "estimated_overhead": {"cpu_percent":"<2","disk_mb":"<10"}, "max_result_bytes": 10485760, "artifact_types": ["runtime_metrics"], "projection_kind": "runtime_summary", "projection_version": "1.0",
+      "preview_modes": ["table","json"], "download_supported": true, "enabled": true, "presentation": {"color":"purple","flamegraph":false}
+    },
+    {
+      "collector_id": "connection_probe", "spec_version": "1.0", "implementation_version": "native.v1",
+      "display_name": "下游连通性探针", "description": "对作用域内端点执行受控 TCP/HTTP 只读连通性探测。", "result_label": "下游端点 TCP/HTTP 连通性与容器状态",
+      "information_goals": ["声明下游端点的连通性与响应状态", "区分本进程故障与依赖不可达"], "output_signals": ["tcp_connect","http_status","latency","container_state"], "target_types": ["service","endpoint","linux_process"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":30,"default":10},"sample_rate":{"type":"integer","minimum":1,"maximum":1,"default":1},"target_ref":{"type":"string","maxLength":256}},"required":["target_pid"]},
+      "risk_level": "R1", "required_capabilities": ["connection_probe"], "default_duration": 10, "max_duration": 30, "default_sample_rate": 1,
+      "estimated_overhead": {"cpu_percent":"<1","disk_mb":"<1"}, "max_result_bytes": 5242880, "artifact_types": ["connection_probe"], "projection_kind": "connection_summary", "projection_version": "1.0",
+      "preview_modes": ["table","json"], "download_supported": true, "enabled": true, "presentation": {"color":"geekblue","flamegraph":false}, "semantic_operation": "service.connection"
+    }
+  ]
+}

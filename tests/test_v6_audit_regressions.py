@@ -202,11 +202,13 @@ def test_answer_only_machine_policy_blocks_write_tool_and_has_zero_side_effects(
     assert turn.status_code == 200, turn.text
     before = repo.list_case_evidence(case["case_id"], "tenant-a")
     denied = client.post(
-        "/internal/agent/tools/query",
+        "/internal/agent/tools/collection-proposal",
         json={
             "case_id": case["case_id"],
-            "operation": "process.list",
+            "collector_id": "process_scan",
+            "target_selector": {"agent_id": "agent-v6-propose", "target_pid": 1},
             "parameters": {},
+            "information_goal": "将服务或主机目标解析为具体 Linux 进程",
             "side_effect_policy": "READ_ONLY",
             "runtime_generation": 0,
         },
@@ -233,18 +235,21 @@ def test_propose_only_operation_never_creates_execution_unit(client):
     assert repo.list_execution_units(case["case_id"], "tenant-a") == []
 
     proposed = client.post(
-        "/internal/agent/tools/query",
+        "/internal/agent/tools/collection-proposal",
         json={
             "case_id": case["case_id"],
-            "operation": "process.list",
+            "collector_id": "process_scan",
+            "target_selector": {"agent_id": "agent-v6-propose", "target_pid": 1},
             "parameters": {},
+            "information_goal": "将服务或主机目标解析为具体 Linux 进程",
             "side_effect_policy": "PROPOSE_ONLY",
             "idempotency_key": "propose-only-no-execution-unit",
         },
         headers=_headers(),
     )
     assert proposed.status_code == 200, proposed.text
-    assert proposed.json()["data"]["task"]["id"]
+    assert proposed.json()["data"]["task"] is None
+    assert proposed.json()["data"]["collection_request"] is None
     assert repo.list_execution_units(case["case_id"], "tenant-a") == []
 
 
@@ -276,19 +281,17 @@ def test_late_write_tool_after_stop_is_fenced(client):
     )
     assert stop.status_code == 200, stop.text
     denied = client.post(
-        "/internal/agent/tools/query",
-        json={"case_id": case["case_id"], "operation": "process.list", "parameters": {}},
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"], "collector_id": "process_scan",
+            "target_selector": {"agent_id": "agent-v6", "target_pid": 1},
+            "parameters": {},
+            "information_goal": "将服务或主机目标解析为具体 Linux 进程",
+        },
         headers=_headers(),
     )
     assert denied.status_code == 409
     assert denied.json()["detail"] == "RUN_TERMINAL"
-    denied_plan = client.post(
-        "/internal/agent/tools/plan",
-        json={"case_id": case["case_id"], "goal": "late plan", "expected_plan_revision": 0},
-        headers=_headers(),
-    )
-    assert denied_plan.status_code == 409
-    assert denied_plan.json()["detail"] == "RUN_TERMINAL"
 
 
 def test_task_wake_is_durable_when_sidecar_is_absent(client, monkeypatch):

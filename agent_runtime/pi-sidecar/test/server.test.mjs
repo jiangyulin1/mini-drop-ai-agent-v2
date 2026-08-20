@@ -83,18 +83,17 @@ test("shadow-plan route returns structured plan without creating task", async ()
   assert.ok(body.data.steps.every((step) => step.collector_id));
 });
 
-test("plan tool schema includes case/scope/plan revision and target fields", () => {
+test("collection proposal schema includes goal, target and revision fences", () => {
   const tools = buildToolCatalog({ internalBase: "http://127.0.0.1:1" });
-  const planTool = tools.find((t) => t.name === "propose_plan_revision");
-  assert.ok(planTool);
-  const props = planTool.parameters.properties;
-  assert.ok(props.expected_case_row_version);
+  const proposalTool = tools.find((t) => t.name === "propose_collection");
+  assert.ok(proposalTool);
+  const props = proposalTool.parameters.properties;
+  assert.ok(props.collector_id);
+  assert.ok(props.target_selector);
+  assert.ok(props.parameters);
+  assert.ok(props.information_goal);
+  assert.ok(props.expected_control_revision);
   assert.ok(props.expected_scope_revision);
-  assert.ok(props.expected_plan_revision);
-  assert.ok(props.steps.items.properties.target_refs);
-  assert.ok(props.steps.items.properties.hypothesis_refs);
-  assert.ok(props.steps.items.properties.selection_strategy);
-  assert.ok(props.steps.items.properties.depends_on);
 });
 
 test("READ_ONLY catalog contains no proposal tools", () => {
@@ -103,8 +102,8 @@ test("READ_ONLY catalog contains no proposal tools", () => {
   assert.ok(names.includes("get_evidence_projection"));
   assert.ok(names.includes("list_case_evidence"));
   assert.ok(names.includes("compare_evidence"));
-  assert.ok(!names.includes("request_operation"));
-  assert.ok(!names.includes("propose_plan_revision"));
+  assert.ok(!names.includes("propose_collection"));
+  assert.ok(names.includes("submit_evidence_analysis"));
   assert.ok(!names.includes("finish_investigation"));
 });
 
@@ -456,8 +455,14 @@ test("internal tool error includes server response detail", async () => {
       internalBase: "http://127.0.0.1:1",
       getEnvelope: () => ({ side_effect_policy: "PROPOSE_ONLY" }),
     });
-    const tool = tools.find((t) => t.name === "request_operation");
-    const result = await tool.execute("call-1", { case_id: "case-a", operation: "system.metrics" });
+    const tool = tools.find((t) => t.name === "propose_collection");
+    const result = await tool.execute("call-1", {
+      case_id: "case-a",
+      collector_id: "sys_metrics",
+      target_selector: { agent_id: "agent-a", target_pid: 1 },
+      parameters: {},
+      information_goal: "主机和目标进程资源饱和度",
+    });
     const text = result.content[0].text;
     assert.match(text, /HTTP 403/);
     assert.match(text, /OPERATION_DISABLED_BY_RUNTIME_POLICY/);

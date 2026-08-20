@@ -11,192 +11,42 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from server.app.schemas import MAX_SAMPLE_RATE, MAX_TASK_DURATION_SEC
+from mini_drop_contracts import list_collector_specs
 
 
-_COMMON_DURATION = {
-    "type": "integer",
-    "minimum": 1,
-    "maximum": MAX_TASK_DURATION_SEC,
-    "default": 15,
-    "unit": "秒",
-    "help": "采集持续时间；任务运行期间目标进程必须保持存活。",
-}
-
-_COMMON_SAMPLE_RATE = {
-    "type": "integer",
-    "minimum": 1,
-    "maximum": MAX_SAMPLE_RATE,
-    "default": 99,
-    "unit": "Hz",
-    "help": "每秒采样频率；频率越高，结果越精细，额外开销也越大。",
-}
-
-
-def _kind(
-    key: str,
-    display_name: str,
-    result_label: str,
-    description: str,
-    *,
-    color: str,
-    flamegraph: bool,
-    default_duration: int = 15,
-    default_sample_rate: int = 99,
-    permission_requirements: list[str] | None = None,
-) -> dict[str, Any]:
-    duration = {**_COMMON_DURATION, "default": default_duration}
-    sample_rate = {**_COMMON_SAMPLE_RATE, "default": default_sample_rate}
+def _legacy_task_kind(spec: Any) -> dict[str, Any]:
+    properties = deepcopy((spec.parameter_schema or {}).get("properties") or {})
+    if "duration_sec" in properties:
+        properties["duration_sec"].update({
+            "unit": "秒", "help": "采集持续时间；任务运行期间目标进程必须保持存活。",
+        })
+    if "sample_rate" in properties:
+        properties["sample_rate"].update({
+            "unit": "Hz", "help": "每秒采样频率；频率越高，结果越精细，额外开销也越大。",
+        })
+    if "target_pid" in properties:
+        properties["target_pid"]["help"] = "目标 Linux 进程 PID。"
     return {
-        "key": key,
-        "display_name": display_name,
-        "result_label": result_label,
-        "description": description,
-        "capability": key,
-        "parameter_schema": {
-            "target_pid": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 4194304,
-                "help": "目标 Linux 进程 PID。",
-            },
-            "duration_sec": duration,
-            "sample_rate": sample_rate,
-        },
+        "key": spec.collector_id,
+        "display_name": spec.display_name,
+        "result_label": spec.result_label,
+        "description": spec.description,
+        "capability": spec.collector_id,
+        "parameter_schema": properties,
         "defaults": {
-            "duration_sec": default_duration,
-            "sample_rate": default_sample_rate,
+            "duration_sec": spec.default_duration,
+            "sample_rate": spec.default_sample_rate,
         },
-        "permission_requirements": permission_requirements or ["读取目标进程 /proc 信息"],
-        "presentation": {
-            "color": color,
-            "flamegraph": flamegraph,
-        },
+        "permission_requirements": list(spec.required_capabilities),
+        "presentation": deepcopy(spec.presentation),
+        "collector_spec_version": spec.spec_version,
+        "information_goals": list(spec.information_goals),
+        "risk_level": spec.risk_level,
     }
 
 
-TASK_KINDS: tuple[dict[str, Any], ...] = (
-    _kind(
-        "perf_cpu",
-        "CPU 火焰图",
-        "交互式 CPU 火焰图 + TopN 热点",
-        "使用 perf 采样目标进程调用栈，适合定位 CPU 热点、锁竞争和异常调用路径。",
-        color="blue",
-        flamegraph=True,
-        permission_requirements=["perf_event_open", "读取目标进程调用栈"],
-    ),
-    _kind(
-        "pyspy",
-        "Python 火焰图",
-        "Python 调用栈火焰图",
-        "使用 py-spy 采样 Python 进程，无需修改应用代码。",
-        color="purple",
-        flamegraph=True,
-        permission_requirements=["ptrace 或等效进程采样权限"],
-    ),
-    _kind(
-        "continuous_perf",
-        "持续火焰图",
-        "按窗口切分的火焰图 + 趋势",
-        "周期采集多个时间窗口，适合观察热点随时间变化。",
-        color="cyan",
-        flamegraph=True,
-        default_duration=60,
-        default_sample_rate=49,
-        permission_requirements=["perf_event_open", "读取目标进程调用栈"],
-    ),
-    _kind(
-        "java_async",
-        "Java 火焰图",
-        "async-profiler Java 火焰图",
-        "采集 JVM 进程的 CPU 调用栈并生成可浏览的 HTML 火焰图。",
-        color="magenta",
-        flamegraph=True,
-        permission_requirements=["async-profiler", "目标 JVM attach 权限"],
-    ),
-    _kind(
-        "go_pprof",
-        "Go pprof",
-        "Go pprof 数据（环境支持时生成火焰图）",
-        "抓取 Go pprof CPU Profile，可下载原始数据并在工具链可用时生成火焰图。",
-        color="geekblue",
-        flamegraph=True,
-        permission_requirements=["目标进程开放 pprof 端点"],
-    ),
-    _kind(
-        "ebpf_io",
-        "I/O 延迟图",
-        "eBPF I/O 延迟直方图",
-        "使用 eBPF/bpftrace 观察块设备延迟分布；该采集不会生成 CPU 火焰图。",
-        color="green",
-        flamegraph=False,
-        default_sample_rate=11,
-        permission_requirements=["CAP_BPF 或 root", "bpftrace", "内核 BPF 支持"],
-    ),
-    _kind(
-        "memory_smaps",
-        "内存趋势",
-        "RSS / PSS / Swap 趋势图",
-        "采样进程 smaps，适合定位内存增长、Swap 和疑似泄漏。",
-        color="orange",
-        flamegraph=False,
-        default_sample_rate=11,
-        permission_requirements=["读取目标进程 /proc/PID/smaps"],
-    ),
-    _kind(
-        "sys_metrics",
-        "系统指标",
-        "CPU / 负载 / 线程 / FD / 网络多维图",
-        "低开销采集主机和进程指标；该采集不会生成调用栈火焰图。",
-        color="gold",
-        flamegraph=False,
-        default_sample_rate=11,
-        permission_requirements=["读取 /proc 系统与进程指标"],
-    ),
-    _kind(
-        "process_scan",
-        "进程扫描",
-        "全机进程候选清单",
-        "列出 Worker 上的进程（PID、命令行、CPU、内存），用于选择诊断目标；不依赖外部工具。",
-        color="lime",
-        flamegraph=False,
-        default_duration=2,
-        default_sample_rate=1,
-        permission_requirements=["读取 /proc 进程列表"],
-    ),
-    _kind(
-        "log_scan",
-        "日志扫描",
-        "目标进程日志尾部与错误行",
-        "通过 /proc/PID/fd 发现进程日志文件，读取尾部并提取错误/警告模式，适合定位报错类根因。",
-        color="volcano",
-        flamegraph=False,
-        default_duration=2,
-        default_sample_rate=1,
-        permission_requirements=["读取目标进程日志文件"],
-    ),
-    _kind(
-        "runtime_snapshot",
-        "运行时快照",
-        "线程状态、锁等待与运行时类型",
-        "只读 /proc，识别 Java、Go、Python 等运行时，并汇总线程阻塞和锁等待。",
-        color="purple",
-        flamegraph=False,
-        default_duration=5,
-        default_sample_rate=1,
-        permission_requirements=["读取目标进程及其线程的 /proc 信息"],
-    ),
-    _kind(
-        "connection_probe",
-        "下游连通性探针",
-        "下游端点 TCP/HTTP 连通性与容器状态",
-        "受控探测目标服务声明的下游端点可达性，并读取下游容器状态；只读、零注入。",
-        color="geekblue",
-        flamegraph=False,
-        default_duration=10,
-        default_sample_rate=1,
-        permission_requirements=["对受控端点发起 TCP/HTTP 连接探测、读取 docker 容器状态"],
-    ),
+TASK_KINDS: tuple[dict[str, Any], ...] = tuple(
+    _legacy_task_kind(spec) for spec in list_collector_specs()
 )
 
 

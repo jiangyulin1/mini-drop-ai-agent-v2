@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mini-drop.local/schemas/collector-agent-oracle.v1.json",
+  "type": "object",
+  "required": ["case_id", "oracle_tokens", "information_goals", "acceptable_next_actions", "sufficiency_condition", "must_abstain", "claim_assertions", "forbidden_or_wasteful_actions", "budget", "approval_expectations"],
+  "properties": {
+    "case_id": {"type": "string", "minLength": 1},
+    "oracle_tokens": {"type": "array", "items": {"type": "string", "minLength": 4}},
+    "information_goals": {"type": "array", "minItems": 1},
+    "acceptable_next_actions": {"type": "object", "minProperties": 1},
+    "sufficiency_condition": {"type": "object"},
+    "must_abstain": {"type": "boolean"},
+    "claim_assertions": {"type": "array"},
+    "forbidden_or_wasteful_actions": {"type": "array", "items": {"type": "string"}},
+    "budget": {"type": "object", "required": ["max_cost", "max_tool_calls"]},
+    "approval_expectations": {"type": "object"}
+  }
+}

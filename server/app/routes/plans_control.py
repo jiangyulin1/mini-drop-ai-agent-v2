@@ -9,7 +9,10 @@ from fastapi import APIRouter, HTTPException, Request
 
 from server.app.agent_runtime.config import AgentRuntimeMode, runtime_mode
 from server.app.agent_runtime.dispatcher import get_runtime
-from server.app.agent_runtime.options import resolve_runtime_options
+from server.app.agent_runtime.options import (
+    ensure_runtime_strategy_allowed,
+    resolve_runtime_options,
+)
 from server.app.agent_runtime.policy import constrain_side_effect_policy, resolve_runtime_policy
 from server.app.agent_runtime.port import AgentTurnInput
 from server.app.ai_provider import model_audit_scope
@@ -48,7 +51,7 @@ from server.app.diagnosis.proposal_card import build_proposal_cards
 from server.app.diagnosis.reference_resolver import ResourceRef
 from server.app.diagnosis.schemas import CreateDiagnosisRequest, TERMINAL_DIAGNOSIS_STATUSES
 from server.app.diagnosis.v6_policy import route_disposition
-from server.app.diagnosis.strategies.registry import get_strategy, normalize_strategy_id
+from server.app.diagnosis.strategies.registry import normalize_strategy_id
 from server.app.http.auth import (
     request_principal as _request_principal,
     request_tenant as _request_tenant,
@@ -758,7 +761,10 @@ def run_incident_case_agent_turn(
             and normalize_strategy_id(payload.runtime_options.strategy_id) != requested_strategy_id
         ):
             raise ValueError("STRATEGY_ID_CONFLICT")
-        strategy = get_strategy(requested_strategy_id)
+        strategy = ensure_runtime_strategy_allowed(
+            requested_strategy_id,
+            experiment_mode=experiment_mode,
+        )
         effective_options = effective_options.model_copy(update={"strategy_id": strategy.strategy_id})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1039,31 +1045,19 @@ def run_incident_case_agent_turn(
                     status = "needs_user"
                     next_actions.append({"type": "change_run_mode", "description": "将 Case 切换为 COLLABORATE 或 AUTHORIZED_AUTONOMY"})
                 else:
-                    try:
-                        started = start_case_diagnosis(
-                            case_id,
-                            StartCaseDiagnosisRequest(
-                                expected_row_version=case.get("row_version"),
-                                strategy_id=strategy.strategy_id,
-                                runtime_policy=effective_policy,
-                                runtime_options=effective_options,
-                            ),
-                            request,
-                        ).data
-                    except HTTPException as exc:
-                        assistant_message = f"我已记录本轮信息，但自动调查暂未启动：{exc.detail}。"
-                        status = "needs_user"
-                        limitations = [str(exc.detail)]
-                        next_actions.append({"type": "resolve_blocker", "description": str(exc.detail)})
-                    else:
-                        started_diagnosis = started.get("diagnosis") or {}
-                        assistant_message = "我已基于当前对话、范围、变更记录和已有证据启动新一轮调查。"
-                        status = "diagnosis_requested"
-                        next_actions.append({
-                            "type": "diagnosis",
-                            "diagnosis_id": started_diagnosis.get("diagnosis_id"),
-                            "status": started_diagnosis.get("status"),
-                        })
+                    # The deterministic runtime is a compatibility reader, not
+                    # an AI fallback. Never route a new Agent turn into the
+                    # legacy rules/candidate diagnosis pipeline.
+                    assistant_message = (
+                        "AI Collector Runtime 未配置，本轮没有创建采集任务。"
+                        "请配置 Pi Runtime，或在 Evidence 数据台中人工创建采集。"
+                    )
+                    status = "needs_user"
+                    limitations = [runtime_fallback_reason or "AI_RUNTIME_NOT_CONFIGURED"]
+                    next_actions.append({
+                        "type": "resolve_blocker",
+                        "description": runtime_fallback_reason or "AI_RUNTIME_NOT_CONFIGURED",
+                    })
 
     side_effect_delta: dict[str, Any] = {}
     if intent in {AgentTurnIntent.EXPLAIN, AgentTurnIntent.STATUS}:

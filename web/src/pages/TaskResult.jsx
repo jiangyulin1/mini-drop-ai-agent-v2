@@ -1039,12 +1039,12 @@ export default function TaskResult() {
         </Card>
       )}
 
-      {/* 智能归因 */}
+      {/* Legacy deterministic attribution */}
       <Card
         title={
           <Space>
             <ExperimentOutlined style={{ color: COLORS.primary }} />
-            智能归因
+            兼容规则归因
           </Space>
         }
         size="small"
@@ -1107,7 +1107,7 @@ export default function TaskResult() {
                   ? "历史诊断与当前证据不一致"
                   : report.not_enough_evidence
                   ? "证据不足：以下内容是待验证候选，不是已确认根因"
-                  : "智能归因结论"
+                  : "规则归因结论"
               }
               description={
                 historicalFlamegraphMismatch ? (

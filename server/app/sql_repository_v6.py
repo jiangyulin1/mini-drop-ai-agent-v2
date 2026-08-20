@@ -24,6 +24,8 @@ from server.app.models import (
     CampaignRevisionModel,
     CaseContextSnapshotModel,
     CaseEvidenceModel,
+    CollectionProposalModel,
+    CollectionRequestModel,
     CausalEdgeModel,
     CausalGraphRevisionModel,
     CausalNodeModel,
@@ -32,10 +34,12 @@ from server.app.models import (
     DeploymentAssessmentModel,
     DomainOutboxModel,
     EvidenceGapModel,
+    EvidenceAnalysisRunModel,
     EvidenceProjectionModel,
     EvidenceReviewRevisionModel,
     ExecutionUnitModel,
     InvestigationRunModel,
+    IncidentCaseModel,
     ModelRequestModel,
     ModelResponseModel,
     OperationSpecModel,
@@ -429,6 +433,143 @@ class SqlRepositoryV6Mixin:
             session.flush()
             return row.to_dict()
 
+    def create_collection_proposal(self, **payload: Any) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            row = CollectionProposalModel(
+                proposal_id=payload.get("proposal_id") or self._new_id("cprop"),
+                case_id=payload["case_id"], tenant_id=payload["tenant_id"],
+                agent_run_id=payload.get("agent_run_id"), cycle_id=payload.get("cycle_id"),
+                collector_id=payload["collector_id"],
+                collector_spec_version=payload["collector_spec_version"],
+                target_selector=payload.get("target_selector") or {},
+                parameters=payload.get("parameters") or {},
+                time_window=payload.get("time_window") or {},
+                information_goal=payload["information_goal"],
+                reason_summary=payload.get("reason_summary") or "",
+                expected_cost=payload.get("expected_cost") or {},
+                expected_risk=payload["expected_risk"],
+                input_evidence_refs=payload.get("input_evidence_refs") or [],
+                status="PROPOSED", validation_result={}, created_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def decide_collection_proposal(
+        self, proposal_id: str, status: str, validation_result: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        with self._write_session() as session:
+            row = session.get(CollectionProposalModel, proposal_id)
+            if row is None:
+                return None
+            row.status = status
+            row.validation_result = validation_result or {}
+            row.decided_at = now_utc()
+            session.flush()
+            return row.to_dict()
+
+    def get_collection_proposal(
+        self, proposal_id: str, case_id: str, tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(CollectionProposalModel).filter(
+                CollectionProposalModel.proposal_id == proposal_id,
+                CollectionProposalModel.case_id == case_id,
+                CollectionProposalModel.tenant_id == tenant_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def list_collection_proposals(
+        self, case_id: str, tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(CollectionProposalModel).filter(
+                CollectionProposalModel.case_id == case_id,
+                CollectionProposalModel.tenant_id == tenant_id,
+            ).order_by(CollectionProposalModel.created_at.asc()).all()
+            return [row.to_dict() for row in rows]
+
+    def create_collection_request(self, **payload: Any) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            session.query(IncidentCaseModel).filter(
+                IncidentCaseModel.id == payload["case_id"],
+                IncidentCaseModel.tenant_id == payload["tenant_id"],
+            ).with_for_update().first()
+            existing = session.query(CollectionRequestModel).filter(
+                CollectionRequestModel.idempotency_key == payload["idempotency_key"],
+            ).first()
+            if existing is not None:
+                return existing.to_dict()
+            requests = session.query(CollectionRequestModel).filter(
+                CollectionRequestModel.case_id == payload["case_id"],
+                CollectionRequestModel.tenant_id == payload["tenant_id"],
+            ).all()
+            request_limit = int(payload.get("request_limit") or 0)
+            if request_limit and len(requests) >= request_limit:
+                raise ValueError("COLLECTION_REQUEST_COUNT_BUDGET_EXHAUSTED")
+            duration_limit = int(payload.get("duration_limit_sec") or 0)
+            if duration_limit:
+                consumed_duration = 0
+                for request in requests:
+                    reservation = request.budget_reservation or {}
+                    effective = request.effective_parameters or {}
+                    consumed_duration += max(0, int(
+                        reservation.get("reserved_duration_sec")
+                        or effective.get("duration_sec")
+                        or reservation.get("max_duration_sec")
+                        or 0
+                    ))
+                requested_duration = max(0, int(
+                    (payload.get("budget_reservation") or {}).get("reserved_duration_sec") or 0
+                ))
+                if consumed_duration + requested_duration > duration_limit:
+                    raise ValueError("COLLECTION_REQUEST_DURATION_BUDGET_EXHAUSTED")
+            row = CollectionRequestModel(
+                collection_request_id=payload.get("collection_request_id") or self._new_id("creq"),
+                proposal_id=payload["proposal_id"], case_id=payload["case_id"],
+                tenant_id=payload["tenant_id"], collector_id=payload["collector_id"],
+                collector_spec_version=payload["collector_spec_version"],
+                resolved_target_identity=payload.get("resolved_target_identity") or {},
+                effective_parameters=payload.get("effective_parameters") or {},
+                runtime_generation=int(payload.get("runtime_generation") or 1),
+                control_revision=int(payload.get("control_revision") or 1),
+                scope_revision=int(payload.get("scope_revision") or 1),
+                idempotency_key=payload["idempotency_key"],
+                budget_reservation=payload.get("budget_reservation") or {},
+                status=payload.get("status") or "ACCEPTED",
+                task_id=payload.get("task_id"), attempt_ids=payload.get("attempt_ids") or [],
+                created_at=now, updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def update_collection_request(
+        self, collection_request_id: str, *, status: str, task_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self._write_session() as session:
+            row = session.get(CollectionRequestModel, collection_request_id)
+            if row is None:
+                return None
+            row.status = status
+            if task_id is not None:
+                row.task_id = task_id
+            row.updated_at = now_utc()
+            session.flush()
+            return row.to_dict()
+
+    def list_collection_requests(
+        self, case_id: str, tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(CollectionRequestModel).filter(
+                CollectionRequestModel.case_id == case_id,
+                CollectionRequestModel.tenant_id == tenant_id,
+            ).order_by(CollectionRequestModel.created_at.asc()).all()
+            return [row.to_dict() for row in rows]
+
     def add_agent_decision_record(self, **payload: Any) -> dict[str, Any]:
         now = now_utc()
         with self._write_session() as session:
@@ -472,12 +613,17 @@ class SqlRepositoryV6Mixin:
                 EvidenceProjectionModel.projection_version == int(projection_version),
             ).first()
             if existing is not None:
+                changed = existing.projection_hash != projection_hash
                 existing.content_json = content
                 existing.projection_hash = projection_hash
                 existing.truncated = bool(truncated)
                 existing.source_bytes = int(source_bytes or 0)
                 existing.projected_bytes = projected_bytes
                 existing.parser_version = parser_version
+                if changed:
+                    self._invalidate_analysis_rows(
+                        session, evidence_id, tenant_id, input_state="STALE_INPUT",
+                    )
                 return existing.to_dict()
             row = EvidenceProjectionModel(
                 projection_id=self._new_id("proj"),
@@ -496,6 +642,9 @@ class SqlRepositoryV6Mixin:
                 created_at=now,
             )
             session.add(row)
+            self._invalidate_analysis_rows(
+                session, evidence_id, tenant_id, input_state="STALE_INPUT",
+            )
             session.flush()
             return row.to_dict()
 
@@ -511,6 +660,148 @@ class SqlRepositoryV6Mixin:
                 query = query.filter(EvidenceProjectionModel.evidence_id == evidence_id)
             rows = query.order_by(EvidenceProjectionModel.created_at.asc()).all()
             return [row.to_dict() for row in rows]
+
+    def create_evidence_analysis_run(self, **payload: Any) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            session.query(IncidentCaseModel).filter(
+                IncidentCaseModel.id == payload["case_id"],
+                IncidentCaseModel.tenant_id == payload["tenant_id"],
+            ).with_for_update().first()
+            existing = session.query(EvidenceAnalysisRunModel).filter(
+                EvidenceAnalysisRunModel.case_id == payload["case_id"],
+                EvidenceAnalysisRunModel.tenant_id == payload["tenant_id"],
+                EvidenceAnalysisRunModel.input_fingerprint == payload["input_fingerprint"],
+            ).first()
+            if existing is not None:
+                return {**existing.to_dict(), "reused": True}
+            row = EvidenceAnalysisRunModel(
+                analysis_run_id=payload.get("analysis_run_id") or self._new_id("ear"),
+                case_id=payload["case_id"], tenant_id=payload["tenant_id"],
+                mode=payload.get("mode") or "SINGLE",
+                evidence_inputs=payload.get("evidence_inputs") or [],
+                input_fingerprint=payload["input_fingerprint"],
+                model_config_id=payload.get("model_config_id"),
+                prompt_version=payload.get("prompt_version") or "evidence-analysis.v1",
+                side_effect_policy="READ_ONLY",
+                input_state=payload.get("input_state") or "CURRENT",
+                status=payload.get("status") or "QUEUED",
+                runtime_turn_id=payload.get("runtime_turn_id"), created_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return {**row.to_dict(), "reused": False}
+
+    def get_evidence_analysis_run(
+        self, analysis_run_id: str, case_id: str, tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(EvidenceAnalysisRunModel).filter(
+                EvidenceAnalysisRunModel.analysis_run_id == analysis_run_id,
+                EvidenceAnalysisRunModel.case_id == case_id,
+                EvidenceAnalysisRunModel.tenant_id == tenant_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def attach_evidence_analysis_turn(
+        self, analysis_run_id: str, case_id: str, tenant_id: str, runtime_turn_id: str,
+    ) -> dict[str, Any] | None:
+        """Bind the queued model turn after the runtime has accepted it."""
+        with self._write_session() as session:
+            row = session.query(EvidenceAnalysisRunModel).filter(
+                EvidenceAnalysisRunModel.analysis_run_id == analysis_run_id,
+                EvidenceAnalysisRunModel.case_id == case_id,
+                EvidenceAnalysisRunModel.tenant_id == tenant_id,
+            ).first()
+            if row is None:
+                return None
+            row.runtime_turn_id = runtime_turn_id
+            session.flush()
+            return row.to_dict()
+
+    def list_evidence_analysis_runs(
+        self, case_id: str, tenant_id: str, *, evidence_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            rows = session.query(EvidenceAnalysisRunModel).filter(
+                EvidenceAnalysisRunModel.case_id == case_id,
+                EvidenceAnalysisRunModel.tenant_id == tenant_id,
+            ).order_by(EvidenceAnalysisRunModel.created_at.asc()).all()
+            items = [row.to_dict() for row in rows]
+            if evidence_id:
+                items = [item for item in items if any(
+                    ref.get("evidence_id") == evidence_id for ref in item.get("evidence_inputs") or []
+                )]
+            return items
+
+    def complete_evidence_analysis_run(self, analysis_run_id: str, **payload: Any) -> dict[str, Any] | None:
+        with self._write_session() as session:
+            row = session.query(EvidenceAnalysisRunModel).filter(
+                EvidenceAnalysisRunModel.analysis_run_id == analysis_run_id,
+                EvidenceAnalysisRunModel.case_id == payload["case_id"],
+                EvidenceAnalysisRunModel.tenant_id == payload["tenant_id"],
+            ).with_for_update().first()
+            if row is None:
+                return None
+            if row.status not in {"QUEUED", "RUNNING"}:
+                raise ValueError("ANALYSIS_RUN_NOT_COMPLETABLE")
+            if row.input_state not in {"CURRENT", "EXCLUDED_INPUT"}:
+                raise ValueError("ANALYSIS_INPUT_STALE")
+            expected_fingerprint = payload.get("expected_input_fingerprint")
+            if expected_fingerprint and row.input_fingerprint != expected_fingerprint:
+                raise ValueError("ANALYSIS_INPUT_FENCED")
+            for name in (
+                "facts", "anomalies", "interpretations", "conflicts", "limitations",
+                "next_collection_proposals", "token_usage",
+            ):
+                if name in payload:
+                    setattr(row, name, payload.get(name) or ([] if name != "token_usage" else {}))
+            row.status = payload.get("status") or "COMPLETED"
+            row.latency_ms = payload.get("latency_ms")
+            row.completed_at = now_utc()
+            session.flush()
+            return row.to_dict()
+
+    def invalidate_evidence_analysis_run(
+        self, analysis_run_id: str, case_id: str, tenant_id: str, *, input_state: str,
+    ) -> dict[str, Any] | None:
+        with self._write_session() as session:
+            row = session.query(EvidenceAnalysisRunModel).filter(
+                EvidenceAnalysisRunModel.analysis_run_id == analysis_run_id,
+                EvidenceAnalysisRunModel.case_id == case_id,
+                EvidenceAnalysisRunModel.tenant_id == tenant_id,
+            ).first()
+            if row is None:
+                return None
+            row.input_state = input_state
+            session.flush()
+            return row.to_dict()
+
+    @staticmethod
+    def _invalidate_analysis_rows(
+        session: OrmSession, evidence_id: str, tenant_id: str, *, input_state: str,
+    ) -> int:
+        changed = 0
+        rows = session.query(EvidenceAnalysisRunModel).filter(
+            EvidenceAnalysisRunModel.tenant_id == tenant_id,
+            EvidenceAnalysisRunModel.input_state == "CURRENT",
+        ).with_for_update().all()
+        for row in rows:
+            if any(ref.get("evidence_id") == evidence_id for ref in (row.evidence_inputs or [])):
+                row.input_state = input_state
+                changed += 1
+        return changed
+
+    def invalidate_evidence_analysis_runs(
+        self, evidence_id: str, tenant_id: str, *, input_state: str = "STALE_INPUT",
+    ) -> int:
+        changed = 0
+        with self._write_session() as session:
+            changed = self._invalidate_analysis_rows(
+                session, evidence_id, tenant_id, input_state=input_state,
+            )
+            session.flush()
+        return changed
 
     def add_evidence_review_revision(
         self, *, evidence_id: str, case_id: str, tenant_id: str,
@@ -548,10 +839,12 @@ class SqlRepositoryV6Mixin:
                     "LOW_TRUST": "LOW_TRUST",
                 }.get(decision, "ACTIVE")
                 evidence.updated_at = now
-                if evidence.status in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
-                    self._revalidate_conclusions_after_evidence_status(
-                        session, evidence, evidence.status, now,
-                    )
+            self._invalidate_analysis_rows(
+                session,
+                evidence_id,
+                tenant_id,
+                input_state="STALE_INPUT",
+            )
             session.flush()
             return row.to_dict()
 

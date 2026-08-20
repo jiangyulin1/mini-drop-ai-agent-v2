@@ -54,7 +54,6 @@ import {
   listTargetSessions,
   ensureEventSourceAuthCookie,
   runAIValidation,
-  startIncidentCaseDiagnosis,
   transitionIncidentCase,
   verifyCaseRecoveryPlan,
   rollbackCaseRecoveryPlan,
@@ -681,13 +680,14 @@ export default function AIDiagnosisWorkspace() {
     }
     setActionLoading(true);
     try {
-      await startIncidentCaseDiagnosis(base.case_id, {
-        expected_row_version: base.row_version,
-        analysis_strategy: "CONSTRAINED_HYBRID",
-        budget_profile: "production_safe",
+      const turn = await runIncidentCaseAgentTurn(base.case_id, {
+        message: "请基于当前目标和已有 Evidence，识别最重要的信息缺口并提出下一项受控采集。证据不足时请明确停止或拒答。",
+        execute_safe_tools: true,
       });
+      const turnId = turn?.next_actions?.find((item) => item.turn_id)?.turn_id || turn?.turn_id || "";
+      setPendingTurn({ caseId: base.case_id, turnId, message: "开始 Evidence 调查", startedAt: Date.now() });
       await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${base.case_id}`)]);
-      message.success("诊断已开始");
+      message.success("AI Evidence 调查已提交");
     } catch (error) {
       message.error(`启动失败：${error.message}`);
       await loadSelection(`case:${base.case_id}`, { quiet: true });
@@ -712,14 +712,13 @@ export default function AIDiagnosisWorkspace() {
       setCaseDetail(updated);
       await refreshLists({ quiet: true });
       if (startAfter) {
-        await startIncidentCaseDiagnosis(updated.case_id, {
-          expected_row_version: updated.row_version,
-          analysis_strategy: "CONSTRAINED_HYBRID",
-          budget_profile: "production_safe",
+        await runIncidentCaseAgentTurn(updated.case_id, {
+          message: "范围已确认。请评估现有 Evidence，提出最有信息价值的下一项受控采集。",
+          execute_safe_tools: true,
         });
       }
       await loadSelection(`case:${updated.case_id}`);
-      message.success(startAfter ? "范围已保存，诊断已开始" : "范围已保存");
+      message.success(startAfter ? "范围已保存，AI Evidence 调查已提交" : "范围已保存");
     } catch (error) {
       message.error(`保存失败：${error.message}`);
       await loadSelection(`case:${base.case_id}`, { quiet: true });
@@ -842,14 +841,13 @@ export default function AIDiagnosisWorkspace() {
         message.warning(`批次 ${group.collectionId} 有 ${rejected.length} 项未接受：` +
           rejected.map((item) => item.rejection_reason || item.result).join(", "));
       }
-      await startIncidentCaseDiagnosis(current.case_id, {
-        expected_row_version: current.row_version,
-        analysis_strategy: "CONSTRAINED_HYBRID",
-        budget_profile: "production_safe",
+      await runIncidentCaseAgentTurn(current.case_id, {
+        message: `请分析刚关联的采集批次 ${group.collectionId}，只输出有字段引用的事实、冲突、限制和下一信息目标。`,
+        execute_safe_tools: false,
       });
       setMode("ai");
       await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${current.case_id}`)]);
-      message.success("已关联该批次的目标与证据任务，并重新启动诊断");
+      message.success("已关联该批次 Evidence，并提交 AI 分析");
     } catch (error) {
       message.error(`分析失败：${error.message}`);
       await loadSelection(`case:${caseDetail.case_id}`, { quiet: true });
@@ -894,18 +892,15 @@ export default function AIDiagnosisWorkspace() {
     <div className={styles.page}>
       <header className={styles.toolbar}>
         <div className={styles.modeSwitch} role="tablist" aria-label="工作模式">
-          <button type="button" className={`${styles.modeButton} ${mode === "ai" ? styles.modeButtonActive : ""}`} onClick={() => setMode("ai")}><MessageOutlined /> AI 协作</button>
-          <button type="button" className={`${styles.modeButton} ${mode === "data" ? styles.modeButtonActive : ""}`} onClick={() => setMode("data")}><DatabaseOutlined /> 诊断数据台</button>
+          <button type="button" className={`${styles.modeButton} ${mode === "ai" ? styles.modeButtonActive : ""}`} onClick={() => setMode("ai")}><MessageOutlined /> AI 调查</button>
+          <button type="button" className={`${styles.modeButton} ${mode === "data" ? styles.modeButtonActive : ""}`} onClick={() => setMode("data")}><DatabaseOutlined /> Evidence 数据台</button>
         </div>
         <span className={styles.toolbarHint}>{mode === "ai" ? "持续会话" : "人工采集与原始数据"}</span>
         <div className={styles.toolbarSpacer} />
-        <Tooltip title="查看能力、准确率和适用范围">
-          <Button size="small" aria-label="能力与准确率" icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)} />
+        <Tooltip title="查看 AI 能力边界与评测状态">
+          <Button size="small" aria-label="能力与评测状态" icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)} />
         </Tooltip>
         {caseDetail && <Button size="small" onClick={openChangeRegistration}>登记变更</Button>}
-        {caseDetail && registeredActions.length > 0 && !["RESOLVED", "STOPPED"].includes(caseDetail.state) && (
-          <Button size="small" onClick={openRecoveryPlan}>恢复方案</Button>
-        )}
         {/* Setup and self-check actions are rare next to the investigation
             controls, so they live behind one menu instead of the top bar. */}
         <Dropdown
@@ -1021,9 +1016,9 @@ export default function AIDiagnosisWorkspace() {
           <div className={styles.emptyState}>
             <div className={styles.emptyPanel}>
               <MessageOutlined style={{ fontSize: 34, color: "#2563eb" }} />
-              <h1 className={styles.emptyTitle}>开始诊断</h1>
-              <p className={styles.emptyDescription}>描述问题。创建后再确认 Worker 和 PID。</p>
-              <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>新建诊断</Button>
+              <h1 className={styles.emptyTitle}>开始 Evidence 调查</h1>
+              <p className={styles.emptyDescription}>描述需要了解的问题，创建后确认 Worker、PID 和采集范围。</p>
+              <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>新建调查</Button>
             </div>
           </div>
         )}
@@ -1066,7 +1061,7 @@ export default function AIDiagnosisWorkspace() {
       </Modal>
 
       <Modal
-        title="AI 诊断能力与测试结果"
+        title="AI Collector 能力与评测状态"
         open={guideOpen}
         onCancel={() => setGuideOpen(false)}
         footer={<Space><Button icon={<ExperimentOutlined />} loading={validationLoading} onClick={validateAIService}>检测当前 AI 连接</Button><Button type="primary" onClick={() => setGuideOpen(false)}>关闭</Button></Space>}
@@ -1075,30 +1070,30 @@ export default function AIDiagnosisWorkspace() {
         <Alert
           type="info"
           showIcon
-          message="以下结果来自 10 个预先设定答案的虚拟机故障案例。样本较少，不能直接代表所有生产事故。"
+          message="当前没有可用于对外声明的 AI 正确率。历史根因分数来自规则主导链路，只保留为离线控制组。"
           style={{ marginBottom: 16 }}
         />
-        <Typography.Title level={5}>测试结果怎么读</Typography.Title>
+        <Typography.Title level={5}>当前可验证能力</Typography.Title>
         <Typography.Paragraph>
-          <strong>严格根因准确率 80%（8/10）</strong>：主要根因分类与故障注入前记录的答案完全一致。
+          <strong>AI 负责选择信息目标、提出 Collector，并对 Evidence 做结构化分析。</strong>服务端负责权限、范围、风险、预算、Task 创建、引用和状态校验。
         </Typography.Paragraph>
         <Typography.Paragraph>
-          <strong>可接受匹配率 90%（9/10）</strong>：其中 1 个案例虽然分类名称没有完全一致，但实例、问题位置和 CPU 故障域正确，仍可用于处理。
+          <strong>规则不再生成在线根因候选或排名。</strong>未配置 Pi 模型 Runtime 时，系统明确返回 AI 未配置，不会把确定性规则结果包装成 AI 输出。
         </Typography.Paragraph>
         <Typography.Paragraph>
-          <strong>证据不足 10%（1/10）</strong>：支付服务停顿没有形成可靠根因。系统没有猜测，而是先用真实结算请求确认故障，再执行已授权的服务恢复动作。
+          <strong>每条事实必须引用固定 Evidence 投影的字段或文本区间。</strong>低可信 Evidence 不能单独支持高确定性事实；排除后，相关分析会变为输入已过期。
         </Typography.Paragraph>
         <Typography.Paragraph>
-          <strong>安全处理覆盖率 100%（10/10）</strong>表示所有案例都得到明确结论、部分结论或安全停止；它不表示根因全部判断正确。自动恢复目前只有 1 个真实授权案例，结果为 1/1，样本不足以称为通用 100% 成功率。
+          新评测会分别报告 Evidence 充分率、信息目标召回率、Claim Support Precision、正确停止/拒答率和 False Certainty；安全违规是硬门禁，不能被综合分抵消。
         </Typography.Paragraph>
         <Typography.Title level={5}>适用流程</Typography.Title>
         <ol>
           <li>先确认服务、Worker、容器或 PID；范围不清楚时系统停止，不猜测目标。</li>
-          <li>补充服务调用关系，便于区分当前服务、同机干扰和下游依赖。</li>
-          <li>系统优先进行低风险采集，并对重复、过期、失败和相互冲突的数据进行清理。</li>
-          <li>结论同时展示"看到了什么、意味着什么、还缺什么"，置信分只表示本次证据强度。</li>
-          <li>只有已登记、已授权且通过预演的动作可以执行；未知命令不会执行。</li>
-          <li>修复后检查系统指标和真实业务请求，连续两次通过才判定恢复；失败则回滚并重新诊断。</li>
+          <li>补充服务调用关系，帮助 Agent 确定目标和信息边界。</li>
+          <li>Agent 提出信息目标和 Collector；服务端验证后才创建原生采集任务。</li>
+          <li>在 Evidence Drawer 中预览、下载、独立分析，并进行可信、低可信、排除或恢复审查。</li>
+          <li>分析分开呈现有引用事实、可能解释、冲突、限制和下一信息目标。</li>
+          <li>证据不足时停止或明确拒答，不自动执行恢复动作。</li>
         </ol>
         <Typography.Title level={5}>当前适用范围</Typography.Title>
         <Typography.Paragraph>

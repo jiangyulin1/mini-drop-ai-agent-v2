@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Card, Col, Empty, Progress, Row, Skeleton, Space, Tabs, Tag, Tooltip, Typography } from "antd";
-import { ApartmentOutlined, BulbOutlined, FileSearchOutlined, NodeIndexOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { getCaseHypotheses, getCaseInvestigationPlan, listCaseEvidenceReviews } from "../../api/client";
+import { Alert, Badge, Button, Card, Empty, Skeleton, Space, Tabs, Tag, Tooltip, Typography, message } from "antd";
+import {
+  AimOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  DatabaseOutlined,
+  FileSearchOutlined,
+  ReloadOutlined,
+  RobotOutlined,
+  SafetyCertificateOutlined,
+} from "@ant-design/icons";
+import { decideCaseCollectionProposal, getCaseInvestigationPlan, listCaseEvidenceReviews } from "../../api/client";
 import EvidenceDrawer from "../../components/EvidenceDrawer";
 import ExplainabilityDrawer from "../../components/ExplainabilityDrawer";
 import { evidenceTrust, planStatus, riskLevel } from "../../utils/opsMappings";
@@ -10,23 +19,80 @@ import "./CanonicalCaseWorkspace.css";
 
 function array(value) { return Array.isArray(value) ? value : value?.items || []; }
 function count(value) { return array(value).length; }
-function compact(value, fallback = "—") {
+function compact(value, fallback = "-") {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "string" || typeof value === "number") return String(value);
   return value.summary || value.title || value.label || value.status || value.statement || fallback;
 }
 
-function EmptyEvidence() {
-  return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Case 还没有可用证据。你可以关联已有任务，或批准 Agent 创建采集任务。" />;
+function LoadFailed({ what, error, onRetry }) {
+  return <Alert type="error" showIcon message={`${what}加载失败`} description={error} action={onRetry ? <Button size="small" onClick={onRetry}>重试</Button> : null} />;
 }
 
-const HYPOTHESIS_STATE = {
-  PENDING: "待验证",
-  SUPPORTED: "有支持证据",
-  CONFIRMED: "已确认",
-  REJECTED: "已排除",
-  REFUTED: "已推翻",
-};
+function InformationGoalsTab({ plan, error, onRetry, onExplain, onOpenEvidence, showInternals }) {
+  const steps = array(plan?.steps);
+  if (error) return <LoadFailed what="信息目标" error={error} onRetry={onRetry} />;
+  if (!steps.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Agent 尚未提出信息目标。已有 Evidence 仍可独立预览和分析。" />;
+  return <div className="ccw-plan">
+    <div className="ccw-plan-head"><div><strong>{plan.goal || "在预算内获取足够证据"}</strong>{showInternals && <small>计划修订 {plan.plan_revision ?? "-"}</small>}</div><Tag>{steps.length} 个信息目标</Tag></div>
+    {steps.map((step, index) => {
+      const status = planStatus(step.status);
+      const risk = riskLevel(step.risk);
+      return <div className="ccw-step" key={step.step_id || index}>
+        <span className="ccw-step-index">{String(index + 1).padStart(2, "0")}</span>
+        <div className="ccw-step-main">
+          <div><strong>{step.expected_information || step.purpose || `信息目标 ${index + 1}`}</strong><Space size={4} wrap><Tag color={status.color}>{status.label}</Tag><Tooltip title={risk.description}><Tag color={risk.color}>{risk.label}</Tag></Tooltip>{step.user_locked && <Tag icon={<SafetyCertificateOutlined />}>用户锁定</Tag>}</Space></div>
+          <p>{step.purpose || "等待 Agent 说明为什么需要补充这项信息"}</p>
+          {showInternals && <div className="ccw-step-details"><span>候选采集器 <b>{step.collector_id || step.kind || "-"}</b></span><span>目标 <b>{array(step.target_refs).join("、") || "-"}</b></span><span>优先级 <b>{step.priority ?? "-"}</b></span></div>}
+          <Space><Button size="small" type="link" onClick={() => onExplain(step)}>查看依据</Button>{step.evidence_id && <Button size="small" type="link" onClick={() => onOpenEvidence(step.evidence_id)}>查看产出 Evidence</Button>}</Space>
+        </div>
+      </div>;
+    })}
+  </div>;
+}
+
+function CollectionActivityTab({ proposals, requests, showInternals, caseId, revisions, onChanged }) {
+  const [deciding, setDeciding] = useState("");
+  const requestByProposal = useMemo(() => new Map(requests.map((item) => [item.proposal_id, item])), [requests]);
+  async function decide(proposal, decision) {
+    setDeciding(proposal.proposal_id);
+    try {
+      await decideCaseCollectionProposal(caseId, proposal.proposal_id, {
+        decision,
+        reason: decision === "APPROVE" ? "Operator approved the bounded collection" : "Operator rejected the collection",
+        expected_control_revision: revisions.control,
+        expected_scope_revision: revisions.scope,
+      });
+      message.success(decision === "APPROVE" ? "采集提案已批准并进入调度" : "采集提案已拒绝");
+      await onChanged?.();
+    } catch (error) {
+      message.error(`操作失败：${error.message}`);
+    } finally {
+      setDeciding("");
+    }
+  }
+  if (!proposals.length && !requests.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无 Agent 采集提案。模型只能提案，Task 由服务端校验后创建。" />;
+  return <div className="ccw-collection-list">{proposals.map((proposal) => {
+    const request = requestByProposal.get(proposal.proposal_id);
+    const errors = array(proposal.validation_result?.errors);
+    const status = request?.status || proposal.status || "PROPOSED";
+    const color = proposal.status === "REJECTED" ? "red" : request?.task_id ? "processing" : "gold";
+    const awaitingApproval = proposal.status === "PROPOSED" && proposal.validation_result?.awaiting_execution_authority;
+    return <div className="ccw-collection-row" key={proposal.proposal_id}>
+      <div className="ccw-collection-icon"><DatabaseOutlined /></div>
+      <div className="ccw-collection-main">
+        <div><strong>{proposal.information_goal || "未声明信息目标"}</strong><Space wrap><Tag color={color}>{status}</Tag><Tag>{proposal.collector_id}</Tag><Tag color={proposal.expected_risk === "R2" ? "orange" : "default"}>{proposal.expected_risk}</Tag></Space></div>
+        <p>{proposal.reason_summary || "未提供提案理由"}</p>
+        {errors.length > 0 && <Alert type="warning" showIcon message={errors.join(" / ")} />}
+        {awaitingApproval && <Space wrap>
+          <Button size="small" type="primary" icon={<CheckOutlined />} loading={deciding === proposal.proposal_id} onClick={() => void decide(proposal, "APPROVE")}>批准采集</Button>
+          <Button size="small" danger icon={<CloseOutlined />} disabled={Boolean(deciding)} onClick={() => void decide(proposal, "REJECT")}>拒绝</Button>
+        </Space>}
+        {showInternals && <div className="ccw-step-details"><span>Proposal <b>{proposal.proposal_id}</b></span><span>Request <b>{request?.collection_request_id || "-"}</b></span><span>Task <b>{request?.task_id || "-"}</b></span></div>}
+      </div>
+    </div>;
+  })}</div>;
+}
 
 function EvidenceTab({ evidence, reviews, error, onRetry, onOpen, onExplain, showInternals }) {
   const latestReview = useMemo(() => {
@@ -35,109 +101,73 @@ function EvidenceTab({ evidence, reviews, error, onRetry, onOpen, onExplain, sho
     return map;
   }, [reviews]);
   if (error) return <LoadFailed what="证据审查记录" error={error} onRetry={onRetry} />;
-  if (!evidence.length) return <EmptyEvidence />;
+  if (!evidence.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Case 还没有 canonical Evidence。可关联已有任务，或让 Agent 提出采集请求。" />;
   return <div className="ccw-evidence-grid">{evidence.map((item) => {
     const id = item.evidence_id || item.id;
     const review = latestReview.get(id);
     const trust = evidenceTrust(review?.decision || item.trust_status || item.status);
-    const source = item.source_node || item.agent_id || item.target_ref || "—";
+    const source = item.source_node || item.agent_id || item.target_ref || "-";
     return <Card size="small" key={id} className={`ccw-evidence-card ${review?.decision === "EXCLUDED" ? "is-excluded" : ""}`} title={<Space><FileSearchOutlined /><Typography.Text ellipsis={{ tooltip: id }}>{item.artifact_type || item.collector_id || id}</Typography.Text></Space>} extra={<Tag color={trust.color}>{trust.label}</Tag>}>
-      <div className="ccw-evidence-meta">
-        <span><small>来源节点</small><strong>{source}</strong></span>
-        {showInternals && <><span><small>采集器</small><strong>{item.collector_id || item.collector || item.artifact_type || "—"}</strong></span><span><small>任务</small><strong>{item.task_id || "—"}</strong></span><span><small>证据 ID</small><strong>{id}</strong></span></>}
-      </div>
-      <Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}>{compact(item.summary || item.projections?.[0]?.content?.summary, "尚无结构化摘要；打开查看原始投影。")}</Typography.Paragraph>
-      {review?.decision === "EXCLUDED" && <Alert type="warning" showIcon message="已从后续调查中排除" />}
-      <Space wrap><Button size="small" onClick={() => onOpen(item)}>详情与审查</Button><Button size="small" type="link" onClick={() => onExplain(item)}>为什么被引用？</Button></Space>
+      <div className="ccw-evidence-meta"><span><small>来源节点</small><strong>{source}</strong></span>{showInternals && <><span><small>采集器</small><strong>{item.collector_id || item.collector || item.artifact_type || "-"}</strong></span><span><small>任务</small><strong>{item.task_id || "-"}</strong></span><span><small>证据 ID</small><strong>{id}</strong></span></> }</div>
+      <Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}>{compact(item.summary || item.projections?.[0]?.content?.summary, "尚无结构化摘要；打开查看确定性投影。")}</Typography.Paragraph>
+      {review?.decision === "EXCLUDED" && <Alert type="warning" showIcon message="已从后续 Agent 上下文中排除" />}
+      <Space wrap><Button size="small" onClick={() => onOpen(item)}>详情、分析与审查</Button><Button size="small" type="link" onClick={() => onExplain(item)}>查看引用状态</Button></Space>
     </Card>;
   })}</div>;
 }
 
-/** A failed request must never be shown as a business empty-state. */
-function LoadFailed({ what, error, onRetry }) {
-  return (
-    <Alert
-      type="error"
-      showIcon
-      message={`${what}加载失败`}
-      description={error}
-      action={onRetry ? <Button size="small" onClick={onRetry}>重试</Button> : null}
-    />
-  );
+function AnalysisTab({ analyses, onOpenEvidence }) {
+  if (!analyses.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无 AI Evidence 分析。分析不会创建 Task，也不会自动生成根因排名。" />;
+  return <div className="ccw-analysis-list">{[...analyses].reverse().map((analysis) => {
+    const stale = analysis.input_state && analysis.input_state !== "CURRENT";
+    return <Card size="small" key={analysis.analysis_run_id} title={<Space><RobotOutlined /><span>{analysis.mode || "EVIDENCE"} 分析</span></Space>} extra={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : "processing"}>{analysis.status}</Tag>{stale && <Tag color="warning">输入已变更</Tag>}</Space>}>
+      {array(analysis.facts).map((fact, index) => <div className="ccw-fact" key={`${analysis.analysis_run_id}-fact-${index}`}><strong>{fact.claim}</strong><Space wrap>{array(fact.citations).map((citation) => <Button type="link" size="small" key={`${citation.evidence_id}-${citation.field_path}`} onClick={() => onOpenEvidence(citation.evidence_id)}>{citation.evidence_id} · {citation.field_path}</Button>)}</Space></div>)}
+      {array(analysis.conflicts).length > 0 && <Alert type="warning" showIcon message="Evidence 存在冲突" description={array(analysis.conflicts).map((item) => compact(item)).join("；")} />}
+      {array(analysis.limitations).length > 0 && <div className="ccw-limitations"><strong>限制与不足</strong>{array(analysis.limitations).map((item, index) => <p key={index}>{compact(item)}</p>)}</div>}
+      {array(analysis.next_collection_proposals).length > 0 && <div className="ccw-next-goals"><strong>下一信息目标</strong>{array(analysis.next_collection_proposals).map((item, index) => <Tag key={index}>{compact(item.information_goal || item)}</Tag>)}</div>}
+    </Card>;
+  })}</div>;
 }
 
-function PlanTab({ plan, error, onRetry, onExplain, onOpenEvidence, showInternals }) {
-  const steps = array(plan?.steps);
-  if (error) return <LoadFailed what="调查计划" error={error} onRetry={onRetry} />;
-  if (!steps.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Agent 尚未生成调查计划。你可以在输入区请求生成计划。" />;
-  return <div className="ccw-plan"><div className="ccw-plan-head"><div><strong>{plan.goal || "定位根因"}</strong>{showInternals && <small>第 {plan.plan_revision ?? "—"} 版 · {plan.source || "server"}</small>}</div><Tag>{steps.length} 个步骤</Tag></div>{steps.map((step, index) => { const status=planStatus(step.status); const risk=riskLevel(step.risk); return <div className="ccw-step" key={step.step_id || index}><span className="ccw-step-index">{String(index + 1).padStart(2,"0")}</span><div className="ccw-step-main"><div><strong>{step.purpose || step.expected_information || step.collector_id || `步骤 ${index + 1}`}</strong><Space size={4} wrap><Tag color={status.color}>{status.label}</Tag><Tooltip title={risk.description}><Tag color={risk.color}>{risk.label}</Tag></Tooltip>{step.user_locked && <Tag icon={<SafetyCertificateOutlined />}>用户锁定</Tag>}</Space></div><p>{step.expected_information || "等待该步骤补充预期信息说明"}</p>{showInternals && <div className="ccw-step-details"><span>采集器 <b>{step.collector_id || step.kind || "—"}</b></span><span>目标 <b>{array(step.target_refs).join("、") || "—"}</b></span><span>假设 <b>{array(step.hypothesis_refs).join("、") || "—"}</b></span><span>优先级 <b>{step.priority ?? "—"}</b></span></div>}<Space><Button size="small" type="link" onClick={() => onExplain(step)}>为什么执行</Button>{step.evidence_id && <Button size="small" type="link" onClick={() => onOpenEvidence(step.evidence_id)}>查看产出 Evidence</Button>}</Space></div></div>; })}</div>;
-}
-
-function HypothesisTab({ graph, workspace, error, onRetry, onExplain }) {
-  const nodes = array(graph?.nodes || graph?.hypotheses || workspace?.hypotheses);
-  if (error) return <LoadFailed what="假设" error={error} onRetry={onRetry} />;
-  if (!nodes.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未形成可审查假设。Agent 会在获得初始 Evidence 后建立并验证假设。" />;
-  return <div className="ccw-hypotheses">{nodes.map((node, index) => { const confidence=Number(node.confidence ?? node.score ?? 0); const state=String(node.status || node.state || "PENDING"); const stateLabel=HYPOTHESIS_STATE[state] || state; const color=state === "CONFIRMED" ? "green" : state === "REJECTED" || state === "REFUTED" ? "red" : state === "SUPPORTED" ? "purple" : "gold"; return <Card size="small" key={node.hypothesis_id || node.node_id || index} title={<Space><BulbOutlined style={{ color: "#7c3aed" }} /><span>{compact(node.description || node.statement || node.title, `假设 ${index + 1}`)}</span></Space>} extra={<Tag color={color}>{stateLabel}</Tag>}><div className="ccw-confidence"><Progress type="dashboard" percent={Math.round(confidence <= 1 ? confidence * 100 : confidence)} size={74} strokeColor="#7c3aed" /><div><p><strong>置信度上升，因为：</strong>{compact(node.confidence_up_reason || node.support_summary, "尚无足够支持证据")}</p><p><strong>置信度下降，因为：</strong>{compact(node.confidence_down_reason || node.counter_summary, "尚未记录明确反证")}</p><p><strong>还缺少：</strong>{compact(node.evidence_gap || node.missing_evidence || node.next_action, "等待 Agent 评估")}</p></div></div><div className="ccw-ref-row"><span>支持 Evidence <Badge count={count(node.supporting_evidence_refs)} showZero color="#7c3aed" /></span><span>反对 Evidence <Badge count={count(node.opposing_evidence_refs)} showZero color="#d92d20" /></span><Button size="small" type="link" onClick={() => onExplain(node)}>为什么这样判断</Button></div></Card>; })}</div>;
-}
-
-function CausalTab({ workspace, onExplain }) {
-  const graph = workspace?.causal_graph || {};
-  const edges = array(graph.edges);
-  const conclusion = workspace?.conclusion;
-  return <div className="ccw-causal"><Card title="结论 / Conclusion" extra={conclusion && <Button size="small" onClick={() => onExplain(conclusion)}>为什么</Button>}>{conclusion ? <><Tag color={conclusion.status === "CONFIRMED" ? "green" : "purple"}>{conclusion.status || "DRAFT"}</Tag><Typography.Title level={4}>{compact(conclusion.summary || conclusion.statement, "结论修订")}</Typography.Title><Typography.Paragraph>{compact(conclusion.description || conclusion.reasoning, "打开‘为什么’查看 Evidence、反证和缺口。")}</Typography.Paragraph><Space wrap>{array(conclusion.evidence_refs).map((ref) => <Tag color="blue" key={ref}>{ref}</Tag>)}</Space></> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前证据还不足以下结论。" />}</Card><Card title={<Space><ApartmentOutlined />因果链 Causal Chain</Space>} extra={<Tag>{count(graph.nodes)} 节点 · {edges.length} 边</Tag>}>{edges.length ? <div className="ccw-edges">{edges.map((edge,index)=><div key={edge.edge_id || index}><strong>{edge.from_node_id || edge.source}</strong><NodeIndexOutlined /><strong>{edge.to_node_id || edge.target}</strong><Tag color={edge.status === "SUPPORTED" ? "purple" : "default"}>{edge.status || edge.relation || "待验证"}</Tag></div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未形成可验证因果链" />}</Card></div>;
-}
-
-/** Canonical Workspace Snapshot projection backed only by existing Case APIs. */
+/** Evidence-native workspace. Legacy RCA and causal graph data are intentionally not rendered. */
 export default function CanonicalCaseWorkspace({ workspace, connected, caseId, onRefresh }) {
   const [plan, setPlan] = useState(null);
-  const [hypotheses, setHypotheses] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState(null);
   const [explainDecision, setExplainDecision] = useState(null);
-  // Distinguish "the agent has produced nothing yet" from "we could not load
-  // it".  Rendering a business empty-state for a failed request hides outages.
   const [loadErrors, setLoadErrors] = useState({});
   const [showInternals, setShowInternals] = useState(false);
   const load = useCallback(async () => {
     if (!caseId) return;
     setLoading(true);
-    const [planResult, hypothesisResult, reviewsResult] = await Promise.allSettled([getCaseInvestigationPlan(caseId), getCaseHypotheses(caseId), listCaseEvidenceReviews(caseId)]);
+    const [planResult, reviewsResult] = await Promise.allSettled([getCaseInvestigationPlan(caseId), listCaseEvidenceReviews(caseId)]);
     if (planResult.status === "fulfilled") setPlan(planResult.value);
-    if (hypothesisResult.status === "fulfilled") setHypotheses(hypothesisResult.value);
     if (reviewsResult.status === "fulfilled") setReviews(reviewsResult.value?.items || []);
     setLoadErrors({
       plan: planResult.status === "rejected" ? (planResult.reason?.message || "加载失败") : "",
-      hypotheses: hypothesisResult.status === "rejected" ? (hypothesisResult.reason?.message || "加载失败") : "",
       reviews: reviewsResult.status === "rejected" ? (reviewsResult.reason?.message || "加载失败") : "",
     });
     setLoading(false);
   }, [caseId]);
   useEffect(() => { void load(); }, [load, workspace?.last_event_seq]);
-  const evidence = array(workspace?.evidence);
-  const revisions = workspace?.revisions || {};
   if (!workspace) return null;
+  const evidence = array(workspace.evidence);
+  const proposals = array(workspace.collection_proposals);
+  const requests = array(workspace.collection_requests);
+  const analyses = array(workspace.evidence_analyses);
+  const revisions = workspace.revisions || {};
   const openById = (id) => setSelectedEvidence(evidence.find((item) => (item.evidence_id || item.id) === id) || null);
   const items = [
-    { key: "plan", label: <Space><NodeIndexOutlined />调查计划 <Badge count={count(plan?.steps)} showZero /></Space>, children: <PlanTab plan={plan} error={loadErrors.plan} onRetry={load} onExplain={setExplainDecision} onOpenEvidence={openById} showInternals={showInternals} /> },
-    { key: "hypotheses", label: <Space><BulbOutlined />假设 <Badge count={count(hypotheses?.nodes || hypotheses?.hypotheses)} showZero /></Space>, children: <HypothesisTab graph={hypotheses} workspace={workspace} error={loadErrors.hypotheses} onRetry={load} onExplain={setExplainDecision} /> },
-    { key: "evidence", label: <Space><FileSearchOutlined />证据 <Badge count={evidence.length} showZero /></Space>, children: <EvidenceTab evidence={evidence} reviews={reviews} error={loadErrors.reviews} onRetry={load} onOpen={setSelectedEvidence} onExplain={setExplainDecision} showInternals={showInternals} /> },
-    { key: "causal", label: <Space><ApartmentOutlined />因果链与结论</Space>, children: <CausalTab workspace={workspace} onExplain={setExplainDecision} /> },
+    { key: "goals", label: <Space><AimOutlined />信息目标 <Badge count={count(plan?.steps)} showZero /></Space>, children: <InformationGoalsTab plan={plan} error={loadErrors.plan} onRetry={load} onExplain={setExplainDecision} onOpenEvidence={openById} showInternals={showInternals} /> },
+    { key: "collections", label: <Space><DatabaseOutlined />采集活动 <Badge count={proposals.length} showZero /></Space>, children: <CollectionActivityTab proposals={proposals} requests={requests} showInternals={showInternals} caseId={caseId} revisions={revisions} onChanged={onRefresh} /> },
+    { key: "evidence", label: <Space><FileSearchOutlined />Evidence <Badge count={evidence.length} showZero /></Space>, children: <EvidenceTab evidence={evidence} reviews={reviews} error={loadErrors.reviews} onRetry={load} onOpen={setSelectedEvidence} onExplain={setExplainDecision} showInternals={showInternals} /> },
+    { key: "analyses", label: <Space><RobotOutlined />受引用分析 <Badge count={analyses.length} showZero /></Space>, children: <AnalysisTab analyses={analyses} onOpenEvidence={openById} /> },
   ];
   return <section className={`${styles.canonicalWorkspace} ccw-shell`} aria-label="Case Workspace" data-testid="canonical-workspace">
-    <header className="ccw-header">
-      <div><h2>调查事实、假设与证据</h2></div>
-      <div className="ccw-status">
-        <Tag color={connected ? "success" : "orange"}>{connected ? "实时同步" : "已降级为轮询，正在重连"}</Tag>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => { void load(); onRefresh?.(); }}>刷新</Button>
-        {/* Version counters and runtime state are diagnostics, not workflow. */}
-        <Button size="small" type="text" onClick={() => setShowInternals((value) => !value)}>
-          {showInternals ? "隐藏技术细节" : "技术细节"}
-        </Button>
-      </div>
-    </header>
-    {showInternals && <div className="ccw-revisions"><span>命令 r{revisions.case_command || 0}</span><span>控制 r{revisions.control || 0}</span><span>范围 r{revisions.scope || 0}</span><span>计划 r{revisions.plan || plan?.plan_revision || 0}</span><span>运行时 {workspace.engine?.state || "IDLE"}</span><span>事件 #{workspace.last_event_seq || 0}</span></div>}
-    {loading && !plan ? <Skeleton active paragraph={{ rows: 6 }} /> : <Tabs items={items} defaultActiveKey="plan" />}
+    <header className="ccw-header"><div><h2>AI 调查与 Evidence 工作区</h2></div><div className="ccw-status"><Tag color={connected ? "success" : "orange"}>{connected ? "实时同步" : "轮询同步"}</Tag><Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => { void load(); onRefresh?.(); }}>刷新</Button><Button size="small" type="text" onClick={() => setShowInternals((value) => !value)}>{showInternals ? "隐藏技术细节" : "技术细节"}</Button></div></header>
+    {showInternals && <div className="ccw-revisions"><span>命令 r{revisions.case_command || 0}</span><span>控制 r{revisions.control || 0}</span><span>范围 r{revisions.scope || 0}</span><span>运行时 {workspace.engine?.state || "IDLE"}</span><span>事件 #{workspace.last_event_seq || 0}</span></div>}
+    {loading && !plan ? <Skeleton active paragraph={{ rows: 6 }} /> : <Tabs items={items} defaultActiveKey="goals" />}
     <EvidenceDrawer open={Boolean(selectedEvidence)} onClose={() => setSelectedEvidence(null)} caseId={caseId} evidence={selectedEvidence} onChanged={() => { void load(); onRefresh?.(); }} onExplain={setExplainDecision} />
     <ExplainabilityDrawer open={Boolean(explainDecision)} onClose={() => setExplainDecision(null)} decision={explainDecision} />
   </section>;

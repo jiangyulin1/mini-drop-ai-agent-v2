@@ -17,6 +17,8 @@ from server.app.application.case_supervision_repository import CaseSupervisionRe
 from server.app.application.repository_facade import RepositoryApplicationFacade
 from server.app.diagnosis import DiagnosisOrchestrator
 from server.app.diagnosis.case_evidence import CaseEvidenceService
+from server.app.diagnosis.collection_supervisor import CollectionSupervisor
+from server.app.diagnosis.evidence_analysis import EvidenceAnalysisService
 from server.app.diagnosis.cluster_scope import TargetResolver
 from server.app.diagnosis.evidence_attachments import EvidenceAttachmentService
 from server.app.diagnosis.fanout import FanoutCollectionService
@@ -39,6 +41,8 @@ class ApplicationServices:
     reference_resolver: ReferenceResolver
     evidence_attachment_service: EvidenceAttachmentService
     case_evidence_service: CaseEvidenceService
+    collection_supervisor: CollectionSupervisor
+    evidence_analysis_service: EvidenceAnalysisService
     investigation_plan_service: InvestigationPlanService
     target_resolver: TargetResolver
     fanout_service: FanoutCollectionService
@@ -68,6 +72,8 @@ def build_application_services(repository: Any | None = None) -> ApplicationServ
         reference_resolver,
     )
     case_evidence_service = CaseEvidenceService(concrete_repository)
+    collection_supervisor = CollectionSupervisor(concrete_repository)
+    evidence_analysis_service = EvidenceAnalysisService(concrete_repository)
     investigation_plan_service = InvestigationPlanService(concrete_repository)
     target_resolver = TargetResolver()
     fanout_service = FanoutCollectionService(concrete_repository)
@@ -93,6 +99,8 @@ def build_application_services(repository: Any | None = None) -> ApplicationServ
         reference_resolver=reference_resolver,
         evidence_attachment_service=evidence_attachment_service,
         case_evidence_service=case_evidence_service,
+        collection_supervisor=collection_supervisor,
+        evidence_analysis_service=evidence_analysis_service,
         investigation_plan_service=investigation_plan_service,
         target_resolver=target_resolver,
         fanout_service=fanout_service,
@@ -156,6 +164,8 @@ source_gateway = _ServiceProxy("source_gateway")
 reference_resolver = _ServiceProxy("reference_resolver")
 evidence_attachment_service = _ServiceProxy("evidence_attachment_service")
 case_evidence_service = _ServiceProxy("case_evidence_service")
+collection_supervisor = _ServiceProxy("collection_supervisor")
+evidence_analysis_service = _ServiceProxy("evidence_analysis_service")
 investigation_plan_service = _ServiceProxy("investigation_plan_service")
 target_resolver = _ServiceProxy("target_resolver")
 fanout_service = _ServiceProxy("fanout_service")

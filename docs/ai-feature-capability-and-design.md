@@ -1,8 +1,8 @@
 # Mini-Drop AI 功能介绍、能力边界与设计方案
 
-> 状态：进行中  
-> 本文用于记录当前 AI 功能现状、不可妥协的边界，以及后续推进路线。  
-> 更新时间：2026-08-19（云服务器三节点已部署当前代码）
+> 状态：兼容说明；当前产品基线以 `ai_collector_architecture_and_migration_plan.md` 为准
+> 本文保留 Runtime/实验接口背景，不得据此恢复 rules-first RCA 或默认自动恢复。
+> 更新时间：2026-08-20
 
 ---
 
@@ -14,15 +14,15 @@
 
 | 模式 | 值 | 说明 |
 |---|---|---|
-| 确定性 | `deterministic` | 默认模式；不调用模型，走规则/证据驱动调查路径，作为控制组和兜底 |
+| 确定性 | `deterministic` | 不调用模型；保留人工 Evidence 工作台并明确报告 AI 未配置，不生成规则 AI 结论 |
 | Pi Shadow | `pi_shadow` | 连接 Pi Sidecar，但只生成 Shadow Plan，不创建真实 Task |
 | Pi 实时 | `pi` | 连接 Pi Sidecar，模型参与 Turn，仍受服务端权限/审批约束 |
 
 当前云服务器运行在 `deterministic` 模式，`MINI_DROP_AI_ENABLED=off`，尚未启用 Pi Sidecar。
 
-### 1.2 诊断策略（DiagnosticStrategy）
+### 1.2 实验策略（仅离线 Harness）
 
-已注册 6 种可插拔策略，策略必须来自 `STRATEGY_REGISTRY`，模型不能自由声明：
+实验 Harness 仍注册 6 种旧对照策略，用于消融与回归。生产 Pi Prompt 不再接收 Hypothesis、规则 Skill、Knowledge 选择或诊断策略提示；在线决策依据是 Case、Evidence、受引用分析、Collector Catalog、采集历史和真实预算。
 
 | strategy_id | 思路 |
 |---|---|
@@ -54,20 +54,21 @@ Pi 0.84.2 当前真正应用 `model`、`reasoning_effort`、`prompt_variant`；`
 - `execution_mode`：`normal` / `dry_run` / `sandbox` / `deny_write`
 - `auto_approve` / `require_approval_for`
 - `allow_arbitrary_command`：永远为 `False`，代码强制拒绝
+- `max_collection_requests`：每 Case 上限 8，只能收紧
+- `max_collection_duration_sec`：每 Case 累计预留时长上限 240 秒，只能收紧
 
 核心原则：**实验只能缩小权限，不能扩大权限**。
 
 ### 1.5 Tool Catalog 与 Tool Gateway
 
-- `server/app/agent_runtime/catalog.py` 是唯一 Tool 规范源，当前 14 个工具。
+- `server/app/agent_runtime/catalog.py` 是唯一 Tool 规范源，当前 12 个工具。
 - Sidecar 通过 `GET /internal/agent/tools/catalog` 动态拉取；失败时回退到内置列表。
 - 服务端 `_tool_fence` 每次调用都重新解析本地 `ToolSpec` 和 `RuntimePolicy`。
 - 工具目录只是发现元数据，不是授权凭证。
 
-当前工具类别：
+当前生产目录固定为 12 个 Evidence/Collector 工具：Case Snapshot、Evidence 列表/投影/比较、Knowledge 检索、可复用 Evidence、Collector Catalog、采集提案/状态、Evidence Analysis 提交/读取和调查结束。
 
-- `READ_ONLY`：`get_case_snapshot`、`list_case_evidence`、`get_evidence_projection`、`compare_evidence`、`search_knowledge`、`get_causal_graph`、`get_evidence_gaps`、`find_reusable_evidence`、`list_operations`、`evaluate_hypotheses`、`rca_candidate_analysis`
-- `PROPOSE_ONLY`：`propose_plan_revision`、`request_operation`、`finish_investigation`
+旧 `evaluate_hypotheses` 和 `rca_candidate_analysis` 已从生产目录和内部路由移除。规则候选代码只保留给旧 `/diagnoses` 兼容路径与离线基线，不进入 Pi 模型工具集。
 
 ### 1.6 意图解析
 
@@ -78,14 +79,9 @@ Pi 0.84.2 当前真正应用 `model`、`reasoning_effort`、`prompt_variant`；`
 - 请求上下文中的目标、环境、时间范围优先于模型推断。
 - 关键词信号（例如 `latency`、`oom`、`packet loss`）用于校正模型误分类。
 
-### 1.7 确定性调查路径
+### 1.7 确定性非 AI 路径
 
-`DeterministicAgentRuntime` 是始终可用的控制组：
-
-- 不调用模型；
-- 从 `SourceRegistry` / `ProbeRegistry` 选择已注册探针；
-- 通过 `SourceGateway` / Tool Gateway 执行；
-- 保持旧有证据驱动行为。
+`DeterministicAgentRuntime` 不调用模型，也不会替模型选择探针或启动旧规则诊断。它只保留控制、审计和人工 Evidence 工作台；需要 AI Turn 时明确返回未配置状态。
 
 ### 1.8 Pi Sidecar
 
@@ -99,13 +95,7 @@ Pi 0.84.2 当前真正应用 `model`、`reasoning_effort`、`prompt_variant`；`
 
 ### 1.9 实验矩阵
 
-`scripts/run_agent_strategy_matrix.py` 支持：
-
-- 用 JSON 描述 `strategy × runtime_options × runtime_policy` 组合；
-- 批量跑同一批 Case；
-- 输出根因准确率、Evidence 引用有效性、工具调用数、副作用数、禁止调用数、重复一致性、估算成本。
-
-示例：`benchmarks/agent_strategy_matrix.example.json`、`benchmarks/agent_experiments/matrix.json`。
+正式方向是 `benchmarks/collector_agent_v1`：锁定模型、Prompt、Catalog、Policy、场景、Evidence hash、seed 和 provider usage，衡量 Evidence 充分率、信息目标召回、Claim Support Precision、正确停止/拒答、错误自信、下一动作和浪费采集。当前仅 3 个开发场景，不能声明正式 AI 正确率；正式模式至少要求 30 个独立 holdout 场景。
 
 ### 1.10 注册一致性
 

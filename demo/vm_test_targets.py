@@ -28,7 +28,7 @@ import hashlib
 import http.server
 import os
 import random
-import socket
+import subprocess
 import sys
 import threading
 import time
@@ -302,7 +302,7 @@ def main():
     print(f"[test-target] scenario={scenario} duration={duration}s pid={os.getpid()}")
     sys.stdout.flush()
     SCENARIOS[scenario](duration)
-    print(f"[test-target] done")
+    print("[test-target] done")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -372,6 +372,11 @@ def main_chaos(argv: list[str]) -> int:
     import argparse
     parser = argparse.ArgumentParser(description="Mini-Drop Chaos Injector / VM test target")
     parser.add_argument("--inject-fault", help="Fault type to inject")
+    parser.add_argument(
+        "--inject-fault-env",
+        metavar="ENV_VAR",
+        help="Read the fault type from an environment variable so it is not exposed in /proc/PID/cmdline",
+    )
     parser.add_argument("--duration", type=int, default=30, help="Duration in seconds")
     parser.add_argument("--list-faults", action="store_true", help="List available fault types")
     args, rest = parser.parse_known_args(argv)
@@ -392,12 +397,21 @@ def main_chaos(argv: list[str]) -> int:
         print("[test-target] done")
         return 0
 
-    if args.inject_fault is None:
+    injected_fault = args.inject_fault
+    if args.inject_fault_env:
+        if injected_fault is not None:
+            parser.error("--inject-fault and --inject-fault-env are mutually exclusive")
+        injected_fault = os.getenv(args.inject_fault_env)
+        if not injected_fault:
+            print(f"Missing fault type in environment variable: {args.inject_fault_env}", file=sys.stderr)
+            return 1
+
+    if injected_fault is None:
         parser.print_help()
         return 1
 
     try:
-        inject_fault(args.inject_fault, args.duration)
+        inject_fault(injected_fault, args.duration)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1

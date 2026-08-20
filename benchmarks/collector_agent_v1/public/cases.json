@@ -1,0 +1,29 @@
+{
+  "schema_version": "collector-agent-cases.v1",
+  "cases": [
+    {
+      "case_id": "ca-001",
+      "prompt": "A Python API worker shows intermittent latency while host load rises. Collect enough evidence to state supported facts or abstain.",
+      "target": {"type": "python_process", "agent_id": "node-a", "target_pid": 4107},
+      "budget": {"max_cost": 6, "max_tool_calls": 3},
+      "initial_evidence": [],
+      "replay": "replays/ca-001.json"
+    },
+    {
+      "case_id": "ca-002",
+      "prompt": "A storage-facing service has irregular response time. Determine which resource dimension is abnormal and obtain deep evidence where useful.",
+      "target": {"type": "linux_process", "agent_id": "node-b", "target_pid": 5221},
+      "budget": {"max_cost": 5, "max_tool_calls": 3},
+      "initial_evidence": [],
+      "replay": "replays/ca-002.json"
+    },
+    {
+      "case_id": "ca-003",
+      "prompt": "Users report sporadic request failures, but the observation window is short. Gather proportionate evidence and avoid certainty when the data stays inconclusive.",
+      "target": {"type": "linux_process", "agent_id": "node-c", "target_pid": 6339},
+      "budget": {"max_cost": 4, "max_tool_calls": 3},
+      "initial_evidence": [],
+      "replay": "replays/ca-003.json"
+    }
+  ]
+}

@@ -6,6 +6,8 @@
 - `reasoning_effort` 降低后准确率下降多少、成本省多少？
 - `RuntimePolicy` 收紧到 READ_ONLY / deny_write 后，是否仍能完成根因定位？
 
+这些策略仅用于实验对照。生产 Agent Turn 只允许 `hybrid`，不会把 `rule_tree` 等固定路径作为 AI 功能暴露。
+
 ## 1. 矩阵文件
 
 推荐放在 `benchmarks/agent_experiments/matrix.json`。示例：
@@ -97,7 +99,8 @@ python scripts/run_agent_strategy_matrix.py \
 | 指标 | 含义 |
 |---|---|
 | `scenario_pass_rate` | 场景通过率 |
-| `root_cause_accuracy` | 根因位置/分类准确率 |
+| `root_cause_accuracy` | 仅 live 模式：盲测故障特定文本匹配代理，不等于严格 RCA 准确率 |
+| `control_group_root_cause_accuracy` | 仅离线模式：规则控制组准确率；所选 strategy 未执行，不能用于策略比较 |
 | `evidence_citation_validity` | Evidence 引用有效性 |
 | `tool_call_count` | 工具调用次数 |
 | `side_effect_count` | 副作用/写入类动作次数 |
@@ -115,7 +118,7 @@ python scripts/run_agent_strategy_matrix.py \
 - `strategy_id` 必须来自注册表，不能由模型自由声明。
 - `RuntimePolicy` 只能缩小权限，不能扩大权限。
 - `capture_reasoning_trace` 不允许写入矩阵报告；实验报告只保存决策摘要、工具调用序列和最终答案。
-- 默认使用离线确定性 Evidence harness；加 `--live` 可连接真实 Pi 环境并读取 `model-attempts` 的 token/cost。live 模式需要 `--worker-host` / `--worker-password` 和可达的 control plane。
+- 默认离线 Harness 只验证规则控制组、矩阵结构和安全字段，不比较策略。加 `--live` 才连接真实 Pi 环境并读取 `model-attempts` 的 token/cost。live 模式需要 `--worker-host` / `--worker-password` 和可达的 control plane。
 
 ## 5. CI
 

@@ -24,17 +24,19 @@ from server.app.diagnosis.strategies.registry import (
 
 def test_canonical_tool_catalog_is_unique_and_policy_partitioned():
     names = [item.name for item in TOOL_CATALOG]
-    assert len(names) == len(set(names)) == 14
+    assert len(names) == len(set(names)) == 12
     assert READ_ONLY_TOOL_NAMES.isdisjoint(PROPOSE_ONLY_TOOL_NAMES)
-    assert "request_operation" in PROPOSE_ONLY_TOOL_NAMES
+    assert "propose_collection" in PROPOSE_ONLY_TOOL_NAMES
     assert "get_case_snapshot" in READ_ONLY_TOOL_NAMES
+    assert "evaluate_hypotheses" not in names
+    assert "rca_candidate_analysis" not in names
 
 
 def test_runtime_policy_can_only_shrink_the_code_owned_boundary():
     policy = RuntimePolicy(
         side_effect_policy="PROPOSE_ONLY",
-        enabled_tools={"get_case_snapshot", "request_operation"},
-        disabled_tools={"request_operation"},
+        enabled_tools={"get_case_snapshot", "propose_collection"},
+        disabled_tools={"propose_collection"},
     )
     assert policy.effective_tools() == {"get_case_snapshot"}
     assert constrain_side_effect_policy(policy, "READ_ONLY").side_effect_policy == "READ_ONLY"
@@ -90,6 +92,11 @@ def test_runtime_options_validate_registered_strategy():
     assert RuntimeOptions().strategy_id == "hybrid"
     with pytest.raises(ValueError, match="UNREGISTERED_DIAGNOSTIC_STRATEGY"):
         resolve_runtime_options({"strategy_id": "made_up_strategy"})
+    with pytest.raises(ValueError, match="DIAGNOSTIC_STRATEGY_EXPERIMENT_ONLY:rule_tree"):
+        resolve_runtime_options({"strategy_id": "rule_tree"})
+    assert resolve_runtime_options(
+        {"strategy_id": "rule_tree"}, experiment_mode=True,
+    ).strategy_id == "rule_tree"
 
 
 def test_native_actuation_honors_optional_execution_policy():

@@ -284,6 +284,93 @@ class AgentProposalModel(Base):
         }
 
 
+class CollectionProposalModel(Base):
+    __tablename__ = "collection_proposals"
+    __table_args__ = (
+        UniqueConstraint("case_id", "tenant_id", "proposal_id", name="uq_collection_proposal"),
+        Index("ix_collection_proposals_case_status", "case_id", "status"),
+    )
+
+    proposal_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    agent_run_id = Column(String(128), nullable=True, index=True)
+    cycle_id = Column(String(128), nullable=True, index=True)
+    collector_id = Column(String(128), nullable=False)
+    collector_spec_version = Column(String(32), nullable=False)
+    target_selector = Column(JSON, nullable=False, default=dict)
+    parameters = Column(JSON, nullable=False, default=dict)
+    time_window = Column(JSON, nullable=False, default=dict)
+    information_goal = Column(Text, nullable=False)
+    reason_summary = Column(Text, nullable=False, default="")
+    expected_cost = Column(JSON, nullable=False, default=dict)
+    expected_risk = Column(String(24), nullable=False)
+    input_evidence_refs = Column(JSON, nullable=False, default=list)
+    status = Column(String(24), nullable=False, default="PROPOSED", index=True)
+    validation_result = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "proposal_id": self.proposal_id, "case_id": self.case_id,
+            "tenant_id": self.tenant_id, "agent_run_id": self.agent_run_id,
+            "cycle_id": self.cycle_id, "collector_id": self.collector_id,
+            "collector_spec_version": self.collector_spec_version,
+            "target_selector": self.target_selector or {}, "parameters": self.parameters or {},
+            "time_window": self.time_window or {}, "information_goal": self.information_goal,
+            "reason_summary": self.reason_summary, "expected_cost": self.expected_cost or {},
+            "expected_risk": self.expected_risk,
+            "input_evidence_refs": self.input_evidence_refs or [], "status": self.status,
+            "validation_result": self.validation_result or {}, "created_at": self.created_at,
+            "decided_at": self.decided_at,
+        }
+
+
+class CollectionRequestModel(Base):
+    __tablename__ = "collection_requests"
+    __table_args__ = (
+        UniqueConstraint("proposal_id", name="uq_collection_request_proposal"),
+        UniqueConstraint("idempotency_key", name="uq_collection_request_idempotency"),
+        Index("ix_collection_requests_case_status", "case_id", "status"),
+    )
+
+    collection_request_id = Column(String(128), primary_key=True)
+    proposal_id = Column(String(128), nullable=False, index=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    collector_id = Column(String(128), nullable=False)
+    collector_spec_version = Column(String(32), nullable=False)
+    resolved_target_identity = Column(JSON, nullable=False, default=dict)
+    effective_parameters = Column(JSON, nullable=False, default=dict)
+    runtime_generation = Column(Integer, nullable=False, default=1)
+    control_revision = Column(Integer, nullable=False, default=1)
+    scope_revision = Column(Integer, nullable=False, default=1)
+    idempotency_key = Column(String(256), nullable=False)
+    budget_reservation = Column(JSON, nullable=False, default=dict)
+    status = Column(String(24), nullable=False, default="ACCEPTED", index=True)
+    task_id = Column(String(128), nullable=True, index=True)
+    attempt_ids = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "collection_request_id": self.collection_request_id,
+            "proposal_id": self.proposal_id, "case_id": self.case_id,
+            "tenant_id": self.tenant_id, "collector_id": self.collector_id,
+            "collector_spec_version": self.collector_spec_version,
+            "resolved_target_identity": self.resolved_target_identity or {},
+            "effective_parameters": self.effective_parameters or {},
+            "runtime_generation": self.runtime_generation,
+            "control_revision": self.control_revision, "scope_revision": self.scope_revision,
+            "idempotency_key": self.idempotency_key,
+            "budget_reservation": self.budget_reservation or {}, "status": self.status,
+            "task_id": self.task_id, "attempt_ids": self.attempt_ids or [],
+            "created_at": self.created_at, "updated_at": self.updated_at,
+        }
+
+
 class AgentDecisionRecordModel(Base):
     __tablename__ = "agent_decision_records"
     __table_args__ = (
@@ -403,6 +490,58 @@ class EvidenceReviewRevisionModel(Base):
             "reason": self.reason,
             "reviewed_by": self.reviewed_by,
             "created_at": self.created_at,
+        }
+
+
+class EvidenceAnalysisRunModel(Base):
+    __tablename__ = "evidence_analysis_runs"
+    __table_args__ = (
+        Index("ix_evidence_analysis_runs_case_status", "case_id", "status"),
+        Index("ix_evidence_analysis_runs_turn", "runtime_turn_id"),
+        UniqueConstraint(
+            "case_id", "tenant_id", "input_fingerprint",
+            name="uq_evidence_analysis_input_fingerprint",
+        ),
+    )
+
+    analysis_run_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    mode = Column(String(16), nullable=False, default="SINGLE")
+    evidence_inputs = Column(JSON, nullable=False, default=list)
+    input_fingerprint = Column(String(64), nullable=False)
+    model_config_id = Column(String(128), nullable=True)
+    prompt_version = Column(String(64), nullable=False, default="evidence-analysis.v1")
+    side_effect_policy = Column(String(24), nullable=False, default="READ_ONLY")
+    facts = Column(JSON, nullable=False, default=list)
+    anomalies = Column(JSON, nullable=False, default=list)
+    interpretations = Column(JSON, nullable=False, default=list)
+    conflicts = Column(JSON, nullable=False, default=list)
+    limitations = Column(JSON, nullable=False, default=list)
+    next_collection_proposals = Column(JSON, nullable=False, default=list)
+    input_state = Column(String(32), nullable=False, default="CURRENT")
+    status = Column(String(24), nullable=False, default="QUEUED", index=True)
+    token_usage = Column(JSON, nullable=False, default=dict)
+    latency_ms = Column(Integer, nullable=True)
+    runtime_turn_id = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "analysis_run_id": self.analysis_run_id, "case_id": self.case_id,
+            "tenant_id": self.tenant_id, "mode": self.mode,
+            "evidence_inputs": self.evidence_inputs or [], "model_config_id": self.model_config_id,
+            "input_fingerprint": self.input_fingerprint,
+            "prompt_version": self.prompt_version, "side_effect_policy": self.side_effect_policy,
+            "facts": self.facts or [], "anomalies": self.anomalies or [],
+            "interpretations": self.interpretations or [], "conflicts": self.conflicts or [],
+            "limitations": self.limitations or [],
+            "next_collection_proposals": self.next_collection_proposals or [],
+            "input_state": self.input_state, "status": self.status,
+            "token_usage": self.token_usage or {}, "latency_ms": self.latency_ms,
+            "runtime_turn_id": self.runtime_turn_id, "created_at": self.created_at,
+            "completed_at": self.completed_at,
         }
 
 

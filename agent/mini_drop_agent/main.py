@@ -28,6 +28,7 @@ from typing import Any
 import grpc
 
 from mini_drop_observability.tracing import configure_tracing, shutdown_tracing, start_span
+from mini_drop_contracts import list_collector_specs
 from agent.mini_drop_agent.collectors.base import CollectorTask
 from agent.mini_drop_agent.collectors.connection_probe import ConnectionProbeCollector
 from agent.mini_drop_agent.collectors.continuous import ContinuousCollector
@@ -71,9 +72,18 @@ COLLECTORS = {
     "process_scan": ProcessScanCollector(),
     "log_scan": LogScanCollector(),
     "runtime_snapshot": RuntimeSnapshotCollector(),
-    "swarm_actuation": SwarmActuationCollector(),
     "connection_probe": ConnectionProbeCollector(),
 }
+
+# Mutating operations are not collectors and are never advertised to the AI
+# Collector catalog. They remain behind the independent actuation feature gate.
+ACTIONS = {"swarm_actuation": SwarmActuationCollector()}
+
+_CATALOG_IDS = {item.collector_id for item in list_collector_specs()}
+if set(COLLECTORS) != _CATALOG_IDS:
+    missing = sorted(_CATALOG_IDS - set(COLLECTORS))
+    unknown = sorted(set(COLLECTORS) - _CATALOG_IDS)
+    raise RuntimeError(f"Collector implementation/catalog mismatch: missing={missing}, unknown={unknown}")
 
 CAPABILITIES = sorted(COLLECTORS.keys())
 
@@ -98,7 +108,7 @@ def _detect_capabilities() -> list[str]:
         and shutil.which("docker")
     ):
         available.add("swarm_actuation")
-    return sorted(available & set(COLLECTORS))
+    return sorted((available & set(COLLECTORS)) | (available & set(ACTIONS)))
 
 
 # ── 任务执行 ───────────────────────────────────────────────────────
@@ -116,6 +126,10 @@ def _run_collector(
     """
     collector_type = task_payload.get("collector_type", "perf_cpu")
     collector = COLLECTORS.get(collector_type)
+    if collector is None and collector_type == "swarm_actuation":
+        enabled = os.getenv("MINI_DROP_AGENT_ACTUATION_ENABLED", "0").strip().lower()
+        if enabled in {"1", "true", "yes", "on"}:
+            collector = ACTIONS.get(collector_type)
     if collector is None:
         return False, f"collector {collector_type} 未在此 Agent 构建中注册", []
 

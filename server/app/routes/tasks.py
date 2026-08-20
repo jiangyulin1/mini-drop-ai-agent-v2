@@ -16,6 +16,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
+from mini_drop_contracts import catalog_payload as collector_catalog_payload
+
 from server.app import storage
 from server.app.application.task_views import task_view
 from server.app.artifact_service import inspect_artifact
@@ -117,6 +119,12 @@ def get_task_kinds(repo: Repository, agent_id: str = "") -> APIResponse:
         "schema_version": "1.0",
         "items": list_task_kinds(capabilities),
     })
+
+
+@router.get("/api/v1/collectors")
+def get_collectors() -> APIResponse:
+    """Versioned CollectorSpec discovery; metadata does not grant execution authority."""
+    return APIResponse(data=collector_catalog_payload())
 
 
 def _validate_task_agent_capability(

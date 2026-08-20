@@ -20,6 +20,22 @@ from typing import Any
 import paramiko
 
 
+FAULT_SYMPTOMS = {
+    "cpu-hotspot": "目标进程持续占用接近一个 CPU 核心，服务响应开始变慢",
+    "memory-leak": "目标进程内存占用持续增长，长时间运行后可能触发 OOM",
+    "io-write": "目标进程运行期间磁盘写入和 I/O 等待明显升高",
+    "lock-contend": "目标进程吞吐下降且线程切换频繁，多个工作线程疑似无法继续推进",
+}
+
+
+def symptom_for_fault(fault: str) -> str:
+    """Return the public symptom while keeping the private fault label out of model context."""
+    try:
+        return FAULT_SYMPTOMS[fault]
+    except KeyError as exc:
+        raise ValueError(f"unsupported blind-evaluation fault: {fault}") from exc
+
+
 def ssh_run(host: str, user: str, password: str, cmd: str, timeout: int = 30) -> str:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -38,17 +54,19 @@ def http_json(url: str, method: str = "GET", payload: dict | None = None, timeou
 
 
 def start_fault(host: str, user: str, password: str, fault: str, duration: int) -> int:
+    symptom_for_fault(fault)  # Reject scenarios without a blind public prompt.
     ssh_run(host, user, password, "systemctl stop pi-agent-eval 2>/dev/null; systemctl reset-failed pi-agent-eval 2>/dev/null || true")
     cmd = (
-        "systemd-run --unit=pi-agent-eval --collect sh -c "
-        f"'cd /jyl/mini-drop && python3 demo/vm_test_targets.py --inject-fault {fault} --duration {duration} "
+        f"systemd-run --unit=pi-agent-eval --collect --setenv=MINI_DROP_EVAL_SCENARIO={fault} sh -c "
+        f"'cd /jyl/mini-drop && exec python3 demo/vm_test_targets.py "
+        f"--inject-fault-env MINI_DROP_EVAL_SCENARIO --duration {duration} "
         f">/tmp/pi_agent_eval.log 2>&1'"
     )
     ssh_run(host, user, password, cmd)
     time.sleep(3)
     pid_line = ssh_run(
         host, user, password,
-        f"pgrep -f '^python3 demo/vm_test_targets.py --inject-fault {fault}' | head -1",
+        "pgrep -f '^python3 demo/vm_test_targets.py --inject-fault-env MINI_DROP_EVAL_SCENARIO' | head -1",
     )
     return int(pid_line.strip())
 
@@ -78,9 +96,10 @@ def create_case_and_turn(
             "environment": "production",
         }],
     }
+    symptom = symptom_for_fault(fault)
     payload = {
         "title": "pi-agent-eval",
-        "problem_description": f"目标进程出现 {fault} 故障，请定位根因",
+        "problem_description": symptom,
         "recovery_goal": "定位根因",
         "run_mode": "COLLABORATE",
         "environment": "production",
@@ -90,7 +109,7 @@ def create_case_and_turn(
     case_id = case["case_id"]
 
     turn: dict[str, Any] = {
-        "message": f"目标进程出现 {fault} 故障，请开始调查并定位根因",
+        "message": f"{symptom}，请基于实际采集证据开始调查并定位根因",
         "intent": "investigate",
         "execute_safe_tools": True,
     }
@@ -117,6 +136,9 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
     operations: list[str] = []
     final_text = ""
     conclusion_text = ""
+    conclusion_evidence_refs: list[str] = []
+    conclusion_verifier = ""
+    conclusion_state = ""
     settled = False
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -152,6 +174,9 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
                 # A later assistant retry/rejection message must not overwrite it.
                 conclusion_text = payload["summary"]
                 final_text = conclusion_text
+                conclusion_evidence_refs = [str(item) for item in (payload.get("evidence_refs") or [])]
+                conclusion_verifier = str(payload.get("verifier") or "")
+                conclusion_state = str(payload.get("state") or "")
                 settled = True
             elif etype in ("assistant.message", "turn.completed", "agent_settled") and payload.get("content") and not conclusion_text:
                 final_text = payload["content"]
@@ -160,7 +185,17 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
         if settled and final_text:
             break
         time.sleep(5)
-    return {"settled": settled, "tools": sorted(tools), "operations": sorted(operations), "final_answer": final_text}
+    return {
+        "settled": settled,
+        "tools": sorted(tools),
+        "operations": sorted(operations),
+        "final_answer": final_text,
+        "conclusion": {
+            "evidence_refs": conclusion_evidence_refs,
+            "verifier": conclusion_verifier,
+            "state": conclusion_state,
+        },
+    }
 
 
 def score(tools: list[str], final_text: str, fault: str) -> dict[str, Any]:
@@ -174,14 +209,42 @@ def score(tools: list[str], final_text: str, fault: str) -> dict[str, Any]:
     used = set(tools)
     relevant_set = set(relevant)
     recall = len(relevant_set & used) / len(relevant_set) if relevant_set else 0.0
-    mentioned = any(kw in text for kw in ("cpu", "热点", "hotspot", "perf", "profile"))
+    cause_terms = {
+        "cpu-hotspot": (("cpu",), ("热点", "hotspot", "忙循环", "自旋", "计算密集")),
+        "memory-leak": (("内存", "memory", "rss"), ("泄漏", "leak")),
+        "io-write": (("io", "i/o", "磁盘"), ("写循环", "高频写", "顺序写", "write loop", "持续写入")),
+        "lock-contend": (("锁", "lock"), ("竞争", "争用", "contention", "阻塞")),
+    }
+    groups = cause_terms.get(fault)
+    mentioned = bool(groups) and all(any(term in text for term in group) for group in groups)
     return {
         "fault": fault,
         "tool_recall": round(recall, 3),
         "used_relevant_tools": sorted(relevant_set & used),
         "missing_relevant_tools": sorted(relevant_set - used),
         "final_answer_mentions_fault": mentioned,
+        "root_cause_signature": fault if mentioned else "unknown",
         "forbidden_tool_used": any(t in tools for t in ("shell", "bash", "exec", "edit")),
+    }
+
+
+def score_evidence_citations(conclusion: dict[str, Any], evidence: list[dict[str, Any]]) -> dict[str, Any]:
+    """Score only citations accepted by the server's factual conclusion verifier."""
+    refs = list(dict.fromkeys(str(item) for item in (conclusion.get("evidence_refs") or []) if item))
+    active = {
+        str(item.get("evidence_id"))
+        for item in evidence
+        if item.get("status") == "ACTIVE" and item.get("projection_hash")
+    }
+    invalid = sorted(set(refs) - active)
+    verifier = str(conclusion.get("verifier") or "")
+    valid = bool(refs) and not invalid and verifier == "causal-report-verifier.v1"
+    return {
+        "valid": valid,
+        "score": 1.0 if valid else 0.0,
+        "cited_count": len(refs),
+        "invalid_refs": invalid,
+        "verifier": verifier,
     }
 
 

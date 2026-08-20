@@ -184,7 +184,7 @@ export default function DiagnosisDataConsole({
     <section className={styles.console}>
       <header className={styles.consoleHeader}>
         <div className={styles.consoleTitleRow}>
-          <h1 className={styles.consoleTitle}>诊断数据台</h1>
+          <h1 className={styles.consoleTitle}>Evidence 数据台</h1>
           <Tag>人工操作</Tag>
           {currentCase && <Tag color="blue">当前会话：{currentCase.title}</Tag>}
           <div className={styles.consoleActions}>

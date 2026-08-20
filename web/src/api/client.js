@@ -415,6 +415,40 @@ export function listCaseEvidence(caseId) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence`);
 }
 
+export function getCaseEvidence(caseId, evidenceId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}`);
+}
+
+export function previewCaseEvidence(caseId, evidenceId, params = {}) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/preview`, { params });
+}
+
+export function listCaseEvidenceAnalyses(caseId, evidenceId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/analyses`);
+}
+
+export function createCaseEvidenceAnalysis(caseId, evidenceId, payload = {}) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/analyses`, payload);
+}
+
+export async function downloadCaseEvidence(caseId, evidenceId, format = "raw") {
+  const token = getStoredApiKey();
+  const response = await axios.get(
+    `/api/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/download`,
+    {
+      params: { format },
+      responseType: "blob",
+      withCredentials: true,
+      headers: token ? { "X-API-Key": token } : {},
+    },
+  );
+  const disposition = response.headers["content-disposition"] || "";
+  const fallback = format === "bundle"
+    ? `evidence-${evidenceId}-bundle.zip`
+    : `evidence-${evidenceId}.bin`;
+  return { blob: response.data, filename: safeDownloadFilename(disposition, fallback) };
+}
+
 /** G4：注册的低风险 Query 目录。 */
 export function listQueryOperations() {
   return api.get("/v1/query-operations");
@@ -437,6 +471,14 @@ export function getCaseCampaign(caseId) {
 /** v6 canonical workspace / command / projection / causal APIs. */
 export function getCaseWorkspace(caseId) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/workspace`);
+}
+
+/** Approve or reject the exact persisted AI collection proposal. */
+export function decideCaseCollectionProposal(caseId, proposalId, payload) {
+  return api.post(
+    `/v1/cases/${encodeURIComponent(caseId)}/collection-proposals/${encodeURIComponent(proposalId)}/decision`,
+    payload,
+  );
 }
 
 /** Open the canonical per-Case stream from a Workspace Snapshot cursor. */

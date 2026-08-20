@@ -3,8 +3,7 @@
  *
  * Security boundary: the model can ONLY see these tools.  No bash/read/write/
  * edit/grep/find/ls.  Every tool is a read-only projection over Case/Evidence/
- * Plan data; mutations happen through Mini-Drop's deterministic services after
- * the model proposes a plan revision.
+ * Collector data; execution happens only after Mini-Drop validates a proposal.
  */
 
 import { Type } from "typebox";
@@ -113,20 +112,6 @@ export function buildToolCatalog({
       `${base}/search-knowledge`, getEnvelope,
     ),
     makeInternalTool(
-      "get_causal_graph",
-      "Get Causal Graph",
-      "Read current CausalGraphRevision with nodes and edges.",
-      Type.Object({ case_id: Type.String({ description: "Case ID" }) }),
-      `${base}/get-causal-graph`, getEnvelope,
-    ),
-    makeInternalTool(
-      "get_evidence_gaps",
-      "Get Evidence Gaps",
-      "Read precise open EvidenceGap records.",
-      Type.Object({ case_id: Type.String({ description: "Case ID" }) }),
-      `${base}/get-evidence-gaps`, getEnvelope,
-    ),
-    makeInternalTool(
       "find_reusable_evidence",
       "Find Reusable Evidence",
       "Find canonical Evidence whose fingerprint, target and window cover a missing fact.",
@@ -138,58 +123,66 @@ export function buildToolCatalog({
       `${base}/reusable-evidence`, getEnvelope,
     ),
     makeInternalTool(
-      "list_operations",
-      "List Acquisition Operations",
-      "List registered OperationSpec records that are enabled and auto-allowed.",
+      "list_collectors",
+      "List Collectors",
+      "List versioned CollectorSpecs with information goals, risk and cost.",
       Type.Object({ case_id: Type.Optional(Type.String({ description: "Case ID" })) }),
-      `${base}/list-operations`, getEnvelope,
+      `${base}/collectors`, getEnvelope,
     ),
     makeInternalTool(
-      "propose_plan_revision",
-      "Propose Plan Revision",
-      "Propose a new immutable Plan revision. Mini-Drop validates CAS and dependencies.",
+      "propose_collection",
+      "Propose Collection",
+      "Propose one catalog-backed collection. Mini-Drop rechecks scope, risk, capability and budget before Task creation.",
       Type.Object({
         case_id: Type.String({ description: "Case ID" }),
-        goal: Type.String({ description: "Investigation goal" }),
-        expected_case_row_version: Type.Integer({ description: "Current case row version" }),
-        expected_scope_revision: Type.Integer({ description: "Current scope revision" }),
-        expected_plan_revision: Type.Integer({ description: "Current plan revision" }),
-        steps: Type.Array(Type.Object({
-          kind: Type.String({ description: "ACQUIRE_EVIDENCE/ANALYZE/ASK_USER/WAIT_EVENT/FINISH" }),
-          collector_id: Type.String({ description: "Registered collector id" }),
-          purpose: Type.String({ description: "Why this step" }),
-          risk: Type.String({ description: "READ_LOW/READ_ELEVATED" }),
-          priority: Type.Integer({ description: "0-1000" }),
-          target_refs: Type.Optional(Type.Array(Type.String({ description: "Target resource refs" }))),
-          hypothesis_refs: Type.Optional(Type.Array(Type.String({ description: "Hypothesis refs" }))),
-          selection_strategy: Type.Optional(Type.String({ description: "Cluster selection strategy" })),
-          depends_on: Type.Optional(Type.Array(Type.String({ description: "Step IDs this step depends on" }))),
-        })),
-      }),
-      `${base}/plan`, getEnvelope,
-    ),
-    makeInternalTool(
-      "request_operation",
-      "Request Acquisition Operation",
-      "Request a registered low-risk Collector/Query/Source operation. Only a Proposal; Supervisor compiles ExecutionUnit.",
-      Type.Object({
-        case_id: Type.String({ description: "Case ID" }),
-        operation: Type.String({ description: "Registered operation id" }),
-        target_selector: Type.Optional(Type.Object({}, { additionalProperties: true })),
-        parameters: Type.Optional(Type.Object({}, { additionalProperties: true })),
+        collector_id: Type.String({ description: "CollectorSpec collector_id" }),
+        target_selector: Type.Object({}, { additionalProperties: true }),
+        parameters: Type.Object({}, { additionalProperties: true }),
+        information_goal: Type.String({ description: "Exact information goal from CollectorSpec" }),
+        reason_summary: Type.Optional(Type.String({ description: "Auditable selection reason" })),
+        time_window: Type.Optional(Type.Object({}, { additionalProperties: true })),
+        input_evidence_refs: Type.Optional(Type.Array(Type.String({ description: "Evidence that motivated the proposal" }))),
         idempotency_key: Type.Optional(Type.String({ description: "Optional idempotency key" })),
         runtime_generation: Type.Optional(Type.Integer({ description: "Runtime generation from Snapshot" })),
         expected_control_revision: Type.Optional(Type.Integer({ description: "Control revision from Snapshot" })),
         expected_scope_revision: Type.Optional(Type.Integer({ description: "Scope revision from Snapshot" })),
       }),
-      `${base}/query`, getEnvelope,
+      `${base}/collection-proposal`, getEnvelope,
     ),
     makeInternalTool(
-      "evaluate_hypotheses",
-      "Evaluate Hypotheses",
-      "Run deterministic analyzers + calibration over current evidence. Anti-hallucination check.",
+      "get_collection_status",
+      "Get Collection Status",
+      "Read authoritative CollectionProposal and CollectionRequest status.",
       Type.Object({ case_id: Type.String({ description: "Case ID" }) }),
-      `${base}/evaluate-hypotheses`, getEnvelope,
+      `${base}/collection-status`, getEnvelope,
+    ),
+    makeInternalTool(
+      "submit_evidence_analysis",
+      "Submit Evidence Analysis",
+      "Persist structured facts after field/span citation verification.",
+      Type.Object({
+        case_id: Type.String({ description: "Case ID" }),
+        analysis_run_id: Type.String({ description: "Queued EvidenceAnalysisRun ID" }),
+        facts: Type.Array(Type.Object({}, { additionalProperties: true })),
+        anomalies: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
+        interpretations: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
+        conflicts: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
+        limitations: Type.Optional(Type.Array(Type.String())),
+        next_collection_proposals: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
+        token_usage: Type.Optional(Type.Object({}, { additionalProperties: true })),
+        latency_ms: Type.Optional(Type.Integer()),
+      }),
+      `${base}/evidence-analysis`, getEnvelope,
+    ),
+    makeInternalTool(
+      "get_evidence_analyses",
+      "Get Evidence Analyses",
+      "Read persisted EvidenceAnalysisRuns and stale-input state.",
+      Type.Object({
+        case_id: Type.String({ description: "Case ID" }),
+        evidence_id: Type.Optional(Type.String({ description: "Optional Evidence ID" })),
+      }),
+      `${base}/evidence-analyses`, getEnvelope,
     ),
     makeInternalTool(
       "finish_investigation",
@@ -209,16 +202,6 @@ export function buildToolCatalog({
         limitations: Type.Optional(Type.Array(Type.String({ description: "Limitations" }))),
       }),
       `${base}/finish`, getEnvelope,
-    ),
-    makeInternalTool(
-      "rca_candidate_analysis",
-      "RCA Candidate Analysis",
-      "Run deterministic rule-based candidate attribution over structured evidence. Read-only; never fabricates evidence refs.",
-      Type.Object({
-        task_metadata: Type.Object({}, { additionalProperties: true }),
-        top_functions: Type.Array(Type.Object({}, { additionalProperties: true })),
-      }),
-      `${base}/rca-analysis`, getEnvelope,
     ),
   ];
   const remoteTools = Array.isArray(catalog?.tools)
@@ -285,12 +268,11 @@ const READ_ONLY_TOOL_NAMES = new Set([
   "get_evidence_projection",
   "compare_evidence",
   "search_knowledge",
-  "get_causal_graph",
-  "get_evidence_gaps",
   "find_reusable_evidence",
-  "list_operations",
-  "evaluate_hypotheses",
-  "rca_candidate_analysis",
+  "list_collectors",
+  "get_collection_status",
+  "get_evidence_analyses",
+  "submit_evidence_analysis",
 ]);
 
 export const ALLOWED_TOOL_NAMES = [
@@ -299,13 +281,11 @@ export const ALLOWED_TOOL_NAMES = [
   "get_evidence_projection",
   "compare_evidence",
   "search_knowledge",
-  "get_causal_graph",
-  "get_evidence_gaps",
   "find_reusable_evidence",
-  "list_operations",
-  "propose_plan_revision",
-  "request_operation",
-  "evaluate_hypotheses",
+  "list_collectors",
+  "propose_collection",
+  "get_collection_status",
+  "submit_evidence_analysis",
+  "get_evidence_analyses",
   "finish_investigation",
-  "rca_candidate_analysis",
 ];

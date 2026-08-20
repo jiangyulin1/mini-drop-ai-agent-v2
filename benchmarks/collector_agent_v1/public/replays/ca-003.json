@@ -1,0 +1,15 @@
+{
+  "schema_version": "collector-branch-replay.v1",
+  "case_id": "ca-003",
+  "available_collectors": ["sys_metrics", "process_scan", "log_scan", "runtime_snapshot", "perf_cpu", "ebpf_io", "memory_smaps", "connection_probe"],
+  "branches": {
+    "sys_metrics": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-003-sys", "projection_hash": "sha256:ca003sys", "projection": {"cpu": {"process_percent": 22.0, "host_percent": 38.0}, "io": {"await_ms": 2.1}, "network": {"retransmits": 0}}},
+    "process_scan": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-003-proc", "projection_hash": "sha256:ca003proc", "projection": {"processes": [{"pid": 6339, "runtime": "native", "cpu_percent": 21.5}]}},
+    "log_scan": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-003-log", "projection_hash": "sha256:ca003log", "projection": {"errors": [], "warnings": []}},
+    "runtime_snapshot": {"status": "SUCCEEDED", "cost": 2, "evidence_id": "ev-003-runtime", "projection_hash": "sha256:ca003runtime", "projection": {"thread_states": {"running": 2, "sleeping": 14}}},
+    "perf_cpu": {"status": "FAILED", "cost": 4, "error_code": "INSUFFICIENT_SAMPLES"},
+    "ebpf_io": {"status": "SUCCEEDED", "cost": 3, "evidence_id": "ev-003-io", "projection_hash": "sha256:ca003io", "projection": {"io_latency_us": {"p50": 410, "p95": 980, "p99": 1400}, "slow_io": 0}},
+    "memory_smaps": {"status": "SUCCEEDED", "cost": 2, "evidence_id": "ev-003-mem", "projection_hash": "sha256:ca003mem", "projection": {"rss_mb": 280, "growth_mb_per_min": 0.1}},
+    "connection_probe": {"status": "SUCCEEDED", "cost": 1, "evidence_id": "ev-003-conn", "projection_hash": "sha256:ca003conn", "projection": {"reachable": true, "latency_ms": 4.8}}
+  }
+}

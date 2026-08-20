@@ -10,9 +10,16 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from mini_drop_contracts import (
+    catalog_payload as collector_catalog_payload,
+    get_collector_spec,
+)
 from server.app.agent_runtime.config import agent_max_active_cases
 from server.app.agent_runtime.catalog import get_tool_spec, tool_catalog_payload
-from server.app.agent_runtime.options import RuntimeOptions, resolve_runtime_options
+from server.app.agent_runtime.options import (
+    RuntimeOptions,
+    resolve_runtime_options,
+)
 from server.app.agent_runtime.policy import (
     RuntimePolicy,
     constrain_side_effect_policy,
@@ -21,11 +28,10 @@ from server.app.agent_runtime.policy import (
 from server.app.agent_runtime.port import CaseContextSnapshot
 from server.app.application.task_views import task_view as _task_view
 from server.app.diagnosis.actuation import ActuationError, enforce_runtime_execution_policy
+from server.app.diagnosis.collection_supervisor import CollectionSupervisor
 from server.app.diagnosis.investigation_plan import PlanUpdateInput
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.query_registry import QUERY_REGISTRY
-from server.app.diagnosis.skill_registry import SKILL_REGISTRY
-from server.app.diagnosis.strategies.registry import get_strategy
 from server.app.diagnosis.v6_policy import READ_ONLY_TOOLS
 from server.app.agent_runtime.shadow import (
     build_deterministic_plan,
@@ -39,7 +45,9 @@ from server.app.http.auth import (
 from server.app.logging_utils import log_event
 from server.app.runtime_services import (
     case_evidence_service,
+    collection_supervisor,
     diagnosis_orchestrator,
+    evidence_analysis_service,
     evidence_attachment_service,
     investigation_plan_service,
     repo,
@@ -167,8 +175,6 @@ def _build_runtime_case_context(
     """Build the L0/L1 Case projection handed to an AgentRuntimePort before a Turn."""
     case_id = str(case.get("case_id") or "")
     plan = investigation_plan_service.read_plan(case_id, tenant_id) or {}
-    graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": []}
-    hypotheses = graph.get("hypotheses") or []
     evidence_summary: list[dict[str, Any]] = []
     canonical_evidence = case_evidence_service.list_evidence(case_id, tenant_id, status=None)
     for item in canonical_evidence:
@@ -204,40 +210,46 @@ def _build_runtime_case_context(
             "freshness": attachment.get("freshness"),
             "quality": attachment.get("quality"),
         })
-    missing_facts: list[str] = []
-    for hypothesis in hypotheses:
-        for fact in (hypothesis.get("missing_evidence") or []):
-            if str(fact) not in missing_facts:
-                missing_facts.append(str(fact))
     binding = repo.get_agent_runtime_binding(case_id, tenant_id)
-    selected_skills = SKILL_REGISTRY.select_skills(
-        goal=str(case.get("problem_description") or ""),
-        target_scope=case.get("target_scope") or {},
-        evidence_summary=evidence_summary,
-        missing_facts=missing_facts,
-        limit=3,
-    )
-    knowledge_context = retrieve_knowledge(
-        str(case.get("problem_description") or ""),
-        [{"finding_type": str(item.get("finding_type") or item.get("status") or "")}
-         for item in hypotheses],
-        limit=3,
-    )
+    collection_proposals = repo.list_collection_proposals(case_id, tenant_id)
+    collection_requests = repo.list_collection_requests(case_id, tenant_id)
+    evidence_analyses = repo.list_evidence_analysis_runs(case_id, tenant_id)
+    information_goals: list[str] = []
+    for analysis in evidence_analyses:
+        if analysis.get("status") != "COMPLETED" or analysis.get("input_state") != "CURRENT":
+            continue
+        for item in analysis.get("next_collection_proposals") or []:
+            goal = str(item.get("information_goal") if isinstance(item, dict) else item).strip()
+            if goal and goal not in information_goals:
+                information_goals.append(goal)
     resolved_policy = constrain_side_effect_policy(
         resolve_runtime_policy(runtime_policy), side_effect_policy,
     )
     experimental = resolved_policy.execution_mode in {"dry_run", "sandbox"}
     resolved_options = resolve_runtime_options(runtime_options, experiment_mode=experimental)
-    strategy = get_strategy(strategy_id or resolved_options.strategy_id)
-    directive = strategy.build_directive(
-        goal=str(case.get("problem_description") or ""),
-        target_scope=case.get("target_scope") or {},
-        evidence_summary=evidence_summary,
-        skill_context=selected_skills,
-        missing_facts=missing_facts,
-        strategy_params=resolved_options.strategy_params,
-    )
+    strategy_id = strategy_id or resolved_options.strategy_id
     tool_catalog = sorted(resolved_policy.effective_tools())
+    consumed_duration = sum(
+        CollectionSupervisor._reserved_duration(item) for item in collection_requests
+    )
+    running_task_ids = [
+        str(item["task_id"])
+        for item in collection_requests
+        if item.get("task_id") and item.get("status") in {"ACCEPTED", "DISPATCHED", "RUNNING"}
+    ]
+    analysis_summary = [
+        {
+            "analysis_run_id": item.get("analysis_run_id"),
+            "status": item.get("status"),
+            "input_state": item.get("input_state"),
+            "evidence_inputs": item.get("evidence_inputs") or [],
+            "facts": (item.get("facts") or [])[:10],
+            "conflicts": (item.get("conflicts") or [])[:10],
+            "limitations": (item.get("limitations") or [])[:10],
+            "next_collection_proposals": (item.get("next_collection_proposals") or [])[:10],
+        }
+        for item in evidence_analyses[-10:]
+    ]
     return CaseContextSnapshot(
         case_id=case_id,
         tenant_id=tenant_id,
@@ -254,31 +266,51 @@ def _build_runtime_case_context(
         turn_id=turn_id,
         disposition=disposition,
         side_effect_policy=resolved_policy.side_effect_policy,
-        diagnostic_strategy_id=strategy.strategy_id,
+        diagnostic_strategy_id=strategy_id,
         strategy_params=resolved_options.strategy_params,
-        strategy_guidance=strategy.render_prompt_guidance(),
+        strategy_guidance="",
         runtime_policy=resolved_policy.audit_summary(),
         runtime_options=resolved_options.audit_summary(),
         context_snapshot_id=None,
         runtime_generation=int(binding.get("runtime_generation") or 1) if binding else 1,
         runtime_session_id=str(binding.get("runtime_session_id") or "") if binding else "",
-        hypotheses=[
-            {
-                "hypothesis_id": item.get("hypothesis_id"),
-                "statement": item.get("statement"),
-                "status": item.get("status"),
-            }
-            for item in hypotheses[:20]
-        ],
+        collection_proposals=collection_proposals[-20:],
+        collection_requests=collection_requests[-20:],
+        evidence_analyses=analysis_summary,
+        information_goals=information_goals[:20],
+        hypotheses=[],
         evidence_summary=evidence_summary[:20],
-        missing_facts=missing_facts[:20],
-        running_task_ids=[],
-        budget={"max_active_cases": agent_max_active_cases()},
+        missing_facts=information_goals[:20],
+        running_task_ids=running_task_ids,
+        budget={
+            "max_active_cases": agent_max_active_cases(),
+            "max_collection_requests": resolved_policy.max_collection_requests,
+            "used_collection_requests": len(collection_requests),
+            "remaining_collection_requests": max(
+                0, resolved_policy.max_collection_requests - len(collection_requests),
+            ),
+            "max_collection_duration_sec": resolved_policy.max_collection_duration_sec,
+            "reserved_collection_duration_sec": consumed_duration,
+            "remaining_collection_duration_sec": max(
+                0, resolved_policy.max_collection_duration_sec - consumed_duration,
+            ),
+        },
         recent_user_commands=[],
         tool_catalog_summary=tool_catalog,
-        knowledge_context=knowledge_context,
-        skill_context=selected_skills,
-        investigation_directive=directive.model_dump(mode="json"),
+        knowledge_context=[],
+        skill_context=[],
+        investigation_directive={
+            "kind": "EVIDENCE_NATIVE_COLLECTOR_AGENT",
+            "authority": "AI proposes; deterministic gateway validates and dispatches",
+            "next_information_goals": information_goals[:20],
+            "stop_conditions": [
+                "evidence_sufficient",
+                "collection_budget_exhausted",
+                "duplicate_collection_would_add_no_information",
+                "no_new_evidence_after_two_cycles",
+                "scope_or_approval_required",
+            ],
+        },
     )
 def _case_investigation_footprint(case_id: str, tenant_id: str) -> dict[str, int]:
     plan = investigation_plan_service.read_plan(case_id, tenant_id) or {}
@@ -517,6 +549,126 @@ def internal_tool_list_operations(payload: dict[str, Any], request: Request) -> 
     return APIResponse(data={"items": items, "total": len(items)})
 
 
+@router.post("/internal/agent/tools/collectors")
+def internal_tool_list_collectors(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    if case_id and repo.get_incident_case(case_id, _request_tenant()) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    return APIResponse(data=collector_catalog_payload())
+
+
+@router.post("/internal/agent/tools/collection-proposal")
+def internal_tool_propose_collection(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    fence_error = _tool_fence(case, tenant_id, payload, "propose_collection")
+    if fence_error:
+        raise HTTPException(status_code=409, detail=fence_error)
+    try:
+        runtime_policy = _runtime_policy_from_tool_payload(payload)
+        collector_spec = get_collector_spec(str(payload.get("collector_id") or ""))
+        if (
+            collector_spec is not None
+            and collector_spec.risk_level in runtime_policy.require_approval_for
+            and not runtime_policy.auto_approve
+        ):
+            raise HTTPException(status_code=403, detail="COLLECTOR_REQUIRES_APPROVAL")
+        result = collection_supervisor.propose_and_dispatch(
+            case_id=case_id, tenant_id=tenant_id,
+            collector_id=str(payload.get("collector_id") or ""),
+            target_selector=payload.get("target_selector") or {},
+            parameters=payload.get("parameters") or {},
+            information_goal=str(payload.get("information_goal") or ""),
+            reason_summary=str(payload.get("reason_summary") or ""),
+            time_window=payload.get("time_window") or {},
+            input_evidence_refs=[str(item) for item in payload.get("input_evidence_refs") or []],
+            runtime_generation=int(payload.get("runtime_generation") or 1),
+            expected_control_revision=payload.get("expected_control_revision"),
+            expected_scope_revision=payload.get("expected_scope_revision"),
+            idempotency_key=str(payload.get("idempotency_key") or "") or None,
+            allowed_risk_levels=runtime_policy.allowed_risk_levels,
+            max_collection_requests=runtime_policy.max_collection_requests,
+            max_collection_duration_sec=runtime_policy.max_collection_duration_sec,
+            agent_run_id=str(payload.get("agent_run_id") or "") or None,
+            cycle_id=str(payload.get("cycle_id") or "") or None,
+            auto_dispatch=runtime_policy.side_effect_policy == "AUTO_READ_LOW",
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    proposal = result.get("proposal") or {}
+    if proposal.get("status") == "REJECTED":
+        raise HTTPException(
+            status_code=409,
+            detail="COLLECTION_PROPOSAL_REJECTED:" + ",".join(
+                (proposal.get("validation_result") or {}).get("errors") or []
+            ),
+        )
+    task = result.get("task")
+    return APIResponse(data={
+        "proposal": proposal,
+        "collection_request": result.get("collection_request"),
+        "task": _task_view(task) if task is not None else None,
+    })
+
+
+@router.post("/internal/agent/tools/collection-status")
+def internal_tool_collection_status(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    persistence = getattr(collection_supervisor, "_repo")
+    return APIResponse(data={
+        "proposals": persistence.list_collection_proposals(case_id, tenant_id),
+        "requests": persistence.list_collection_requests(case_id, tenant_id),
+    })
+
+
+@router.post("/internal/agent/tools/evidence-analysis")
+def internal_tool_submit_evidence_analysis(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    fence_error = _tool_fence(case, tenant_id, payload, "submit_evidence_analysis")
+    if fence_error:
+        raise HTTPException(status_code=409, detail=fence_error)
+    try:
+        result = evidence_analysis_service.complete_run(
+            analysis_run_id=str(payload.get("analysis_run_id") or ""),
+            case_id=case_id, tenant_id=tenant_id, facts=payload.get("facts") or [],
+            anomalies=payload.get("anomalies") or [],
+            interpretations=payload.get("interpretations") or [],
+            conflicts=payload.get("conflicts") or [], limitations=payload.get("limitations") or [],
+            next_collection_proposals=payload.get("next_collection_proposals") or [],
+            token_usage=payload.get("token_usage") or {}, latency_ms=payload.get("latency_ms"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.post("/internal/agent/tools/evidence-analyses")
+def internal_tool_get_evidence_analyses(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    items = evidence_analysis_service.list_runs(
+        case_id, tenant_id, evidence_id=str(payload.get("evidence_id") or "") or None,
+    )
+    return APIResponse(data={"items": items, "total": len(items)})
+
+
 @router.post("/internal/agent/tools/get-evidence-projection")
 def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Request) -> APIResponse:
     """v6 read-only tool: bounded content expansion of EvidenceProjection."""
@@ -711,58 +863,6 @@ def internal_tool_upsert_plan(payload: dict[str, Any], request: Request) -> APIR
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return APIResponse(data=plan)
-
-
-@router.post("/internal/agent/tools/evaluate-hypotheses")
-def internal_tool_evaluate_hypotheses(payload: dict[str, Any], request: Request) -> APIResponse:
-    _require_internal_token(request)
-    case_id = str(payload.get("case_id") or "")
-    tenant_id = _request_tenant()
-    case = repo.get_incident_case(case_id, tenant_id)
-    if case is None:
-        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
-    graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
-    return APIResponse(data={
-        "hypotheses": [
-            {"hypothesis_id": item.get("hypothesis_id"), "status": item.get("status")}
-            for item in (graph.get("hypotheses") or [])
-        ],
-        "note": "确定性假设评估结果；模型不得凭直觉覆盖。",
-    })
-
-
-@router.post("/internal/agent/tools/rca-analysis")
-def internal_tool_rca_analysis(payload: dict[str, Any], request: Request) -> APIResponse:
-    """E9：把 rca 候选归因分析器作为只读 Tool 暴露，模型不能越过它自创原因。
-
-    规则引擎（candidates）是确定性白名单匹配；返回候选时同时给出缺失证据，
-    绝不凭空捏造证据引用。本工具不创建任何 Task。
-    """
-    _require_internal_token(request)
-    from server.app.rca.candidates import generate_candidates
-    from server.app.rca.models import EvidenceInput
-    list_fields = (
-        "task_metadata", "top_functions", "tool_results", "suggestions", "failure_events",
-    )
-    dict_fields = ("ebpf_metrics", "sys_metrics", "baseline_diff", "agent_stats")
-    evidence = EvidenceInput(**{
-        **{key: payload.get(key) or [] for key in list_fields},
-        **{key: payload.get(key) for key in dict_fields},
-    })
-    candidates = generate_candidates(evidence)
-    return APIResponse(data={
-        "candidates": [
-            {
-                "candidate_id": item.candidate_id,
-                "description": item.description,
-                "evidence_refs": item.evidence_refs,
-                "rule_score": item.rule_score,
-                "missing_evidence": item.missing_evidence,
-            }
-            for item in candidates
-        ],
-        "note": "确定性规则候选；模型可在其内排序/挑选，但不得新增候选或证据引用。",
-    })
 
 
 def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> APIResponse:

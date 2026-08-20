@@ -78,7 +78,6 @@ def run_matrix(matrix: dict[str, Any], source: Path) -> dict[str, Any]:
     scenario_ids = None if selected == "all" else set(selected)
     repetitions = int(matrix.get("repetitions", 1))
     rows: list[dict[str, Any]] = []
-    effort_cost = {"none": 0.5, "low": 0.75, "medium": 1.0, "high": 1.5}
     for condition in matrix["conditions"]:
         strategy = get_strategy(condition.get("strategy_id"))
         options = resolve_runtime_options({
@@ -99,30 +98,41 @@ def run_matrix(matrix: dict[str, Any], source: Path) -> dict[str, Any]:
         outputs = [json.dumps(report["results"], sort_keys=True, ensure_ascii=False) for report in reports]
         calls = _tool_calls(first)
         metrics = first["metrics"]
+        control_accuracy = metrics.get("root_location_accuracy") or metrics.get("classification_accuracy")
+        options_audit = options.audit_summary()
+        options_audit["runtime_support"]["strategy"] = "not_applied_offline_control"
         rows.append({
             "condition_id": condition["condition_id"],
             "strategy_id": strategy.strategy_id,
             "strategy_version": strategy.strategy_version,
-            "runtime_options": options.audit_summary(),
+            "runtime_options": options_audit,
             "runtime_policy": policy.audit_summary(),
             "repetitions": repetitions,
             "scenario_count": first["total"],
-            "scenario_pass_rate": metrics.get("scenario_pass_rate"),
-            "root_cause_accuracy": metrics.get("root_location_accuracy") or metrics.get("classification_accuracy"),
-            "evidence_citation_validity": metrics.get("evidence_reference_integrity"),
+            "scenario_pass_rate": None,
+            "control_group_scenario_pass_rate": metrics.get("scenario_pass_rate"),
+            "strategy_applied": False,
+            "root_cause_accuracy": None,
+            "control_group_root_cause_accuracy": control_accuracy,
+            "evidence_citation_validity": None,
+            "control_group_evidence_citation_validity": metrics.get("evidence_reference_integrity"),
             "unsafe_auto_execute_count": metrics.get("unsafe_auto_execute_count", 0),
-            "tool_call_count": calls,
+            "tool_call_count": None,
+            "control_group_tool_call_count": calls,
             "side_effect_count": 0,
             "prohibited_call_count": 0,
-            "repeat_consistency": sum(value == outputs[0] for value in outputs) / len(outputs),
-            "estimated_cost_units": round(calls * effort_cost[options.reasoning_effort] * repetitions, 3),
+            "repeat_consistency": None,
+            "control_group_repeat_consistency": (
+                sum(value == outputs[0] for value in outputs) / len(outputs)
+            ),
+            "estimated_cost_units": 0.0,
         })
     return {
         "schema_version": "agent-strategy-matrix-report.v1",
         "matrix_id": matrix.get("matrix_id"),
         "source": str(source.relative_to(ROOT)),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "adapter": "offline_deterministic_evidence_harness",
+        "adapter": "offline_rules_control_only",
         "conditions": rows,
     }
 
@@ -179,19 +189,32 @@ def run_live_matrix(
             result = live.wait_for_settle(args.control_url, case_id, args.timeout)
             scores = live.score(result["tools"], result["final_answer"], args.fault)
             try:
+                evidence = live.http_json(
+                    f"{args.control_url.rstrip('/')}/api/v1/cases/{case_id}/evidence",
+                )["data"]["items"]
+            except Exception:
+                evidence = []
+            citations = live.score_evidence_citations(result.get("conclusion") or {}, evidence)
+            try:
                 attempts = live.http_json(
                     f"{args.control_url.rstrip('/')}/api/v1/cases/{case_id}/model-attempts",
                 )["data"]["items"]
             except Exception:
                 attempts = []
             usage = _sum_model_attempts(attempts)
+            root_match = 1.0 if scores["final_answer_mentions_fault"] else 0.0
+            prohibited_count = 1 if scores["forbidden_tool_used"] else 0
             runs.append({
                 "case_id": case_id,
                 "settled": result["settled"],
                 "tool_call_count": len(result["tools"]),
-                "root_cause_accuracy": 1.0 if scores["final_answer_mentions_fault"] else 0.0,
+                "root_cause_accuracy": root_match,
+                "root_cause_signature": scores["root_cause_signature"],
                 "tool_recall": scores["tool_recall"],
-                "prohibited_call_count": 1 if scores["forbidden_tool_used"] else 0,
+                "evidence_citation_validity": citations["score"],
+                "citation_details": citations,
+                "prohibited_call_count": prohibited_count,
+                "passed": bool(result["settled"] and root_match and citations["valid"] and not prohibited_count),
                 "final_answer": result["final_answer"],
                 "usage": usage,
             })
@@ -204,9 +227,12 @@ def run_live_matrix(
             "repetitions": repetitions,
             "fault": args.fault,
             "scenario_count": 1,
-            "scenario_pass_rate": round(sum(item["root_cause_accuracy"] for item in runs) / len(runs), 3),
+            "scenario_pass_rate": round(sum(item["passed"] for item in runs) / len(runs), 3),
             "root_cause_accuracy": round(sum(item["root_cause_accuracy"] for item in runs) / len(runs), 3),
-            "evidence_citation_validity": 0.0,
+            "root_cause_scoring_method": "blind-fault-specific-text-match.v1",
+            "evidence_citation_validity": round(
+                sum(item["evidence_citation_validity"] for item in runs) / len(runs), 3,
+            ),
             "tool_call_count": sum(item["tool_call_count"] for item in runs),
             "side_effect_count": 0,
             "prohibited_call_count": sum(item["prohibited_call_count"] for item in runs),
@@ -222,8 +248,10 @@ def run_live_matrix(
             "runs": runs,
         }
         if repetitions > 1:
-            outputs = [json.dumps(item["final_answer"], sort_keys=True, ensure_ascii=False) for item in runs]
-            row["repeat_consistency"] = round(sum(value == outputs[0] for value in outputs) / len(outputs), 3)
+            signatures = [item["root_cause_signature"] for item in runs]
+            row["repeat_consistency"] = round(
+                max(signatures.count(value) for value in set(signatures)) / len(signatures), 3,
+            )
         rows.append(row)
     return {
         "schema_version": "agent-strategy-matrix-report.v1",
@@ -238,19 +266,37 @@ def run_live_matrix(
 def render_markdown(report: dict[str, Any]) -> str:
     lines = [
         f"# Agent strategy matrix: {report['matrix_id']}", "",
-        "| Condition | Strategy | Pass rate | Root accuracy | Evidence validity | Tools | Side effects | Consistency | Cost |",
+        "| Condition | Strategy | Pass rate | Root match | Evidence validity | Tools | Side effects | Consistency | Cost |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in report["conditions"]:
         cost = row.get("cost", row.get("estimated_cost_units", 0.0))
+        pass_rate = row.get("scenario_pass_rate")
+        pass_display = "n/a" if pass_rate is None else f"{pass_rate:.3f}"
+        root_accuracy = row.get("root_cause_accuracy")
+        root_display = "n/a" if root_accuracy is None else f"{root_accuracy:.3f}"
+        evidence_validity = row.get("evidence_citation_validity")
+        evidence_display = "n/a" if evidence_validity is None else f"{evidence_validity:.3f}"
+        tool_calls = row.get("tool_call_count")
+        tool_display = "n/a" if tool_calls is None else str(tool_calls)
+        consistency = row.get("repeat_consistency")
+        consistency_display = "n/a" if consistency is None else f"{consistency:.3f}"
         lines.append(
-            f"| {row['condition_id']} | {row['strategy_id']} | {row['scenario_pass_rate']:.3f} | "
-            f"{row['root_cause_accuracy']:.3f} | {row['evidence_citation_validity']:.3f} | "
-            f"{row['tool_call_count']} | {row['side_effect_count']} | {row['repeat_consistency']:.3f} | "
+            f"| {row['condition_id']} | {row['strategy_id']} | {pass_display} | "
+            f"{root_display} | {evidence_display} | "
+            f"{tool_display} | {row['side_effect_count']} | {consistency_display} | "
             f"{float(cost):.6f} |"
         )
     adapter = report.get("adapter", "offline")
-    lines.extend(["", f"> Harness: {adapter}. Live Pi token/cost is read from model-attempts audit.", ""])
+    lines.extend([
+        "",
+        f"> Harness: {adapter}. Offline mode is a rules-only control and does not apply the selected strategy, "
+        "so it never reports strategy root-cause accuracy. A live pass requires a settled investigation, "
+        "blind fault-specific root match, "
+        "server-verified citations, and zero prohibited tools. Root match is a text proxy, not strict RCA accuracy. "
+        "Live Pi token/cost is read from model-attempts audit.",
+        "",
+    ])
     return "\n".join(lines)
 
 

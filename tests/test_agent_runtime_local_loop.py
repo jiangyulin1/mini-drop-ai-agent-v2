@@ -1,6 +1,6 @@
 """T1 local longitudinal chain without a real model.
 
-HTTP Turn -> AgentRuntimePort/Sidecar surface -> internal Query tool ->
+HTTP Turn -> AgentRuntimePort/Sidecar surface -> Collector proposal ->
 native Task -> Task completion -> CaseEvidence -> Runtime follow_up.
 """
 
@@ -115,7 +115,6 @@ def _create_case(client: TestClient) -> dict:
 
 def test_local_longitudinal_chain_turn_query_task_evidence_wakeup(client, monkeypatch):
     import server.app.app_factory as main_module
-    from server.app.schemas import CreateTaskRequest
 
     repo.register_agent(
         "agent-loop", "node-loop", "192.168.77.10", version="0.3.0",
@@ -133,8 +132,14 @@ def test_local_longitudinal_chain_turn_query_task_evidence_wakeup(client, monkey
 
         # 2. Simulated Pi tool call through internal gateway creates a native Task.
         query = client.post(
-            "/internal/agent/tools/query",
-            json={"case_id": case["case_id"], "operation": "process.list", "parameters": {}},
+            "/internal/agent/tools/collection-proposal",
+            json={
+                "case_id": case["case_id"], "collector_id": "process_scan",
+                "target_selector": {"agent_id": "agent-loop", "target_pid": 1},
+                "parameters": {},
+                "information_goal": "将服务或主机目标解析为具体 Linux 进程",
+                "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+            },
             headers={"X-Internal-Token": TOKEN},
         )
         assert query.status_code == 200, query.text

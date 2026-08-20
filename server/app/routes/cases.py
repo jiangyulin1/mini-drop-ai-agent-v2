@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json as _json
+import zipfile
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
-from server.app.agent_runtime.config import runtime_mode
+from mini_drop_contracts import get_collector_spec
+from server.app.agent_runtime.config import AgentRuntimeMode, runtime_mode
+from server.app.agent_runtime.dispatcher import get_runtime
+from server.app.agent_runtime.port import AgentTurnInput, CaseContextSnapshot
+from server.app.artifact_service import read_artifact_bytes
 from server.app.application.task_views import task_view as _task_view
 from server.app.case_collaboration import (
     AttachResourcesRequest,
@@ -39,7 +46,9 @@ from server.app.http.auth import (
     require_role as _require_role,
 )
 from server.app.runtime_services import (
+    collection_supervisor,
     diagnosis_orchestrator,
+    evidence_analysis_service,
     evidence_attachment_service,
     investigation_plan_service,
     reference_resolver,
@@ -653,6 +662,206 @@ def list_case_evidence(
     return APIResponse(data={"items": items, "total": len(items)})
 
 
+def _case_evidence_detail(case_id: str, tenant_id: str, evidence_id: str) -> dict[str, Any]:
+    evidence = repo.get_case_evidence(case_id, tenant_id, evidence_id)
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence 不存在")
+    projections = repo.list_evidence_projections(case_id, tenant_id, evidence_id=evidence_id)
+    reviews = investigation_plan_service.list_reviews(case_id, tenant_id, evidence_id=evidence_id)
+    analyses = evidence_analysis_service.list_runs(case_id, tenant_id, evidence_id=evidence_id)
+    spec = get_collector_spec(str(evidence.get("collector_id") or ""))
+    return {
+        **evidence,
+        "collector_spec": spec.to_dict() if spec else None,
+        "projections": projections,
+        "reviews": reviews,
+        "analyses": analyses,
+    }
+
+
+@router.get("/api/v1/cases/{case_id}/evidence/{evidence_id}")
+def get_case_evidence_detail(case_id: str, evidence_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    return APIResponse(data=_case_evidence_detail(case_id, _request_tenant(), evidence_id))
+
+
+@router.get("/api/v1/cases/{case_id}/evidence/{evidence_id}/preview")
+def preview_case_evidence(
+    case_id: str, evidence_id: str, request: Request, max_bytes: int = 131072,
+) -> APIResponse:
+    _require_role(request, "operator")
+    detail = _case_evidence_detail(case_id, _request_tenant(), evidence_id)
+    max_bytes = max(1, min(int(max_bytes), 262144))
+    projections = detail.get("projections") or []
+    if not projections:
+        raise HTTPException(status_code=409, detail="EVIDENCE_PROJECTION_UNAVAILABLE")
+    projection = projections[-1]
+    encoded = _json.dumps(
+        projection.get("content") or {}, ensure_ascii=False, sort_keys=True, default=str,
+    ).encode("utf-8")
+    truncated = len(encoded) > max_bytes
+    preview = encoded[:max_bytes].decode("utf-8", errors="replace") if truncated else None
+    spec = detail.get("collector_spec") or {}
+    return APIResponse(data={
+        "evidence_id": evidence_id,
+        "review_state": detail.get("status"),
+        "projection_hash": projection.get("projection_hash"),
+        "projection_kind": projection.get("projection_kind"),
+        "preview_modes": spec.get("preview_modes") or ["json"],
+        "content": None if truncated else projection.get("content"),
+        "text_preview": preview,
+        "truncated": truncated or bool(projection.get("truncated")),
+        "source_bytes": projection.get("source_bytes"),
+        "projected_bytes": projection.get("projected_bytes"),
+    })
+
+
+def _raw_evidence_bytes(detail: dict[str, Any]) -> tuple[bytes, str, str]:
+    task_id = str(detail.get("task_id") or "")
+    artifact_id = str(detail.get("artifact_id") or "")
+    artifacts = list(repo.artifacts.get(task_id, [])) if task_id else []
+    artifact = next((item for item in artifacts if str(item.get("id") or "") == artifact_id), None)
+    if artifact is None:
+        artifact = next((item for item in artifacts if item.get("artifact_type") == detail.get("artifact_type")), None)
+    if artifact is not None:
+        has_external_raw = bool(artifact.get("local_path") or artifact.get("object_key"))
+        try:
+            raw = read_artifact_bytes(artifact)
+        except FileNotFoundError as exc:
+            if has_external_raw:
+                raise HTTPException(status_code=409, detail="EVIDENCE_RAW_OBJECT_MISSING") from exc
+            raw = _json.dumps(artifact, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        return (
+            raw,
+            str(artifact.get("content_type") or "application/octet-stream"),
+            str(artifact.get("filename") or f"{detail['evidence_id']}.json"),
+        )
+    # Source Evidence has no natural file; its canonical projection is the raw JSON contract.
+    if str(detail.get("source_channel") or "") != "COLLECTOR" and detail.get("projections"):
+        raw = _json.dumps(
+            detail["projections"][-1].get("content") or {},
+            ensure_ascii=False, sort_keys=True, default=str,
+        ).encode("utf-8")
+        return raw, "application/json", f"{detail['evidence_id']}.json"
+    raise HTTPException(status_code=409, detail="EVIDENCE_RAW_OBJECT_UNAVAILABLE")
+
+
+@router.get("/api/v1/cases/{case_id}/evidence/{evidence_id}/download")
+def download_case_evidence(
+    case_id: str, evidence_id: str, request: Request, format: str = "raw",
+) -> Response:
+    _require_role(request, "operator")
+    if format not in {"raw", "bundle"}:
+        raise HTTPException(status_code=400, detail="INVALID_EVIDENCE_DOWNLOAD_FORMAT")
+    detail = _case_evidence_detail(case_id, _request_tenant(), evidence_id)
+    raw, media_type, filename = _raw_evidence_bytes(detail)
+    if format == "raw":
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "X-Content-Type-Options": "nosniff",
+        }
+        return Response(content=raw, media_type=media_type, headers=headers)
+    manifest = {
+        "schema_version": "evidence-bundle.v1",
+        "evidence": {key: value for key, value in detail.items() if key not in {"projections", "reviews", "analyses", "collector_spec"}},
+        "collector_spec": detail.get("collector_spec"),
+        "raw_filename": filename,
+        "registered_sha256": detail.get("sha256"),
+        "projection_hashes": [item.get("projection_hash") for item in detail.get("projections") or []],
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", _json.dumps(manifest, ensure_ascii=False, indent=2, default=str))
+        archive.writestr(f"raw/{filename}", raw)
+        archive.writestr("projections.json", _json.dumps(detail.get("projections") or [], ensure_ascii=False, indent=2, default=str))
+        archive.writestr("reviews.json", _json.dumps(detail.get("reviews") or [], ensure_ascii=False, indent=2, default=str))
+        archive.writestr("analyses.json", _json.dumps(detail.get("analyses") or [], ensure_ascii=False, indent=2, default=str))
+    bundle_name = f"evidence-{evidence_id}-bundle.zip"
+    return Response(
+        content=output.getvalue(), media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(bundle_name)}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/api/v1/cases/{case_id}/evidence/{evidence_id}/analyses")
+def list_case_evidence_analyses(case_id: str, evidence_id: str, request: Request) -> APIResponse:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_case_evidence(case_id, tenant_id, evidence_id) is None:
+        raise HTTPException(status_code=404, detail="Evidence 不存在")
+    items = evidence_analysis_service.list_runs(case_id, tenant_id, evidence_id=evidence_id)
+    return APIResponse(data={"items": items, "total": len(items)})
+
+
+@router.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/analyses")
+def create_case_evidence_analysis(
+    case_id: str, evidence_id: str, payload: dict[str, Any], request: Request,
+) -> APIResponse:
+    """Queue a genuinely model-backed, read-only single-Evidence analysis."""
+    _require_role(request, "operator")
+    if runtime_mode() not in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
+        raise HTTPException(status_code=409, detail="AI_RUNTIME_NOT_CONFIGURED")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    try:
+        run = evidence_analysis_service.create_run(
+            case_id=case_id, tenant_id=tenant_id, evidence_ids=[evidence_id],
+            mode="SINGLE", model_config_id=payload.get("model_config_id"),
+            prompt_version=str(payload.get("prompt_version") or "evidence-analysis.v1"),
+            explicit_single=True,
+        )
+        if run.get("reused"):
+            return APIResponse(data=run)
+        runtime = get_runtime()
+        binding = runtime.start_or_resume(CaseContextSnapshot(
+            case_id=case_id, tenant_id=tenant_id,
+            case_goal=str(case.get("problem_description") or case.get("title") or ""),
+            target_scope=case.get("target_scope") or {},
+            case_command_revision=int(case.get("case_command_revision") or 1),
+            control_revision=int(case.get("control_revision") or 1),
+            scope_revision=int(case.get("scope_revision") or 1),
+            evidence_watermark=len(repo.list_case_evidence(case_id, tenant_id)),
+            evidence_summary=run.get("evidence_inputs") or [],
+            side_effect_policy="READ_ONLY",
+            investigation_directive={
+                "kind": "EVIDENCE_ANALYSIS", "analysis_run_id": run["analysis_run_id"],
+                "required_tool": "submit_evidence_analysis",
+            },
+        ))
+        accepted = runtime.submit_turn(case_id, AgentTurnInput(
+            case_id=case_id,
+            message=(
+                f"Analyze Evidence {evidence_id} for analysis run {run['analysis_run_id']}. "
+                "Use only the pinned projection. Every fact requires an exact field/span citation. "
+                "Submit the structured result with submit_evidence_analysis; do not create tasks."
+            ),
+            references=[{"type": "evidence", "id": evidence_id}],
+            requested_mode="EVIDENCE_ANALYSIS",
+            runtime_policy={"side_effect_policy": "READ_ONLY"},
+        ))
+        repo.record_agent_runtime_turn(
+            turn_id=accepted.turn_id, case_id=case_id, tenant_id=tenant_id,
+            runtime_session_id=binding.runtime_session_id,
+            runtime_generation=binding.runtime_generation,
+            user_message=f"Analyze Evidence {evidence_id}", requested_mode="EVIDENCE_ANALYSIS",
+            status="ACCEPTED", accepted_mode=accepted.mode, detail=accepted.detail,
+            idempotency_key=f"evidence-analysis:{run['analysis_run_id']}",
+            disposition="ANSWER_ONLY", side_effect_policy="READ_ONLY",
+            actor_id=_request_principal(request), client_command_id=None,
+        )
+        run = repo.attach_evidence_analysis_turn(
+            run["analysis_run_id"], case_id, tenant_id, accepted.turn_id,
+        ) or run
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data={**run, "runtime_turn_id": accepted.turn_id, "status": "QUEUED"})
+
+
 @router.get("/api/v1/cases/{case_id}/evidence/{evidence_id}/projections")
 def get_case_evidence_projections(
     case_id: str,
@@ -682,11 +891,9 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
         item["projections"] = repo.list_evidence_projections(
             case_id, tenant_id, evidence_id=item.get("evidence_id"),
         ) if hasattr(repo, "list_evidence_projections") else []
-    graph = repo.get_causal_graph(case_id, tenant_id) if hasattr(repo, "get_causal_graph") else None
-    gaps = repo.list_evidence_gaps(case_id, tenant_id, status="OPEN") if hasattr(repo, "list_evidence_gaps") else []
-    conclusion = repo.get_conclusion(case_id, tenant_id) if hasattr(repo, "get_conclusion") else None
-    recommendations = repo.list_repair_recommendations(case_id, tenant_id) if hasattr(repo, "list_repair_recommendations") else []
-    executions = repo.list_execution_units(case_id, tenant_id) if hasattr(repo, "list_execution_units") else []
+    collection_proposals = repo.list_collection_proposals(case_id, tenant_id)
+    collection_requests = repo.list_collection_requests(case_id, tenant_id)
+    evidence_analyses = repo.list_evidence_analysis_runs(case_id, tenant_id)
     turns = repo.list_agent_runtime_turns(case_id, tenant_id)
     messages = repo.list_assistant_messages(case_id, tenant_id) if hasattr(repo, "list_assistant_messages") else []
     binding = repo.get_agent_runtime_binding(case_id, tenant_id)
@@ -695,7 +902,10 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
         "COMPLETED", "CANCELLED", "FAILED", "SUPERSEDED",
     }]
     return APIResponse(data={
-        "case_projection_version": int(case.get("row_version") or 0) + len(messages) + len(evidence_items),
+        "case_projection_version": (
+            int(case.get("row_version") or 0) + len(messages) + len(evidence_items)
+            + len(collection_proposals) + len(collection_requests) + len(evidence_analyses)
+        ),
         "revisions": {
             "case_command": case.get("case_command_revision") or 1,
             "control": case.get("control_revision") or 1,
@@ -719,15 +929,49 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
         "user_action_required": None,
         "plan": plan,
         "campaign": {},
-        "executions": executions,
+        "collection_proposals": collection_proposals,
+        "collection_requests": collection_requests,
         "evidence": evidence_items,
-        "hypotheses": [],
-        "causal_graph": graph or {},
-        "evidence_gaps": gaps,
-        "conclusion": conclusion,
-        "recommendations": recommendations,
+        "evidence_analyses": evidence_analyses,
         "messages": messages,
         "last_event_seq": max([int(item.get("case_event_seq") or 0) for item in repo.list_case_events(case_id, tenant_id, limit=200) or []] or [0]),
+    })
+
+
+@router.post("/api/v1/cases/{case_id}/collection-proposals/{proposal_id}/decision")
+def decide_case_collection_proposal(
+    case_id: str, proposal_id: str, payload: dict[str, Any], request: Request,
+) -> APIResponse:
+    """Approve or reject the exact persisted collection proposal."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    try:
+        result = collection_supervisor.decide_pending_proposal(
+            proposal_id=proposal_id, case_id=case_id, tenant_id=tenant_id,
+            decision=str(payload.get("decision") or ""),
+            decided_by=_request_principal(request),
+            reason=str(payload.get("reason") or ""),
+            expected_control_revision=payload.get("expected_control_revision"),
+            expected_scope_revision=payload.get("expected_scope_revision"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    repo.record_case_event(
+        case_id, tenant_id, event_type="collection_proposal_decided",
+        payload={
+            "proposal_id": proposal_id,
+            "decision": str(payload.get("decision") or "").upper(),
+            "actor_id": _request_principal(request),
+        },
+        actor_id=_request_principal(request),
+    )
+    task = result.get("task")
+    return APIResponse(data={
+        "proposal": result.get("proposal"),
+        "collection_request": result.get("collection_request"),
+        "task": _task_view(task) if task is not None else None,
     })
 
 

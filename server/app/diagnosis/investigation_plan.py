@@ -283,6 +283,16 @@ class InvestigationPlanService:
             "reason": payload.reason,
             "actor_id": actor_id,
         })
+        if hasattr(self._repo, "add_evidence_review_revision"):
+            self._repo.add_evidence_review_revision(
+                evidence_id=payload.evidence_id, case_id=case_id, tenant_id=tenant_id,
+                decision=payload.decision, reviewed_by=actor_id, reason=payload.reason,
+            )
+        if hasattr(self._repo, "invalidate_evidence_analysis_runs"):
+            self._repo.invalidate_evidence_analysis_runs(
+                payload.evidence_id, tenant_id,
+                input_state=("EXCLUDED_INPUT" if payload.decision == "EXCLUDED" else "STALE_INPUT"),
+            )
         # 排除后的 Evidence 从后续 Attachment/Prompt 投影中剥离；恢复时回写 canonical store。
         if payload.decision == "EXCLUDED":
             self._apply_excluded_evidence(case_id, tenant_id, payload.evidence_id)

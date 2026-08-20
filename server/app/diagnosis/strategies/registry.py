@@ -40,7 +40,8 @@ def get_strategy(strategy_id: str | None):
         raise ValueError(f"UNREGISTERED_DIAGNOSTIC_STRATEGY:{normalized}") from exc
 
 
-def strategy_catalog() -> list[dict[str, Any]]:
+def strategy_catalog(*, experiment_mode: bool = False) -> list[dict[str, Any]]:
+    strategies = STRATEGY_REGISTRY.values() if experiment_mode else (STRATEGY_REGISTRY["hybrid"],)
     return [
         {
             "strategy_id": item.strategy_id,
@@ -48,5 +49,5 @@ def strategy_catalog() -> list[dict[str, Any]]:
             "description": item.description,
             "prompt_guidance": item.render_prompt_guidance(),
         }
-        for item in STRATEGY_REGISTRY.values()
+        for item in strategies
     ]
