@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.database import init_db, reset_engine
-from server.app.main import app, investigation_plan_service
+from server.app.main import app, investigation_plan_service, repo
 from server.app.models import Base
 
 
@@ -60,6 +60,36 @@ def _plan_payload(case) -> dict:
             "status": "QUEUED",
         }],
     }
+
+
+def _review_evidence(
+    client: TestClient,
+    case_id: str,
+    evidence_id: str,
+    decision: str,
+    *,
+    reason_code: str,
+    reason: str,
+    assessment: dict | None = None,
+):
+    preview = client.post(
+        f"/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/preview",
+        json={"decision": decision, "assessment": assessment or {}},
+    )
+    assert preview.status_code == 200, preview.text
+    impact = preview.json()["data"]
+    return client.post(
+        f"/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews",
+        json={
+            "evidence_id": evidence_id,
+            "decision": decision,
+            "expected_review_revision": impact["current_review_revision"],
+            "impact_token": impact["impact_token"],
+            "assessment": assessment or {},
+            "reason_code": reason_code,
+            "reason": reason,
+        },
+    )
 
 
 def test_create_plan_and_revision_bump(client: TestClient):
@@ -190,27 +220,24 @@ def test_evidence_review_excludes_and_persists(client: TestClient, monkeypatch):
     fixed_now = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     monkeypatch.setattr("server.app.sql_repository.now_utc", lambda: fixed_now)
     case = _create_case(client)
-    reviewed = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/ev-102/reviews",
-        json={
-            "evidence_id": "ev-102",
-            "decision": "LOW_TRUST",
-            "reason_code": "TEST_TRAFFIC",
-            "reason": "该时间段存在压测流量",
-        },
+    repo.upsert_case_evidence(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_id="ev-102",
+        attachment_id=None, task_id=None, artifact_id=None, artifact_type="sys_metrics",
+        collector_id="sys_metrics", source_type="task_artifact", target_ref="service:service-a",
+        content_hash="content-102", projection_hash="projection-102",
+    )
+    reviewed = _review_evidence(
+        client, case["case_id"], "ev-102", "LOW_TRUST",
+        reason_code="TEST_TRAFFIC", reason="该时间段存在压测流量",
     )
     assert reviewed.status_code == 200, reviewed.text
     data = reviewed.json()["data"]
     assert data["decision"] == "LOW_TRUST"
     assert data["review_revision"] == 1
 
-    excluded = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/ev-102/reviews",
-        json={
-            "evidence_id": "ev-102",
-            "decision": "EXCLUDED",
-            "reason": "来自测试环境",
-        },
+    excluded = _review_evidence(
+        client, case["case_id"], "ev-102", "EXCLUDED",
+        reason_code="SCOPE_MISMATCH", reason="来自测试环境",
     )
     assert excluded.status_code == 200
     assert excluded.json()["data"]["review_revision"] == 2

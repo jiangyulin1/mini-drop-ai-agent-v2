@@ -584,10 +584,15 @@ def _deliver_one_wakeup(
     wakeup_id = str(wakeup.get("wakeup_id") or "")
     if not wakeup_id or wakeup.get("status") != "PENDING":
         return False
+    reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
     # finish_investigation is terminal for the current run. Evidence that races
     # with an accepted conclusion stays durable, but must not enqueue another
     # autonomous model turn after the Agent has explicitly stopped.
-    if hasattr(repo, "get_conclusion") and repo.get_conclusion(case_id, tenant_id) is not None:
+    if (
+        reason_class != "EVIDENCE_ELIGIBILITY_CHANGED"
+        and hasattr(repo, "get_conclusion")
+        and repo.get_conclusion(case_id, tenant_id) is not None
+    ):
         if hasattr(repo, "consume_runtime_wakeup"):
             repo.consume_runtime_wakeup(wakeup_id, "SKIPPED_CONCLUDED")
         return False
@@ -603,7 +608,6 @@ def _deliver_one_wakeup(
         runtime_options=inherited_options,
         strategy_id=inherited_strategy_id,
     )
-    reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
     cycle = (
         repo.get_agent_cycle(str(wakeup.get("cycle_id")))
         if wakeup.get("cycle_id") and hasattr(repo, "get_agent_cycle")
@@ -696,6 +700,19 @@ def _deliver_one_wakeup(
                 "只有在仍缺少决定性事实时，才选择一个可执行的替代 Collector。"
             )
             follow_up_evidence_ids: list[str] = []
+        elif reason_class == "EVIDENCE_ELIGIBILITY_CHANGED":
+            source_summary = ", ".join(str(item) for item in (wakeup.get("source_refs") or []))
+            note = (
+                f"人工 Evidence 审查改变了推理准入：{source_summary}。"
+                "请重新读取当前 Evidence lifecycle_status、review_trust_state、review_revision 与 Projection Hash；"
+                "不得沿用已失效的 AnalysisRun、假设支持关系或恢复建议。"
+                "先确定性复核现有结论和 Evidence Gap，再基于新的准入状态继续调查。"
+            )
+            follow_up_evidence_ids = [
+                item.get("evidence_id")
+                for item in case_evidence_service.list_evidence(case_id, tenant_id)
+                if item.get("lifecycle_status") == "ACTIVE" and not item.get("ui_archived")
+            ]
         else:
             queued_analyses = [
                 item for item in evidence_analysis_service.list_runs(case_id, tenant_id)
@@ -794,7 +811,9 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
     event_id = str(event.get("outbox_id") or "")
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
-    if event_type not in {"EVIDENCE_COMMITTED", "COLLECTION_TERMINAL"}:
+    if event_type not in {
+        "EVIDENCE_COMMITTED", "COLLECTION_TERMINAL", "EVIDENCE_ELIGIBILITY_CHANGED",
+    }:
         repo.record_outbox_consumer_effect(
             event_id=event_id,
             consumer_name="control-plane",
@@ -806,7 +825,17 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
     case_id = str(payload.get("case_id") or "")
     tenant_id = str(payload.get("tenant_id") or _request_tenant())
     run_id = str(payload.get("investigation_run_id") or "")
-    if not case_id or not run_id:
+    if not case_id:
+        raise ValueError(f"{event_type} requires case_id and investigation_run_id")
+    if not run_id and event_type == "EVIDENCE_ELIGIBILITY_CHANGED":
+        repo.record_outbox_consumer_effect(
+            event_id=event_id,
+            consumer_name="control-plane",
+            effect_key=f"review-without-runtime:{event_id}",
+            effect_payload={"case_id": case_id, "event_type": event_type},
+        )
+        return
+    if not run_id:
         raise ValueError(f"{event_type} requires case_id and investigation_run_id")
     case = repo.get_incident_case(case_id, tenant_id) or {}
     run = repo.get_investigation_run(case_id, tenant_id, run_id)
@@ -815,14 +844,16 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
 
     wakeup = repo.get_runtime_wakeup_by_outbox(event_id)
     if wakeup is None:
-        reason_class = (
-            "COLLECTION_TERMINAL" if event_type == "COLLECTION_TERMINAL"
-            else "EVIDENCE_COMMITTED"
-        )
+        reason_class = {
+            "COLLECTION_TERMINAL": "COLLECTION_TERMINAL",
+            "EVIDENCE_ELIGIBILITY_CHANGED": "EVIDENCE_ELIGIBILITY_CHANGED",
+        }.get(event_type, "EVIDENCE_COMMITTED")
         if reason_class == "COLLECTION_TERMINAL":
             dedupe_key = (
                 f"collection-terminal-wakeup:{payload.get('task_id')}:{payload.get('task_status')}"
             )
+        elif reason_class == "EVIDENCE_ELIGIBILITY_CHANGED":
+            dedupe_key = f"evidence-review-wakeup:{event_id}"
         else:
             dedupe_key = (
                 f"evidence-wakeup:{case_id}:{run_id}:"

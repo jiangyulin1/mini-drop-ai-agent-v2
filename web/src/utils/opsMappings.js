@@ -49,6 +49,9 @@ export const EVIDENCE_TRUST = {
   VALID: entry("有效", "green", "已通过完整性检查，可参与推理"),
   LOW_TRUST: entry("低可信", "gold", "仍保留，但在推理中降低权重"),
   EXCLUDED: entry("已排除", "default", "已从后续 Agent Prompt 与结论投影中排除"),
+  UNREVIEWED: entry("待审查", "default", "尚未完成人工可信度审查"),
+  RESTORE_AS_TRUSTED: entry("恢复为可信", "green"),
+  RESTORE_AS_LOW_TRUST: entry("恢复为低可信", "gold"),
   UNKNOWN: entry("待审查", "default", "尚未完成人工可信度审查"),
 };
 

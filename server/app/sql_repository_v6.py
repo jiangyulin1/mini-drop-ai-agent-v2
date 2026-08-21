@@ -25,6 +25,8 @@ from server.app.models import (
     CaseEventModel,
     CaseContextSnapshotModel,
     CaseEvidenceModel,
+    CaseHypothesisNodeModel,
+    CaseRecoveryPlanModel,
     CollectionProposalModel,
     CollectionRequestModel,
     CausalEdgeModel,
@@ -38,6 +40,7 @@ from server.app.models import (
     EvidenceAnalysisRunModel,
     EvidenceProjectionModel,
     EvidenceReviewRevisionModel,
+    EvidenceReviewModel,
     ExecutionUnitModel,
     InvestigationRunModel,
     IncidentCaseModel,
@@ -48,6 +51,13 @@ from server.app.models import (
     RepairRecommendationModel,
     RuntimeWakeupModel,
     RuntimeWakeupSourceModel,
+)
+from server.app.diagnosis.evidence_governance import (
+    INFERENCE_DECISIONS,
+    assess_evidence,
+    create_impact_token,
+    review_result,
+    verify_impact_token,
 )
 from server.app.state_machine import now_utc
 
@@ -933,6 +943,435 @@ class SqlRepositoryV6Mixin:
             session.flush()
         return changed
 
+    @staticmethod
+    def _evidence_ref_contains(value: Any, evidence_id: str) -> bool:
+        if isinstance(value, str):
+            return value == evidence_id
+        if isinstance(value, dict):
+            return any(
+                key in {"evidence_id", "id"} and str(item) == evidence_id
+                for key, item in value.items()
+            ) or any(
+                SqlRepositoryV6Mixin._evidence_ref_contains(item, evidence_id)
+                for item in value.values()
+            )
+        if isinstance(value, list):
+            return any(SqlRepositoryV6Mixin._evidence_ref_contains(item, evidence_id) for item in value)
+        return False
+
+    def _evidence_review_impact_in_session(
+        self,
+        session: OrmSession,
+        *,
+        case_id: str,
+        tenant_id: str,
+        evidence: CaseEvidenceModel,
+        decision: str,
+        assessment: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if decision in INFERENCE_DECISIONS:
+            assessment_result = assess_evidence(assessment)
+        else:
+            assessment_result = {
+                "assessment": {},
+                "derived_trust_score": int(evidence.derived_trust_score or 50),
+                "recommended_decision": str(evidence.review_trust_state or "UNREVIEWED"),
+                "reasons": ["该操作只整理界面，不改变证据推理准入"],
+            }
+        outcome = review_result(
+            decision=decision,
+            current_lifecycle=evidence.lifecycle_status,
+            current_trust=evidence.review_trust_state,
+            hidden=bool(evidence.ui_hidden),
+            archived=bool(evidence.ui_archived),
+        )
+        analyses = [
+            row for row in session.query(EvidenceAnalysisRunModel).filter(
+                EvidenceAnalysisRunModel.case_id == case_id,
+                EvidenceAnalysisRunModel.tenant_id == tenant_id,
+            ).all()
+            if self._evidence_ref_contains(row.evidence_inputs or [], evidence.evidence_id)
+        ]
+        hypotheses = [
+            row for row in session.query(CaseHypothesisNodeModel).filter(
+                CaseHypothesisNodeModel.case_id == case_id,
+                CaseHypothesisNodeModel.tenant_id == tenant_id,
+            ).all()
+            if self._evidence_ref_contains(row.supporting_evidence_refs_json or [], evidence.evidence_id)
+            or self._evidence_ref_contains(row.contradicting_evidence_refs_json or [], evidence.evidence_id)
+        ]
+        bindings = session.query(ClaimEvidenceBindingModel).filter(
+            ClaimEvidenceBindingModel.evidence_id == evidence.evidence_id,
+        ).all()
+        conclusion_ids = sorted({row.conclusion_id for row in bindings})
+        plans = [
+            row for row in session.query(CaseRecoveryPlanModel).filter(
+                CaseRecoveryPlanModel.case_id == case_id,
+                CaseRecoveryPlanModel.tenant_id == tenant_id,
+                CaseRecoveryPlanModel.status.notin_({
+                    "VERIFIED", "ROLLED_BACK", "REJECTED", "DRY_RUN_EMPTY", "FAILED",
+                }),
+            ).all()
+            if evidence.evidence_id in (row.evidence_refs_json or [])
+        ]
+        latest = session.query(ConclusionRevisionModel).filter(
+            ConclusionRevisionModel.case_id == case_id,
+            ConclusionRevisionModel.tenant_id == tenant_id,
+        ).order_by(ConclusionRevisionModel.revision.desc()).first()
+        predicted = latest.state if latest else None
+        if outcome["inference_changed"] and outcome["lifecycle_status"] != "ACTIVE":
+            supporting = session.query(ClaimEvidenceBindingModel).filter(
+                ClaimEvidenceBindingModel.conclusion_id == latest.conclusion_id,
+                ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
+            ).all() if latest else []
+            remaining = [item for item in supporting if item.evidence_id != evidence.evidence_id]
+            predicted = "PARTIALLY_CONFIRMED" if remaining else "INSUFFICIENT_EVIDENCE"
+        elif outcome["inference_changed"] and outcome["trust_state"] == "LOW_TRUST":
+            predicted = "PARTIALLY_CONFIRMED" if latest else None
+        recollection = []
+        if decision in {"EXCLUDED", "LOW_TRUST"} and evidence.collector_id:
+            recollection.append({
+                "collector_id": evidence.collector_id,
+                "target": evidence.target_ref or f"evidence:{evidence.evidence_id}",
+                "duration_sec": 30,
+            })
+        affected = {
+            "analysis_runs": len(analyses),
+            "hypotheses": len(hypotheses),
+            "conclusions": len(conclusion_ids),
+            "recovery_plans": len(plans),
+        }
+        requires_approval = bool(
+            plans
+            or (
+                decision in {"EXCLUDED", "RESTORE_AS_TRUSTED"}
+                and latest is not None
+                and latest.state in {"CONFIRMED", "PARTIALLY_CONFIRMED"}
+            )
+        )
+        token_payload = {
+            "case_id": case_id,
+            "tenant_id": tenant_id,
+            "evidence_id": evidence.evidence_id,
+            "decision": decision,
+            "assessment": assessment_result["assessment"],
+            "expected_review_revision": int(evidence.review_revision or 0),
+            "projection_hash": evidence.projection_hash,
+            "current_lifecycle_status": evidence.lifecycle_status,
+            "current_trust_state": evidence.review_trust_state,
+            "outcome": outcome,
+            "affected": affected,
+            "predicted_conclusion_state": predicted,
+            "recovery_plan_ids": sorted(row.id for row in plans),
+            "requires_approval": requires_approval,
+        }
+        return {
+            **token_payload,
+            "current_review_revision": int(evidence.review_revision or 0),
+            "assessment_result": assessment_result,
+            "recommended_recollection": recollection,
+            "impact_token": create_impact_token(token_payload),
+        }
+
+    def preview_evidence_review(
+        self,
+        *,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        decision: str,
+        assessment: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            evidence = session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+                CaseEvidenceModel.evidence_id == evidence_id,
+            ).first()
+            if evidence is None:
+                return None
+            return self._evidence_review_impact_in_session(
+                session,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                evidence=evidence,
+                decision=decision,
+                assessment=assessment,
+            )
+
+    def _hold_recovery_plans_for_evidence(
+        self,
+        session: OrmSession,
+        *,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        review_revision: int,
+        actor_id: str,
+        now: datetime,
+    ) -> list[str]:
+        held: list[str] = []
+        plans = session.query(CaseRecoveryPlanModel).filter(
+            CaseRecoveryPlanModel.case_id == case_id,
+            CaseRecoveryPlanModel.tenant_id == tenant_id,
+            CaseRecoveryPlanModel.status.in_({
+                "PROPOSED", "DRY_RUN_COMPLETED", "APPROVED", "HELD_FOR_EVIDENCE_REVIEW",
+            }),
+        ).with_for_update().all()
+        for plan in plans:
+            if evidence_id not in (plan.evidence_refs_json or []):
+                continue
+            existing_hold = dict(plan.evidence_hold_json or {})
+            previous = (
+                str(existing_hold.get("previous_status") or "PROPOSED")
+                if plan.status == "HELD_FOR_EVIDENCE_REVIEW"
+                else plan.status
+            )
+            plan.status = "HELD_FOR_EVIDENCE_REVIEW"
+            plan.evidence_hold_json = {
+                "previous_status": previous,
+                "evidence_ids": sorted(set([
+                    *(existing_hold.get("evidence_ids") or []),
+                    evidence_id,
+                ])),
+                "review_revision": review_revision,
+                "held_by": actor_id,
+                "held_at": now.isoformat(),
+            }
+            plan.row_version += 1
+            plan.updated_at = now
+            held.append(plan.id)
+        return held
+
+    def _resume_recovery_plans_after_restore(
+        self,
+        session: OrmSession,
+        *,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        now: datetime,
+    ) -> list[str]:
+        resumed: list[str] = []
+        plans = session.query(CaseRecoveryPlanModel).filter(
+            CaseRecoveryPlanModel.case_id == case_id,
+            CaseRecoveryPlanModel.tenant_id == tenant_id,
+            CaseRecoveryPlanModel.status == "HELD_FOR_EVIDENCE_REVIEW",
+        ).with_for_update().all()
+        for plan in plans:
+            hold = dict(plan.evidence_hold_json or {})
+            blocked = [item for item in (hold.get("evidence_ids") or []) if item != evidence_id]
+            if blocked:
+                hold["evidence_ids"] = blocked
+                plan.evidence_hold_json = hold
+                continue
+            previous = str(hold.get("previous_status") or "PROPOSED")
+            plan.status = previous if previous in {"PROPOSED", "DRY_RUN_COMPLETED", "APPROVED"} else "PROPOSED"
+            plan.evidence_hold_json = {}
+            plan.row_version += 1
+            plan.updated_at = now
+            resumed.append(plan.id)
+        return resumed
+
+    def apply_evidence_review(
+        self,
+        *,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        decision: str,
+        assessment: dict[str, Any] | None,
+        reason_code: str,
+        reason: str,
+        override_reason: str | None,
+        expected_review_revision: int,
+        impact_token: str,
+        actor_id: str,
+    ) -> dict[str, Any] | None:
+        now = now_utc()
+        with self._write_session() as session:
+            evidence = session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+                CaseEvidenceModel.evidence_id == evidence_id,
+            ).with_for_update().first()
+            if evidence is None:
+                return None
+            if int(evidence.review_revision or 0) != int(expected_review_revision):
+                raise ValueError("EVIDENCE_REVIEW_VERSION_CONFLICT")
+            preview = self._evidence_review_impact_in_session(
+                session,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                evidence=evidence,
+                decision=decision,
+                assessment=assessment,
+            )
+            token_payload = {
+                key: preview[key] for key in (
+                    "case_id", "tenant_id", "evidence_id", "decision", "assessment",
+                    "expected_review_revision", "projection_hash", "current_lifecycle_status",
+                    "current_trust_state", "outcome", "affected", "predicted_conclusion_state",
+                    "recovery_plan_ids", "requires_approval",
+                )
+            }
+            if not verify_impact_token(impact_token, token_payload):
+                raise ValueError("EVIDENCE_REVIEW_IMPACT_STALE")
+            assessment_result = preview["assessment_result"]
+            recommendation = str(assessment_result["recommended_decision"])
+            normalized_decision = {
+                "RESTORE_AS_TRUSTED": "TRUSTED",
+                "RESTORE_AS_LOW_TRUST": "LOW_TRUST",
+            }.get(decision, decision)
+            overridden = bool(assessment_result["assessment"] and normalized_decision != recommendation)
+            if overridden and not str(override_reason or "").strip():
+                raise ValueError("EVIDENCE_REVIEW_OVERRIDE_REASON_REQUIRED")
+            outcome = preview["outcome"]
+            revision = int(evidence.review_revision or 0) + 1
+            legacy = EvidenceReviewModel(
+                review_id=self._new_id("review"),
+                case_id=case_id,
+                tenant_id=tenant_id,
+                evidence_id=evidence_id,
+                decision=decision,
+                reason_code=reason_code,
+                reason=reason,
+                actor_id=actor_id,
+                review_revision=revision,
+                created_at=now,
+            )
+            session.add(legacy)
+            review = EvidenceReviewRevisionModel(
+                review_revision_id=self._new_id("rev"),
+                evidence_id=evidence_id,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                review_revision=revision,
+                decision=decision,
+                lifecycle_status=outcome["lifecycle_status"],
+                trust_state=outcome["trust_state"],
+                derived_trust_score=int(assessment_result["derived_trust_score"]),
+                projection_hash=evidence.projection_hash,
+                reason_code=reason_code,
+                reason=reason,
+                assessment_json=assessment_result["assessment"],
+                recommendation_json={
+                    "decision": recommendation,
+                    "reasons": assessment_result["reasons"],
+                    "override_reason": override_reason,
+                },
+                impact_json={
+                    "affected": preview["affected"],
+                    "predicted_conclusion_state": preview["predicted_conclusion_state"],
+                    "recommended_recollection": preview["recommended_recollection"],
+                },
+                overridden_recommendation=overridden,
+                reviewed_by=actor_id,
+                created_at=now,
+            )
+            session.add(review)
+            previous_status = evidence.status
+            evidence.lifecycle_status = outcome["lifecycle_status"]
+            evidence.review_trust_state = outcome["trust_state"]
+            evidence.review_revision = revision
+            evidence.derived_trust_score = int(assessment_result["derived_trust_score"])
+            evidence.ui_hidden = bool(outcome["ui_hidden"])
+            evidence.ui_archived = bool(outcome["ui_archived"])
+            evidence.status = outcome["status"]
+            evidence.updated_at = now
+            invalidated = 0
+            held_plans: list[str] = []
+            resumed_plans: list[str] = []
+            if decision in INFERENCE_DECISIONS:
+                invalidated = self._invalidate_analysis_rows(
+                    session,
+                    evidence_id,
+                    tenant_id,
+                    input_state=("EXCLUDED_INPUT" if outcome["lifecycle_status"] == "EXCLUDED" else "STALE_INPUT"),
+                )
+                self._revalidate_conclusions_after_evidence_status(
+                    session, evidence, outcome["status"], now,
+                )
+                if outcome["lifecycle_status"] == "EXCLUDED" or outcome["trust_state"] == "LOW_TRUST":
+                    held_plans = self._hold_recovery_plans_for_evidence(
+                        session,
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        evidence_id=evidence_id,
+                        review_revision=revision,
+                        actor_id=actor_id,
+                        now=now,
+                    )
+                elif decision.startswith("RESTORE_AS_") or decision == "TRUSTED":
+                    resumed_plans = self._resume_recovery_plans_after_restore(
+                        session,
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        evidence_id=evidence_id,
+                        now=now,
+                    )
+            event_payload = {
+                "evidence_id": evidence_id,
+                "decision": decision,
+                "review_revision": revision,
+                "previous_status": previous_status,
+                "lifecycle_status": outcome["lifecycle_status"],
+                "trust_state": outcome["trust_state"],
+                "invalidated_analysis_runs": invalidated,
+                "held_recovery_plan_ids": held_plans,
+                "resumed_recovery_plan_ids": resumed_plans,
+            }
+            session.add(CaseEventModel(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                event_type="evidence_reviewed",
+                actor_id=actor_id,
+                payload_json=event_payload,
+                created_at=now,
+            ))
+            if held_plans:
+                session.add(CaseEventModel(
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    event_type="recovery_plan_held",
+                    actor_id=actor_id,
+                    payload_json={"evidence_id": evidence_id, "recovery_plan_ids": held_plans},
+                    created_at=now,
+                ))
+            if decision in INFERENCE_DECISIONS:
+                run = session.query(InvestigationRunModel).filter(
+                    InvestigationRunModel.case_id == case_id,
+                    InvestigationRunModel.tenant_id == tenant_id,
+                ).order_by(InvestigationRunModel.created_at.desc()).first()
+                self._enqueue_domain_outbox_in_session(
+                    session,
+                    aggregate_type="case",
+                    aggregate_id=case_id,
+                    event_type="EVIDENCE_ELIGIBILITY_CHANGED",
+                    payload={
+                        **event_payload,
+                        "case_id": case_id,
+                        "tenant_id": tenant_id,
+                        "investigation_run_id": run.run_id if run else None,
+                        "source_refs": [f"evidence:{evidence_id}"],
+                        "reason": "Human Evidence review changed inference eligibility",
+                    },
+                    dedupe_key=f"evidence-review:{evidence_id}:{revision}",
+                    aggregate_revision=revision,
+                )
+            session.flush()
+            return {
+                **review.to_dict(),
+                "status": evidence.status,
+                "ui_hidden": bool(evidence.ui_hidden),
+                "ui_archived": bool(evidence.ui_archived),
+                "affected": preview["affected"],
+                "predicted_conclusion_state": preview["predicted_conclusion_state"],
+                "invalidated_analysis_runs": invalidated,
+                "held_recovery_plan_ids": held_plans,
+                "resumed_recovery_plan_ids": resumed_plans,
+            }
+
     def add_evidence_review_revision(
         self, *, evidence_id: str, case_id: str, tenant_id: str,
         decision: str, reviewed_by: str, reason: str | None = None,
@@ -962,12 +1401,23 @@ class SqlRepositoryV6Mixin:
                 CaseEvidenceModel.tenant_id == tenant_id,
             ).first()
             if evidence is not None:
-                evidence.status = {
+                evidence.lifecycle_status = {
                     "EXCLUDED": "EXCLUDED",
                     "SUPERSEDED": "SUPERSEDED",
                     "INVALID": "INVALID",
-                    "LOW_TRUST": "LOW_TRUST",
                 }.get(decision, "ACTIVE")
+                evidence.review_trust_state = (
+                    "LOW_TRUST" if decision == "LOW_TRUST"
+                    else "TRUSTED" if decision in {"TRUSTED", "RESTORED"}
+                    else evidence.review_trust_state
+                )
+                evidence.review_revision = revision
+                evidence.status = (
+                    evidence.lifecycle_status
+                    if evidence.lifecycle_status != "ACTIVE"
+                    else "LOW_TRUST" if evidence.review_trust_state == "LOW_TRUST"
+                    else "ACTIVE"
+                )
                 evidence.updated_at = now
             self._invalidate_analysis_rows(
                 session,
@@ -977,6 +1427,22 @@ class SqlRepositoryV6Mixin:
             )
             session.flush()
             return row.to_dict()
+
+    def list_evidence_review_revisions(
+        self, case_id: str, tenant_id: str, *, evidence_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(EvidenceReviewRevisionModel).filter(
+                EvidenceReviewRevisionModel.case_id == case_id,
+                EvidenceReviewRevisionModel.tenant_id == tenant_id,
+            )
+            if evidence_id:
+                query = query.filter(EvidenceReviewRevisionModel.evidence_id == evidence_id)
+            rows = query.order_by(
+                EvidenceReviewRevisionModel.review_revision.desc(),
+                EvidenceReviewRevisionModel.created_at.desc(),
+            ).all()
+            return [row.to_dict() for row in rows]
 
     def _revalidate_conclusions_after_evidence_status(
         self,
@@ -1011,14 +1477,29 @@ class SqlRepositoryV6Mixin:
                 ]),
             ).all()
         }
-        valid_support = [
+        directional_support = [
             binding for binding in previous_bindings
             if (evidence_rows.get(binding.evidence_id) is not None)
-            and evidence_rows[binding.evidence_id].status == "ACTIVE"
+            and evidence_rows[binding.evidence_id].lifecycle_status == "ACTIVE"
             and binding.support_kind == "SUPPORTS"
         ]
-        new_state = "PARTIALLY_CONFIRMED" if valid_support else "INSUFFICIENT_EVIDENCE"
-        limitation = f"evidence_invalidated:{evidence.evidence_id}:{status}"
+        strong_support = [
+            binding for binding in directional_support
+            if evidence_rows[binding.evidence_id].review_trust_state != "LOW_TRUST"
+        ]
+        new_state = (
+            ("PARTIALLY_CONFIRMED" if latest.state == "INSUFFICIENT_EVIDENCE" else latest.state)
+            if strong_support
+            else "PARTIALLY_CONFIRMED" if directional_support
+            else "INSUFFICIENT_EVIDENCE"
+        )
+        if new_state == latest.state:
+            return
+        limitation = (
+            f"evidence_restored_requires_reinvestigation:{evidence.evidence_id}:{status}"
+            if evidence.lifecycle_status == "ACTIVE" and evidence.review_trust_state == "TRUSTED"
+            else f"evidence_invalidated:{evidence.evidence_id}:{status}"
+        )
         downgraded = ConclusionRevisionModel(
             conclusion_id=self._new_id("concl"),
             case_id=latest.case_id,
@@ -1054,9 +1535,23 @@ class SqlRepositoryV6Mixin:
         for old in previous_bindings:
             current_evidence = evidence_rows.get(old.evidence_id)
             result = (
-                old.verifier_result
-                if current_evidence is not None and current_evidence.status == "ACTIVE"
-                else f"EVIDENCE_{getattr(current_evidence, 'status', 'MISSING')}"
+                (
+                    "VALIDATED"
+                    if str(old.verifier_result or "").startswith("EVIDENCE_")
+                    else old.verifier_result
+                )
+                if (
+                    current_evidence is not None
+                    and current_evidence.lifecycle_status == "ACTIVE"
+                    and current_evidence.review_trust_state != "LOW_TRUST"
+                )
+                else (
+                    "EVIDENCE_LOW_TRUST"
+                    if current_evidence is not None
+                    and current_evidence.lifecycle_status == "ACTIVE"
+                    and current_evidence.review_trust_state == "LOW_TRUST"
+                    else f"EVIDENCE_{getattr(current_evidence, 'lifecycle_status', 'MISSING')}"
+                )
             )
             session.add(ClaimEvidenceBindingModel(
                 claim_id=self._new_id("claim"),

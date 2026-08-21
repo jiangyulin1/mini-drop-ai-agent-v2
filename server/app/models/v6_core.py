@@ -605,7 +605,16 @@ class EvidenceReviewRevisionModel(Base):
     tenant_id = Column(String(128), nullable=False, index=True)
     review_revision = Column(Integer, nullable=False, default=1)
     decision = Column(String(24), nullable=False)
+    lifecycle_status = Column(String(24), nullable=False, default="ACTIVE", server_default="ACTIVE")
+    trust_state = Column(String(24), nullable=False, default="UNREVIEWED", server_default="UNREVIEWED")
+    derived_trust_score = Column(Integer, nullable=False, default=50, server_default="50")
+    projection_hash = Column(String(64), nullable=True)
+    reason_code = Column(String(64), nullable=True)
     reason = Column(Text, nullable=True)
+    assessment_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    recommendation_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    impact_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    overridden_recommendation = Column(Boolean, nullable=False, default=False, server_default="0")
     reviewed_by = Column(String(128), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -617,7 +626,16 @@ class EvidenceReviewRevisionModel(Base):
             "tenant_id": self.tenant_id,
             "review_revision": self.review_revision,
             "decision": self.decision,
+            "lifecycle_status": self.lifecycle_status,
+            "trust_state": self.trust_state,
+            "derived_trust_score": self.derived_trust_score,
+            "projection_hash": self.projection_hash,
+            "reason_code": self.reason_code,
             "reason": self.reason,
+            "assessment": self.assessment_json or {},
+            "recommendation": self.recommendation_json or {},
+            "impact": self.impact_json or {},
+            "overridden_recommendation": bool(self.overridden_recommendation),
             "reviewed_by": self.reviewed_by,
             "created_at": self.created_at,
         }

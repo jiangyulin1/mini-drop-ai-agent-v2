@@ -338,6 +338,21 @@ def create_case_recovery_plan(
     if policy.decision == AuthorizationDecision.DENIED:
         raise HTTPException(status_code=403, detail=f"ACTION_DENIED:{','.join(policy.reason_codes)}")
     try:
+        evidence_refs = list(dict.fromkeys(payload.evidence_refs or []))
+        if not evidence_refs:
+            conclusion = repo.get_conclusion(case_id, tenant_id) or {}
+            evidence_refs = list(dict.fromkeys(
+                str(binding.get("evidence_id") or "")
+                for binding in (conclusion.get("claim_evidence_bindings") or [])
+                if binding.get("support_kind") == "SUPPORTS"
+                and binding.get("evidence_id")
+            ))
+        missing_evidence = [
+            evidence_id for evidence_id in evidence_refs
+            if repo.get_case_evidence(case_id, tenant_id, evidence_id) is None
+        ]
+        if missing_evidence:
+            raise ValueError(f"RECOVERY_PLAN_EVIDENCE_NOT_FOUND:{','.join(missing_evidence)}")
         plan = repo.create_case_recovery_plan(
             case_id,
             tenant_id,
@@ -346,6 +361,7 @@ def create_case_recovery_plan(
             value_after_fix=payload.value_after_fix,
             verification_method=payload.verification_method,
             policy=policy.model_dump(mode="json"),
+            evidence_refs=evidence_refs,
             created_by=_request_principal(request),
             expected_case_version=payload.expected_case_version,
         )
@@ -480,6 +496,8 @@ def execute_case_recovery_plan(
     if case is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
     plan = _case_recovery_plan_or_404(case_id, tenant_id, plan_id)
+    if plan["status"] == "HELD_FOR_EVIDENCE_REVIEW":
+        raise HTTPException(status_code=409, detail="RECOVERY_PLAN_HELD_FOR_EVIDENCE_REVIEW")
     if plan["status"] not in {"APPROVED", "EXECUTING"} or not plan.get("approved_by"):
         raise HTTPException(status_code=409, detail="RECOVERY_PLAN_NOT_APPROVED")
     approval_binding = (plan.get("policy") or {}).get("approval_binding")

@@ -622,6 +622,11 @@ export function reviewCaseEvidence(caseId, evidenceId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/reviews`, payload);
 }
 
+/** 提交前计算 Evidence 审查对分析、结论和恢复方案的影响。 */
+export function previewCaseEvidenceReview(caseId, evidenceId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/reviews/preview`, payload);
+}
+
 /** 列出证据审查记录。 */
 export function listCaseEvidenceReviews(caseId, params = {}) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence-reviews`, { params });

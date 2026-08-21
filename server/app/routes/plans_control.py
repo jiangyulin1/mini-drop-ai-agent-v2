@@ -20,6 +20,7 @@ from server.app.capability_tokens import canonical_hash
 from server.app.case_collaboration import (
     CaseMessageRequest,
     EvidenceReviewRequest,
+    EvidenceReviewPreviewRequest,
     PlanUpdateRequest,
     ReprioritizeStepRequest,
     RetargetStepRequest,
@@ -259,19 +260,52 @@ def review_case_evidence(
     principal_id = _request_principal(request)
     review_payload = payload.model_copy(update={"evidence_id": evidence_id})
     try:
+        preview = investigation_plan_service.preview_evidence_review(
+            case_id,
+            tenant_id,
+            evidence_id,
+            decision=payload.decision,
+            assessment=payload.assessment,
+        )
+        if preview is None:
+            raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+        if preview.get("requires_approval"):
+            _require_role(request, "authorization_admin")
         review = investigation_plan_service.review_evidence(
             case_id, tenant_id,
             EvidenceReviewInput(**review_payload.model_dump(mode="json")),
             actor_id=principal_id,
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    repo.record_case_event(
-        case_id, tenant_id, event_type="evidence_reviewed",
-        payload={"evidence_id": evidence_id, "decision": review["decision"], "actor_id": principal_id},
-        actor_id=principal_id,
-    )
+    if review is None:
+        raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
     return APIResponse(data=review)
+
+
+@router.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/preview")
+def preview_case_evidence_review(
+    case_id: str,
+    evidence_id: str,
+    payload: EvidenceReviewPreviewRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    try:
+        result = investigation_plan_service.preview_evidence_review(
+            case_id,
+            _request_tenant(),
+            evidence_id,
+            decision=payload.decision,
+            assessment=payload.assessment,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+    return APIResponse(data=result)
 
 
 @router.get("/api/v1/cases/{case_id}/evidence-reviews")

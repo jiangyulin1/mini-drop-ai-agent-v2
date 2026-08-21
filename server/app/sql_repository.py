@@ -115,6 +115,7 @@ RECOVERY_PLAN_TRANSITIONS = {
     "EXECUTING": {"EXECUTED", "FAILED"},
     "EXECUTED": {"VERIFIED", "VERIFICATION_FAILED", "ROLLED_BACK"},
     "VERIFICATION_FAILED": {"ROLLED_BACK"},
+    "HELD_FOR_EVIDENCE_REVIEW": {"PROPOSED", "DRY_RUN_COMPLETED", "APPROVED", "REJECTED"},
     "FAILED": {"ROLLED_BACK"},
     "DRY_RUN_EMPTY": set(),
     "REJECTED": set(),
@@ -1902,7 +1903,8 @@ class SqlRepository(SqlRepositoryV6Mixin):
             ).first()
             if row is None:
                 return None
-            row.status = "ACTIVE"
+            row.lifecycle_status = "ACTIVE"
+            row.status = "LOW_TRUST" if row.review_trust_state == "LOW_TRUST" else "ACTIVE"
             row.updated_at = now
             session.flush()
             return row.to_dict()
@@ -1924,6 +1926,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
             ).first()
             if row is None:
                 return None
+            row.lifecycle_status = "EXCLUDED"
             row.status = "EXCLUDED"
             row.updated_at = now
             self._revalidate_conclusions_after_evidence_status(
@@ -1943,6 +1946,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
         verification_method: str,
         policy: dict[str, Any],
         created_by: str,
+        evidence_refs: list[str] | None = None,
         expected_case_version: int | None = None,
     ) -> dict[str, Any] | None:
         now = now_utc()
@@ -1959,7 +1963,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 CaseRecoveryPlanModel.tenant_id == tenant_id,
                 CaseRecoveryPlanModel.status.in_([
                     "PROPOSED", "DRY_RUN_COMPLETED", "APPROVED", "EXECUTING", "EXECUTED",
-                    "VERIFICATION_FAILED",
+                    "VERIFICATION_FAILED", "HELD_FOR_EVIDENCE_REVIEW",
                 ]),
             ).first()
             if active is not None:
@@ -1975,6 +1979,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 verification_method=verification_method,
                 status="PROPOSED",
                 policy_json=_json_safe(policy),
+                evidence_refs_json=list(dict.fromkeys(evidence_refs or [])),
                 requires_approval=1,
                 row_version=0,
                 created_by=created_by,
