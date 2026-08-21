@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
-import numpy as np
 from sqlalchemy import func, or_
 
 from server.app.database import new_session
@@ -26,6 +25,10 @@ CHUNK_TARGET_CHARS = 1_000
 CHUNK_OVERLAP_CHARS = 160
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".csv", ".log", ".xml"}
 SUPPORTED_SUFFIXES = TEXT_SUFFIXES | {".docx"}
+
+
+def _vector_dot(left: list[float], right: list[float]) -> float:
+    return sum(float(a) * float(b) for a, b in zip(left, right))
 
 
 def extract_document_text(filename: str, content: bytes) -> str:
@@ -197,10 +200,9 @@ def retrieve_user_knowledge(
             vector_rows = base.order_by(vector_distance).limit(candidate_limit).all()
         else:
             candidates = base.limit(500).all()
-            query_array = np.asarray(query_vector, dtype=np.float32)
             vector_rows = sorted(
                 candidates,
-                key=lambda pair: -float(np.dot(query_array, np.asarray(pair[0].embedding, dtype=np.float32))),
+                key=lambda pair: -_vector_dot(query_vector, pair[0].embedding or []),
             )[:candidate_limit]
 
         lexical_rows: list[tuple[KnowledgeChunkModel, KnowledgeDocumentModel]] = []

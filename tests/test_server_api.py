@@ -33,6 +33,7 @@ def _reset_repo(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("MINI_DROP_API_AUTH_ENABLED", raising=False)
     monkeypatch.delenv("MINI_DROP_API_KEY", raising=False)
+    monkeypatch.delenv("MINI_DROP_WEB_AUTO_SESSION_ENABLED", raising=False)
     monkeypatch.setenv("MINI_DROP_REQUIRE_STORAGE", "1")
     monkeypatch.setattr(store, "ensure_bucket", lambda _bucket: None)
     monkeypatch.setattr(store, "bucket_available", lambda _bucket: True)
@@ -346,6 +347,44 @@ class TestApiAuth:
         assert "HttpOnly" in cookie
         assert "Secure" in cookie
         assert "SameSite=lax" in cookie
+
+    def test_bootstrap_is_disabled_unless_explicitly_enabled(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_API_AUTH_ENABLED", "1")
+        monkeypatch.setenv("MINI_DROP_API_KEY", "secret-token")
+
+        response = client.post("/api/auth/bootstrap")
+
+        assert response.status_code == 404
+
+    def test_bootstrap_sets_cookie_without_returning_key(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_API_AUTH_ENABLED", "1")
+        monkeypatch.setenv("MINI_DROP_API_KEY", "secret-token")
+        monkeypatch.setenv("MINI_DROP_WEB_AUTO_SESSION_ENABLED", "1")
+
+        response = client.post(
+            "/api/auth/bootstrap",
+            headers={"X-Forwarded-Proto": "https", "Origin": "https://testserver"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == {"authenticated": True}
+        assert "secret-token" not in response.text
+        cookie = response.headers["set-cookie"]
+        assert "secret-token" not in cookie
+        assert "mini_drop_web_session=" in cookie
+        assert "HttpOnly" in cookie
+        assert "Secure" in cookie
+        assert "SameSite=lax" in cookie
+        assert client.get("https://testserver/api/tasks").status_code == 200
+
+    def test_bootstrap_rejects_cross_site_origin(self, client: TestClient, monkeypatch):
+        monkeypatch.setenv("MINI_DROP_API_AUTH_ENABLED", "1")
+        monkeypatch.setenv("MINI_DROP_API_KEY", "secret-token")
+        monkeypatch.setenv("MINI_DROP_WEB_AUTO_SESSION_ENABLED", "1")
+
+        response = client.post("/api/auth/bootstrap", headers={"Origin": "https://other.example"})
+
+        assert response.status_code == 403
 
     def test_healthz_stays_public_when_auth_enabled(self, client: TestClient, monkeypatch):
         monkeypatch.setenv("MINI_DROP_API_AUTH_ENABLED", "1")

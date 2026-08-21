@@ -50,6 +50,7 @@ from server.app.ai_validation import AIValidationBusy, run_ai_validation_suite
 from server.app.capability_tokens import canonical_hash
 from server.app.database import init_db, new_session
 from server.app.event_bus import BUS
+from server.app.http.auth import valid_web_session
 from server.app.flamegraph_parser import extract_top_functions_from_svg
 from server.app.prometheus_metrics import (
     REGISTRY,
@@ -1206,6 +1207,7 @@ async def _access_log(request: Request, call_next):
 
 async def _api_key_auth(request: Request, call_next):
     token = _extract_api_token(request)
+    web_session_valid = valid_web_session(request)
     if _requires_api_auth(request):
         expected = os.getenv("MINI_DROP_API_KEY", "")
         if not expected:
@@ -1213,9 +1215,9 @@ async def _api_key_auth(request: Request, call_next):
                 status_code=500,
                 content={"detail": "API auth enabled but MINI_DROP_API_KEY is empty"},
             )
-        if not token or not secrets.compare_digest(token, expected):
+        if not web_session_valid and (not token or not secrets.compare_digest(token, expected)):
             return JSONResponse(status_code=401, content={"detail": "无效 API Key"})
-    request.state.principal_id = _principal_for_request(token)
+    request.state.principal_id = _principal_for_request(token or ("web-session" if web_session_valid else None))
     request.state.principal_roles = _roles_for_request()
     return await call_next(request)
 
@@ -1232,7 +1234,7 @@ def _requires_api_auth(request: Request) -> bool:
     path = request.url.path
     return path.startswith("/api/") and path not in {
         "/api/healthz", "/api/livez", "/api/readyz", "/api/metrics",
-        "/api/auth/set-cookie", "/api/auth/clear-cookie",
+        "/api/auth/set-cookie", "/api/auth/bootstrap", "/api/auth/clear-cookie",
     }
 
 
