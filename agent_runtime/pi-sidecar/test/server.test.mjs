@@ -5,8 +5,14 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "../src/server.mjs";
-import { RuntimeManager } from "../src/runtime.mjs";
+import { createServer, sidecarListenOptions } from "../src/server.mjs";
+import {
+  boundCaseContextPayload,
+  buildBoundedAgentPrompt,
+  buildEvidenceAgentSystemPrompt,
+  modelRuntimeOptionsFromEnvironment,
+  RuntimeManager,
+} from "../src/runtime.mjs";
 import { EventSpool } from "../src/event-spool.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -30,6 +36,17 @@ test("health reports ready and model gating", async () => {
   assert.equal(body.ok, true);
   assert.equal(body.data.runtime_type, "pi");
   assert.equal(typeof body.data.model_ready, "boolean");
+});
+
+test("sidecar listen host is opt-in and preserves the historic default", () => {
+  assert.deepEqual(sidecarListenOptions({}), { port: 8899 });
+  assert.deepEqual(
+    sidecarListenOptions({
+      MINI_DROP_PI_SIDECAR_PORT: "9900",
+      MINI_DROP_PI_SIDECAR_HOST: "127.0.0.1",
+    }),
+    { port: 9900, host: "127.0.0.1" },
+  );
 });
 
 test("unknown internal route returns 404", async () => {
@@ -96,10 +113,387 @@ test("collection proposal schema includes goal, target and revision fences", () 
   assert.ok(props.expected_scope_revision);
 });
 
+test("topology discovery fallback exposes the bounded start/advance contract", () => {
+  const oldCatalog = {
+    schema_version: "tool-catalog.v1",
+    tools: ALLOWED_TOOL_NAMES
+      .filter((name) => name !== "discover_topology")
+      .map((name) => ({
+        name,
+        description: `old canonical ${name}`,
+        parameters: { type: "object", additionalProperties: false },
+        internal_path: `/internal/agent/tools/${name}`,
+        enabled_by_default: true,
+      })),
+  };
+  const tools = buildToolCatalog({ internalBase: "http://control", catalog: oldCatalog });
+  const discovery = tools.find((tool) => tool.name === "discover_topology");
+  assert.ok(discovery);
+  assert.match(discovery.description, /Start or advance bounded Case-scoped/);
+  assert.deepEqual(discovery.parameters.required, ["case_id"]);
+  const props = discovery.parameters.properties;
+  assert.equal(props.seed_pid.minimum, 1);
+  assert.equal(props.run_id.pattern, "^discovery-[0-9a-f]{20}$");
+  assert.match(props.run_id.description, /omit on first call/);
+  assert.equal(props.max_hops.maximum, 4);
+  assert.equal(props.max_parallel_tasks.maximum, 8);
+  assert.equal(props.wait_timeout_sec.maximum, 45);
+});
+
+test("investigative system prompt requires a verified terminal tool outcome", () => {
+  const prompt = buildEvidenceAgentSystemPrompt("eval");
+  assert.match(prompt, /must be submitted through finish_investigation/);
+  assert.match(prompt, /Never substitute a plain-text final or stage conclusion/);
+  assert.match(prompt, /COLLECTING means end this run/);
+  assert.match(prompt, /COMPLETED or PARTIAL discovery is not an investigation conclusion/);
+  assert.match(prompt, /do not call propose_causal_graph/);
+  assert.match(prompt, /prompt_variant=eval/);
+});
+
+test("bounded prompt keeps evidence identity fields under the configured budget", () => {
+  const payload = {
+    case_id: "case-budget",
+    case_goal: "PR attribution",
+    evidence_summary: [
+      { evidence_id: "ev-1", projection_hash: "hash-1", summary: "first " + "x".repeat(5000) },
+      { evidence_id: "ev-2", projection_hash: "hash-2", summary: "second " + "y".repeat(5000) },
+    ],
+    hypotheses: [{ statement: "h".repeat(5000) }],
+    causal_graph: { noisy: "z".repeat(5000) },
+  };
+  const bounded = boundCaseContextPayload(payload, 1800);
+  assert.ok(JSON.stringify(bounded).length <= bounded._context_meta.max_chars);
+  assert.equal(bounded.evidence_summary[0].evidence_id, "ev-1");
+  assert.equal(bounded.evidence_summary[0].projection_hash, "hash-1");
+  assert.ok("summary" in bounded.evidence_summary[0]);
+  const prompt = buildBoundedAgentPrompt({ contextPayload: payload, userMessage: "继续", maxChars: 2048 });
+  assert.ok(prompt.prompt.length <= 2048);
+  assert.doesNotThrow(() => JSON.parse(prompt.contextBlock));
+  assert.match(prompt.prompt, /ev-1/);
+  assert.match(prompt.prompt, /hash-1/);
+});
+
+test("context budget reads MINI_DROP_PI_CONTEXT_MAX_CHARS", () => {
+  const original = process.env.MINI_DROP_PI_CONTEXT_MAX_CHARS;
+  process.env.MINI_DROP_PI_CONTEXT_MAX_CHARS = "800";
+  try {
+    const prompt = buildBoundedAgentPrompt({
+      contextPayload: { case_id: "case-env", evidence_summary: [] },
+      userMessage: "short",
+    });
+    assert.equal(prompt.maxChars, 800);
+    assert.ok(prompt.prompt.length <= 800);
+  } finally {
+    if (original === undefined) delete process.env.MINI_DROP_PI_CONTEXT_MAX_CHARS;
+    else process.env.MINI_DROP_PI_CONTEXT_MAX_CHARS = original;
+  }
+});
+
+test("fresh evaluation turns reset Pi conversation history without resetting event sequence", async () => {
+  const calls = [];
+  const session = {
+    isIdle: true,
+    sessionManager: { newSession: () => calls.push("new_session") },
+    agent: { state: { messages: [{ role: "user", content: "old round" }] } },
+    subscribe: () => { calls.push("subscribe"); return () => {}; },
+    setActiveToolsByName: () => {},
+    clearQueue: () => {},
+    prompt: (text) => { calls.push(["prompt", text.length]); return Promise.resolve(); },
+    isStreaming: false,
+  };
+  const manager = new RuntimeManager({ modelRuntime: {}, eventSpool: new EventSpool(null) });
+  manager.sessions.set("fresh-case", {
+    session,
+    generation: 3,
+    context: { case_id: "fresh-case", side_effect_policy: "READ_ONLY", runtime_options: {} },
+    subscribed: false,
+    currentTurnId: null,
+    toolEnvelope: { current: {} },
+    optionSignature: "",
+    concluded: false,
+    runStopRequested: false,
+    pendingWakeup: "",
+    terminalReminderCount: 0,
+  });
+  manager.lastSeq.set("fresh-case", 17);
+  await manager.submitTurn("fresh-case", {
+    message: "new round",
+    runtime_options: { fresh_session: true },
+  });
+  assert.deepEqual(calls[0], "new_session");
+  assert.equal(session.agent.state.messages.length, 0);
+  assert.equal(manager.lastSeq.get("fresh-case"), 17);
+  assert.equal(calls.at(-1)[0], "prompt");
+});
+
+test("models path is opt-in and PI_OFFLINE does not disable provider turns", () => {
+  const originalPath = process.env.MINI_DROP_PI_MODELS_PATH;
+  const originalOffline = process.env.PI_OFFLINE;
+  process.env.MINI_DROP_PI_MODELS_PATH = "/tmp/mini-drop-models.json";
+  process.env.PI_OFFLINE = "1";
+  try {
+    const options = modelRuntimeOptionsFromEnvironment();
+    assert.equal(options.modelsPath, "/tmp/mini-drop-models.json");
+    assert.equal(options.allowModelNetwork, false);
+    // PI_OFFLINE only affects catalog refresh inside the SDK; the sidecar still
+    // creates a selected model and submits real turns when credentials exist.
+    assert.equal(Object.hasOwn(options, "provider"), false);
+  } finally {
+    if (originalPath === undefined) delete process.env.MINI_DROP_PI_MODELS_PATH;
+    else process.env.MINI_DROP_PI_MODELS_PATH = originalPath;
+    if (originalOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = originalOffline;
+  }
+});
+
+test("finish tool has a closed state enum and terminates an accepted run", async () => {
+  let acceptedFinish = null;
+  const tools = buildToolCatalog({
+    internalBase: "http://127.0.0.1:1",
+    sideEffectPolicy: "PROPOSE_ONLY",
+    onAcceptedFinish: (result) => { acceptedFinish = result; },
+  });
+  const finish = tools.find((tool) => tool.name === "finish_investigation");
+  assert.ok(finish);
+  const stateSchema = finish.parameters.properties.state;
+  assert.ok(JSON.stringify(stateSchema).includes("CONFIRMED"));
+  assert.ok(!JSON.stringify(stateSchema).includes("CONCLUDED"));
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: { accepted: true } }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+  try {
+    const result = await finish.execute("finish-call", {
+      case_id: "case-a", summary: "done", evidence_ids: ["ev-1"],
+    });
+    assert.equal(result.terminate, true);
+    assert.equal(acceptedFinish.accepted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejected finish does not terminate the run", async () => {
+  let acceptedFinish = null;
+  const tools = buildToolCatalog({
+    internalBase: "http://127.0.0.1:1",
+    onAcceptedFinish: (result) => { acceptedFinish = result; },
+  });
+  const finish = tools.find((tool) => tool.name === "finish_investigation");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true, data: { accepted: false, reason: "VERIFIER_REJECTED" },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  try {
+    const result = await finish.execute("finish-rejected", {
+      case_id: "case-a", summary: "unsupported", evidence_ids: [],
+    });
+    assert.equal(result.terminate, undefined);
+    assert.equal(acceptedFinish, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepted collection terminates the current run instead of model polling", async () => {
+  let scheduled = null;
+  const tools = buildToolCatalog({
+    internalBase: "http://127.0.0.1:1",
+    onCollectionScheduled: (result) => { scheduled = result; },
+  });
+  const proposal = tools.find((tool) => tool.name === "propose_collection");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    data: {
+      collection_request: { status: "DISPATCHED" },
+      task: { id: "task-a" },
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  try {
+    const result = await proposal.execute("collection-call", {
+      case_id: "case-a",
+      collector_id: "sys_metrics",
+      target_selector: { agent_id: "agent-a" },
+      parameters: {},
+      information_goal: "CPU utilization over time",
+    });
+    assert.equal(result.terminate, true);
+    assert.equal(scheduled.task.id, "task-a");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("topology discovery terminates only while collecting Evidence", async () => {
+  let status = "PROPOSED";
+  const collectingResults = [];
+  const tools = buildToolCatalog({
+    internalBase: "http://127.0.0.1:1",
+    onDiscoveryCollecting: (result) => { collectingResults.push(result); },
+  });
+  const discovery = tools.find((tool) => tool.name === "discover_topology");
+  assert.ok(discovery);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    data: { status, run_id: "discovery-a" },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  try {
+    for (const nonTerminalStatus of ["PROPOSED", "PENDING", "PARTIAL", "COMPLETED"]) {
+      status = nonTerminalStatus;
+      const result = await discovery.execute(`discovery-${nonTerminalStatus}`, {
+        case_id: "case-a",
+      });
+      assert.equal(result.terminate, undefined, `${nonTerminalStatus} must remain non-terminal`);
+    }
+    assert.equal(collectingResults.length, 0);
+
+    status = "collecting";
+    const collecting = await discovery.execute("discovery-collecting", {
+      case_id: "case-a",
+      run_id: "discovery-a",
+    });
+    assert.equal(collecting.terminate, true);
+    assert.equal(collectingResults.length, 1);
+    assert.equal(collectingResults[0].status, "collecting");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("finish and causal graph schemas expose required structured fields", () => {
+  const tools = buildToolCatalog({ internalBase: "http://127.0.0.1:1" });
+  const finish = tools.find((tool) => tool.name === "finish_investigation");
+  const recommendation = finish.parameters.properties.recommendations.items;
+  assert.deepEqual(
+    new Set(recommendation.required),
+    new Set(["cause_or_edge_ref", "target", "concrete_action"]),
+  );
+  const graph = tools.find((tool) => tool.name === "propose_causal_graph");
+  assert.ok(graph.parameters.properties.nodes.items.properties.node_id);
+  assert.ok(graph.parameters.properties.edges.items.properties.source_node_id);
+  const plan = tools.find((tool) => tool.name === "propose_plan_revision");
+  const step = plan.parameters.properties.steps.items;
+  assert.ok(step.properties.collector_id);
+  assert.ok(step.properties.purpose);
+  assert.deepEqual(new Set(step.required), new Set(["collector_id", "purpose"]));
+});
+
+test("runtime coalesces queued follow-ups and rejects them after conclusion", async () => {
+  const manager = new RuntimeManager({ modelRuntime: {} });
+  const calls = [];
+  const fakeSession = {
+    isStreaming: true,
+    pendingMessageCount: 0,
+    followUp: async (note) => { calls.push(note); fakeSession.pendingMessageCount = 1; },
+    clearQueue: () => { fakeSession.pendingMessageCount = 0; calls.push("cleared"); },
+  };
+  manager.sessions.set("case-coalesce", { session: fakeSession, concluded: false });
+
+  assert.deepEqual(await manager.followUp("case-coalesce", { note: "evidence-1" }), {
+    accepted: true, coalesced: false, started: false,
+  });
+  assert.deepEqual(await manager.followUp("case-coalesce", { note: "evidence-2" }), {
+    accepted: true, coalesced: true,
+  });
+  assert.deepEqual(calls, ["evidence-1"]);
+
+  manager._markConcluded("case-coalesce");
+  assert.deepEqual(await manager.followUp("case-coalesce", { note: "late" }), {
+    accepted: false, reason: "CONCLUDED",
+  });
+  assert.deepEqual(calls, ["evidence-1", "cleared"]);
+});
+
+test("runtime starts a fresh prompt when evidence arrives after the agent is idle", async () => {
+  const manager = new RuntimeManager({ modelRuntime: {} });
+  const calls = [];
+  const fakeSession = {
+    isStreaming: false,
+    pendingMessageCount: 0,
+    subscribe: () => { calls.push("subscribed"); },
+    prompt: async (note) => { calls.push(note); },
+  };
+  manager.sessions.set("case-idle", {
+    session: fakeSession,
+    concluded: false,
+    lastError: "",
+  });
+
+  assert.deepEqual(await manager.followUp("case-idle", { note: "new evidence" }), {
+    accepted: true, coalesced: false, started: true,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["subscribed", "new evidence"]);
+  assert.match(manager.sessions.get("case-idle").currentTurnId, /-wakeup-/);
+});
+
+test("runtime defers a racing evidence wakeup until the scheduled collection run stops", async () => {
+  const manager = new RuntimeManager({ modelRuntime: {} });
+  const calls = [];
+  let resolveIdle;
+  const fakeSession = {
+    isStreaming: true,
+    pendingMessageCount: 0,
+    clearQueue: () => { calls.push("cleared"); },
+    waitForIdle: () => new Promise((resolve) => { resolveIdle = resolve; }),
+    prompt: async (note) => { calls.push(note); },
+  };
+  manager.sessions.set("case-race", {
+    session: fakeSession,
+    concluded: false,
+    runStopRequested: false,
+    pendingWakeup: "",
+    wakeupWaitScheduled: false,
+    lastError: "",
+  });
+
+  manager._markCollectionScheduled("case-race");
+  assert.equal(manager.sessions.get("case-race").runStopRequested, true);
+  assert.deepEqual(await manager.followUp("case-race", { note: "durable evidence" }), {
+    accepted: true, coalesced: false, started: false, deferred: true,
+  });
+  fakeSession.isStreaming = false;
+  resolveIdle();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["cleared", "durable evidence"]);
+  assert.equal(manager.sessions.get("case-race").runStopRequested, false);
+});
+
+test("runtime issues at most one terminal reminder after an unverified settle", async () => {
+  const manager = new RuntimeManager({ modelRuntime: {} });
+  const prompts = [];
+  const entry = {
+    session: {
+      isStreaming: false,
+      prompt: async (note) => { prompts.push(note); },
+    },
+    context: { side_effect_policy: "AUTO_READ_LOW" },
+    concluded: false,
+    runStopRequested: false,
+    terminalReminderCount: 0,
+    lastError: "",
+  };
+  manager.sessions.set("case-terminal", entry);
+
+  manager._scheduleTerminalReminder("case-terminal", entry);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  manager._scheduleTerminalReminder("case-terminal", entry);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /finish_investigation/);
+  assert.equal(entry.terminalReminderCount, 1);
+});
+
 test("READ_ONLY catalog contains no proposal tools", () => {
   const tools = buildToolCatalog({ internalBase: "http://127.0.0.1:1", sideEffectPolicy: "READ_ONLY" });
   const names = tools.map((t) => t.name);
   assert.ok(names.includes("get_evidence_projection"));
+  assert.ok(names.includes("get_dependency_graph"));
   assert.ok(names.includes("list_case_evidence"));
   assert.ok(names.includes("compare_evidence"));
   assert.ok(!names.includes("propose_collection"));
@@ -279,6 +673,21 @@ test("snapshot refresh keeps one session and updates active tool catalog", async
   assert.equal(manager.get("case-refresh").toolEnvelope.current.runtime_generation, 3);
 });
 
+test("permission changes rotate the session option signature", () => {
+  const manager = new RuntimeManager({ modelRuntime: {}, eventSpool: new EventSpool(null) });
+  const readOnly = manager._optionSignature({
+    runtime_options: { reasoning_effort: "high" },
+    side_effect_policy: "READ_ONLY",
+    runtime_policy: { effective_tools: ["get_case_snapshot"] },
+  });
+  const investigative = manager._optionSignature({
+    runtime_options: { reasoning_effort: "high" },
+    side_effect_policy: "AUTO_READ_LOW",
+    runtime_policy: { effective_tools: ["finish_investigation", "get_case_snapshot"] },
+  });
+  assert.notEqual(readOnly, investigative);
+});
+
 test("runtime forwards non-thinking events and drops private thinking", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
@@ -300,6 +709,8 @@ test("runtime forwards non-thinking events and drops private thinking", async ()
     manager.lastSeq.set("case-x", 0);
     manager._observe("case-x", { type: "thinking.private", text: "secret" });
     assert.equal(manager.lastSeq.get("case-x"), 0);
+    manager._observe("case-x", { type: "text_delta", text: "transient" });
+    assert.equal(manager.lastSeq.get("case-x"), 0); // discarded SDK delta is not a cursor item
     await manager._forwardEvent("case-x", { generation: 2 }, { type: "assistant_message", text: "hello" });
     assert.equal(requests.length, 0); // seq 0 never forwarded
     manager._observe("case-x", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } });
@@ -436,6 +847,103 @@ test("message_end event carries per-call model usage and cost delta", async () =
   } finally {
     delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("model attempts only audit terminal assistant responses and dedupe responseId", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalToken = process.env.MINI_DROP_PI_INTERNAL_TOKEN;
+  const originalKey = process.env.DEEPSEEK_API_KEY;
+  const requests = [];
+  globalThis.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({ ok: true, data: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    process.env.MINI_DROP_PI_INTERNAL_TOKEN = "test-token";
+    process.env.DEEPSEEK_API_KEY = "credential-must-never-be-forwarded";
+    const manager = new RuntimeManager({
+      modelRuntime: {},
+      internalBase: "http://127.0.0.1:8191",
+      eventSpool: new EventSpool(null),
+    });
+    const entry = {
+      generation: 1,
+      currentTurnId: "turn-main",
+      context: {
+        context_packet_id: "packet-main",
+        diagnostic_strategy_id: "hybrid",
+        runtime_options: { reasoning_effort: "low" },
+      },
+      session: {
+        model: { provider: "deepseek", id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+        getSessionStats: () => ({
+          tokens: { input: 120, output: 30, cacheRead: 10, cacheWrite: 0 },
+          cost: 0.001,
+        }),
+      },
+    };
+    manager.sessions.set("case-model-audit", entry);
+    manager.lastSeq.set("case-model-audit", 0);
+
+    const forward = async (event) => {
+      manager._observe("case-model-audit", event);
+      await manager._forwardEvent("case-model-audit", entry, event);
+    };
+    await forward({
+      type: "message_end",
+      message: { role: "user", content: [{ type: "text", text: "terminal reminder" }] },
+    });
+    const response = {
+      role: "assistant",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      responseId: "provider-response-1",
+      stopReason: "stop",
+      usage: {
+        input: 120,
+        output: 30,
+        cacheRead: 10,
+        cacheWrite: 0,
+        cost: { total: 0.001 },
+      },
+      content: [{ type: "text", text: "verified answer" }],
+    };
+    await forward({ type: "message_end", message: response });
+    await forward({ type: "turn_end", message: response });
+    await forward({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        responseId: "provider-response-pending",
+        stopReason: "pending",
+        content: [],
+      },
+    });
+
+    const attempts = requests.flatMap((body) => body.events)
+      .map((event) => event.payload.model_attempt)
+      .filter(Boolean);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].turn_id, "turn-main");
+    assert.equal(attempts[0].input_tokens, 120);
+    assert.equal(attempts[0].output_tokens, 30);
+    assert.equal(attempts[0].response_hash.length, 64);
+    assert.match(attempts[0].model_attempt_id, /^model_attempt_pi_[0-9a-f]{24}$/);
+    assert.equal("response_id" in attempts[0], false);
+    assert.equal(
+      JSON.stringify(requests).includes("credential-must-never-be-forwarded"),
+      false,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalToken === undefined) delete process.env.MINI_DROP_PI_INTERNAL_TOKEN;
+    else process.env.MINI_DROP_PI_INTERNAL_TOKEN = originalToken;
+    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalKey;
   }
 });
 

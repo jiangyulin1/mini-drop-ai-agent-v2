@@ -30,7 +30,13 @@ export default function RuntimeConsole() {
     if (values[1].status === "fulfilled") setProvider(values[1].value);
     if (values[2].status === "fulfilled") setHealth(values[2].value);
     if (values[3].status === "fulfilled") setControls(Array.isArray(values[3].value) ? values[3].value : values[3].value?.items || []);
-    const failure = values.find((item) => item.status === "rejected"); if (failure) setError(failure.reason);
+    // A missing optional AI projection is a normal deployment state. Keep
+    // actionable errors for actual request failures without surfacing a raw
+    // configuration 404 in the workbench.
+    const failure = values.find((item, index) => (
+      item.status === "rejected" && !(index === 1 && item.reason?.status === 404)
+    ));
+    if (failure) setError(failure.reason);
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -40,17 +46,17 @@ export default function RuntimeConsole() {
   const aiNotConfigured = runtime?.ai_status === "NOT_CONFIGURED" || runtime?.mode === "deterministic";
   return (
     <div className={styles.page}>
-      <header><div><span>RUNTIME & POLICY BOUNDARIES</span><Typography.Title level={2}>Runtime 与设置</Typography.Title><Typography.Paragraph>这里只显示无敏感运行投影；Provider Key、API Token 和内部凭据不会返回到浏览器。</Typography.Paragraph></div><Space><Button icon={<SettingOutlined />} onClick={() => navigate("/settings")}>访问与存储设置</Button><Button icon={<ReloadOutlined />} onClick={load}>刷新</Button></Space></header>
+      <header><div><span>RUNTIME & POLICY BOUNDARIES</span><Typography.Title level={2}>Runtime 与设置</Typography.Title><Typography.Paragraph>这里只显示无敏感运行投影；敏感凭据始终由部署环境管理。</Typography.Paragraph></div><Space><Button icon={<SettingOutlined />} onClick={() => navigate("/settings")}>访问与存储设置</Button><Button icon={<ReloadOutlined />} onClick={load}>刷新</Button></Space></header>
       <ErrorAlert error={error} onRetry={load} />
-      {!aiReady && <Alert type={aiNotConfigured ? "info" : "error"} showIcon message={aiNotConfigured ? "AI Collector Runtime 未配置" : "Pi Runtime 异常"} description={aiNotConfigured ? "采集、火焰图和 Evidence 工作台仍可人工使用；系统不会用规则归因冒充 AI。" : runtime?.ready_error || "服务未报告具体原因"} />}
+      {!aiReady && <Alert type={aiNotConfigured ? "info" : "error"} showIcon message={aiNotConfigured ? "AI 调查暂不可用" : "AI 运行服务需要检查"} description="采集、火焰图和 Evidence 工作台仍可继续使用；运行凭据由部署环境管理。" />}
       <div className={styles.grid}>
         <Card title={<Space><RobotOutlined />只读运行状态</Space>} extra={<Tag color={aiReady ? "success" : aiNotConfigured ? "default" : "error"}>{aiReady ? "AI READY" : aiNotConfigured ? "WORKBENCH" : "ERROR"}</Tag>}>
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="Runtime Type">{runtime?.runtime_type || "—"}</Descriptions.Item>
             <Descriptions.Item label="Runtime Version">{runtime?.runtime_version || flags.pi_runtime_version || "—"}</Descriptions.Item>
             <Descriptions.Item label="Runtime Mode"><Tag color="purple">{runtime?.mode || flags.runtime_mode || "—"}</Tag></Descriptions.Item>
-            <Descriptions.Item label="Pi URL 是否配置">{flags.pi_runtime_url ? <Tag color="success">已配置（值已隐藏）</Tag> : <Tag>未配置</Tag>}</Descriptions.Item>
-            <Descriptions.Item label="Provider 是否配置">{provider?.has_api_key ? <Tag color="success">已配置（值已隐藏）</Tag> : <Tag>未配置</Tag>}</Descriptions.Item>
+            <Descriptions.Item label="Runtime 连接">{flags.pi_runtime_url ? <Tag color="success">已接入</Tag> : <Tag>按部署配置</Tag>}</Descriptions.Item>
+            <Descriptions.Item label="AI 服务">{provider?.has_api_key || aiReady ? <Tag color="success">已接入</Tag> : <Tag>按部署配置</Tag>}</Descriptions.Item>
             <Descriptions.Item label="服务版本">{health?.version || "—"}</Descriptions.Item>
           </Descriptions>
         </Card>

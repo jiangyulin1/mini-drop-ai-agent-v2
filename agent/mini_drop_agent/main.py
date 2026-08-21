@@ -16,6 +16,7 @@ import server.app._env  # noqa: F401 — 自动加载 .env
 import json
 import multiprocessing
 import os
+import platform
 import queue
 import re
 import shutil
@@ -36,6 +37,7 @@ from agent.mini_drop_agent.collectors.ebpf import EBPFCollector
 from agent.mini_drop_agent.collectors.java_async import JavaAsyncProfilerCollector
 from agent.mini_drop_agent.collectors.log_scan import LogScanCollector
 from agent.mini_drop_agent.collectors.memory import MemoryCollector
+from agent.mini_drop_agent.collectors.network_discovery import NetworkDiscoveryCollector
 from agent.mini_drop_agent.collectors.perf import PerfCollector
 from agent.mini_drop_agent.collectors.process_scan import ProcessScanCollector
 from agent.mini_drop_agent.collectors.pprof import PprofCollector
@@ -48,6 +50,10 @@ from agent.mini_drop_agent.connection import GrpcConnection
 from agent.mini_drop_agent.config import AgentConfig, load_config
 from agent.mini_drop_agent.logging_utils import log_event
 from agent.mini_drop_agent.metrics import ProcessStatsSampler
+from agent.mini_drop_agent.process_incarnation import (
+    TargetIncarnationCheck,
+    check_target_incarnation,
+)
 from agent.mini_drop_agent.result_spool import ResultSpool
 from server.app.generated import (
     healthcheck_pb2,
@@ -73,6 +79,7 @@ COLLECTORS = {
     "log_scan": LogScanCollector(),
     "runtime_snapshot": RuntimeSnapshotCollector(),
     "connection_probe": ConnectionProbeCollector(),
+    "network_discovery": NetworkDiscoveryCollector(),
 }
 
 # Mutating operations are not collectors and are never advertised to the AI
@@ -95,6 +102,8 @@ def _detect_capabilities() -> list[str]:
         "go_pprof", "memory_smaps", "sys_metrics", "process_scan", "log_scan",
         "runtime_snapshot", "connection_probe",
     }
+    if os.path.isdir("/proc") or (platform.system() == "Darwin" and shutil.which("lsof")):
+        available.add("network_discovery")
     if shutil.which("perf"):
         available.update({"perf_cpu", "continuous_perf"})
     if shutil.which("bpftrace"):
@@ -147,6 +156,12 @@ def _run_collector(
     if target_pid == os.getpid() or (agent_main_pid and target_pid == agent_main_pid):
         return False, "拒绝自剖析请求 (target_pid 与 Agent 自身 PID 相同)", []
 
+    raw_options = task_payload.get("request_params", {}).get("options", {})
+    options = raw_options if isinstance(raw_options, dict) else {}
+    incarnation_check = check_target_incarnation(target_pid, options)
+    if not incarnation_check.allowed:
+        return False, incarnation_check.message, []
+
     sample_rate = max(1, min(task_payload.get("sample_rate", 99), 10000))
     duration_sec = max(1, min(task_payload.get("duration_sec", 15), 600))
 
@@ -156,7 +171,7 @@ def _run_collector(
         target_pid=target_pid,
         sample_rate=sample_rate,
         duration_sec=duration_sec,
-        options=task_payload.get("request_params", {}).get("options", {}),
+        options=options,
     )
     with start_span(
         "mini_drop.collector.run",
@@ -170,18 +185,49 @@ def _run_collector(
         },
     ):
         result = collector.collect(collector_task)
-        artifacts = result.artifacts
+        artifacts = _annotate_incarnation_check(
+            result.artifacts, incarnation_check,
+        )
+        result_reason = result.reason
+        if result.ok and incarnation_check.status == "limited":
+            result_reason = f"{result_reason}; {incarnation_check.message}"
         if result.ok and config is not None:
             try:
                 artifacts = maybe_upload_artifacts(
                     task_payload["id"],
-                    result.artifacts,
+                    artifacts,
                     config,
                     attempt_id=task_payload.get("attempt_id", ""),
                 )
             except Exception as exc:
-                return False, f"artifact upload failed: {exc}", result.artifacts
-        return result.ok, result.reason, artifacts
+                return False, f"artifact upload failed: {exc}", artifacts
+        return result.ok, result_reason, artifacts
+
+
+def _annotate_incarnation_check(
+    artifacts: list[dict[str, Any]],
+    check: TargetIncarnationCheck,
+) -> list[dict[str, Any]]:
+    """Persist whether a discovery-pinned PID was verified or only limited."""
+
+    if check.status == "not_requested":
+        return artifacts
+    annotated: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        item = dict(artifact)
+        metadata = dict(item.get("metadata") or {})
+        metadata["target_incarnation_validation"] = check.status
+        if check.expected_entity_id:
+            metadata["expected_entity_id"] = check.expected_entity_id
+        if check.actual_entity_id:
+            metadata["actual_entity_id"] = check.actual_entity_id
+        if check.message:
+            metadata["target_incarnation_limitation"] = check.message
+        item["metadata"] = metadata
+        annotated.append(item)
+    return annotated
 
 
 def _collector_error_code(ok: bool, reason: str, *, cancelled: bool = False) -> str:
@@ -192,6 +238,18 @@ def _collector_error_code(ok: bool, reason: str, *, cancelled: bool = False) -> 
     if cancelled:
         return "TASK_CANCELLED"
     normalized = (reason or "").lower()
+    if "target_incarcation_changed" in normalized or "target_incarnation_changed" in normalized:
+        return "TARGET_INCARCATION_CHANGED"
+    if (
+        "target_incarcation_expectation_invalid" in normalized
+        or "target_incarnation_expectation_invalid" in normalized
+    ):
+        return "TARGET_INCARCATION_EXPECTATION_INVALID"
+    if (
+        "target_incarcation_unverifiable" in normalized
+        or "target_incarnation_unverifiable" in normalized
+    ):
+        return "TARGET_INCARCATION_UNVERIFIABLE"
     if "target_pid" in normalized or "self-analysis" in normalized or "自剖析" in normalized:
         return "INVALID_TARGET_PID"
     if "not registered" in normalized or "未在" in normalized or "unavailable" in normalized:

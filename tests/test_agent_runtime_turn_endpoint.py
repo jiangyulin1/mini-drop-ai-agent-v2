@@ -143,6 +143,11 @@ def test_agent_turn_routes_through_agent_runtime_port(client, monkeypatch, mode)
         assert binding["runtime_generation"] == 1
         turns = repo.list_agent_runtime_turns(case["case_id"], "tenant-a")
         assert [item["turn_id"] for item in turns] == ["turn-mock-1"]
+        updated_case = repo.get_incident_case(case["case_id"], "tenant-a")
+        assert updated_case["state"] == "INVESTIGATING"
+        workspace = client.get(f"/api/v1/cases/{case['case_id']}/workspace").json()["data"]
+        assert workspace["active_turn"]["turn_id"] == "turn-mock-1"
+        assert workspace["runtime_turns"][0]["status"] == "ACCEPTED"
         state = client.get(f"/api/v1/cases/{case['case_id']}/agent/runtime-state")
         assert state.status_code == 200, state.text
         assert state.json()["data"]["binding"]["runtime_generation"] == 1
@@ -158,6 +163,53 @@ def test_agent_turn_routes_through_agent_runtime_port(client, monkeypatch, mode)
         ]
         # Cycle refreshes keep the same live Sidecar session/generation.
         assert resume_requests[-1][2]["context"]["runtime_generation"] == 1
+
+
+@pytest.mark.parametrize("mode", ["pi", "pi_shadow"])
+def test_answer_only_pi_turn_keeps_case_read_only_and_reports_explain(client, monkeypatch, mode):
+    """A generic answer-only sentence must not look like a live investigation."""
+    with _start_sidecar(monkeypatch, mode):
+        case = _create_case(client)
+        resp = client.post(
+            f"/api/v1/cases/{case['case_id']}/agent/turn",
+            json={
+                "message": "请用一句话说明当前 Case 还缺哪些关键事实",
+                "requested_disposition": "ANSWER_ONLY",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["intent"] == "explain"
+        assert data["policy_used"]["side_effect_policy"] == "READ_ONLY"
+
+        updated_case = repo.get_incident_case(case["case_id"], "tenant-a")
+        assert updated_case["state"] == "OPEN"
+        turns = repo.list_agent_runtime_turns(case["case_id"], "tenant-a")
+        assert turns[0]["disposition"] == "ANSWER_ONLY"
+        assert turns[0]["side_effect_policy"] == "READ_ONLY"
+        events = repo.list_case_events(case["case_id"], "tenant-a")
+        submitted = next(
+            item for item in reversed(events)
+            if item["event_type"] == "agent_runtime_turn_submitted"
+        )
+        assert submitted["payload"]["intent"] == "explain"
+
+
+def test_answer_only_rejects_conflicting_mutating_intent_before_reference_attach(client):
+    case = _create_case(client)
+    before_events = repo.list_case_events(case["case_id"], "tenant-a")
+    response = client.post(
+        f"/api/v1/cases/{case['case_id']}/agent/turn",
+        json={
+            "message": "请继续调查",
+            "intent": "investigate",
+            "requested_disposition": "ANSWER_ONLY",
+            "references": [{"type": "task", "id": "missing-task"}],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "ANSWER_ONLY_INTENT_CONFLICT"
+    assert repo.list_case_events(case["case_id"], "tenant-a") == before_events
 
 
 def test_agent_turn_creates_runtime_context_packet_for_model_audit(client, monkeypatch):
@@ -304,8 +356,14 @@ def test_task_done_wakes_pi_runtime_with_materialized_case_evidence(client, monk
     fake = FakeRuntime()
     monkeypatch.setattr(main_module, "get_runtime", lambda: fake)
     main_module._wake_case_from_task(task.id, "DONE")
+    main_module._run_runtime_wakeup_pass()
     assert len(fake.calls) == 1
     assert fake.calls[0][1].evidence_ids
+    analyses = repo.list_evidence_analysis_runs(case["case_id"], "tenant-a")
+    assert len(analyses) == 1
+    assert analyses[0]["status"] == "QUEUED"
+    assert analyses[0]["analysis_run_id"] in fake.calls[0][1].note
+    assert "projection_hash" in fake.calls[0][1].note
     stored = case_evidence_service.list_evidence(case["case_id"], "tenant-a")
     assert len(stored) == 1
     assert stored[0]["task_id"] == task.id

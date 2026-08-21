@@ -17,6 +17,8 @@
 - [快速开始](#快速开始)
 - [项目概览](#项目概览)
 - [环境要求](#环境要求)
+- [环境准备指南](docs/environment-setup.md)
+- [部署模式指南](docs/deployment-profiles.md)
 - [整体架构](#整体架构)
 - [核心流程](#核心流程)
 - [采集器](#采集器)
@@ -39,32 +41,38 @@
 
 ## 快速开始
 
+**本机轻量模式（macOS / Linux，无需 Docker、本地模型、PostgreSQL 或 MinIO）：**
+
 ```bash
-# 1. 克隆 + 配置
-git clone https://github.com/jiangyulin1/mini-drop.git && cd mini-drop
+git clone https://github.com/jiangyulin1/mini-drop-ai-agent-v2.git mini-drop && cd mini-drop
+python -m pip install uv==0.12.5
+uv sync --locked --extra dev
+uv run --locked python scripts/compile_proto.py
+cp deploy/env/local-native.env.example .env
+
+# 分别在终端中启动 Server、Analyzer、Agent 和 Web
+uv run --locked python dev.py server
+uv run --locked python dev.py analyzer-worker
+uv run --locked python dev.py agent
+npm --prefix web ci
+npm --prefix web run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173`。这一模式使用 SQLite 和本地 Artifact；启用
+Pi/DeepSeek 的步骤见[环境准备指南](docs/environment-setup.md)。DeepSeek API 调用不需要
+下载本地大模型。
+
+**Linux 完整 Compose（PostgreSQL + MinIO + Server + Analyzer + Agent + Web）：**
+
+```bash
 cp .env.example .env
-
-# 2. 启动全栈服务（PostgreSQL + MinIO + Server + Agent + Web）
-docker compose up -d
-
-# 3. 端到端演示：启动热点进程 → 创建采集任务 → 轮询完成 → 验证火焰图
+docker compose --env-file .env config --quiet
+docker compose --env-file .env up -d --build
 bash demo/demo.sh
-
-# 4. 浏览器打开 http://localhost 查看火焰图与诊断
 ```
 
-> **纯净 Ubuntu 22.04 首次运行**：需要安装 `make` 和 Docker，见下方[环境要求](#环境要求)和[部署与运维](#部署与运维)章节。
-
-**本地运行（无 Docker）：**
-
-```bash
-pip install -e ".[dev]"
-python dev.py proto       # 编译 gRPC stub
-python dev.py server      # 终端 1：FastAPI :8191 + gRPC :50051
-python dev.py agent       # 终端 2：Agent 注册并心跳
-python dev.py analyzer-worker  # 终端 3：独立分析 Worker
-python dev.py test        # 运行测试
-```
+完整 Collector 需要 Linux。Docker Desktop 中的 Agent 无法观察 macOS/Windows 宿主机的
+真实 PID namespace 和内核探针。
 
 ---
 
@@ -83,8 +91,8 @@ python dev.py test        # 运行测试
 - **分体部署架构**：Web/Server/DB/MinIO 跑在 Docker 里，Agent 裸机运行且需要 `privileged` + `pid:host`。权限隔离明确，Agent 可独立升级重启，不影响 Web 服务。
 - **gRPC 契约优先**：5 个 `.proto` 文件定义全部通信接口，强类型编译期发现字段不匹配，二进制序列化比 JSON 小 3-5 倍。
 - **采集器即插件**：所有采集器实现 `Collector(Protocol)` 协议——新增采集器只需实现 `collect(task) → CollectorResult`，Server 不绑定具体工具。
-- **Evidence 驱动的 AI 调查**：Pi 模式读取 canonical Evidence、识别缺口并提出受控采集；服务端负责 scope、权限、审批、引用和副作用校验。旧 `rules.json` 候选排序仅作为兼容基线，不属于生产 AI Runtime。
-- **持续 Evidence Case**：保存范围、信息目标、采集提案、原生 Task、Evidence、人工 Review 和受引用分析；当前能力与门禁见 [`docs/ai_collector_architecture_and_migration_plan.md`](docs/ai_collector_architecture_and_migration_plan.md)。
+  - **受监督 Evidence-native 诊断 Agent**：Pi 模式读取 Case、假设、Evidence、缺口与因果状态，提出调查计划和受控采集，形成有字段引用的结论；服务端负责 scope、权限、审批、预算、引用和副作用校验。旧 `rules.json` 候选排序仅作为兼容基线，不属于生产 Agent Runtime。
+  - **持续 Evidence Case**：保存范围、信息目标、Plan Revision、假设/反证、采集提案、原生 Task、Evidence、人工 Review、因果图、结论修订与受审批恢复链路。
 - **自然语言采集**：用户描述意图 → LLM function calling 解析 → `/proc` PID 匹配 → 参数 clamp 安全范围 → 自动创建任务。
 - **可恢复执行流水线**：Task 保留兼容聚合状态，同时持久化 `collection_status` 与 `analysis_status`；每次下发创建唯一 `TaskAttempt`，采集成功后投递带租约的 `AnalysisJob`，结果重放不会重复写入。
 - **真实运行中取消**：Server 将取消指令通过心跳下发，Agent 终止采集进程组、持久化取消结果并安全重放；排队超时、Agent 失联和 Analyzer 租约过期均有确定性恢复路径。
@@ -99,13 +107,15 @@ python dev.py test        # 运行测试
 
 | 项 | 要求 |
 |------|------|
-| **操作系统** | Ubuntu 22.04 / 20.04（其他 Linux 发行版需自行适配） |
+| **操作系统** | macOS/Linux 可运行控制面与 Pi；完整 Collector Worker 需要 Linux |
 | **Linux 内核** | 5.4+（eBPF 需要内核支持 BPF 特性） |
 | **Docker** | Engine 20.10+ + Compose v2 |
 | **make** | `sudo apt-get install -y make`（纯净 Ubuntu 需额外安装） |
 | **内存** | 8 GB 以上（PostgreSQL + MinIO + Server + Web 合计约 2 GB） |
 | **磁盘** | 20 GB 可用空间（Demo 产物约 500 MB） |
-| **Python**（仅本地模式） | 3.9+ |
+| **Python**（仅本地模式） | `>=3.9,<3.14`，推荐 3.12 |
+| **Node.js**（Web 本地开发） | 推荐 20 |
+| **Node.js**（Pi Sidecar） | 22.19.0+ |
 | **perf** | `linux-tools-$(uname -r)` — 用于 CPU 火焰图采集 |
 | **bpftrace** | 0.14+ — 用于 eBPF IO 延迟采集 |
 | **py-spy** | 0.3+ — 用于 Python 用户态采样 |
@@ -130,7 +140,7 @@ sudo sh -c 'echo kernel.perf_event_paranoid=1 > /etc/sysctl.d/99-mini-drop.conf'
 sudo sysctl -p /etc/sysctl.d/99-mini-drop.conf
 
 # 克隆项目
-git clone https://github.com/jiangyulin1/mini-drop.git && cd mini-drop
+git clone https://github.com/jiangyulin1/mini-drop-ai-agent-v2.git mini-drop && cd mini-drop
 cp .env.example .env
 
 # Docker 全栈启动
@@ -177,7 +187,8 @@ flowchart LR
 | MinIO Console | 9001 | 管理面板 |
 
 端口冲突时可通过 `MINI_DROP_GRPC_PORT` 覆盖 Server gRPC 监听端口；Agent
-侧的连接地址需同步指向该端口。
+侧的连接地址需同步指向该端口。默认仍监听全部网卡；本机联调可设置
+`MINI_DROP_GRPC_HOST=127.0.0.1`，使 Agent gRPC 端口只对本机开放。
 
 ### 架构决策
 
@@ -274,7 +285,7 @@ class Collector(Protocol):
 
 每个 Case 默认最多创建 8 个实际采集请求、累计预留 240 秒，RuntimePolicy 只能收紧该上限。重复提案复用原 Request/Task 且不重复消耗预算；多 Worker 部署时，预算会在数据库事务中锁定 Case 后再次校验。模型分析必须引用 Evidence 的 projection hash 与具体字段/文本跨度，人工将 Evidence 标记为 `LOW_TRUST`、`EXCLUDED` 或恢复后，会使相关 AnalysisRun 失效或改变可引用状态。
 
-未配置 Pi 时系统返回 `AI_RUNTIME_NOT_CONFIGURED`，仍可人工采集、预览、下载和治理 Evidence，但不会回退到规则根因排名。自动恢复和旧因果归因不属于当前产品主线。
+未配置 Pi 时系统返回 `AI_RUNTIME_NOT_CONFIGURED`，仍可人工采集、预览、下载和治理 Evidence；不会回退到规则根因排名。受审批恢复方案、回滚和重复验证仍属于统一 Case 主线，但必须建立在 Evidence-bound Conclusion 和现有安全策略之上。
 
 AI 的目标是在受控范围和预算内选择高信息增益 Collector，形成 canonical Evidence，并输出带字段引用的事实、冲突、限制和下一信息目标。历史 90 轮评测的 48.9% 是旧规则归因链的运行级控制组结果，不是当前 AI 正确率；在 `collector_agent_v1` 达到独立 holdout 数量和安全门禁前，项目不声明正式 AI 准确率。当前架构基线与分阶段门禁见 [`docs/ai_collector_architecture_and_migration_plan.md`](docs/ai_collector_architecture_and_migration_plan.md)。新的本地评测可先验证公私隔离、Catalog/Evidence hash 和评分合同：
 
@@ -307,7 +318,7 @@ PENDING → RUNNING → UPLOADING → ANALYZING → DONE
 | 任务面板 | `/` | 统计卡片、NLP 输入、任务搜索/排序/删除、Agent 列表、SSE 实时通知 |
 | 任务详情 | `/task/:id` | D3 交互式火焰图 + ECharts TopN 联动、eBPF IO Histogram、状态时间线、兼容规则归因 |
 | AI 集群诊断 | `/ai-diagnosis` | 自然语言诊断、拓扑目标、假设、受控探针审批、证据血缘与等级置信报告 |
-| AI Case 工作台 | `/ai-cases` | 创建 Case、五块恢复摘要、消息/修正、Pause/Resume/Stop、候选/迭代、时间线与模型审计 |
+| AI Case 工作台 | `/ai-cases` | 创建 Case、调查计划、Evidence、假设/缺口/因果/结论、恢复摘要、消息/修正、Pause/Resume/Stop、时间线与模型审计 |
 | 诊断历史 | `/diagnoses` | 全量诊断记录、置信度筛选、搜索过滤 |
 | Agent 详情 | `/agent/:id` | 资源趋势折线图、采集能力标签、关联任务搜索 |
 | 审计日志 | `/audit` | 事件筛选、自由搜索、时间倒序 |
@@ -447,10 +458,14 @@ GET    /api/healthz                       # 依赖诊断报告；请读取 healt
 
 ### Docker 部署
 
+完整模式只适用于 Linux；各模式的数据、权限与 Pi 差异见
+[`docs/deployment-profiles.md`](docs/deployment-profiles.md)。
+
 ```bash
-git clone https://github.com/jiangyulin1/mini-drop.git && cd mini-drop
+git clone https://github.com/jiangyulin1/mini-drop-ai-agent-v2.git mini-drop && cd mini-drop
 cp .env.example .env
-docker compose up -d
+docker compose --env-file .env config --quiet
+docker compose --env-file .env up -d --build
 ```
 
 ### 分体部署（推荐）
@@ -479,12 +494,15 @@ sudo bash deploy/scripts/install-worker.sh "$PWD"
 
 生产或虚拟机部署前必须根据目标环境单独确认地址、证书、身份、存储和防火墙策略；仓库不再维护绑定某次实验 IP 和发布目录的部署快照。
 
-### 离线 / 本地 Docker（SQLite，无需拉取外部镜像）
+### 本地 Docker（SQLite，不启动 PostgreSQL/MinIO）
 
 ```bash
 npm --prefix web run build
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build server agent web
+docker compose -f docker-compose.yml -f docker-compose.local.yml \
+  up -d --build server analyzer agent web
 ```
+
+本地仍可能首次拉取 Python/Nginx 基础镜像；它不是完全离线安装包。
 
 ### 一键演示
 
@@ -559,7 +577,7 @@ Web 顶栏填写的是 `MINI_DROP_API_KEY`（Control REST 访问凭据），不�
 
 ## AI Provider
 
-兼容任意 OpenAI-style `/v1/chat/completions` 接口：
+Server 侧 NLP/摘要兼容任意 OpenAI-style `/v1/chat/completions` 接口：
 
 ```bash
 export MINI_DROP_AI_ENABLED=full
@@ -579,6 +597,12 @@ MINI_DROP_AI_ENABLED=full      → nlp=on,  rca=on,  summarize=on
 ```
 
 不配模型 Runtime 时核心采集、火焰图和 Evidence 工作台不受影响；AI 调查明确显示未配置，不会降级成规则引擎并伪装为 AI。
+
+Evidence Case 对话使用独立的 Pi Sidecar 配置：还需要
+`MINI_DROP_AGENT_RUNTIME=pi`、`MINI_DROP_PI_RUNTIME_URL`、内部 Token，以及只注入 Sidecar
+的 Provider Key。`PI_OFFLINE=1` 只关闭模型目录刷新，不会阻止 DeepSeek completion；
+也不要求本地模型。完整配置和验证方法见
+[`docs/environment-setup.md`](docs/environment-setup.md)。
 
 ### MCP 能力接入
 
@@ -614,7 +638,7 @@ make mcp            # 启动独立 MCP Server（需安装 .[mcp]）
 make agent          # 启动 Agent
 make test           # 运行测试
 make eval           # 运行诊断 golden scenarios，生成 JSON/Markdown 报告
-make lint           # 语法检查 + ruff + mypy
+make lint           # 语法检查 + ruff
 make fmt            # ruff format
 make demo           # bash demo/demo.sh
 
@@ -661,7 +685,7 @@ mini-drop/
 │   └── connection.py     gRPC 连接管理 + 认证拦截器 + 重试逻辑
 ├── analyzer/             perf.data → stackcollapse → flamegraph JSON 树 + TopN + SVG
 ├── web/                  React 18 + Ant Design 5 + d3-flame-graph + ECharts
-│   ├── src/pages/        Dashboard / TaskResult / AgentDetail / AuditLogs / Settings / DiagnosisHistory
+│   ├── src/pages/        Dashboard / TaskResult / Agents / Operations / AI Case Workspace / Settings
 │   └── src/components/   FlamegraphViewer / TopNChart / EBPFHistogram / NLPTaskInput / ErrorBoundary
 ├── proto/                5 个 gRPC 契约文件（common/init/healthcheck/hotmethod/control）
 ├── demo/                 演示脚本 & 15 种负载场景生成器
@@ -718,3 +742,6 @@ bpftrace 对演示场景足够——Shell 一行命令即可挂载内核探针�
 - [RuntimePolicy 运行权限策略](docs/runtime-policy.md)
 - [能力扩展指南](docs/extension-guide.md)
 - [跨运行时注册表一致性](docs/registry-consistency.md)
+- [环境准备](docs/environment-setup.md)
+- [部署模式](docs/deployment-profiles.md)
+- [仓库维护与清理](docs/repository-maintenance.md)

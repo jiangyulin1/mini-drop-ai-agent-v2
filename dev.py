@@ -24,11 +24,11 @@ ROOT = Path(__file__).resolve().parent
 
 def cmd_proto():
     """编译 .proto 文件为 Python gRPC stub。"""
-    script = ROOT / "proto" / "compile.sh"
+    script = ROOT / "scripts" / "compile_proto.py"
     if script.is_file():
-        subprocess.check_call(["bash", str(script)], cwd=ROOT / "proto", shell=(sys.platform == "win32"))
+        subprocess.check_call([sys.executable, str(script)], cwd=ROOT)
     else:
-        sys.exit("proto/compile.sh 不存在，请先拉取项目完整代码")
+        sys.exit("scripts/compile_proto.py 不存在，请先拉取项目完整代码")
 
 
 def cmd_server():

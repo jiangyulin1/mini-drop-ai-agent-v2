@@ -23,6 +23,7 @@ from server.app.diagnosis.cluster_scope import TargetResolver
 from server.app.diagnosis.evidence_attachments import EvidenceAttachmentService
 from server.app.diagnosis.fanout import FanoutCollectionService
 from server.app.diagnosis.investigation_plan import InvestigationPlanService
+from server.app.diagnosis.investigation_state import InvestigationStateService
 from server.app.diagnosis.mcp_fact_resolver import McpEvidenceService, McpFactResolver
 from server.app.diagnosis.reference_resolver import ReferenceResolver
 from server.app.diagnosis.source_gateway import SourceGateway
@@ -44,6 +45,7 @@ class ApplicationServices:
     collection_supervisor: CollectionSupervisor
     evidence_analysis_service: EvidenceAnalysisService
     investigation_plan_service: InvestigationPlanService
+    investigation_state_service: InvestigationStateService
     target_resolver: TargetResolver
     fanout_service: FanoutCollectionService
     mcp_evidence_service: McpEvidenceService
@@ -75,10 +77,14 @@ def build_application_services(repository: Any | None = None) -> ApplicationServ
     collection_supervisor = CollectionSupervisor(concrete_repository)
     evidence_analysis_service = EvidenceAnalysisService(concrete_repository)
     investigation_plan_service = InvestigationPlanService(concrete_repository)
+    investigation_state_service = InvestigationStateService(concrete_repository)
     target_resolver = TargetResolver()
     fanout_service = FanoutCollectionService(concrete_repository)
     mcp_fact_resolver = McpFactResolver(
-        native_collectors={"sys_metrics", "log_scan", "perf_cpu", "connection_probe"},
+        native_collectors={
+            "sys_metrics", "log_scan", "perf_cpu", "connection_probe",
+            "network_discovery",
+        },
         registered_sources={item.source_id for item in mcp_client_manager.source_definitions()},
     )
     mcp_evidence_service = McpEvidenceService(
@@ -102,6 +108,7 @@ def build_application_services(repository: Any | None = None) -> ApplicationServ
         collection_supervisor=collection_supervisor,
         evidence_analysis_service=evidence_analysis_service,
         investigation_plan_service=investigation_plan_service,
+        investigation_state_service=investigation_state_service,
         target_resolver=target_resolver,
         fanout_service=fanout_service,
         mcp_evidence_service=mcp_evidence_service,
@@ -167,6 +174,7 @@ case_evidence_service = _ServiceProxy("case_evidence_service")
 collection_supervisor = _ServiceProxy("collection_supervisor")
 evidence_analysis_service = _ServiceProxy("evidence_analysis_service")
 investigation_plan_service = _ServiceProxy("investigation_plan_service")
+investigation_state_service = _ServiceProxy("investigation_state_service")
 target_resolver = _ServiceProxy("target_resolver")
 fanout_service = _ServiceProxy("fanout_service")
 mcp_evidence_service = _ServiceProxy("mcp_evidence_service")

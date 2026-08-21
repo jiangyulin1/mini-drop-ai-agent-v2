@@ -1,42 +1,206 @@
-/* TaskResult 页面样式 */
-
 .page {
   width: 100%;
+  min-width: 0;
+  padding: 14px 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-x: clip;
+}
+
+.loadingPage {
+  min-height: calc(100dvh - var(--app-header-height, 56px) - 34px);
 }
 
 .pageHeader {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 0;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
-.flameTopNRow {
-  margin-top: 16px;
+.pageHeaderMain,
+.headerActions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
 }
 
-.flameCol {
-  /* 火焰图占据更多宽度 */
+.pageHeaderMain :global(.ant-typography) {
+  color: var(--app-text);
+  font-size: 19px;
 }
 
-.topNCol {
-  /* TopN 侧边栏 */
+.headerActions {
+  justify-content: flex-end;
 }
 
+.headerActions :global(.ant-tag) {
+  margin: 0;
+}
+
+.page :global(.ant-card) {
+  min-width: 0;
+  border-color: var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  box-shadow: none;
+}
+
+.page :global(.ant-card-head) {
+  min-height: 40px;
+  padding-inline: 12px;
+}
+
+.page :global(.ant-card-body) {
+  min-width: 0;
+  padding: 12px;
+}
+
+.page :global(.ant-alert) {
+  min-width: 0;
+  border-radius: 8px;
+}
+
+.page :global(.ant-row),
+.page :global(.ant-col),
+.page :global(.ant-space-item),
+.page :global(.ant-descriptions-item-content) {
+  min-width: 0;
+}
+
+.page :global(.ant-descriptions-item-content),
+.page :global(.ant-typography) {
+  overflow-wrap: anywhere;
+}
+
+.page :global(.ant-table-wrapper) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.page :global(.ant-table-content) {
+  overflow-x: auto !important;
+}
+
+.page :global(.ant-table-cell) {
+  overflow-wrap: anywhere;
+}
+
+.page :global(.ant-timeline) {
+  margin-top: 2px;
+}
+
+.flameTopNRow,
 .section {
-  margin-top: 16px;
+  margin-top: 12px;
+}
+
+.flameCol,
+.topNCol {
+  min-width: 0;
 }
 
 .skeletonCard {
-  padding: 16px;
-  background: #fff;
+  padding: 12px;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  border: 1px solid #f0f0f0;
+  background: var(--app-surface);
 }
 
-/* 响应式 */
+.diagnosisCard :global(.ant-card-head-wrapper) {
+  min-width: 0;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.diagnosisActions {
+  justify-content: flex-end;
+}
+
+.evidenceSummary {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-background);
+}
+
+.rawDiagnosisResult {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 992px) {
   .flameTopNRow {
     flex-direction: column;
+  }
+}
+
+@media (max-width: 680px) {
+  .page {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .pageHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .headerActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .headerActions > button {
+    min-width: 0;
+    flex: 1 1 132px;
+  }
+
+  .page :global(.ant-card-head),
+  .page :global(.ant-card-body) {
+    padding-inline: 10px;
+  }
+
+  .page :global(.ant-alert-with-description) {
+    padding: 10px;
+  }
+
+  .diagnosisCard :global(.ant-card-head-title),
+  .diagnosisCard :global(.ant-card-extra),
+  .diagnosisActions {
+    width: 100%;
+  }
+
+  .diagnosisCard :global(.ant-card-extra) {
+    margin-inline-start: 0;
+  }
+
+  .diagnosisActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  .pageHeaderMain {
+    width: 100%;
+  }
+
+  .pageHeaderMain :global(.ant-typography) {
+    font-size: 18px;
+  }
+
+  .headerActions > button {
+    flex-basis: 100%;
   }
 }

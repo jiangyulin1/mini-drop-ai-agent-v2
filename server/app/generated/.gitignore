@@ -1,5 +1,5 @@
 # 自动生成的 gRPC stub，不纳入版本控制。
-# 运行 proto/compile.sh 重新生成。
+# 运行 scripts/compile_proto.py 重新生成。
 *.py
 !__init__.py
 !.gitignore

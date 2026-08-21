@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Descriptions, Divider, Drawer, Empty, Form, Input, List, Modal, Select, Space, Tag, Typography, message } from "antd";
+import { Alert, Button, Descriptions, Divider, Drawer, Empty, Form, Input, List, Modal, Select, Space, Tag, Tooltip, Typography, message } from "antd";
 import { CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined, FileSearchOutlined, HistoryOutlined, RobotOutlined, WarningOutlined } from "@ant-design/icons";
 import {
   createCaseEvidenceAnalysis,
@@ -11,11 +11,29 @@ import {
 import { formatArtifactSize } from "../utils/evidence";
 import { evidenceTrust } from "../utils/opsMappings";
 import ErrorAlert from "./ErrorAlert";
+import styles from "./EvidenceDrawer.module.css";
 
 function value(item, ...keys) { for (const key of keys) if (item?.[key] !== undefined && item?.[key] !== null && item?.[key] !== "") return item[key]; return null; }
 function stringify(input) { return typeof input === "string" ? input : JSON.stringify(input, null, 2); }
 
-export default function EvidenceDrawer({ open, onClose, caseId, evidence, onChanged, onExplain }) {
+function resolveFieldPath(input, fieldPath) {
+  if (!input || typeof input !== "object" || !fieldPath) return { found: false, value: undefined };
+  const normalized = String(fieldPath).replace(/^projection\./, "").replace(/\[(\d+)\]/g, ".$1");
+  const segments = normalized.split(".").filter(Boolean);
+  let current = input;
+  for (const segment of segments) {
+    if ((Array.isArray(current) || (current && typeof current === "object")) && Object.prototype.hasOwnProperty.call(current, segment)) current = current[segment];
+    else return { found: false, value: undefined };
+  }
+  return { found: true, value: current };
+}
+
+function shortHash(value) {
+  const text = String(value || "-");
+  return text.length > 18 ? `${text.slice(0, 8)}…${text.slice(-6)}` : text;
+}
+
+export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusCitation, onChanged, onExplain }) {
   const [form] = Form.useForm();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [decision, setDecision] = useState("TRUSTED");
@@ -25,11 +43,37 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, onChan
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const item = detail || evidence || {};
+  const item = useMemo(() => detail || evidence || {}, [detail, evidence]);
   const evidenceId = evidence?.evidence_id || evidence?.id;
   const trustValue = item.trust_status || item.review_decision || item.status || "UNKNOWN";
   const trust = evidenceTrust(trustValue);
   const raw = useMemo(() => preview?.content || preview?.text_preview || value(item, "raw_data", "content", "data", "summary", "projections"), [item, preview]);
+  const citationProjection = useMemo(() => {
+    if (!focusCitation) return null;
+    const targetHash = focusCitation.projection_hash;
+    const historical = targetHash
+      ? (detail?.projections || []).find((projection) => projection?.projection_hash === targetHash)
+      : null;
+    if (historical) return historical;
+    if (!targetHash || preview?.projection_hash === targetHash) return preview;
+    return null;
+  }, [detail?.projections, focusCitation, preview]);
+  const citationValue = useMemo(
+    () => resolveFieldPath(citationProjection?.content, focusCitation?.field_path),
+    [citationProjection?.content, focusCitation?.field_path],
+  );
+  const citationProjectionMissing = Boolean(
+    focusCitation?.projection_hash
+    && detail
+    && preview?.projection_hash
+    && !citationProjection,
+  );
+  const citationProjectionHistorical = Boolean(
+    citationProjection
+    && focusCitation?.projection_hash
+    && preview?.projection_hash
+    && focusCitation.projection_hash !== preview.projection_hash,
+  );
 
   useEffect(() => {
     if (!open || !caseId || !evidenceId) return;
@@ -67,8 +111,13 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, onChan
     setLoading(true); setError(null);
     try {
       const run = await createCaseEvidenceAnalysis(caseId, evidenceId);
-      setAnalyses((items) => [...items, run]);
-      message.success("Evidence AI 分析已进入队列");
+      setAnalyses((items) => {
+        const index = items.findIndex((item) => item.analysis_run_id === run.analysis_run_id);
+        if (index < 0) return [...items, run];
+        return items.map((item, itemIndex) => itemIndex === index ? run : item);
+      });
+      message.success(run.reused ? "已打开相同输入的分析记录" : "Evidence AI 分析已进入队列");
+      onChanged?.();
     } catch (nextError) { setError(nextError); } finally { setLoading(false); }
   }
   return (
@@ -77,6 +126,18 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, onChan
         {!evidence ? <Empty description="请选择 Evidence" /> : <Space direction="vertical" size={16} style={{ width: "100%" }}>
           {String(trustValue).toUpperCase() === "EXCLUDED" && <Alert type="warning" showIcon message="已从后续调查中排除" description="该证据不会继续参与 Agent Prompt 和结论投影，但完整审查记录仍保留用于审计。" />}
           <ErrorAlert error={error} />
+          {focusCitation && <section className={styles.citationFocus} data-testid="evidence-citation-focus" aria-label="当前事实引用">
+            <div className={styles.citationHeader}>
+              <strong>引用定位</strong>
+              <Tag color={citationProjectionMissing ? "warning" : citationProjectionHistorical ? "gold" : "blue"}>{citationProjectionMissing ? "投影不可用" : citationProjectionHistorical ? "历史投影" : "引用投影"}</Tag>
+            </div>
+            <div className={styles.citationMeta}>
+              <span><small>字段路径</small><Typography.Text code>{focusCitation.field_path || "未标注"}</Typography.Text></span>
+              <span><small>Projection Hash</small><Tooltip title={focusCitation.projection_hash || "未标注"}><Typography.Text>{shortHash(focusCitation.projection_hash)}</Typography.Text></Tooltip></span>
+              {(focusCitation.start != null || focusCitation.end != null) && <span><small>引用区间</small><Typography.Text>{focusCitation.start ?? "-"}–{focusCitation.end ?? "-"}</Typography.Text></span>}
+            </div>
+            {citationProjectionMissing ? <Alert type="warning" showIcon message="分析时固定的投影不可用" description="历史引用仍保留用于审计，当前字段值不会替代原分析输入。可下载证据包核对已归档投影。" /> : citationValue.found ? <div className={styles.citationValue}><small>引用字段值</small><pre>{stringify(citationValue.value)}</pre>{focusCitation.quote != null && <Typography.Text type="secondary">引用原文：“{String(focusCitation.quote)}”</Typography.Text>}</div> : <Alert type="warning" showIcon message="引用投影中无法定位该字段" description={citationProjection?.truncated ? "Evidence 投影已截断，可下载证据包核对完整投影。" : "字段可能已失效，或该 Evidence 未返回结构化投影。"} />}
+          </section>}
           <Descriptions size="small" column={2} bordered>
             <Descriptions.Item label="Evidence ID" span={2}><Typography.Text copyable>{evidenceId}</Typography.Text></Descriptions.Item>
             <Descriptions.Item label="类型">{value(item, "evidence_type", "artifact_type", "type") || "—"}</Descriptions.Item>
@@ -104,9 +165,9 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, onChan
             <Button onClick={() => onExplain?.(item)}>为什么被使用？</Button>
           </Space>
           <Divider orientation="left">数据摘要 / 原始投影</Divider>
-          {raw ? <pre style={{ maxHeight: 340, overflow: "auto", padding: 12, borderRadius: 8, color: "#d1d5db", background: "#111827", whiteSpace: "pre-wrap" }}>{stringify(raw)}</pre> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Evidence 投影未包含可预览原始数据；可通过 Artifact 下载查看。" />}
+          {raw ? <pre className={styles.rawProjection}>{stringify(raw)}</pre> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Evidence 投影未包含可预览原始数据；可通过 Artifact 下载查看。" />}
           <Divider orientation="left"><RobotOutlined /> AI 分析记录</Divider>
-          <List size="small" bordered dataSource={analyses} locale={{ emptyText: "还没有 AI 分析记录" }} renderItem={(analysis) => <List.Item><List.Item.Meta title={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : "processing"}>{analysis.status}</Tag><span>{analysis.mode}</span>{analysis.input_state !== "CURRENT" && <Tag color="warning">{analysis.input_state}</Tag>}</Space>} description={(analysis.facts || []).map((fact) => fact.claim).filter(Boolean).join("；") || (analysis.limitations || []).join("；") || analysis.analysis_run_id} /><time>{analysis.created_at ? new Date(analysis.created_at).toLocaleString() : "—"}</time></List.Item>} />
+          <List size="small" bordered dataSource={analyses} locale={{ emptyText: "还没有 AI 分析记录" }} renderItem={(analysis) => <List.Item><List.Item.Meta title={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : analysis.status === "FAILED" ? "red" : "processing"}>{analysis.status}</Tag><span>{analysis.mode}</span>{analysis.input_state !== "CURRENT" && <Tag color="warning">{analysis.input_state}</Tag>}</Space>} description={(analysis.facts || []).map((fact) => fact.claim).filter(Boolean).join("；") || (analysis.limitations || []).join("；") || analysis.analysis_run_id} /><time>{analysis.created_at ? new Date(analysis.created_at).toLocaleString() : "—"}</time></List.Item>} />
           <Divider orientation="left"><HistoryOutlined /> Review 历史</Divider>
           <List size="small" bordered dataSource={reviews} locale={{ emptyText: "还没有人工审查记录" }} renderItem={(review) => <List.Item><List.Item.Meta title={<Space><Tag color={evidenceTrust(review.decision).color}>{review.decision}</Tag><span>Revision {review.review_revision || "—"}</span></Space>} description={`${review.reason_code || "NO_REASON_CODE"} · ${review.reason || "未填写说明"}`} /><time>{review.created_at ? new Date(review.created_at).toLocaleString() : "—"}</time></List.Item>} />
         </Space>}

@@ -26,6 +26,12 @@ vi.mock("./AgentProcessPicker", () => ({
 
 const workers = [
   {
+    id: "demo-worker",
+    hostname: "历史演示节点",
+    status: "ONLINE",
+    capabilities: ["perf_cpu"],
+  },
+  {
     id: "worker-a",
     hostname: "离线节点 A",
     status: "OFFLINE",

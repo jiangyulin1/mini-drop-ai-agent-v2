@@ -112,11 +112,11 @@
 
 .iw-evidence, .iw-fanout { margin-top: 16px; }
 .iw-review-row, .iw-fanout-row {
-  display: flex; gap: 8px; align-items: center;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   padding: 4px 0; border-bottom: 1px dashed var(--app-border, #e5e7eb);
 }
 .iw-review-id { font-family: monospace; }
-.iw-review-reason, .iw-fanout-conclusion { color: var(--app-text-secondary, #6b7280); }
+.iw-review-reason, .iw-fanout-conclusion { color: var(--app-text-secondary, #6b7280); flex: 1 1 220px; }
 .iw-review-actions { margin-top: 8px; display: flex; gap: 8px; }
 .iw-review-actions button, .iw-fanout-row {
   font-size: 12px;

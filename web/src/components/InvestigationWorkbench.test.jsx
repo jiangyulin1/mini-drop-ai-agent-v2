@@ -36,6 +36,7 @@ describe("InvestigationWorkbench", () => {
           status: "COMPLETED", aggregate: { conclusion: "fault-domain" } },
       ],
     });
+    vi.spyOn(api, "listAcquisitionOperations").mockResolvedValue({ items: [] });
     vi.spyOn(api, "cancelCasePlanStep").mockResolvedValue({});
     vi.spyOn(api, "removeCasePlanStep").mockResolvedValue({});
     vi.spyOn(api, "reprioritizeCasePlanStep").mockResolvedValue({});
@@ -84,13 +85,63 @@ describe("InvestigationWorkbench", () => {
 
   it("shows evidence reviews and fanout coverage", async () => {
     render(<InvestigationWorkbench caseId="case-1" />);
-    await waitFor(() => expect(screen.getByText("证据审查（1）")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("证据审查（1/1）")).toBeInTheDocument());
     expect(screen.getByText("ev-1")).toBeInTheDocument();
     // Trust decisions render through the shared opsMappings vocabulary.
     expect(screen.getByText("可信")).toBeInTheDocument();
     expect(screen.getByText("ALL_IN_SCOPE")).toBeInTheDocument();
     expect(screen.getByText("覆盖率 67%")).toBeInTheDocument();
     expect(screen.getByText("fault-domain")).toBeInTheDocument();
+  });
+
+  it("counts the current review state once per Evidence", async () => {
+    api.listCaseEvidenceReviews.mockResolvedValue({
+      items: [
+        { review_id: "r-new", evidence_id: "ev-1", decision: "TRUSTED" },
+        { review_id: "r-old", evidence_id: "ev-1", decision: "LOW_TRUST" },
+      ],
+    });
+    render(<InvestigationWorkbench caseId="case-1" />);
+
+    await waitFor(() => expect(screen.getByText("证据审查（1/1）")).toBeInTheDocument());
+    expect(screen.getAllByText("ev-1")).toHaveLength(1);
+    expect(screen.getByText("可信")).toBeInTheDocument();
+  });
+
+  it("reconstructs the Pi activity timeline and exposes unreviewed Evidence", async () => {
+    api.getCaseInvestigationPlan.mockResolvedValue({ plan_id: null, steps: [] });
+    api.listCaseEvidenceReviews.mockResolvedValue({ items: [] });
+    api.listCaseFanoutRuns.mockResolvedValue({ items: [] });
+    const workspace = {
+      case: { problem_description: "验证 CPU 偏高" },
+      collection_proposals: [
+        { proposal_id: "proposal-1", collector_id: "sys_metrics",
+          information_goal: "建立 CPU 基线", status: "ACCEPTED", expected_risk: "READ_LOW" },
+        { proposal_id: "proposal-2", collector_id: "perf_cpu",
+          information_goal: "定位热点", status: "REJECTED", expected_risk: "READ_MEDIUM" },
+      ],
+      collection_requests: [
+        { collection_request_id: "request-1", proposal_id: "proposal-1", status: "COMPLETED" },
+      ],
+      evidence: [
+        { evidence_id: "ev-live-1", evidence_type: "sys_metrics" },
+      ],
+    };
+
+    render(<InvestigationWorkbench caseId="case-1" workspace={workspace} />);
+
+    await waitFor(() => expect(screen.getByText("即时调查轨迹")).toBeInTheDocument());
+    expect(screen.getByText(/2 项活动/)).toBeInTheDocument();
+    expect(screen.getByText("建立 CPU 基线")).toBeInTheDocument();
+    expect(screen.getByText("定位热点")).toBeInTheDocument();
+    expect(screen.getByText("证据审查（0/1）")).toBeInTheDocument();
+    expect(screen.getByText("未人工审查")).toBeInTheDocument();
+    expect(screen.getByText("本 Case 未触发跨节点采集")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "信任" }));
+    await waitFor(() => expect(api.reviewCaseEvidence).toHaveBeenCalledWith(
+      "case-1", "ev-live-1", expect.objectContaining({ decision: "TRUSTED" }),
+    ));
   });
 
   it("shows offline banner when the plan request fails", async () => {

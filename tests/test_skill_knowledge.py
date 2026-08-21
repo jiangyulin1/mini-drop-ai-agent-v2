@@ -74,9 +74,10 @@ def test_runtime_case_context_excludes_legacy_skill_and_knowledge_rules(client: 
     from server.app.main import _build_runtime_case_context
     snapshot = _build_runtime_case_context(case, "tenant-a")
     assert snapshot.hypotheses == []
-    assert snapshot.skill_context == []
+    assert snapshot.skill_context
     assert snapshot.knowledge_context == []
-    assert snapshot.investigation_directive["kind"] == "EVIDENCE_NATIVE_COLLECTOR_AGENT"
+    assert "search_knowledge" in snapshot.tool_catalog_summary
+    assert snapshot.investigation_directive["kind"] == "EVIDENCE_NATIVE_SUPERVISED_INVESTIGATOR"
     assert "no_new_evidence_after_two_cycles" in snapshot.investigation_directive["stop_conditions"]
     assert snapshot.budget["max_collection_requests"] == 8
     assert snapshot.budget["max_collection_duration_sec"] == 240

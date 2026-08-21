@@ -1,0 +1,24 @@
+.drawer :global(.ant-drawer-header) { border-bottom-color: var(--line); }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.section { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--app-surface); }
+.sectionHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.sectionHead h5, .section h5 { margin: 0; }
+.sectionHead > div { display: flex; flex-direction: column; }
+.memoryText, .preview { margin: 0 0 14px; padding: 14px; border-radius: 7px; background: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.actionBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.searchBand { padding: 14px; border: 1px solid color-mix(in srgb, #3974ed 24%, var(--line)); border-radius: 8px; background: color-mix(in srgb, #3974ed 4%, var(--app-surface)); }
+.results { display: grid; gap: 7px; margin-top: 10px; }
+.results button, .chunkList button { width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--app-text); background: var(--app-surface); text-align: left; cursor: pointer; }
+.results button:hover, .chunkList button:hover { border-color: #3974ed; }
+.results strong, .results span, .results small { display: block; }
+.results span { max-height: 44px; margin: 4px 0; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.results small, .chunkList small { color: var(--quiet); }
+.docIcon { padding: 9px; border-radius: 7px; color: #285fc7; background: #eaf1ff; font-size: 17px; }
+.titleButton { padding: 0; border: 0; color: var(--app-text); background: transparent; font-weight: 650; cursor: pointer; }
+.titleButton:hover { color: #3974ed; }
+.chunkList { display: grid; gap: 8px; }
+.chunkList button > span { font-weight: 650; }
+.chunkList button > small { float: right; }
+.chunkList p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+@media (max-width: 600px) { .actionBar > * { flex: 1 1 auto; } }

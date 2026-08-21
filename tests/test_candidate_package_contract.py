@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 
 from scripts.package_candidate import (
@@ -55,6 +56,60 @@ def test_candidate_tracks_all_lock_and_generated_web_inputs():
     assert "web/playwright.config.js" in UNTRACKED_ALLOWLIST
     assert package_version(ROOT) == "0.1.0"
     assert pi_version(ROOT) == "0.84.2"
+
+
+def test_runtime_docker_images_include_shared_collector_contracts():
+    for name in ("server.Dockerfile", "agent.Dockerfile"):
+        dockerfile = (ROOT / "deploy" / "dockerfiles" / name).read_text(encoding="utf-8")
+        assert "COPY mini_drop_contracts/ ./mini_drop_contracts/" in dockerfile
+
+
+def test_migration_revision_ids_fit_legacy_postgresql_version_column():
+    revisions = ROOT / "migrations" / "versions"
+    for path in revisions.glob("*.py"):
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        revision = next(
+            (
+                node.value.value
+                for node in module.body
+                if isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "revision"
+                and isinstance(node.value, ast.Constant)
+            ),
+            None,
+        )
+        if revision is not None:
+            assert len(revision) <= 32, f"{path.name}: revision ID is too long"
+
+
+def test_jyl_security_release_contract_exposes_control_without_weakening_internal_auth():
+    control = (ROOT / "deploy/compose/jyl-secure.control.yml").read_text(encoding="utf-8")
+    worker = (ROOT / "deploy/compose/jyl-secure.worker.yml").read_text(encoding="utf-8")
+    nginx = (ROOT / "deploy/nginx/jyl-secure.conf").read_text(encoding="utf-8")
+
+    assert "MINI_DROP_API_AUTH_ENABLED: ${MINI_DROP_API_AUTH_ENABLED:-1}" in control
+    assert "MINI_DROP_API_KEY: ${MINI_DROP_API_KEY:?set MINI_DROP_API_KEY}" in control
+    assert 'MINI_DROP_GRPC_AUTH_ENABLED: "1"' in control
+    assert 'MINI_DROP_GRPC_SECURE: "1"' in control
+    assert "MINI_DROP_GRPC_DISTRIBUTE_MINIO_CREDENTIALS: \"0\"" in control
+    assert 'AGENT_GRPC_SECURE: "1"' in worker
+    assert "AGENT_GRPC_CA_CERT: /certs/ca.crt" in worker
+    assert 'MINIO_SECURE: "1"' in worker
+    assert "MINIO_CA_CERT: /certs/ca.crt" in worker
+    assert "listen 8443 ssl;" in nginx
+    assert "listen 9443 ssl;" in nginx
+    assert "return 308 https://$host:8443$request_uri;" in nginx
+    assert "X-API-Key" not in nginx
+    assert '"0.0.0.0:${CONTROL_HTTPS_PORT:-80}:8443"' in control
+    assert '"0.0.0.0:${CONTROL_MINIO_TLS_PORT:-9100}:9443"' in control
+    assert control.count("context: ../..") == 4
+    assert "- ../certs:/certs:ro" in control
+    assert "context: ../.." in worker
+    assert "- ../certs:/certs:ro" in worker
+    generator = ROOT / "deploy/scripts/generate-jyl-security-material.sh"
+    assert generator.exists()
+    assert "refusing to overwrite existing security material" in generator.read_text(encoding="utf-8")
 
 
 def test_deployment_receipt_identity_keeps_real_versions_and_all_digests():

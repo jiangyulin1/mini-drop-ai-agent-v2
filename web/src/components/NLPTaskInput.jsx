@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -14,7 +14,6 @@ import {
 } from "antd";
 import {
   AimOutlined,
-  FireOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { createTask, listAgents, listTaskKinds } from "../api/client";
@@ -63,14 +62,17 @@ export default function NLPTaskInput({ onTaskCreated }) {
     );
   }
 
-  async function loadAgents() {
+  const loadAgents = useCallback(async () => {
     setAgentsLoading(true);
     try {
-      const items = await listAgents();
-      setAgents(items || []);
-      const preferred = selectCapableAgent(quickCollector, items || []);
+      const items = (await listAgents() || []).filter((agent) => agent.id !== "demo-worker");
+      setAgents(items);
+      const preferred = items.find((agent) =>
+        agent.status === "ONLINE"
+        && (agent.capabilities || []).includes(quickCollector)
+      );
       setQuickAgentId((current) =>
-        (items || []).some((agent) => (
+        items.some((agent) => (
           agent.id === current
           && agent.status === "ONLINE"
           && (agent.capabilities || []).includes(quickCollector)
@@ -83,10 +85,13 @@ export default function NLPTaskInput({ onTaskCreated }) {
     } finally {
       setAgentsLoading(false);
     }
-  }
+  }, [quickCollector]);
 
   useEffect(() => {
     loadAgents();
+  }, [loadAgents]);
+
+  useEffect(() => {
     listTaskKinds()
       .then((items) => {
         const normalized = Object.fromEntries(

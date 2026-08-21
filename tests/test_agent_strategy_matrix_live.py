@@ -127,3 +127,13 @@ def test_evidence_citations_require_active_projected_refs_and_server_verifier():
     )
     assert invalid["score"] == 0.0
     assert invalid["invalid_refs"] == ["ev-missing"]
+
+
+def test_live_score_uses_dispatched_collectors_not_pi_gateway_tool_names():
+    result = pi_script.score(
+        ["process_scan", "runtime_snapshot", "sys_metrics"],
+        "根因是用户态忙循环造成 CPU 热点",
+        "cpu-hotspot",
+    )
+    assert result["tool_recall"] == 0.667
+    assert result["used_relevant_tools"] == ["process_scan", "sys_metrics"]

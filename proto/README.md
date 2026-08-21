@@ -24,7 +24,8 @@ python scripts/compile_proto.py
 ```
 
 编译产物输出到 `server/app/generated/`，包含 `*_pb2.py` 和 `*_pb2_grpc.py`。
-Linux 环境仍可使用 `cd proto && bash compile.sh`。
+该 Python 入口是 Linux、macOS 和 Windows 的唯一编译方式，`make proto` 与
+`python dev.py proto` 均调用它。
 
 ## 兼容性约定
 

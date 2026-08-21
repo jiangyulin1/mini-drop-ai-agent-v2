@@ -1,9 +1,13 @@
-"""Linux host/process/container metrics collector using the sys_metrics.v2 contract."""
+"""Host/process metrics collector using the portable sys_metrics.v2 contract."""
 
 from __future__ import annotations
 
 import json
 import os
+import platform
+import re
+import shutil
+import subprocess
 import time
 from typing import Any
 
@@ -27,29 +31,39 @@ class SysMetricsCollector:
         os.makedirs(output_dir, exist_ok=True)
 
         samples: list[dict[str, Any]] = []
-        previous_host_cpu = self._read_proc_stat_total()
+        runtime_platform = platform.system()
+        previous_host_cpu = (
+            self._read_proc_stat_total() if runtime_platform != "Darwin" else {}
+        )
         deadline = time.time() + duration_sec
         while time.time() < deadline:
             if not self._pid_exists(task.target_pid):
                 break
             timestamp = time.time()
-            host_cpu = self._read_proc_stat_total()
-            samples.append({
-                "ts": timestamp,
-                "host_cpu_ticks": host_cpu,
-                "host_cpu": self._cpu_ratios(previous_host_cpu, host_cpu),
-                "load": self._read_loadavg(),
-                "host_memory": self._read_meminfo(),
-                "psi": self._read_psi(),
-                "process": self._read_process_metrics(task.target_pid),
-                "container": self._read_cgroup_metrics(task.target_pid),
-                # /proc/<pid>/net follows the target network namespace. This
-                # keeps container/netns packet-loss evidence scoped to the
-                # workload instead of silently reporting host-only counters.
-                "host_network": self._read_network_dev(task.target_pid),
-                "host_tcp": self._read_tcp_counters(task.target_pid),
-                "filesystems": self._read_filesystems(task.target_pid, task.options),
-            })
+            if runtime_platform == "Darwin":
+                sample = self._read_darwin_sample(
+                    task.target_pid, task.options, timestamp=timestamp,
+                )
+                host_cpu = {}
+            else:
+                host_cpu = self._read_proc_stat_total()
+                sample = {
+                    "ts": timestamp,
+                    "host_cpu_ticks": host_cpu,
+                    "host_cpu": self._cpu_ratios(previous_host_cpu, host_cpu),
+                    "load": self._read_loadavg(),
+                    "host_memory": self._read_meminfo(),
+                    "psi": self._read_psi(),
+                    "process": self._read_process_metrics(task.target_pid),
+                    "container": self._read_cgroup_metrics(task.target_pid),
+                    # /proc/<pid>/net follows the target network namespace. This
+                    # keeps container/netns packet-loss evidence scoped to the
+                    # workload instead of silently reporting host-only counters.
+                    "host_network": self._read_network_dev(task.target_pid),
+                    "host_tcp": self._read_tcp_counters(task.target_pid),
+                    "filesystems": self._read_filesystems(task.target_pid, task.options),
+                }
+            samples.append(sample)
             previous_host_cpu = host_cpu
             if mode == "snapshot" or len(samples) >= self.MAX_SAMPLES:
                 break
@@ -62,12 +76,14 @@ class SysMetricsCollector:
 
         normalized = self._compute_v2(task.target_pid, samples)
         legacy = self._legacy_summary(normalized)
+        coverage = self._coverage(runtime_platform)
         output = {
             "schema_version": self.SCHEMA_VERSION,
             "task_id": task.id,
             "mode": mode,
             "duration_sec": duration_sec,
             "sample_count": len(samples),
+            "coverage": coverage,
             "host": normalized["host"],
             "process": normalized["process"],
             "container": normalized["container"],
@@ -84,7 +100,8 @@ class SysMetricsCollector:
                 f"系统指标采集完成: {len(samples)} 个样本 | "
                 f"host CPU={legacy['avg_cpu_user_pct'] + legacy['avg_cpu_sys_pct']:.1f}% | "
                 f"process CPU={normalized['process']['cpu']['normalized_core_usage']:.2f} cores | "
-                f"RSS={normalized['process']['memory']['rss_bytes']} bytes"
+                f"RSS={normalized['process']['memory']['rss_bytes']} bytes | "
+                f"coverage={coverage['level']}"
             ),
             artifacts=[{
                 "artifact_type": "sys_metrics",
@@ -92,9 +109,315 @@ class SysMetricsCollector:
                 "local_path": output_path,
                 "content_type": "application/json",
                 "size_bytes": os.path.getsize(output_path),
-                "metadata": {"schema_version": self.SCHEMA_VERSION, **legacy},
+                "metadata": {
+                    "schema_version": self.SCHEMA_VERSION,
+                    "platform": coverage["platform"],
+                    "coverage_level": coverage["level"],
+                    **legacy,
+                },
             }],
         )
+
+    @staticmethod
+    def _coverage(runtime_platform: str) -> dict[str, Any]:
+        if runtime_platform == "Darwin":
+            return {
+                "platform": "darwin",
+                "level": "partial",
+                "available": [
+                    "host_load",
+                    "host_memory",
+                    "host_network_bytes",
+                    "host_filesystem_capacity",
+                    "process_cpu_time",
+                    "process_rss",
+                    "process_virtual_memory",
+                    "process_threads",
+                    "process_fd_count",
+                ],
+                "unavailable": [
+                    "linux_psi",
+                    "cgroup_v2",
+                    "target_network_namespace",
+                    "process_io_bytes",
+                    "host_cpu_breakdown",
+                ],
+                "note": (
+                    "macOS 使用系统只读接口采集；Linux PSI、cgroup 和目标 netns "
+                    "语义不可用，缺失字段保持为空而不是推造。"
+                ),
+            }
+        return {
+            "platform": runtime_platform.lower() or "unknown",
+            "level": "full" if runtime_platform == "Linux" else "partial",
+            "available": ["procfs", "host", "process", "network", "filesystem"],
+            "unavailable": [],
+        }
+
+    @classmethod
+    def _read_darwin_sample(
+        cls,
+        pid: int,
+        options: dict[str, Any],
+        *,
+        timestamp: float,
+    ) -> dict[str, Any]:
+        """Read bounded macOS facts without pretending Linux-only coverage.
+
+        The fallback uses one-shot, read-only system utilities available on a
+        stock macOS install.  It never captures payloads and never traverses a
+        process tree or filesystem, keeping the collector suitable for the
+        low-bandwidth local acceptance path.
+        """
+        return {
+            "ts": timestamp,
+            "host_cpu_ticks": {},
+            "host_cpu": {},
+            "load": cls._read_darwin_loadavg(),
+            "host_memory": cls._read_darwin_meminfo(),
+            "psi": {},
+            "process": cls._read_darwin_process_metrics(pid),
+            "container": {},
+            "host_network": cls._read_darwin_network_dev(),
+            "host_tcp": cls._read_darwin_tcp_counters(),
+            "filesystems": cls._read_darwin_filesystems(options),
+        }
+
+    @staticmethod
+    def _run_readonly(command: list[str], *, timeout: float = 3.0) -> str:
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return completed.stdout if completed.returncode == 0 else ""
+
+    @staticmethod
+    def _read_darwin_loadavg() -> dict[str, float]:
+        try:
+            load1, load5, load15 = os.getloadavg()
+        except (AttributeError, OSError):
+            return {}
+        return {
+            "load1": float(load1),
+            "load5": float(load5),
+            "load15": float(load15),
+            "load1m": float(load1),
+            "load5m": float(load5),
+            "load15m": float(load15),
+        }
+
+    @classmethod
+    def _read_darwin_meminfo(cls) -> dict[str, int]:
+        try:
+            total_bytes = int(os.sysconf("SC_PHYS_PAGES")) * int(
+                os.sysconf("SC_PAGE_SIZE")
+            )
+        except (AttributeError, OSError, TypeError, ValueError):
+            total_bytes = 0
+        raw = cls._run_readonly(["/usr/bin/vm_stat"])
+        page_size_match = re.search(r"page size of\s+(\d+)\s+bytes", raw)
+        try:
+            page_size = int(page_size_match.group(1)) if page_size_match else int(
+                os.sysconf("SC_PAGE_SIZE")
+            )
+        except (AttributeError, OSError, TypeError, ValueError):
+            page_size = 4096
+        pages: dict[str, int] = {}
+        for line in raw.splitlines():
+            match = re.match(r"([^:]+):\s+([0-9.]+)\.?$", line.strip())
+            if not match:
+                continue
+            try:
+                pages[match.group(1).strip().lower()] = int(float(match.group(2)))
+            except ValueError:
+                continue
+        available_pages = sum(
+            pages.get(name, 0)
+            for name in (
+                "pages free",
+                "pages inactive",
+                "pages speculative",
+                "pages purgeable",
+            )
+        )
+        result: dict[str, int] = {}
+        if total_bytes > 0:
+            result["total_bytes"] = total_bytes
+        if available_pages > 0:
+            result["available_bytes"] = min(
+                total_bytes or available_pages * page_size,
+                available_pages * page_size,
+            )
+            result["available_is_estimate"] = True
+        return result
+
+    @staticmethod
+    def _parse_cpu_time(value: str) -> float:
+        """Parse macOS ps CPU clocks such as ``1-02:03:04.25``."""
+        raw = str(value or "").strip()
+        if not raw:
+            return 0.0
+        days = 0
+        if "-" in raw:
+            day_text, raw = raw.split("-", 1)
+            try:
+                days = int(day_text)
+            except ValueError:
+                return 0.0
+        try:
+            parts = [float(item) for item in raw.split(":")]
+        except ValueError:
+            return 0.0
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+        elif len(parts) == 2:
+            hours, (minutes, seconds) = 0.0, parts
+        elif len(parts) == 1:
+            hours, minutes, seconds = 0.0, 0.0, parts[0]
+        else:
+            return 0.0
+        return days * 86400.0 + hours * 3600.0 + minutes * 60.0 + seconds
+
+    @classmethod
+    def _read_darwin_process_metrics(cls, pid: int) -> dict[str, Any]:
+        result: dict[str, Any] = {"pid": pid}
+        raw = cls._run_readonly([
+            "/bin/ps", "-p", str(pid),
+            "-o", "pid=", "-o", "utime=", "-o", "stime=",
+            "-o", "rss=", "-o", "vsz=",
+        ])
+        fields = raw.split()
+        if len(fields) >= 5:
+            try:
+                ticks = float(os.sysconf("SC_CLK_TCK"))
+            except (AttributeError, OSError, TypeError, ValueError):
+                ticks = 100.0
+            try:
+                result.update({
+                    "pid": int(fields[0]),
+                    "utime_ticks": int(cls._parse_cpu_time(fields[1]) * ticks),
+                    "stime_ticks": int(cls._parse_cpu_time(fields[2]) * ticks),
+                    "rss_bytes": int(fields[3]) * 1024,
+                    "vmrss_kb": int(fields[3]),
+                    "vsize_bytes": int(fields[4]) * 1024,
+                })
+            except ValueError:
+                pass
+
+        thread_rows = cls._run_readonly(["/bin/ps", "-M", "-p", str(pid)])
+        if thread_rows:
+            result["num_threads"] = max(0, len(thread_rows.splitlines()) - 1)
+
+        # Sandboxed macOS processes may be unable to query even their own PID
+        # through ps. Keep the fallback scoped to this Python process: using
+        # getrusage for arbitrary PIDs would silently report the collector.
+        if pid == os.getpid():
+            if int(result.get("rss_bytes", 0) or 0) <= 0:
+                try:
+                    import resource
+
+                    peak_rss = int(
+                        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                    )
+                except (ImportError, OSError, TypeError, ValueError):
+                    peak_rss = 0
+                if peak_rss > 0:
+                    result["rss_bytes"] = peak_rss
+                    result["vmrss_kb"] = peak_rss // 1024
+                    result["rss_measurement"] = "peak_self_fallback"
+            if int(result.get("num_threads", 0) or 0) <= 0:
+                import threading
+
+                result["num_threads"] = max(1, threading.active_count())
+                result["thread_measurement"] = "python_self_lower_bound"
+
+        lsof = shutil.which("lsof")
+        if lsof:
+            fd_rows = cls._run_readonly([
+                lsof, "-a", "-p", str(pid), "-d", "0-9999", "-F", "f",
+            ], timeout=5.0)
+            if fd_rows:
+                result["fd_count"] = sum(
+                    1 for line in fd_rows.splitlines()
+                    if re.fullmatch(r"f\d+", line.strip())
+                )
+        return result
+
+    @classmethod
+    def _read_darwin_network_dev(cls) -> dict[str, int]:
+        raw = cls._run_readonly(["/usr/sbin/netstat", "-ibn"])
+        rx_total = tx_total = 0
+        seen: set[str] = set()
+        for line in raw.splitlines():
+            parts = line.split()
+            if len(parts) < 9 or not parts[2].startswith("<Link#"):
+                continue
+            interface = parts[0]
+            if interface in seen:
+                continue
+            try:
+                address_offset = 1 if not parts[3].isdigit() else 0
+                rx_total += int(parts[5 + address_offset])
+                tx_total += int(parts[8 + address_offset])
+            except (IndexError, ValueError):
+                continue
+            seen.add(interface)
+        return {"rx_bytes": rx_total, "tx_bytes": tx_total}
+
+    @classmethod
+    def _read_darwin_tcp_counters(cls) -> dict[str, int]:
+        raw = cls._run_readonly(["/usr/sbin/netstat", "-s", "-p", "tcp"])
+        patterns = {
+            "out_segments": r"^\s*(\d+)\s+packet(?:s)? sent$",
+            "retrans_segments": r"^\s*(\d+)\s+data packet(?:s)? .*retransmitted$",
+            "TCPTimeouts": r"^\s*(\d+)\s+retransmit timeout(?:s)?$",
+            "ListenOverflows": r"^\s*(\d+)\s+listen queue overflow(?:s)?$",
+        }
+        result: dict[str, int] = {}
+        for line in raw.splitlines():
+            for name, pattern in patterns.items():
+                match = re.match(pattern, line)
+                if match:
+                    result[name] = int(match.group(1))
+                    break
+        return result
+
+    @staticmethod
+    def _read_darwin_filesystems(
+        options: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        requested = options.get("filesystem_paths") or []
+        if not isinstance(requested, list):
+            requested = []
+        paths = ["/", "/tmp"]
+        paths.extend(
+            value for value in requested[:5]
+            if isinstance(value, str) and value.startswith("/") and len(value) <= 512
+        )
+        result: dict[str, dict[str, Any]] = {}
+        for raw_path in dict.fromkeys(paths):
+            try:
+                stats = os.statvfs(raw_path)
+            except (FileNotFoundError, PermissionError, OSError, AttributeError):
+                continue
+            total = int(stats.f_blocks * stats.f_frsize)
+            available = int(stats.f_bavail * stats.f_frsize)
+            used = max(0, total - int(stats.f_bfree * stats.f_frsize))
+            result[raw_path] = {
+                "path": raw_path,
+                "total_bytes": total,
+                "available_bytes": available,
+                "used_ratio": used / total if total > 0 else 0.0,
+                "inode_available": int(stats.f_favail),
+                "inode_total": int(stats.f_files),
+            }
+        return result
 
     @staticmethod
     def _read_proc_stat_total() -> dict[str, int]:
@@ -503,7 +826,19 @@ class SysMetricsCollector:
 
     @staticmethod
     def _pid_exists(pid: int) -> bool:
-        return os.path.isdir(f"/proc/{pid}")
+        if pid <= 0:
+            return False
+        if os.path.isdir("/proc"):
+            return os.path.isdir(f"/proc/{pid}")
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
 
     @classmethod
     def _compute_summary(cls, samples: list[dict[str, Any]]) -> dict[str, Any]:

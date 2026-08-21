@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from server.app.database import init_db, reset_engine
 from server.app.main import app, repo
 from server.app.models import Base
-from server.app.runtime_services import evidence_analysis_service
+from server.app.runtime_services import case_evidence_service, evidence_analysis_service
 from server.app.schemas import CreateTaskRequest
 from server.app.state_machine import Actor, TaskStatus
 
@@ -103,6 +103,103 @@ def test_attachment_materializes_task_artifacts_as_case_evidence(client: TestCli
     assert listed.json()["data"]["items"][0]["evidence_id"] == item["evidence_ids"][0]
 
 
+def test_source_envelope_materializes_as_canonical_evidence(client: TestClient):
+    case = _create_case(client)
+    evidence_id = case_evidence_service.materialize_source_envelope(
+        case["case_id"], "tenant-a", envelope={
+            "schema_version": "evidence-envelope.v1",
+            "evidence_id": "ev-source-1", "source_id": "mcp-k8s-control-plane",
+            "source_version": "1", "principal_id": "operator-a", "tenant_id": "tenant-a",
+            "case_id": case["case_id"], "resource_scope": {"cluster": "prod-a"},
+            "operation": "events.list", "query_fingerprint": "query-hash",
+            "observed_at": "2026-08-20T01:00:00+00:00", "valid_time": {},
+            "data_class": "INTERNAL", "content_hash": "content-hash",
+            "projection_hash": "envelope-projection-hash",
+            "content_projection": {"events": [{"reason": "BackOff"}]},
+            "redactions": {"projected_bytes": 64}, "policy": {"decision": "ALLOW"},
+        }, actor_id="operator-a",
+    )
+    assert evidence_id == "ev-source-1"
+    evidence = repo.get_case_evidence(case["case_id"], "tenant-a", evidence_id)
+    assert evidence["source_channel"] == "MCP"
+    assert evidence["trust_level"] == "AUTHORIZED_SOURCE"
+    assert evidence["lineage"]["query_fingerprint"] == "query-hash"
+    projection = repo.list_evidence_projections(case["case_id"], "tenant-a", evidence_id)[0]
+    assert projection["projection_kind"] == "source_projection"
+    assert projection["content"]["events"][0]["reason"] == "BackOff"
+
+
+def test_evaluation_projection_import_is_explicit_and_reusable(client: TestClient, monkeypatch):
+    case = _create_case(client)
+    payload = {
+        "evidence_id": f"eval:{case['case_id']}:pr_core",
+        "pack_kind": "pr_core",
+        "source_id": "github:grafana/grafana#123359",
+        "source_ref": "github://grafana/grafana/pull/123359",
+        "projection": {
+            "records": [{
+                "evidence_id": "ghpr:grafana-123359:pr_core:abc",
+                "field_path": "github.title",
+                "projection_hash": "a" * 64,
+                "value": "Fix queue retention",
+                "synthetic": False,
+            }],
+        },
+        "source_bytes": 512,
+        "synthetic": False,
+    }
+    disabled = client.post(
+        f"/api/v1/cases/{case['case_id']}/evidence/import",
+        json=payload,
+        headers={"X-Evaluation-Import-Token": "eval-token"},
+    )
+    assert disabled.status_code == 404
+
+    monkeypatch.setenv("MINI_DROP_EVAL_IMPORT_ENABLED", "1")
+    monkeypatch.setenv("MINI_DROP_EVAL_IMPORT_TOKEN", "eval-token")
+    imported = client.post(
+        f"/api/v1/cases/{case['case_id']}/evidence/import",
+        json=payload,
+        headers={"X-Evaluation-Import-Token": "eval-token"},
+    )
+    assert imported.status_code == 200, imported.text
+    result = imported.json()["data"]
+    assert result["evidence_id"] == payload["evidence_id"]
+    assert result["synthetic"] is False
+    assert result["projected_bytes"] > 0
+
+    stored = repo.get_case_evidence(case["case_id"], "tenant-a", payload["evidence_id"])
+    assert stored["source_channel"] == "EVALUATION"
+    assert stored["data_origin"] == "REPLAY"
+    assert stored["trust_level"] == "DEVELOPMENT_EVAL"
+    projection = repo.list_evidence_projections(
+        case["case_id"], "tenant-a", evidence_id=payload["evidence_id"],
+    )[0]
+    assert projection["projection_kind"] == "evaluation_projection"
+    assert projection["content"]["records"][0]["field_path"] == "github.title"
+
+
+def test_evaluation_projection_import_rejects_hash_mismatch(client: TestClient, monkeypatch):
+    case = _create_case(client)
+    monkeypatch.setenv("MINI_DROP_EVAL_IMPORT_ENABLED", "1")
+    monkeypatch.setenv("MINI_DROP_EVAL_IMPORT_TOKEN", "eval-token")
+    response = client.post(
+        f"/api/v1/cases/{case['case_id']}/evidence/import",
+        json={
+            "evidence_id": f"eval:{case['case_id']}:runtime",
+            "pack_kind": "simulated_runtime",
+            "source_id": "synthetic:runtime",
+            "source_ref": "synthetic://runtime",
+            "projection": {"signals": []},
+            "projection_hash": "b" * 64,
+            "synthetic": True,
+        },
+        headers={"X-Evaluation-Import-Token": "eval-token"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "EVALUATION_PROJECTION_HASH_MISMATCH"
+
+
 def test_finish_accepts_canonical_evidence_and_persists_conclusion(client: TestClient):
     task_id = _done_task_with_artifact()
     case = _create_case(client)
@@ -194,6 +291,11 @@ def test_excluding_supporting_evidence_appends_downgraded_conclusion(client: Tes
     assert downgraded["state"] == "INSUFFICIENT_EVIDENCE"
     assert downgraded["verifier_version"] == "causal-report-verifier.v2-revalidation"
     assert downgraded["claim_evidence_bindings"][0]["verifier_result"] == "EVIDENCE_EXCLUDED"
+    published_message = repo.list_assistant_messages(case["case_id"], "tenant-a")[-1]
+    assert published_message["conclusion_revision_id"] == original["conclusion_id"]
+    assert repo.get_conclusion(
+        case["case_id"], "tenant-a", original["conclusion_id"],
+    )["revision"] == 1
 
 
 def test_case_evidence_detail_preview_and_download_contract(client: TestClient):

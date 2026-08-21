@@ -25,6 +25,7 @@ CollectorType = Literal[
     "runtime_snapshot",
     "swarm_actuation",
     "connection_probe",
+    "network_discovery",
 ]
 MIN_TASK_DURATION_SEC = 1
 MAX_TASK_DURATION_SEC = 120

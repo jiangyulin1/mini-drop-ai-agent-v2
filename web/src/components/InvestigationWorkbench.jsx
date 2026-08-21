@@ -30,7 +30,50 @@ const HISTORY_STATES = new Set([
  * - Evidence Trust/Exclude 审查；
  * - 断线状态与恢复提示。
  */
-export default function InvestigationWorkbench({ caseId }) {
+function normalizeActivityStatus(proposal, request) {
+  const requestStatus = request?.status;
+  if (requestStatus) return requestStatus;
+  if (proposal?.status === "REJECTED") return "BLOCKED";
+  if ((proposal?.validation_result || {}).awaiting_execution_authority) return "WAITING_APPROVAL";
+  return proposal?.status === "PROPOSED" ? "DRAFT" : (proposal?.status || "DRAFT");
+}
+
+function buildActivityTimeline(workspace) {
+  const proposals = workspace?.collection_proposals || [];
+  const requests = workspace?.collection_requests || [];
+  const requestsByProposal = new Map(
+    requests.map((item) => [String(item.proposal_id || ""), item]),
+  );
+  const consumedRequests = new Set();
+  const steps = proposals.map((proposal, index) => {
+    const request = requestsByProposal.get(String(proposal.proposal_id || ""));
+    if (request?.collection_request_id) consumedRequests.add(request.collection_request_id);
+    return {
+      step_id: `activity:${proposal.proposal_id || index}`,
+      collector_id: proposal.collector_id || request?.collector_id || "采集提案",
+      purpose: proposal.information_goal || proposal.reason_summary || "Agent 采集活动",
+      priority: Math.max(0, proposals.length - index),
+      risk: proposal.expected_risk || request?.risk_level,
+      status: normalizeActivityStatus(proposal, request),
+      _readOnly: true,
+    };
+  });
+  for (const [index, request] of requests.entries()) {
+    if (consumedRequests.has(request.collection_request_id)) continue;
+    steps.push({
+      step_id: `request:${request.collection_request_id || index}`,
+      collector_id: request.collector_id || "采集请求",
+      purpose: request.information_goal || request.reason_summary || "Agent 发起的采集请求",
+      priority: 0,
+      risk: request.risk_level,
+      status: request.status || "DRAFT",
+      _readOnly: true,
+    });
+  }
+  return steps;
+}
+
+export default function InvestigationWorkbench({ caseId, workspace }) {
   const [plan, setPlan] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [fanoutRuns, setFanoutRuns] = useState([]);
@@ -94,7 +137,34 @@ export default function InvestigationWorkbench({ caseId }) {
     return () => window.clearInterval(timer);
   }, [caseId, refresh]);
 
-  const steps = useMemo(() => (plan?.steps ?? []).slice(), [plan]);
+  const activitySteps = useMemo(() => buildActivityTimeline(workspace), [workspace]);
+  const hasPersistedPlan = Boolean(plan?.plan_id);
+  const steps = useMemo(
+    () => hasPersistedPlan ? (plan?.steps ?? []).slice() : activitySteps,
+    [activitySteps, hasPersistedPlan, plan],
+  );
+  const reviewRows = useMemo(() => {
+    const latestReview = new Map();
+    for (const review of reviews) {
+      if (!latestReview.has(review.evidence_id)) latestReview.set(review.evidence_id, review);
+    }
+    const evidence = workspace?.evidence || [];
+    const rows = evidence.map((item) => latestReview.get(item.evidence_id) || {
+      review_id: `unreviewed:${item.evidence_id}`,
+      evidence_id: item.evidence_id,
+      decision: "UNREVIEWED",
+      reason: `${item.evidence_type || item.collector_id || "Evidence"} · 尚未人工审查`,
+    });
+    const evidenceIds = new Set(evidence.map((item) => item.evidence_id));
+    for (const review of latestReview.values()) {
+      if (!evidenceIds.has(review.evidence_id)) rows.push(review);
+    }
+    return rows;
+  }, [reviews, workspace]);
+  const reviewedEvidenceCount = useMemo(
+    () => reviewRows.filter((item) => item.decision !== "UNREVIEWED").length,
+    [reviewRows],
+  );
   const group = useMemo(() => {
     const buckets = { current: [], next: [], history: [] };
     for (const step of steps) {
@@ -156,7 +226,7 @@ export default function InvestigationWorkbench({ caseId }) {
     <div
       className="iw-step-card"
       data-status={step.status}
-      draggable={NEXT_STATES.has(step.status) || RUNNING_STATES.has(step.status)}
+      draggable={!step._readOnly && (NEXT_STATES.has(step.status) || RUNNING_STATES.has(step.status))}
       onDragStart={() => setDragIndex(index)}
       onDragOver={(e) => e.preventDefault()}
       onDrop={() => handleDrop(index)}
@@ -174,7 +244,7 @@ export default function InvestigationWorkbench({ caseId }) {
         <div className="iw-step-meta">集群策略：{step.selection_strategy}</div>
       )}
       <div className="iw-step-actions">
-        {NEXT_STATES.has(step.status) && (
+        {!step._readOnly && NEXT_STATES.has(step.status) && (
           <>
             <button onClick={() => runAction(
               () => cancelCasePlanStep(caseId, step.step_id, {}),
@@ -186,13 +256,13 @@ export default function InvestigationWorkbench({ caseId }) {
             )}>移除</button>
           </>
         )}
-        {RUNNING_STATES.has(step.status) && (
+        {!step._readOnly && RUNNING_STATES.has(step.status) && (
           <button onClick={() => runAction(
             () => cancelCasePlanStep(caseId, step.step_id, {}),
             `已请求取消：${step.collector_id}`,
           )}>停止</button>
         )}
-        {NEXT_STATES.has(step.status) && (
+        {!step._readOnly && NEXT_STATES.has(step.status) && (
           <>
             {/* Pick from the registered collectors instead of asking the user
                 to recall and type a collector_id. */}
@@ -217,7 +287,7 @@ export default function InvestigationWorkbench({ caseId }) {
             <button onClick={() => fanoutStep(step)}>集群扇出</button>
           </>
         )}
-        <span className="iw-drag-hint">拖拽排序</span>
+        <span className="iw-drag-hint">{step._readOnly ? "事件轨迹" : "拖拽排序"}</span>
       </div>
     </div>
   );
@@ -235,8 +305,11 @@ export default function InvestigationWorkbench({ caseId }) {
       {notice && !error && <div className="iw-notice">{notice}</div>}
 
       <div className="iw-plan-header">
-        <strong>调查计划</strong>
-        <span>Revision {plan?.plan_revision ?? "—"} · 目标：{plan?.goal || "—"}</span>
+        <strong>{hasPersistedPlan ? "调查计划" : "即时调查轨迹"}</strong>
+        <span>
+          {hasPersistedPlan ? `Revision ${plan?.plan_revision ?? "—"}` : `${steps.length} 项活动`}
+          {` · 目标：${plan?.goal || workspace?.case?.problem_description || workspace?.case?.title || "—"}`}
+        </span>
         <button onClick={refresh}>刷新</button>
       </div>
 
@@ -264,15 +337,15 @@ export default function InvestigationWorkbench({ caseId }) {
       </div>
 
       <div className="iw-evidence" aria-label="证据审查">
-        <h4>证据审查（{reviews.length}）</h4>
-        {reviews.length === 0 ? (
-          <p className="iw-empty">暂无证据审查记录</p>
+        <h4>证据审查（{reviewedEvidenceCount}/{reviewRows.length}）</h4>
+        {reviewRows.length === 0 ? (
+          <p className="iw-empty">暂无可审查 Evidence</p>
         ) : (
-          reviews.map((review) => (
+          reviewRows.map((review) => (
             <div className="iw-review-row" key={review.review_id}>
               <span className="iw-review-id">{review.evidence_id}</span>
               <span className="iw-tag" data-status={review.decision}>
-                {EVIDENCE_TRUST[review.decision]?.label || review.decision}
+                {review.decision === "UNREVIEWED" ? "未人工审查" : (EVIDENCE_TRUST[review.decision]?.label || review.decision)}
               </span>
               <span className="iw-review-reason">{review.reason || review.reason_code || ""}</span>
               {/* Act on the evidence in front of you -- never ask the user to
@@ -290,7 +363,7 @@ export default function InvestigationWorkbench({ caseId }) {
       <div className="iw-fanout" aria-label="集群扇出运行">
         <h4>集群扇出（{fanoutRuns.length}）</h4>
         {fanoutRuns.length === 0 ? (
-          <p className="iw-empty">暂无扇出运行</p>
+          <p className="iw-empty">本 Case 未触发跨节点采集</p>
         ) : (
           fanoutRuns.map((run) => (
             <div className="iw-fanout-row" key={run.run_id}>

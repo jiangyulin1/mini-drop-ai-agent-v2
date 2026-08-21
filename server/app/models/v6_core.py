@@ -12,6 +12,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from pgvector.sqlalchemy import Vector
+
+from server.app.diagnosis.embeddings import VECTOR_DIMENSIONS
 
 from server.app.models.base import Base
 
@@ -252,6 +255,127 @@ class AssistantMessageModel(Base):
         }
 
 
+class KnowledgeDocumentModel(Base):
+    """Tenant knowledge supplied by an operator, optionally scoped to one Case."""
+
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "content_sha256", "case_id", name="uq_knowledge_document_scope_hash"),
+        Index("ix_knowledge_documents_tenant_scope", "tenant_id", "scope", "status"),
+    )
+
+    document_id = Column(String(128), primary_key=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    case_id = Column(String(128), nullable=True, index=True)
+    scope = Column(String(16), nullable=False, default="CASE")
+    kind = Column(String(24), nullable=False, default="DOCUMENT")
+    title = Column(String(256), nullable=False)
+    filename = Column(String(512), nullable=True)
+    media_type = Column(String(128), nullable=False, default="text/plain")
+    content_text = Column(Text, nullable=False)
+    content_sha256 = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="ACTIVE", index=True)
+    created_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self, *, include_content: bool = False) -> dict:
+        value = {
+            "document_id": self.document_id,
+            "tenant_id": self.tenant_id,
+            "case_id": self.case_id,
+            "scope": self.scope,
+            "kind": self.kind,
+            "title": self.title,
+            "filename": self.filename,
+            "media_type": self.media_type,
+            "content_sha256": self.content_sha256,
+            "content_length": len(self.content_text or ""),
+            "preview": (self.content_text or "")[:420],
+            "status": self.status,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        if include_content:
+            value["content_text"] = self.content_text
+        return value
+
+
+class KnowledgeChunkModel(Base):
+    """A bounded retrieval unit derived from one operator document."""
+
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        UniqueConstraint("document_id", "chunk_index", name="uq_knowledge_chunk_document_index"),
+        Index("ix_knowledge_chunks_tenant_case", "tenant_id", "case_id"),
+    )
+
+    chunk_id = Column(String(128), primary_key=True)
+    document_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    case_id = Column(String(128), nullable=True, index=True)
+    chunk_index = Column(Integer, nullable=False)
+    start_offset = Column(Integer, nullable=False)
+    end_offset = Column(Integer, nullable=False)
+    content_text = Column(Text, nullable=False)
+    lexical_text = Column(Text, nullable=False, default="")
+    content_sha256 = Column(String(64), nullable=False)
+    term_frequencies = Column(JSON, nullable=False, default=dict)
+    embedding = Column(Vector(VECTOR_DIMENSIONS).with_variant(JSON(), "sqlite"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self, *, include_content: bool = True) -> dict:
+        value = {
+            "chunk_id": self.chunk_id,
+            "document_id": self.document_id,
+            "case_id": self.case_id,
+            "chunk_index": self.chunk_index,
+            "start_offset": self.start_offset,
+            "end_offset": self.end_offset,
+            "content_sha256": self.content_sha256,
+        }
+        if include_content:
+            value["content"] = self.content_text
+        return value
+
+
+class CaseMemoryModel(Base):
+    """Reviewed, durable retrospective for one investigation conversation."""
+
+    __tablename__ = "case_memories"
+    __table_args__ = (
+        UniqueConstraint("case_id", "tenant_id", name="uq_case_memory_case_tenant"),
+    )
+
+    memory_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    summary_text = Column(Text, nullable=False, default="")
+    highlights = Column(JSON, nullable=False, default=list)
+    evidence_refs = Column(JSON, nullable=False, default=list)
+    source_event_seq = Column(Integer, nullable=False, default=0)
+    auto_capture = Column(Boolean, nullable=False, default=True)
+    promoted_document_id = Column(String(128), nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "memory_id": self.memory_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "summary_text": self.summary_text,
+            "highlights": self.highlights or [],
+            "evidence_refs": self.evidence_refs or [],
+            "source_event_seq": self.source_event_seq,
+            "auto_capture": self.auto_capture,
+            "promoted_document_id": self.promoted_document_id,
+            "generated_at": self.generated_at,
+            "updated_at": self.updated_at,
+        }
+
+
 class AgentProposalModel(Base):
     __tablename__ = "agent_proposals"
     __table_args__ = (
@@ -296,6 +420,8 @@ class CollectionProposalModel(Base):
     tenant_id = Column(String(128), nullable=False, index=True)
     agent_run_id = Column(String(128), nullable=True, index=True)
     cycle_id = Column(String(128), nullable=True, index=True)
+    plan_step_id = Column(String(128), nullable=True, index=True)
+    plan_revision = Column(Integer, nullable=True)
     collector_id = Column(String(128), nullable=False)
     collector_spec_version = Column(String(32), nullable=False)
     target_selector = Column(JSON, nullable=False, default=dict)
@@ -316,6 +442,7 @@ class CollectionProposalModel(Base):
             "proposal_id": self.proposal_id, "case_id": self.case_id,
             "tenant_id": self.tenant_id, "agent_run_id": self.agent_run_id,
             "cycle_id": self.cycle_id, "collector_id": self.collector_id,
+            "plan_step_id": self.plan_step_id, "plan_revision": self.plan_revision,
             "collector_spec_version": self.collector_spec_version,
             "target_selector": self.target_selector or {}, "parameters": self.parameters or {},
             "time_window": self.time_window or {}, "information_goal": self.information_goal,
@@ -346,6 +473,8 @@ class CollectionRequestModel(Base):
     runtime_generation = Column(Integer, nullable=False, default=1)
     control_revision = Column(Integer, nullable=False, default=1)
     scope_revision = Column(Integer, nullable=False, default=1)
+    plan_step_id = Column(String(128), nullable=True, index=True)
+    plan_revision = Column(Integer, nullable=True)
     idempotency_key = Column(String(256), nullable=False)
     budget_reservation = Column(JSON, nullable=False, default=dict)
     status = Column(String(24), nullable=False, default="ACCEPTED", index=True)
@@ -364,6 +493,7 @@ class CollectionRequestModel(Base):
             "effective_parameters": self.effective_parameters or {},
             "runtime_generation": self.runtime_generation,
             "control_revision": self.control_revision, "scope_revision": self.scope_revision,
+            "plan_step_id": self.plan_step_id, "plan_revision": self.plan_revision,
             "idempotency_key": self.idempotency_key,
             "budget_reservation": self.budget_reservation or {}, "status": self.status,
             "task_id": self.task_id, "attempt_ids": self.attempt_ids or [],
@@ -696,8 +826,11 @@ class RuntimeWakeupSourceModel(Base):
         UniqueConstraint("outbox_id", name="uq_runtime_wakeup_source_outbox"),
     )
 
-    wakeup_id = Column(String(128), nullable=False, primary_key=True)
-    outbox_id = Column(String(128), nullable=False, index=True)
+    wakeup_id = Column(String(128), nullable=False, index=True)
+    # One coalesced wakeup may contain many outbox events. The outbox event is
+    # the identity of this mapping; using wakeup_id as the primary key prevents
+    # the second event in a batch from being attached.
+    outbox_id = Column(String(128), nullable=False, primary_key=True)
     source_ref = Column(String(256), nullable=False)
     evidence_watermark = Column(Integer, nullable=False, default=0)
     mapped_at = Column(DateTime(timezone=True), nullable=False)
@@ -966,7 +1099,7 @@ class CausalNodeModel(Base):
     )
 
     node_id = Column(String(128), primary_key=True)
-    graph_id = Column(String(128), nullable=False, index=True)
+    graph_id = Column(String(128), primary_key=True, nullable=False, index=True)
     case_id = Column(String(128), nullable=False, index=True)
     entity_ref = Column(String(256), nullable=False)
     mechanism = Column(Text, nullable=False)
@@ -1008,7 +1141,7 @@ class CausalEdgeModel(Base):
     )
 
     edge_id = Column(String(128), primary_key=True)
-    graph_id = Column(String(128), nullable=False, index=True)
+    graph_id = Column(String(128), primary_key=True, nullable=False, index=True)
     case_id = Column(String(128), nullable=False, index=True)
     source_node_id = Column(String(128), nullable=False)
     target_node_id = Column(String(128), nullable=False)

@@ -200,7 +200,12 @@ class TestTaskKinds:
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert data["schema_version"] == "1.0"
-        assert len(data["items"]) == 12
+        assert len(data["items"]) == 13
+        network_discovery = next(
+            item for item in data["items"] if item["key"] == "network_discovery"
+        )
+        assert network_discovery["display_name"]
+        assert network_discovery["result_label"]
         assert any(item["key"] == "connection_probe" for item in data["items"])
         perf = next(item for item in data["items"] if item["key"] == "perf_cpu")
         assert perf["defaults"]["sample_rate"] == 99

@@ -13,7 +13,7 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; 
 python3 -m venv "$ROOT/.venv"
 "$ROOT/.venv/bin/pip" install --upgrade pip
 "$ROOT/.venv/bin/pip" install -e "$ROOT[dev]"
-(cd "$ROOT/proto" && bash compile.sh)
+"$ROOT/.venv/bin/python" "$ROOT/scripts/compile_proto.py"
 
 install -d -m 0750 /etc/mini-drop
 if [[ ! -e /etc/mini-drop/worker.env ]]; then

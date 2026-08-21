@@ -46,7 +46,7 @@ fi
 # ── 4. 编译 proto ──────────────────────────────────────
 echo ""
 echo "[4/5] Compiling protobuf stubs…"
-(cd proto && bash compile.sh) || echo "WARN: proto compilation failed (may already be compiled)"
+python3 scripts/compile_proto.py || echo "WARN: proto compilation failed (may already be compiled)"
 
 # ── 5. 运行测试 ────────────────────────────────────────
 echo ""

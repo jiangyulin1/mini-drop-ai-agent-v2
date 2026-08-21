@@ -1,0 +1,70 @@
+.citationFocus {
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-surface) 94%, var(--app-accent-surface, #eaf1ff));
+}
+
+.citationHeader {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.citationMeta {
+  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.citationMeta span {
+  min-width: 0;
+}
+
+.citationMeta small,
+.citationMeta :global(.ant-typography) {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citationMeta small,
+.citationValue > small {
+  margin-bottom: 3px;
+  color: var(--app-text-secondary);
+  font-size: 10px;
+}
+
+.citationValue {
+  padding: 9px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  background: var(--app-surface);
+}
+
+.citationValue pre {
+  max-height: 160px;
+  margin: 0 0 4px;
+  overflow: auto;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rawProjection {
+  max-height: 340px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 8px;
+  color: #d1d5db;
+  background: #111827;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

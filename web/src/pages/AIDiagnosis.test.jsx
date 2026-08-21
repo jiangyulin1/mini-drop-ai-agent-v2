@@ -9,7 +9,6 @@ import {
   getCaseInvestigationPlan,
   getCaseCurrentUnderstanding,
   listAgents,
-  listDiagnosisSessions,
   listIncidentCaseEvents,
   listIncidentCases,
   listTasks,
@@ -19,6 +18,7 @@ import {
   listAcquisitionOperations,
   listRegisteredActions,
   listTargetSessions,
+  runIncidentCaseAgentTurn,
 } from "../api/client";
 
 vi.mock("../api/client", () => ({
@@ -50,7 +50,6 @@ vi.mock("../api/client", () => ({
   getTaskArtifactContent: vi.fn(),
   getTaskArtifacts: vi.fn(),
   listAgents: vi.fn(),
-  listDiagnosisSessions: vi.fn(),
   listIncidentCaseEvents: vi.fn(),
   listIncidentCases: vi.fn(),
   listCaseProposals: vi.fn(),
@@ -133,7 +132,6 @@ describe("AIDiagnosis workspace", () => {
     listRegisteredActions.mockResolvedValue({ items: [] });
     listTargetSessions.mockResolvedValue([]);
     listIncidentCaseEvents.mockResolvedValue({ items: [], total: 0 });
-    listDiagnosisSessions.mockResolvedValue([]);
     listTasks.mockResolvedValue([]);
   });
 
@@ -151,11 +149,9 @@ describe("AIDiagnosis workspace", () => {
     expect(screen.getByRole("button", { name: "设置与检测" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /范围与服务关系/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^诊断数据$/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /能力与评测状态/ }));
-    expect(await screen.findByText(/当前没有可用于对外声明的 AI 正确率/)).toBeInTheDocument();
-    expect(screen.getByText(/规则不再生成在线根因候选或排名/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /关\s*闭/ }));
-    expect(screen.getByRole("button", { name: /发送并分析/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /能力与评测状态/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/规则不再生成在线根因候选或排名/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /发送$/ })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "设置范围" }));
     expect(await screen.findByText("Worker 与目标进程")).toBeInTheDocument();
@@ -183,5 +179,38 @@ describe("AIDiagnosis workspace", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "长期目标" }));
     expect(await screen.findByText(/长期目标会积累信号/)).toBeInTheDocument();
     expect(screen.getByLabelText("服务标识")).toBeInTheDocument();
+  });
+
+  it("keeps ordinary conversation read-only by default", async () => {
+    runIncidentCaseAgentTurn.mockResolvedValue({ status: "runtime_turn_accepted", turn_id: "turn-1" });
+    render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
+
+    fireEvent.change(await screen.findByPlaceholderText("补充事实、纠正结论，或要求重新分析"), {
+      target: { value: "解释当前 Evidence 能证明什么" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /发送$/ }));
+
+    await waitFor(() => expect(runIncidentCaseAgentTurn).toHaveBeenCalledWith(CASE.case_id, {
+      message: "解释当前 Evidence 能证明什么",
+      execute_safe_tools: true,
+      requested_disposition: "ANSWER_ONLY",
+    }));
+  });
+
+  it("only starts writable investigation after the user selects that mode", async () => {
+    runIncidentCaseAgentTurn.mockResolvedValue({ status: "runtime_turn_accepted", turn_id: "turn-1" });
+    render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
+
+    fireEvent.click(await screen.findByText("继续调查"));
+    fireEvent.change(await screen.findByPlaceholderText("补充事实、纠正结论，或要求重新分析"), {
+      target: { value: "继续调查并持久化结论" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /发送并调查/ }));
+
+    await waitFor(() => expect(runIncidentCaseAgentTurn).toHaveBeenCalledWith(CASE.case_id, {
+      message: "继续调查并持久化结论",
+      execute_safe_tools: true,
+      requested_disposition: "INVESTIGATE",
+    }));
   });
 });

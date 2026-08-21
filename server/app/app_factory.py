@@ -116,6 +116,7 @@ from server.app.agent_runtime.config import (
     agent_max_active_cases,
     runtime_mode,
 )
+from server.app.agent_runtime.options import RuntimeOptions
 from server.app.agent_runtime.dispatcher import active_runtime_info, get_runtime
 from server.app.agent_runtime.port import AgentTurnInput, CaseContextSnapshot, RuntimeFollowUp
 from server.app.agent_runtime.shadow import (
@@ -224,6 +225,8 @@ from server.app.routes.actuation import (
 )
 from server.app.routes.nlp import router as nlp_router
 from server.app.routes.tasks import router as tasks_router
+from server.app.routes.knowledge_memory import router as knowledge_memory_router
+from server.app.routes.topology_discovery import router as topology_discovery_router
 from server.app.v6_routes import (
     QueryError,
     _build_runtime_case_context,
@@ -235,7 +238,9 @@ from server.app.runtime_services import (
     bind_application_services,
     build_application_services,
     case_evidence_service,
+    collection_supervisor,
     diagnosis_orchestrator,
+    evidence_analysis_service,
     evidence_attachment_service,
     fanout_service,
     investigation_plan_service,
@@ -541,6 +546,32 @@ def _ensure_active_investigation_run(case_id: str, tenant_id: str) -> dict[str, 
     ) if hasattr(repo, "create_investigation_run") else None
 
 
+def _latest_runtime_turn_preferences(
+    case_id: str,
+    tenant_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
+    """Keep autonomous Evidence wakeups on the initiating Turn's policy/options."""
+    if not hasattr(repo, "list_context_packets"):
+        return None, None, None
+    packets = repo.list_context_packets(case_id, tenant_id, limit=100) or []
+    runtime_turns = [item for item in packets if item.get("purpose") == "runtime_turn"]
+    if not runtime_turns:
+        return None, None, None
+    packet = max(runtime_turns, key=lambda item: str(item.get("created_at") or ""))
+    payload = packet.get("payload") or {}
+    raw_options = payload.get("runtime_options") or {}
+    allowed_option_keys = set(RuntimeOptions.model_fields)
+    runtime_options = {
+        key: value for key, value in raw_options.items()
+        if key in allowed_option_keys
+    }
+    return (
+        payload.get("runtime_policy") or None,
+        runtime_options or None,
+        str(payload.get("diagnostic_strategy_id") or "") or None,
+    )
+
+
 def _deliver_one_wakeup(
     case: dict[str, Any],
     tenant_id: str,
@@ -552,91 +583,179 @@ def _deliver_one_wakeup(
     wakeup_id = str(wakeup.get("wakeup_id") or "")
     if not wakeup_id or wakeup.get("status") != "PENDING":
         return False
+    # finish_investigation is terminal for the current run. Evidence that races
+    # with an accepted conclusion stays durable, but must not enqueue another
+    # autonomous model turn after the Agent has explicitly stopped.
+    if hasattr(repo, "get_conclusion") and repo.get_conclusion(case_id, tenant_id) is not None:
+        if hasattr(repo, "consume_runtime_wakeup"):
+            repo.consume_runtime_wakeup(wakeup_id, "SKIPPED_CONCLUDED")
+        return False
+    inherited_policy, inherited_options, inherited_strategy_id = (
+        _latest_runtime_turn_preferences(case_id, tenant_id)
+    )
     context = _build_runtime_case_context(
         case, tenant_id,
         disposition="INVESTIGATE",
         side_effect_policy="AUTO_READ_LOW",
         investigation_run_id=run.get("run_id"),
+        runtime_policy=inherited_policy,
+        runtime_options=inherited_options,
+        strategy_id=inherited_strategy_id,
     )
-    context_payload = context.model_dump(mode="json")
-    packet = repo.create_context_packet({
-        "case_id": case_id,
-        "tenant_id": tenant_id,
-        "schema_version": "case-context.v1",
-        "purpose": "runtime_wakeup",
-        "iteration_no": 0,
-        "payload": context_payload,
-        "projection_stats": {},
-        "source_versions": {
-            "context_builder": "runtime-wakeup.v1",
-            "source_registry": "source-registry.v1",
-        },
-        "content_hash": canonical_hash(context_payload),
-        "created_by": "mini-drop-agent-runtime",
-    }) if hasattr(repo, "create_context_packet") else None
-    if packet:
-        context = context.model_copy(update={
-            "context_packet_id": packet["context_packet_id"],
-        })
-    snapshot = repo.create_case_context_snapshot(
-        case_id=case_id,
-        tenant_id=tenant_id,
-        investigation_run_id=run.get("run_id"),
-        content=context.model_dump(mode="json"),
-    ) if hasattr(repo, "create_case_context_snapshot") else None
-    binding = repo.get_agent_runtime_binding(case_id, tenant_id)
-    generation = int((binding or {}).get("runtime_generation") or 1)
-    cycle = repo.create_agent_cycle(
-        case_id=case_id,
-        tenant_id=tenant_id,
-        run_id=run["run_id"],
-        trigger_type="EVIDENCE_COMMITTED",
-        trigger_ref=wakeup_id,
-        context_snapshot_id=snapshot.get("snapshot_id") if snapshot else None,
-        evidence_watermark=int(wakeup.get("to_evidence_watermark") or 0),
-        runtime_binding_id=case_id,
-        generation=generation,
-    ) if hasattr(repo, "create_agent_cycle") else None
+    reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
+    cycle = (
+        repo.get_agent_cycle(str(wakeup.get("cycle_id")))
+        if wakeup.get("cycle_id") and hasattr(repo, "get_agent_cycle")
+        else None
+    )
+    snapshot = None
     model_request = None
-    if cycle and hasattr(repo, "create_model_request"):
-        projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
-        model_request = repo.create_model_request(
+    if cycle is None:
+        context_payload = context.model_dump(mode="json")
+        packet = repo.create_context_packet({
+            "case_id": case_id,
+            "tenant_id": tenant_id,
+            "schema_version": "case-context.v1",
+            "purpose": "runtime_wakeup",
+            "iteration_no": 0,
+            "payload": context_payload,
+            "projection_stats": {},
+            "source_versions": {
+                "context_builder": "runtime-wakeup.v1",
+                "source_registry": "source-registry.v1",
+            },
+            "content_hash": canonical_hash(context_payload),
+            "created_by": "mini-drop-agent-runtime",
+        }) if hasattr(repo, "create_context_packet") else None
+        if packet:
+            context = context.model_copy(update={
+                "context_packet_id": packet["context_packet_id"],
+            })
+        snapshot = repo.create_case_context_snapshot(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            investigation_run_id=run.get("run_id"),
+            content=context.model_dump(mode="json"),
+        ) if hasattr(repo, "create_case_context_snapshot") else None
+        binding = repo.get_agent_runtime_binding(case_id, tenant_id)
+        generation = int((binding or {}).get("runtime_generation") or 1)
+        cycle = repo.create_agent_cycle(
             case_id=case_id,
             tenant_id=tenant_id,
             run_id=run["run_id"],
-            cycle_id=cycle["cycle_id"],
-            input_snapshot_hash=snapshot.get("snapshot_hash") if snapshot else None,
-            evidence_projection_hashes=[
-                item.get("projection_hash") for item in projections
-                if item.get("projection_hash")
-            ],
-            idempotency_key=f"mreq:{wakeup_id}:{cycle['cycle_id']}",
-        )
+            trigger_type=reason_class,
+            trigger_ref=wakeup_id,
+            context_snapshot_id=snapshot.get("snapshot_id") if snapshot else None,
+            evidence_watermark=int(wakeup.get("to_evidence_watermark") or 0),
+            runtime_binding_id=case_id,
+            generation=generation,
+        ) if hasattr(repo, "create_agent_cycle") else None
+        if cycle and hasattr(repo, "create_model_request"):
+            projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
+            model_request = repo.create_model_request(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                run_id=run["run_id"],
+                cycle_id=cycle["cycle_id"],
+                input_snapshot_hash=snapshot.get("snapshot_hash") if snapshot else None,
+                evidence_projection_hashes=[
+                    item.get("projection_hash") for item in projections
+                    if item.get("projection_hash")
+                ],
+                idempotency_key=f"mreq:{wakeup_id}:{cycle['cycle_id']}",
+            )
     if hasattr(repo, "seal_runtime_wakeup"):
         repo.seal_runtime_wakeup(wakeup_id, cycle_id=cycle.get("cycle_id") if cycle else None)
     try:
         runtime = get_runtime()
+        binding = None
         if hasattr(runtime, "start_or_resume"):
-            runtime.start_or_resume(context)
+            binding = runtime.start_or_resume(context)
+        if binding is not None and hasattr(repo, "upsert_agent_runtime_binding"):
+            repo.upsert_agent_runtime_binding(
+                case_id,
+                tenant_id,
+                runtime_type=binding.runtime_type,
+                runtime_version=binding.runtime_version,
+                runtime_session_id=binding.runtime_session_id,
+                runtime_generation=binding.runtime_generation,
+                status=binding.status,
+                last_event_seq=binding.last_event_seq,
+                last_context_snapshot_id=binding.last_context_snapshot_id,
+                lease_owner=binding.lease_owner,
+            )
+        if reason_class == "COLLECTION_TERMINAL":
+            source_refs = ", ".join(str(item) for item in (wakeup.get("source_refs") or []))
+            terminal_detail = str(wakeup.get("reason") or "collection terminated without Evidence")
+            note = (
+                f"采集任务已失败、取消或完成但未产生 Evidence：{source_refs}。"
+                f"终态详情：{terminal_detail}。"
+                "请读取 CollectionRequest 获取权威状态；不要假设存在新 Evidence。"
+                "请记录 limitation，并使用现有 Evidence 提交结构化终态；"
+                "只有在仍缺少决定性事实时，才选择一个可执行的替代 Collector。"
+            )
+            follow_up_evidence_ids: list[str] = []
+        else:
+            queued_analyses = [
+                item for item in evidence_analysis_service.list_runs(case_id, tenant_id)
+                if item.get("status") in {"QUEUED", "RUNNING"}
+                and item.get("input_state") == "CURRENT"
+            ]
+            analysis_run_id = str(queued_analyses[-1].get("analysis_run_id") or "") if queued_analyses else ""
+            source_summary = ", ".join(str(item) for item in (wakeup.get("source_refs") or []))
+            if analysis_run_id:
+                note = (
+                    f"新 Evidence 已物化：{source_summary}；"
+                    f"本批次的 EvidenceAnalysisRun 是 {analysis_run_id}。"
+                    "请先读取该运行锁定的 Evidence Projection，再调用 submit_evidence_analysis。"
+                    "每个 fact 必须提供 claim、certainty，以及包含 evidence_id、projection_hash、field_path 的准确 citations。"
+                    "分析提交成功后，再更新假设、缺口和因果图并决定下一步。"
+                )
+            else:
+                # A topology run may materialize Evidence directly through its
+                # bounded orchestration path, without creating an
+                # EvidenceAnalysisRun.  Never tell the model that the run is
+                # "未创建" and then invite it to invent an ID: that produces
+                # a predictable ANALYSIS_RUN_NOT_FOUND rejection.  In this
+                # branch the canonical terminal contract is finish_investigation.
+                note = (
+                    f"新 Evidence 已物化：{source_summary}；本批次没有预注册的 EvidenceAnalysisRun。"
+                    "不要调用 submit_evidence_analysis，也不要编造 analysis_run_id。"
+                    "请读取当前 Evidence Projection、依赖图和证据缺口，"
+                    "然后使用 finish_investigation 提交带 evidence_id、projection_hash、field_path 引用的结构化结论；"
+                    "如果证据不足，使用 INSUFFICIENT_EVIDENCE，并明确缺失事实。"
+                )
+            follow_up_evidence_ids = [
+                item.get("evidence_id")
+                for item in case_evidence_service.list_evidence(case_id, tenant_id)
+            ]
         runtime.follow_up(
             case_id,
             RuntimeFollowUp(
                 case_id=case_id,
-                note=f"新 Evidence 已物化：{', '.join(str(item) for item in (wakeup.get('source_refs') or []))}；请读取 Projection 后继续",
-                evidence_ids=[
-                    item.get("evidence_id")
-                    for item in case_evidence_service.list_evidence(case_id, tenant_id)
-                ],
+                note=note,
+                evidence_ids=follow_up_evidence_ids,
             ),
         )
         if hasattr(repo, "consume_runtime_wakeup"):
             repo.consume_runtime_wakeup(wakeup_id, "DELIVERED")
         return True
-    except RuntimeError:
+    except RuntimeError as exc:
         if cycle and hasattr(repo, "transition_agent_cycle"):
             repo.transition_agent_cycle(cycle["cycle_id"], "QUEUED")
         if model_request and hasattr(repo, "transition_model_request"):
             repo.transition_model_request(model_request["model_request_id"], "QUEUED")
+        if hasattr(repo, "requeue_runtime_wakeup"):
+            repo.requeue_runtime_wakeup(
+                wakeup_id, cycle_id=cycle.get("cycle_id") if cycle else None,
+            )
+        log_event(
+            "warning",
+            "runtime_wakeup_delivery_deferred",
+            case_id=case_id,
+            wakeup_id=wakeup_id,
+            error_type=type(exc).__name__,
+        )
         return False
 
 
@@ -673,7 +792,8 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
 
     event_id = str(event.get("outbox_id") or "")
     payload = event.get("payload") or {}
-    if event.get("event_type") != "EVIDENCE_COMMITTED":
+    event_type = str(event.get("event_type") or "")
+    if event_type not in {"EVIDENCE_COMMITTED", "COLLECTION_TERMINAL"}:
         repo.record_outbox_consumer_effect(
             event_id=event_id,
             consumer_name="control-plane",
@@ -686,7 +806,7 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
     tenant_id = str(payload.get("tenant_id") or _request_tenant())
     run_id = str(payload.get("investigation_run_id") or "")
     if not case_id or not run_id:
-        raise ValueError("EVIDENCE_COMMITTED requires case_id and investigation_run_id")
+        raise ValueError(f"{event_type} requires case_id and investigation_run_id")
     case = repo.get_incident_case(case_id, tenant_id) or {}
     run = repo.get_investigation_run(case_id, tenant_id, run_id)
     if not case or run is None:
@@ -694,6 +814,20 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
 
     wakeup = repo.get_runtime_wakeup_by_outbox(event_id)
     if wakeup is None:
+        reason_class = (
+            "COLLECTION_TERMINAL" if event_type == "COLLECTION_TERMINAL"
+            else "EVIDENCE_COMMITTED"
+        )
+        if reason_class == "COLLECTION_TERMINAL":
+            dedupe_key = (
+                f"collection-terminal-wakeup:{payload.get('task_id')}:{payload.get('task_status')}"
+            )
+        else:
+            dedupe_key = (
+                f"evidence-wakeup:{case_id}:{run_id}:"
+                f"{int(payload.get('control_revision') or 1)}:"
+                f"{int(payload.get('scope_revision') or 1)}"
+            )
         wakeup = repo.create_runtime_wakeup(
             case_id=case_id,
             tenant_id=tenant_id,
@@ -702,10 +836,13 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
             source_refs=list(payload.get("source_refs") or []),
             control_revision=int(payload.get("control_revision") or 1),
             scope_revision=int(payload.get("scope_revision") or 1),
-            reason_class="EVIDENCE_COMMITTED",
+            reason_class=reason_class,
             from_evidence_watermark=int(payload.get("from_evidence_watermark") or 0),
             to_evidence_watermark=int(payload.get("to_evidence_watermark") or 0),
-            dedupe_key=f"outbox-wakeup:{event_id}",
+            # All Evidence committed before the 5-second runtime delivery pass
+            # belongs to one wakeup. create_runtime_wakeup merges source refs
+            # and advances the watermark while the row remains PENDING.
+            dedupe_key=dedupe_key,
         )
         repo.add_runtime_wakeup_source(
             wakeup_id=wakeup["wakeup_id"],
@@ -713,8 +850,6 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
             source_ref=(payload.get("source_refs") or [f"outbox:{event_id}"])[0],
             evidence_watermark=int(payload.get("to_evidence_watermark") or 0),
         )
-    if wakeup.get("status") == "PENDING":
-        _deliver_one_wakeup(case, tenant_id, wakeup, run)
     repo.record_outbox_consumer_effect(
         event_id=event_id,
         consumer_name="runtime-wakeup",
@@ -740,6 +875,8 @@ def _run_runtime_wakeup_pass() -> None:
         case_id = case.get("case_id") or case.get("id") or ""
         if not case_id or case.get("state") in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
             continue
+        if not _collection_batch_ready_for_wakeup(case_id, tenant_id):
+            continue
         for wakeup in repo.list_runtime_wakeups(case_id, tenant_id, status="PENDING")[:10]:
             run = repo.get_investigation_run(case_id, tenant_id, wakeup["investigation_run_id"]) if hasattr(repo, "get_investigation_run") else None
             if run is None:
@@ -747,6 +884,29 @@ def _run_runtime_wakeup_pass() -> None:
             if run is None:
                 continue
             _deliver_one_wakeup(case, tenant_id, wakeup, run)
+
+
+def _collection_batch_ready_for_wakeup(case_id: str, tenant_id: str) -> bool:
+    """Wait for one dispatched Collector batch and its outbox writes to settle."""
+    requests = repo.list_collection_requests(case_id, tenant_id) if hasattr(
+        repo, "list_collection_requests",
+    ) else []
+    if any(
+        item.get("task_id") and item.get("status") in {"ACCEPTED", "DISPATCHED", "RUNNING"}
+        for item in requests
+    ):
+        return False
+    updated = [item.get("updated_at") for item in requests if item.get("updated_at")]
+    if not updated:
+        return True
+    quiet_sec = max(0.0, float(os.getenv("MINI_DROP_WAKEUP_QUIET_SEC", "3")))
+    latest = max(updated)
+    if isinstance(latest, str):
+        latest = datetime.fromisoformat(latest.replace("Z", "+00:00"))
+    now = now_utc()
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=now.tzinfo)
+    return (now - latest).total_seconds() >= quiet_sec
 
 
 def _wake_case_from_task(task_id: str, to_status: str) -> None:
@@ -758,7 +918,11 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
     tenant_id = str(options.get("tenant_id") or _request_tenant())
     if not case_id:
         return
+    terminal_requests = collection_supervisor.mark_task_terminal(
+        case_id, tenant_id, task_id, to_status,
+    )
     outcome = PLAN_DRIVER.on_task_done(case_id, tenant_id, task_id, status=to_status)
+    evidence_ids: list[str] = []
     if to_status == "DONE" and getattr(task, "collector_type", ""):
         evidence_ids = case_evidence_service.materialize_task_artifacts(
             case_id,
@@ -774,12 +938,47 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
             evidence_count=len(evidence_ids),
         )
         if evidence_ids:
-            case = repo.get_incident_case(case_id, tenant_id) or {}
-            if case.get("state") not in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
-                run = _ensure_active_investigation_run(case_id, tenant_id)
-                if run is not None and runtime_mode() in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
-                    watermark = len(case_evidence_service.list_evidence(case_id, tenant_id))
-                    if hasattr(repo, "enqueue_domain_outbox"):
+            active_evidence_ids = [
+                str(item.get("evidence_id") or "")
+                for item in case_evidence_service.list_evidence(case_id, tenant_id)
+                if item.get("status") == "ACTIVE" and item.get("evidence_id")
+            ]
+            if active_evidence_ids:
+                try:
+                    analysis = evidence_analysis_service.create_run(
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        evidence_ids=active_evidence_ids,
+                        mode="SINGLE" if len(active_evidence_ids) == 1 else "MULTI",
+                        prompt_version="evidence-analysis.v1",
+                    )
+                    log_event(
+                        "info",
+                        "task_wake_analysis_queued",
+                        task_id=task_id,
+                        case_id=case_id,
+                        analysis_run_id=analysis.get("analysis_run_id"),
+                        reused=bool(analysis.get("reused")),
+                    )
+                except ValueError as exc:
+                    log_event(
+                        "warning",
+                        "task_wake_analysis_deferred",
+                        task_id=task_id,
+                        case_id=case_id,
+                        reason=str(exc)[:300],
+                    )
+    terminal_without_evidence = bool(terminal_requests) and (
+        to_status in {"FAILED", "CANCELLED"} or (to_status == "DONE" and not evidence_ids)
+    )
+    if evidence_ids or terminal_without_evidence:
+        case = repo.get_incident_case(case_id, tenant_id) or {}
+        if case.get("state") not in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
+            run = _ensure_active_investigation_run(case_id, tenant_id)
+            if run is not None and runtime_mode() in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
+                watermark = len(case_evidence_service.list_evidence(case_id, tenant_id))
+                if hasattr(repo, "enqueue_domain_outbox"):
+                    if evidence_ids:
                         repo.enqueue_domain_outbox(
                             aggregate_type="evidence_batch",
                             aggregate_id=f"{case_id}:{task_id}",
@@ -801,31 +1000,81 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
                             },
                             dedupe_key=f"evidence-batch:{case_id}:{task_id}:{','.join(sorted(evidence_ids))}",
                         )
-                        # Keep the synchronous helper contract for API/tests;
-                        # production also runs the same relay continuously.
-                        _run_outbox_relay_pass()
+                    else:
+                        request_ids = [
+                            str(item.get("collection_request_id") or "")
+                            for item in terminal_requests
+                            if item.get("collection_request_id")
+                        ]
+                        task_reason = str(getattr(task, "status_reason", "") or to_status)
+                        repo.enqueue_domain_outbox(
+                            aggregate_type="collection_terminal",
+                            aggregate_id=f"{case_id}:{task_id}",
+                            event_type="COLLECTION_TERMINAL",
+                            payload={
+                                "case_id": case_id,
+                                "task_id": task_id,
+                                "task_status": to_status,
+                                "task_reason": task_reason[:1000],
+                                "collection_request_ids": request_ids,
+                                "tenant_id": tenant_id,
+                                "investigation_run_id": run["run_id"],
+                                "source_refs": [
+                                    f"collection_request:{request_id}:{to_status}"
+                                    for request_id in request_ids
+                                ] or [f"task:{task_id}:{to_status}"],
+                                "control_revision": int(case.get("control_revision") or 1),
+                                "scope_revision": int(case.get("scope_revision") or 1),
+                                "from_evidence_watermark": watermark,
+                                "to_evidence_watermark": watermark,
+                                "reason": (
+                                    f"Task {task_id} entered {to_status} without canonical Evidence: "
+                                    f"{task_reason[:300]}"
+                                ),
+                            },
+                            dedupe_key=f"collection-terminal:{task_id}:{to_status}",
+                        )
+                    # Keep the synchronous helper contract for API/tests;
+                    # production also runs the same relay continuously.
+                    _run_outbox_relay_pass()
     return outcome
 
 
 def _run_case_task_wake_pass() -> None:
-    """G5/G6：Analyzer Worker 在独立进程中完成 Task，Server 事件总线看不到其
-    task_changed 事件。周期扫描 Case 派生且已 DONE 但尚未物化 Evidence 的 Task，
-    执行与实时唤醒相同的逻辑。
+    """Recover terminal collection Tasks missed by the in-process event bus.
+
+    Analyzer Workers can finish in another process, so the durable sweep covers
+    successful, failed and cancelled CollectionRequests.
     """
     repo.invalidate_cache("tasks")
     for task in list(getattr(repo, "tasks", {}).values()):
-        if status_value(getattr(task, "status", "")) != TaskStatus.DONE.value:
+        task_status = status_value(getattr(task, "status", ""))
+        if task_status not in {
+            TaskStatus.DONE.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value,
+        }:
             continue
         options = (getattr(task, "request_params", None) or {}).get("options") or {}
         case_id = str(options.get("case_id") or "")
         if not case_id:
             continue
+        if task_status != TaskStatus.DONE.value and not options.get("collection_request_id"):
+            continue
         tenant_id = str(options.get("tenant_id") or _request_tenant())
         existing = repo.list_case_evidence(case_id, tenant_id) if hasattr(repo, "list_case_evidence") else []
-        if any(str(item.get("task_id") or "") == str(task.id) for item in existing):
+        if task_status == TaskStatus.DONE.value and any(
+            str(item.get("task_id") or "") == str(task.id) for item in existing
+        ):
+            # Some bounded workflows (notably topology discovery) materialize
+            # canonical Evidence before the cross-process recovery sweep sees
+            # the terminal Task event.  Evidence idempotency must not leave the
+            # associated CollectionRequest stuck in DISPATCHED, otherwise the
+            # runtime batch gate blocks every later Evidence wakeup.
+            collection_supervisor.mark_task_terminal(
+                case_id, tenant_id, str(task.id), task_status,
+            )
             continue
         try:
-            _wake_case_from_task(str(task.id), TaskStatus.DONE.value)
+            _wake_case_from_task(str(task.id), task_status)
         except Exception as exc:  # noqa: BLE001
             log_event(
                 "warning",
@@ -1218,6 +1467,8 @@ def create_app() -> FastAPI:
         actuation_router,
         nlp_router,
         tasks_router,
+        knowledge_memory_router,
+        topology_discovery_router,
         v6_router,
     ):
         application.include_router(
@@ -1249,5 +1500,3 @@ def create_app() -> FastAPI:
 app = create_app()
 
 # ── 启动入口 ──────────────────────────────────────────────────
-
-

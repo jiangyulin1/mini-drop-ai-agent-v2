@@ -22,6 +22,7 @@ from server.app.models import (
     AgentRuntimeTurnModel,
     AssistantMessageModel,
     CampaignRevisionModel,
+    CaseEventModel,
     CaseContextSnapshotModel,
     CaseEvidenceModel,
     CollectionProposalModel,
@@ -386,6 +387,133 @@ class SqlRepositoryV6Mixin:
             session.flush()
             return row.to_dict()
 
+    def complete_agent_runtime_turn(
+        self, turn_id: str, tenant_id: str, *, detail: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Complete an accepted Turn when its work continues asynchronously."""
+        now = now_utc()
+        with self._write_session() as session:
+            turn = session.get(AgentRuntimeTurnModel, turn_id)
+            if turn is None or turn.tenant_id != tenant_id:
+                return None
+            if turn.status != "COMPLETED":
+                turn.status = "COMPLETED"
+                turn.completed_at = now
+                turn.updated_at = now
+            if detail:
+                turn.detail = detail
+            session.flush()
+            return turn.to_dict()
+
+    def finalize_investigation_result(
+        self, *, case_id: str, tenant_id: str, summary: str,
+        evidence_refs: list[str], limitations: list[str], conclusion_state: str,
+        conclusion_id: str | None, message_id: str, visible_content: str,
+        trigger_turn_id: str | None, limitation_refs: list[str] | None = None,
+        actor_id: str = "mini-drop-pi-runtime",
+    ) -> dict[str, Any]:
+        """Atomically publish the Case conclusion, assistant message and Turn completion."""
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            existing = session.get(AssistantMessageModel, message_id)
+            if existing is not None:
+                return {"message": existing.to_dict(), "case": case.to_dict(), "duplicate": True}
+
+            case.current_finding_json = {
+                "status": "concluded",
+                "statement": summary,
+                "evidence_refs": list(evidence_refs),
+                "limitations": list(limitations),
+            }
+            case.current_activity_json = {
+                "phase": "conclusion_drafted",
+                "message": "Agent 已提交证据约束的结论，等待处置或继续追问",
+            }
+            if str(conclusion_state).upper() == "INSUFFICIENT_EVIDENCE":
+                case.state = "INSUFFICIENT_EVIDENCE"
+                case.state_reason = "agent_finished_with_insufficient_evidence"
+                case.need_user_json = {
+                    "required": True,
+                    "question": "当前证据不足。请补充范围、时间窗或新的可观测数据后新开调查。",
+                }
+            elif case.state not in {"PAUSED", "STOPPED", "RESOLVED"}:
+                case.state = "WAITING_USER"
+                case.state_reason = "agent_conclusion_ready"
+                case.need_user_json = {
+                    "required": True,
+                    "question": "结论已形成。请审查证据、选择恢复建议，或继续追问。",
+                }
+            case.row_version += 1
+            case.updated_at = now
+
+            message = AssistantMessageModel(
+                message_id=message_id,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                trigger_turn_id=trigger_turn_id,
+                origin_turn_id=trigger_turn_id,
+                content=visible_content,
+                evidence_refs=list(evidence_refs),
+                limitation_refs=list(limitation_refs or []),
+                conclusion_revision_id=conclusion_id,
+                created_at=now,
+            )
+            session.add(message)
+            if trigger_turn_id:
+                turn = session.get(AgentRuntimeTurnModel, trigger_turn_id)
+                if turn is not None and turn.tenant_id == tenant_id:
+                    turn.status = "COMPLETED"
+                    turn.completed_at = now
+                    turn.updated_at = now
+
+            event_payloads = [
+                ("assistant.message", "mini-drop-agent-runtime", {
+                    "message_id": message_id,
+                    "trigger_turn_id": trigger_turn_id,
+                    "content": visible_content,
+                    "evidence_refs": list(evidence_refs),
+                    "conclusion_revision_id": conclusion_id,
+                }),
+                ("agent_finish_investigation", actor_id, {
+                    "summary": summary,
+                    "evidence_refs": list(evidence_refs),
+                    "verifier": "causal-report-verifier.v1",
+                    "state": conclusion_state,
+                    "conclusion_id": conclusion_id,
+                    "assistant_message_id": message_id,
+                }),
+            ]
+            if trigger_turn_id:
+                event_payloads.insert(1, ("turn.completed", "mini-drop-agent-runtime", {
+                    "turn_id": trigger_turn_id,
+                    "message_id": message_id,
+                }))
+            events: list[CaseEventModel] = []
+            for event_type, event_actor, event_payload in event_payloads:
+                event = CaseEventModel(
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    event_type=event_type,
+                    actor_id=event_actor,
+                    payload_json=event_payload,
+                    created_at=now,
+                )
+                session.add(event)
+                events.append(event)
+            session.flush()
+            self._notify_after_commit(session, "case_summary_updated", {
+                "case_id": case_id,
+                "tenant_id": tenant_id,
+                "state": case.state,
+                "row_version": case.row_version,
+            })
+            for event in events:
+                self._notify_after_commit(session, "case_event", event.to_dict())
+            return {"message": message.to_dict(), "case": case.to_dict(), "duplicate": False}
+
     def list_assistant_messages(
         self, case_id: str, tenant_id: str, *, limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -440,6 +568,7 @@ class SqlRepositoryV6Mixin:
                 proposal_id=payload.get("proposal_id") or self._new_id("cprop"),
                 case_id=payload["case_id"], tenant_id=payload["tenant_id"],
                 agent_run_id=payload.get("agent_run_id"), cycle_id=payload.get("cycle_id"),
+                plan_step_id=payload.get("plan_step_id"), plan_revision=payload.get("plan_revision"),
                 collector_id=payload["collector_id"],
                 collector_spec_version=payload["collector_spec_version"],
                 target_selector=payload.get("target_selector") or {},
@@ -536,6 +665,7 @@ class SqlRepositoryV6Mixin:
                 runtime_generation=int(payload.get("runtime_generation") or 1),
                 control_revision=int(payload.get("control_revision") or 1),
                 scope_revision=int(payload.get("scope_revision") or 1),
+                plan_step_id=payload.get("plan_step_id"), plan_revision=payload.get("plan_revision"),
                 idempotency_key=payload["idempotency_key"],
                 budget_reservation=payload.get("budget_reservation") or {},
                 status=payload.get("status") or "ACCEPTED",
@@ -1321,6 +1451,25 @@ class SqlRepositoryV6Mixin:
             session.flush()
             return row.to_dict()
 
+    def requeue_runtime_wakeup(
+        self, wakeup_id: str, *, cycle_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return a failed delivery to PENDING without losing its audit cycle."""
+
+        now = now_utc()
+        with self._write_session() as session:
+            row = session.get(RuntimeWakeupModel, wakeup_id)
+            if row is None:
+                return None
+            if row.status != "SEALED":
+                return row.to_dict()
+            if cycle_id and row.cycle_id and row.cycle_id != cycle_id:
+                return row.to_dict()
+            row.status = "PENDING"
+            row.updated_at = now
+            session.flush()
+            return row.to_dict()
+
     def add_runtime_wakeup_source(
         self, *, wakeup_id: str, outbox_id: str, source_ref: str,
         evidence_watermark: int = 0,
@@ -1540,6 +1689,7 @@ class SqlRepositoryV6Mixin:
                     mechanism=node.get("mechanism", ""),
                     role=node.get("role", "SYMPTOM"),
                     model_proposed_role=node.get("role"),
+                    verifier_role=node.get("verifier_role"),
                     onset_start=_parse_aware_datetime(node.get("onset_start")),
                     onset_end=_parse_aware_datetime(node.get("onset_end")),
                     supporting_evidence_refs=node.get("supporting_evidence_refs") or [],
@@ -1563,7 +1713,7 @@ class SqlRepositoryV6Mixin:
                     topology_path_refs=edge.get("topology_path_refs") or [],
                     supporting_evidence_refs=edge.get("supporting_evidence_refs") or [],
                     knowledge_refs=edge.get("knowledge_refs") or [],
-                    verification_state="UNVERIFIED",
+                    verification_state=edge.get("verification_state", "UNVERIFIED"),
                     created_at=now,
                 ))
             session.flush()
@@ -1634,7 +1784,13 @@ class SqlRepositoryV6Mixin:
             rows = query.order_by(EvidenceGapModel.created_at.asc()).all()
             return [row.to_dict() for row in rows]
 
-    def resolve_evidence_gap(self, gap_id: str) -> dict[str, Any] | None:
+    def resolve_evidence_gap(
+        self,
+        gap_id: str,
+        *,
+        observed_evidence: list[str] | None = None,
+        conflicting_evidence_refs: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         now = now_utc()
         with self._write_session() as session:
             row = session.get(EvidenceGapModel, gap_id)
@@ -1642,6 +1798,10 @@ class SqlRepositoryV6Mixin:
                 return None
             row.status = "RESOLVED"
             row.resolved_at = now
+            if observed_evidence is not None:
+                row.observed_evidence = list(dict.fromkeys(observed_evidence))
+            if conflicting_evidence_refs is not None:
+                row.conflicting_evidence_refs = list(dict.fromkeys(conflicting_evidence_refs))
             session.flush()
             return row.to_dict()
 
@@ -1657,22 +1817,31 @@ class SqlRepositoryV6Mixin:
         coincidental_anomalies: list[dict[str, Any]] | None = None,
         ruled_out: list[dict[str, Any]] | None = None,
         evidence_gap_ids: list[str] | None = None,
+        recommendation_ids: list[str] | None = None,
+        recommendations: list[dict[str, Any]] | None = None,
         limitations: list[str] | None = None,
         abstention_reason: str | None = None,
         report_text: str | None = None,
         created_from_cycle_id: str | None = None,
         model_request_id: str | None = None,
         verifier_version: str = "causal-report-verifier.v1",
+        conclusion_id: str | None = None,
     ) -> dict[str, Any]:
         now = now_utc()
         with self._write_session() as session:
+            if conclusion_id:
+                existing = session.get(ConclusionRevisionModel, conclusion_id)
+                if existing is not None:
+                    if existing.case_id != case_id or existing.tenant_id != tenant_id:
+                        raise ValueError("CONCLUSION_ID_CONFLICT")
+                    return existing.to_dict()
             previous = session.query(ConclusionRevisionModel).filter(
                 ConclusionRevisionModel.case_id == case_id,
                 ConclusionRevisionModel.tenant_id == tenant_id,
             ).order_by(ConclusionRevisionModel.revision.desc()).first()
             revision = int(previous.revision or 0) + 1 if previous else 1
             conclusion = ConclusionRevisionModel(
-                conclusion_id=self._new_id("concl"),
+                conclusion_id=conclusion_id or self._new_id("concl"),
                 case_id=case_id,
                 tenant_id=tenant_id,
                 investigation_run_id=investigation_run_id,
@@ -1689,7 +1858,7 @@ class SqlRepositoryV6Mixin:
                 causal_graph_revision_id=causal_graph_revision_id,
                 claims=claims or [],
                 evidence_gap_ids=evidence_gap_ids or [],
-                recommendation_ids=[],
+                recommendation_ids=recommendation_ids or [],
                 limitations=limitations or [],
                 abstention_reason=abstention_reason,
                 report_text=report_text,
@@ -1720,6 +1889,31 @@ class SqlRepositoryV6Mixin:
                     created_at=now,
                 )
                 session.add(binding)
+            for recommendation, recommendation_id in zip(
+                recommendations or [], recommendation_ids or [],
+            ):
+                session.add(RepairRecommendationModel(
+                    recommendation_id=recommendation_id,
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    conclusion_id=conclusion.conclusion_id,
+                    cause_or_edge_ref=recommendation["cause_or_edge_ref"],
+                    category=recommendation.get("category", "root_fix"),
+                    target=recommendation["target"],
+                    concrete_action=recommendation["concrete_action"],
+                    rationale=recommendation.get("rationale"),
+                    evidence_refs=recommendation.get("evidence_refs") or [],
+                    prerequisites=recommendation.get("prerequisites") or [],
+                    risk=recommendation.get("risk"),
+                    approval=recommendation.get("approval"),
+                    expected_effect=recommendation.get("expected_effect"),
+                    verification_operations=recommendation.get("verification_operations") or [],
+                    success_criteria=recommendation.get("success_criteria") or [],
+                    rollback_or_failure_condition=recommendation.get("rollback_or_failure_condition"),
+                    confidence=float(recommendation.get("confidence", 0.0) or 0.0),
+                    limitations=recommendation.get("limitations") or [],
+                    created_at=now,
+                ))
             session.flush()
             return conclusion.to_dict()
 
@@ -1733,7 +1927,29 @@ class SqlRepositoryV6Mixin:
             )
             if conclusion_id:
                 query = query.filter(ConclusionRevisionModel.conclusion_id == conclusion_id)
-            conclusion = query.order_by(ConclusionRevisionModel.revision.desc()).first()
+                conclusion = query.order_by(ConclusionRevisionModel.revision.desc()).first()
+            else:
+                published = session.query(AssistantMessageModel).filter(
+                    AssistantMessageModel.case_id == case_id,
+                    AssistantMessageModel.tenant_id == tenant_id,
+                    AssistantMessageModel.conclusion_revision_id.is_not(None),
+                ).order_by(AssistantMessageModel.created_at.desc()).first()
+                if published is not None:
+                    published_conclusion = query.filter(
+                        ConclusionRevisionModel.conclusion_id == published.conclusion_revision_id,
+                    ).first()
+                    if published_conclusion is None:
+                        conclusion = None
+                    else:
+                        # Message bindings are immutable; revalidation advances current state.
+                        revalidated = query.filter(
+                            ConclusionRevisionModel.revision > published_conclusion.revision,
+                            ConclusionRevisionModel.verifier_version
+                            == "causal-report-verifier.v2-revalidation",
+                        ).order_by(ConclusionRevisionModel.revision.desc()).first()
+                        conclusion = revalidated or published_conclusion
+                else:
+                    conclusion = query.order_by(ConclusionRevisionModel.revision.desc()).first()
             if conclusion is None:
                 return None
             bindings = session.query(ClaimEvidenceBindingModel).filter(

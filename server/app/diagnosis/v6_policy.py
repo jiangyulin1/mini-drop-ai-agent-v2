@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from server.app.agent_runtime.catalog import (
@@ -95,15 +96,44 @@ def tool_policy_error(tool_name: str, policy: str | RuntimePolicy | dict[str, An
     return None
 
 
+_FIELD_PATH_PATTERN = re.compile(
+    r"^[^.\[\]]+(?:(?:\.[^.\[\]]+)|(?:\[\d+\]))*$"
+)
+
+
+def _field_path_segments(field_path: str) -> list[str | int] | None:
+    """Parse the two path forms emitted by Pi: ``a.b.0.c`` and ``a[0].c``.
+
+    Projection paths are deliberately a small, non-executable JSONPath subset.
+    Supporting both forms keeps the final-conclusion verifier consistent with
+    the EvidenceAnalysis verifier and avoids a needless model retry when an
+    array element is cited.
+    """
+    normalized = str(field_path or "").strip()
+    if normalized.startswith("projection."):
+        normalized = normalized[len("projection."):]
+    if not normalized or _FIELD_PATH_PATTERN.fullmatch(normalized) is None:
+        return None
+    segments: list[str | int] = []
+    for key, index in re.findall(r"([^.\[\]]+)|\[(\d+)\]", normalized):
+        segments.append(int(index) if index else key)
+    return segments
+
+
 def field_matches_projection(content: dict[str, Any], field_path: str | None, expected: Any = None) -> tuple[bool, Any]:
-    """Resolve dotted field_path inside a projection content dict."""
+    """Resolve a bounded dotted/bracket path inside a projection content dict."""
     if not field_path:
         return False, None
     current: Any = content
-    for part in field_path.split("."):
+    segments = _field_path_segments(field_path)
+    if segments is None:
+        return False, None
+    for part in segments:
         if isinstance(current, dict) and part in current:
             current = current[part]
-        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+        elif isinstance(current, list) and isinstance(part, int) and 0 <= part < len(current):
+            current = current[part]
+        elif isinstance(current, list) and isinstance(part, str) and part.isdigit() and int(part) < len(current):
             current = current[int(part)]
         else:
             return False, None

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import io
 import json as _json
+import os
 import zipfile
 from datetime import datetime
 from typing import Any
@@ -27,6 +29,7 @@ from server.app.case_collaboration import (
     CreateTargetSessionRequest,
     CreateTargetSignalRequest,
     ExcludeAttachmentRequest,
+    EvaluationEvidenceImportRequest,
     IndexProfileTaskRequest,
     ReferenceSearchRequest,
     TargetSessionTransitionRequest,
@@ -38,6 +41,11 @@ from server.app.diagnosis.campaign import (
     campaign_matrix,
 )
 from server.app.diagnosis.query_registry import QUERY_REGISTRY
+from server.app.diagnosis.case_evidence import stable_projection_hash
+from server.app.diagnosis.network_discovery import (
+    aggregate_dependency_graph,
+    case_dependency_graph_snapshot,
+)
 from server.app.diagnosis.reference_resolver import ResourceRef
 from server.app.event_bus import BUS
 from server.app.http.auth import (
@@ -46,11 +54,13 @@ from server.app.http.auth import (
     require_role as _require_role,
 )
 from server.app.runtime_services import (
+    case_evidence_service,
     collection_supervisor,
     diagnosis_orchestrator,
     evidence_analysis_service,
     evidence_attachment_service,
     investigation_plan_service,
+    investigation_state_service,
     reference_resolver,
     repo,
 )
@@ -448,8 +458,14 @@ def list_incident_case_events(
     after_id: int = 0,
     after_seq: int = 0,
     before_seq: int | None = None,
+    latest: bool = False,
 ) -> APIResponse:
     _require_role(request, "operator")
+    if latest:
+        high_water = repo.get_case_event_high_water(case_id, _request_tenant())
+        if high_water is None:
+            raise HTTPException(status_code=404, detail="Case 不存在")
+        return APIResponse(data={"items": [], "total": 0, "last_event_seq": high_water})
     items = repo.list_case_events(
         case_id,
         _request_tenant(),
@@ -555,6 +571,59 @@ def attach_case_resources(
         payload={"results": results, "actor_id": principal_id}, actor_id=principal_id,
     )
     return APIResponse(data={"items": results})
+
+
+@router.post("/api/v1/cases/{case_id}/evidence/import")
+def import_evaluation_evidence(
+    case_id: str,
+    payload: EvaluationEvidenceImportRequest,
+    request: Request,
+) -> APIResponse:
+    """Import one bounded projection for a local GitHub replay evaluation.
+
+    This route is intentionally fail-closed.  It is disabled unless the
+    operator explicitly enables ``MINI_DROP_EVAL_IMPORT_ENABLED`` and sets a
+    separate short-lived ``MINI_DROP_EVAL_IMPORT_TOKEN``.  The raw pack is
+    never accepted, and later Agent turns only reference the canonical ID.
+    """
+    _require_role(request, "operator")
+    enabled = os.getenv("MINI_DROP_EVAL_IMPORT_ENABLED", "0").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=404, detail="EVALUATION_IMPORT_DISABLED")
+    expected_token = os.getenv("MINI_DROP_EVAL_IMPORT_TOKEN", "").strip()
+    supplied_token = request.headers.get("X-Evaluation-Import-Token", "").strip()
+    if not expected_token or not supplied_token or not hmac.compare_digest(
+        supplied_token, expected_token,
+    ):
+        raise HTTPException(status_code=401, detail="EVALUATION_IMPORT_TOKEN_REQUIRED")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    required_prefix = f"eval:{case_id}:"
+    if not payload.evidence_id.startswith(required_prefix):
+        raise HTTPException(status_code=422, detail="EVALUATION_EVIDENCE_ID_SCOPE_INVALID")
+    computed_hash = stable_projection_hash(payload.projection)
+    if payload.projection_hash and payload.projection_hash != computed_hash:
+        raise HTTPException(status_code=422, detail="EVALUATION_PROJECTION_HASH_MISMATCH")
+    try:
+        result = case_evidence_service.materialize_evaluation_projection(
+            case_id,
+            tenant_id,
+            evidence_id=payload.evidence_id,
+            pack_kind=payload.pack_kind,
+            source_id=payload.source_id,
+            source_ref=payload.source_ref,
+            projection=payload.projection,
+            content_hash=payload.content_hash,
+            source_bytes=payload.source_bytes,
+            synthetic=payload.synthetic,
+            observed_at=payload.observed_at,
+            actor_id=_request_principal(request),
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        raise HTTPException(status_code=409 if detail.endswith("CONFLICT") else 400, detail=detail) from exc
+    return APIResponse(data=result)
 
 
 @router.post("/api/v1/cases/{case_id}/campaigns")
@@ -891,20 +960,157 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
         item["projections"] = repo.list_evidence_projections(
             case_id, tenant_id, evidence_id=item.get("evidence_id"),
         ) if hasattr(repo, "list_evidence_projections") else []
+    dependency_graph = aggregate_dependency_graph(
+        evidence_items,
+        [
+            projection
+            for item in evidence_items
+            for projection in item.get("projections") or []
+        ],
+    )
     collection_proposals = repo.list_collection_proposals(case_id, tenant_id)
     collection_requests = repo.list_collection_requests(case_id, tenant_id)
     evidence_analyses = repo.list_evidence_analysis_runs(case_id, tenant_id)
+    analysis_count_by_evidence: dict[str, int] = {}
+    for analysis in evidence_analyses:
+        referenced_ids = {
+            str(item.get("evidence_id") or "")
+            for item in analysis.get("evidence_inputs") or []
+            if isinstance(item, dict) and item.get("evidence_id")
+        }
+        for evidence_id in referenced_ids:
+            analysis_count_by_evidence[evidence_id] = analysis_count_by_evidence.get(evidence_id, 0) + 1
+    for item in evidence_items:
+        item["analysis_count"] = analysis_count_by_evidence.get(str(item.get("evidence_id") or ""), 0)
+    investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
+    execution_units = repo.list_execution_units(case_id, tenant_id) if hasattr(repo, "list_execution_units") else []
+    fanout_runs = repo.list_fanout_runs(case_id, tenant_id)
     turns = repo.list_agent_runtime_turns(case_id, tenant_id)
     messages = repo.list_assistant_messages(case_id, tenant_id) if hasattr(repo, "list_assistant_messages") else []
     binding = repo.get_agent_runtime_binding(case_id, tenant_id)
-    active_turn = next((item for item in reversed(turns) if item.get("status") == "ROUTED"), None)
+    active_turn = next((
+        item for item in reversed(turns)
+        if item.get("status") in {"ACCEPTED", "ROUTED", "RUNNING"}
+    ), None)
     active_plan_steps = [item for item in (plan.get("steps") or []) if item.get("status") not in {
         "COMPLETED", "CANCELLED", "FAILED", "SUPERSEDED",
     }]
+    request_by_proposal = {
+        str(item.get("proposal_id") or ""): item for item in collection_requests
+    }
+    evidence_by_task: dict[str, list[str]] = {}
+    for item in evidence_items:
+        task_id = str(item.get("task_id") or "")
+        evidence_id = str(item.get("evidence_id") or "")
+        if task_id and evidence_id:
+            evidence_by_task.setdefault(task_id, []).append(evidence_id)
+
+    def proposal_goal(proposal: dict[str, Any]) -> dict[str, Any]:
+        proposal_id = str(proposal.get("proposal_id") or "")
+        request_item = request_by_proposal.get(proposal_id) or {}
+        task_id = str(request_item.get("task_id") or "")
+        evidence_ids = evidence_by_task.get(task_id, [])
+        proposal_status = str(proposal.get("status") or "PROPOSED")
+        request_status = str(request_item.get("status") or "")
+        awaiting = bool((proposal.get("validation_result") or {}).get("awaiting_execution_authority"))
+        if proposal_status == "REJECTED" or request_status in {
+            "FAILED", "DISPATCH_FAILED", "CANCELLED", "REJECTED",
+        }:
+            goal_status = "BLOCKED"
+        elif awaiting and not request_item:
+            goal_status = "WAITING_APPROVAL"
+        elif evidence_ids:
+            goal_status = "EVIDENCE_READY"
+        elif task_id or request_status in {"ACCEPTED", "DISPATCHED", "RUNNING"}:
+            goal_status = "COLLECTING"
+        else:
+            goal_status = "PROPOSED"
+        return {
+            "goal_id": proposal.get("plan_step_id") or f"proposal:{proposal_id}",
+            "title": proposal.get("information_goal") or "未命名信息目标",
+            "reason": proposal.get("reason_summary") or "Agent 提出的采集目标",
+            "status": goal_status,
+            "source": "proposal",
+            "collector_id": proposal.get("collector_id"),
+            "risk": proposal.get("expected_risk"),
+            "proposal_id": proposal_id,
+            "collection_request_id": request_item.get("collection_request_id"),
+            "task_id": task_id or None,
+            "evidence_ids": evidence_ids,
+        }
+
+    information_goals: list[dict[str, Any]] = []
+    proposal_by_step = {
+        str(item.get("plan_step_id") or ""): item
+        for item in collection_proposals if item.get("plan_step_id")
+    }
+    consumed_proposals: set[str] = set()
+    for index, step in enumerate(plan.get("steps") or []):
+        step_id = str(step.get("step_id") or "")
+        proposal = proposal_by_step.get(step_id)
+        if proposal:
+            goal = proposal_goal(proposal)
+            consumed_proposals.add(str(proposal.get("proposal_id") or ""))
+        else:
+            step_status = str(step.get("status") or "PROPOSED")
+            goal = {
+                "goal_id": step_id or f"plan:{index}",
+                "title": step.get("expected_information") or step.get("purpose") or f"信息目标 {index + 1}",
+                "reason": step.get("purpose") or "调查计划中的信息目标",
+                "status": {
+                    "COMPLETED": "RESOLVED", "RUNNING": "COLLECTING",
+                    "FAILED": "BLOCKED", "CANCELLED": "BLOCKED",
+                }.get(step_status, "PROPOSED"),
+                "source": "plan",
+                "collector_id": step.get("collector_id") or step.get("kind"),
+                "risk": step.get("risk"),
+                "proposal_id": None,
+                "collection_request_id": None,
+                "task_id": (step.get("task_ids") or [None])[-1],
+                "evidence_ids": evidence_by_task.get(str((step.get("task_ids") or [""])[-1]), []),
+            }
+        information_goals.append(goal)
+    for proposal in collection_proposals:
+        if str(proposal.get("proposal_id") or "") not in consumed_proposals:
+            information_goals.append(proposal_goal(proposal))
+    known_titles = {str(item.get("title") or "").strip().lower() for item in information_goals}
+    for gap in investigation_state["evidence_gaps"]:
+        title = str(gap.get("required_fact") or "").strip()
+        if title.lower() in known_titles:
+            continue
+        information_goals.append({
+            "goal_id": gap.get("gap_id"), "title": title or "未命名证据缺口",
+            "reason": gap.get("what_it_does_not_support") or gap.get("blocked_claim") or "需要补证",
+            "status": "RESOLVED" if gap.get("status") == "RESOLVED" else "BLOCKED" if gap.get("status") == "BLOCKING" else "PROPOSED",
+            "source": "gap", "collector_id": None, "risk": None,
+            "proposal_id": None, "collection_request_id": None, "task_id": None,
+            "evidence_ids": list(gap.get("observed_evidence") or []),
+        })
+        known_titles.add(title.lower())
+    for analysis in evidence_analyses:
+        for index, item in enumerate(analysis.get("next_collection_proposals") or []):
+            title = str(item.get("information_goal") or item.get("title") or "").strip()
+            if not title or title.lower() in known_titles:
+                continue
+            information_goals.append({
+                "goal_id": f"analysis:{analysis.get('analysis_run_id')}:{index}",
+                "title": title, "reason": item.get("reason_summary") or "Evidence 分析提出的下一目标",
+                "status": "PROPOSED", "source": "analysis",
+                "collector_id": item.get("collector_id"), "risk": item.get("expected_risk"),
+                "proposal_id": None, "collection_request_id": None, "task_id": None,
+                "evidence_ids": [],
+            })
+            known_titles.add(title.lower())
+    waiting_proposal = next((
+        item for item in collection_proposals
+        if item.get("status") == "PROPOSED"
+        and (item.get("validation_result") or {}).get("awaiting_execution_authority")
+    ), None)
     return APIResponse(data={
         "case_projection_version": (
             int(case.get("row_version") or 0) + len(messages) + len(evidence_items)
             + len(collection_proposals) + len(collection_requests) + len(evidence_analyses)
+            + len(investigation_state["evidence_gaps"]) + len(execution_units) + len(fanout_runs)
         ),
         "revisions": {
             "case_command": case.get("case_command_revision") or 1,
@@ -926,16 +1132,41 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
             "status": active_plan_steps[0].get("status") if active_plan_steps else None,
         },
         "next_action": None,
-        "user_action_required": None,
+        "user_action_required": ({
+            "kind": "collection_approval",
+            "proposal_id": waiting_proposal.get("proposal_id"),
+            "summary": waiting_proposal.get("information_goal"),
+        } if waiting_proposal else None),
         "plan": plan,
+        "information_goals": information_goals,
         "campaign": {},
         "collection_proposals": collection_proposals,
         "collection_requests": collection_requests,
         "evidence": evidence_items,
         "evidence_analyses": evidence_analyses,
+        "hypothesis_graph": investigation_state["hypothesis_graph"],
+        "hypotheses": investigation_state["hypothesis_graph"].get("hypotheses") or [],
+        "evidence_gaps": investigation_state["evidence_gaps"],
+        "causal_graph": investigation_state["causal_graph"] or {},
+        "dependency_graph": dependency_graph,
+        "conclusion": investigation_state["conclusion"],
+        "recommendations": investigation_state["recommendations"],
+        "execution_units": execution_units,
+        "fanout_runs": fanout_runs,
         "messages": messages,
+        "runtime_turns": turns,
         "last_event_seq": max([int(item.get("case_event_seq") or 0) for item in repo.list_case_events(case_id, tenant_id, limit=200) or []] or [0]),
     })
+
+
+@router.get("/api/v1/cases/{case_id}/dependency-graph")
+def get_case_dependency_graph(case_id: str, request: Request) -> APIResponse:
+    """Return the active, evidence-backed communication graph for one Case."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    return APIResponse(data=case_dependency_graph_snapshot(repo, case_id, tenant_id))
 
 
 @router.post("/api/v1/cases/{case_id}/collection-proposals/{proposal_id}/decision")

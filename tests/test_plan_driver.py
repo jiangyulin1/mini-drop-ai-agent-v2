@@ -54,7 +54,10 @@ def _create_case(client: TestClient, *, cluster: bool = False) -> dict:
 def _register_agent() -> None:
     repo.register_agent(
         "agent-a", "node-a", "192.168.10.11", version="0.3.0",
-        capabilities=["sys_metrics", "service:checkout", "fault_domain:zone-a"],
+        capabilities=[
+            "sys_metrics", "log_scan", "runtime_snapshot", "memory_smaps",
+            "service:checkout", "fault_domain:zone-a",
+        ],
     )
 
 
@@ -105,6 +108,7 @@ def test_driver_dispatches_read_low_steps_to_tasks(client: TestClient):
     assert len(data["dispatched"]) == 2
     assert all(d["kind"] == "single" for d in data["dispatched"])
     assert all(d["status"] == "RUNNING" for d in data["dispatched"])
+    assert all(d["proposal_id"] and d["collection_request_id"] for d in data["dispatched"])
     # Step 状态机推进
     steps = client.get(f"/api/v1/cases/{case['case_id']}/plans/current").json()["data"]["steps"]
     by_id = {s["step_id"]: s for s in steps}
@@ -112,6 +116,11 @@ def test_driver_dispatches_read_low_steps_to_tasks(client: TestClient):
     # 每个 Step 有独立 Task
     for d in data["dispatched"]:
         assert d["task_id"]
+    proposals = repo.list_collection_proposals(case["case_id"], "tenant-a")
+    requests = repo.list_collection_requests(case["case_id"], "tenant-a")
+    assert {item["plan_step_id"] for item in proposals} == set(step_ids)
+    assert {item["plan_step_id"] for item in requests} == set(step_ids)
+    assert all(item["plan_revision"] == plan["plan_revision"] for item in requests)
 
 
 def test_task_done_wake_marks_step_completed(client: TestClient):

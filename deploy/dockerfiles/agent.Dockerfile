@@ -20,11 +20,13 @@ COPY pyproject.toml README.md ./
 COPY server/ ./server/
 COPY agent/ ./agent/
 COPY analyzer/ ./analyzer/
+COPY mini_drop_contracts/ ./mini_drop_contracts/
 COPY mini_drop_observability/ ./mini_drop_observability/
 RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
     pip install --no-cache-dir -e . "grpcio-tools>=1.80,<1.81"
 
 COPY proto/ ./proto/
-RUN cd proto && bash compile.sh
+COPY scripts/compile_proto.py ./scripts/compile_proto.py
+RUN python scripts/compile_proto.py
 
 CMD ["python", "-m", "agent.mini_drop_agent.main"]

@@ -59,6 +59,7 @@ from server.app.http.auth import (
 from server.app.logging_utils import log_event
 from server.app.runtime_services import (
     case_supervision_repository,
+    collection_supervisor,
     diagnosis_orchestrator,
     fanout_service,
     investigation_plan_service,
@@ -242,6 +243,7 @@ PLAN_DRIVER = PlanDriver(
     investigation_plan_service,
     fanout_service,
     target_resolver,
+    collection_supervisor,
 )
 
 

@@ -1,25 +1,33 @@
 import { Suspense, lazy } from "react";
 import { Spin } from "antd";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import OperationsOverview from "./pages/OperationsOverview";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const AuditLogs = lazy(() => import("./pages/AuditLogs"));
 const TaskResult = lazy(() => import("./pages/TaskResult"));
-const DiagnosisHistory = lazy(() => import("./pages/DiagnosisHistory"));
 const AIDiagnosis = lazy(() => import("./pages/AIDiagnosis"));
 const AgentDetail = lazy(() => import("./pages/AgentDetail"));
 const Settings = lazy(() => import("./pages/Settings"));
 const AgentsOverview = lazy(() => import("./pages/AgentsOverview"));
 const RuntimeConsole = lazy(() => import("./pages/RuntimeConsole"));
-const AboutAgent = lazy(() => import("./pages/AboutAgent"));
 
 const Lazy = ({ children }) => (
   <Suspense fallback={<Spin size="large" style={{ display: "block", margin: "40px auto" }} />}>
     {children}
   </Suspense>
 );
+
+export function LegacyCaseRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: "/cases", search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
 
 export default function Router() {
   return (
@@ -39,14 +47,14 @@ export default function Router() {
           />
           {/* Legacy aliases: redirect so layout, sidebar highlighting and
               browser history all resolve to a single canonical URL. */}
-          <Route path="/ai-diagnosis" element={<Navigate to="/cases" replace />} />
+          <Route path="/ai-diagnosis" element={<LegacyCaseRedirect />} />
           <Route
             path="/ai-cases"
-            element={<Navigate to="/cases" replace />}
+            element={<LegacyCaseRedirect />}
           />
           <Route
             path="/diagnoses"
-            element={<Lazy><DiagnosisHistory /></Lazy>}
+            element={<Navigate to="/cases" replace />}
           />
           <Route
             path="/agent/:agentId"
@@ -54,7 +62,7 @@ export default function Router() {
           />
           <Route path="/agents" element={<Lazy><AgentsOverview /></Lazy>} />
           <Route path="/runtime" element={<Lazy><RuntimeConsole /></Lazy>} />
-          <Route path="/about" element={<Lazy><AboutAgent /></Lazy>} />
+          <Route path="/about" element={<Navigate to="/" replace />} />
           <Route
             path="/settings"
             element={<Lazy><Settings /></Lazy>}

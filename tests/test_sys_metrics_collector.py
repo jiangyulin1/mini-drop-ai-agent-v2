@@ -38,7 +38,8 @@ class TestSysMetricsCollector:
         def pid_exists(pid):
             return True
 
-        with mock.patch.object(collector, "_pid_exists", side_effect=pid_exists), \
+        with mock.patch("agent.mini_drop_agent.collectors.sys_metrics.platform.system", return_value="Linux"), \
+             mock.patch.object(collector, "_pid_exists", side_effect=pid_exists), \
              mock.patch.object(collector, "_read_proc_stat_total", return_value={"user": 1000, "system": 500, "idle": 8500, "iowait": 100}), \
              mock.patch.object(collector, "_read_loadavg", return_value={"load1m": 0.5, "load5m": 0.3, "load15m": 0.2}), \
              mock.patch.object(collector, "_read_process_metrics", return_value={"num_threads": 12, "fd_count": 45, "vmrss_kb": 102400}), \
@@ -54,7 +55,8 @@ class TestSysMetricsCollector:
         collector = SysMetricsCollector()
         collector.OUTPUT_BASE = str(tmp_path)
 
-        with mock.patch.object(collector, "_pid_exists", return_value=True), \
+        with mock.patch("agent.mini_drop_agent.collectors.sys_metrics.platform.system", return_value="Linux"), \
+             mock.patch.object(collector, "_pid_exists", return_value=True), \
              mock.patch.object(collector, "_read_proc_stat_total", return_value={"user": 1000, "system": 300, "idle": 8700, "iowait": 50}), \
              mock.patch.object(collector, "_read_loadavg", return_value={"load1m": 1.0, "load5m": 0.8, "load15m": 0.6}), \
              mock.patch.object(collector, "_read_process_metrics", return_value={
@@ -91,7 +93,8 @@ class TestSysMetricsCollector:
             return {"fd_count": fd_values[idx] if idx < len(fd_values) else fd_values[-1],
                     "num_threads": 5, "vmrss_kb": 10240}
 
-        with mock.patch.object(collector, "_pid_exists", side_effect=pid_exists), \
+        with mock.patch("agent.mini_drop_agent.collectors.sys_metrics.platform.system", return_value="Linux"), \
+             mock.patch.object(collector, "_pid_exists", side_effect=pid_exists), \
              mock.patch.object(collector, "_read_proc_stat_total", return_value={"user": 500, "system": 200, "idle": 9300, "iowait": 0}), \
              mock.patch.object(collector, "_read_loadavg", return_value={"load1m": 0.1, "load5m": 0.1, "load15m": 0.1}), \
              mock.patch.object(collector, "_read_process_metrics", side_effect=proc_metrics), \

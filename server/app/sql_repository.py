@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
@@ -104,6 +105,7 @@ def _collection_queue_ttl_sec(duration_sec: int) -> int:
 INITIAL_EVIDENCE_ARTIFACT_TYPES = {
     "top_json", "ebpf_metrics", "sys_metrics", "memory_json",
     "network_metrics", "database_metrics", "runtime_metrics", "log_scan",
+    "network_discovery", "dependency_graph",
 }
 
 RECOVERY_PLAN_TRANSITIONS = {
@@ -948,6 +950,21 @@ class SqlRepository(SqlRepositoryV6Mixin):
             rows = query.order_by(CaseEventModel.id.asc()).limit(limit).all()
             return [row.to_dict() for row in rows]
 
+    def get_case_event_high_water(self, case_id: str, tenant_id: str) -> int | None:
+        """Return the latest case-event sequence without reading payloads."""
+        with self._read_session() as session:
+            exists = session.query(IncidentCaseModel.id).filter(
+                IncidentCaseModel.id == case_id,
+                IncidentCaseModel.tenant_id == tenant_id,
+            ).first()
+            if exists is None:
+                return None
+            value = session.query(func.max(CaseEventModel.case_event_seq)).filter(
+                CaseEventModel.case_id == case_id,
+                CaseEventModel.tenant_id == tenant_id,
+            ).scalar()
+            return int(value or 0)
+
     # ── Case Resource Attachments（E1 统一数据入口）────────────────────
     def upsert_case_attachment(self, case_id: str, tenant_id: str,
                                payload: dict[str, Any]) -> dict[str, Any]:
@@ -1610,6 +1627,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
         summary: str,
         evidence_refs: list[str],
         limitations: list[str] | None = None,
+        conclusion_state: str = "PARTIALLY_CONFIRMED",
         actor_id: str = "mini-drop-pi-runtime",
     ) -> dict[str, Any] | None:
         """Persist a structured Agent conclusion draft on the Case aggregate."""
@@ -1626,8 +1644,22 @@ class SqlRepository(SqlRepositoryV6Mixin):
             }
             case.current_activity_json = {
                 "phase": "conclusion_drafted",
-                "message": "Agent 已提交结论草稿，等待用户确认或继续追问",
+                "message": "Agent 已提交证据约束的结论，等待处置或继续追问",
             }
+            if str(conclusion_state).upper() == "INSUFFICIENT_EVIDENCE":
+                case.state = "INSUFFICIENT_EVIDENCE"
+                case.state_reason = "agent_finished_with_insufficient_evidence"
+                case.need_user_json = {
+                    "required": True,
+                    "question": "当前证据不足。请补充范围、时间窗或新的可观测数据后新开调查。",
+                }
+            elif case.state not in {"PAUSED", "STOPPED", "RESOLVED"}:
+                case.state = "WAITING_USER"
+                case.state_reason = "agent_conclusion_ready"
+                case.need_user_json = {
+                    "required": True,
+                    "question": "结论已形成。请审查证据、选择恢复建议，或继续追问。",
+                }
             case.row_version += 1
             case.updated_at = now
             session.flush()
@@ -1637,6 +1669,42 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 "state": case.state,
                 "row_version": case.row_version,
             })
+            return case.to_dict()
+
+    def mark_incident_case_investigating(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        actor_id: str = "mini-drop-agent-runtime",
+    ) -> dict[str, Any] | None:
+        """Project an accepted runtime Turn onto the user-facing Case state."""
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                return None
+            if case.state in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
+                return case.to_dict()
+            changed = case.state != "INVESTIGATING"
+            case.state = "INVESTIGATING"
+            case.state_reason = "agent_runtime_turn_accepted"
+            case.current_activity_json = {
+                "status": "investigating",
+                "message": "AI 正在选择信息目标、采集 Evidence 并验证假设",
+            }
+            case.need_user_json = {"required": False, "question": None}
+            case.updated_at = now
+            if changed:
+                case.row_version += 1
+            session.flush()
+            if changed:
+                self._notify_after_commit(session, "case_summary_updated", {
+                    "case_id": case.id,
+                    "tenant_id": tenant_id,
+                    "state": case.state,
+                    "actor_id": actor_id,
+                })
             return case.to_dict()
 
     # ── Canonical Case Evidence（G3）────────────────────────────────────

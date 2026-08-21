@@ -8,6 +8,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 
 def main() -> None:
@@ -16,6 +17,13 @@ def main() -> None:
         database = Path(work) / "schema.db"
         os.environ["DATABASE_URL"] = f"sqlite:///{database.as_posix()}"
         config = Config(str(project_root / "alembic.ini"))
+        heads = ScriptDirectory.from_config(config).get_heads()
+        too_long = [revision for revision in heads if len(revision) > 32]
+        if too_long:
+            raise RuntimeError(
+                "Alembic revision exceeds legacy PostgreSQL VARCHAR(32): "
+                + ", ".join(too_long)
+            )
         command.upgrade(config, "head")
         command.check(config)
     print("Alembic schema drift check passed.")

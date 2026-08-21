@@ -35,6 +35,7 @@ from server.app.http.auth import (
     require_role as _require_role,
 )
 from server.app.runtime_services import (
+    case_evidence_service,
     diagnosis_orchestrator,
     mcp_client_manager,
     mcp_evidence_service,
@@ -384,6 +385,17 @@ def query_mcp_for_fact(payload: dict[str, Any], request: Request) -> APIResponse
         principal_id=_request_principal(request),
         native_collectors=[str(x) for x in (payload.get("native_collectors") or [])],
     )
+    envelope = result.get("envelope")
+    case_id = str(payload.get("case_id") or "")
+    if envelope and case_id:
+        if repo.get_incident_case(case_id, tenant_id) is None:
+            raise HTTPException(status_code=404, detail="Case 不存在")
+        try:
+            result["canonical_evidence_id"] = case_evidence_service.materialize_source_envelope(
+                case_id, tenant_id, envelope=envelope, actor_id=_request_principal(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     return APIResponse(data=result)
 
 

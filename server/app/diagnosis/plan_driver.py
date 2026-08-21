@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from mini_drop_contracts import get_collector_spec
 from server.app.agent_runtime.policy import RuntimePolicy, resolve_runtime_policy
 from server.app.diagnosis.cluster_scope import EnvironmentProfile, MembershipSnapshot, TargetResolver
 from server.app.diagnosis.fanout import FanoutCollectionRun, FanoutCollectionService
@@ -46,11 +47,13 @@ class PlanDriver:
         investigation_plan_service: Any,
         fanout_service: FanoutCollectionService,
         target_resolver: TargetResolver,
+        collection_supervisor: Any,
     ):
         self._repo = repository
         self._plan_service = investigation_plan_service
         self._fanout = fanout_service
         self._resolver = target_resolver
+        self._collection_supervisor = collection_supervisor
 
     # ── 主入口 ─────────────────────────────────────────────────────────
 
@@ -155,29 +158,42 @@ class PlanDriver:
         target = self._resolve_single_target(case_id, tenant_id, step)
         if target is None:
             return {"step_id": step_id, "status": "NO_TARGET", "reason": "TARGET_UNAVAILABLE"}
-        from server.app.schemas import CreateTaskRequest
-        task = self._repo.create_task(
-            CreateTaskRequest(
-                name=f"plan:{collector_id}:{target['agent_id']}"[:120],
-                agent_id=target["agent_id"],
-                target_pid=target["pid"],
-                collector_type=collector_id,
-                sample_rate=11,
-                duration_sec=15,
-                options={
-                    "source": "plan_driver",
-                    "diagnosis_step_id": step_id,
-                    "plan_step_id": step_id,
-                    "case_id": case_id,
-                    "tenant_id": tenant_id,
-                    "plan_revision": plan_revision,
-                    "scope_revision": scope_revision,
-                },
-            ),
-            idempotency_key=f"plan-step:{step_id}",
+        spec = get_collector_spec(collector_id)
+        if spec is None:
+            self._block_step(case_id, tenant_id, step_id)
+            return {"step_id": step_id, "status": "REJECTED", "reason": "COLLECTOR_NOT_REGISTERED"}
+        requested_goal = str(step.get("expected_information") or "").strip()
+        information_goal = requested_goal if requested_goal in spec.information_goals else spec.information_goals[0]
+        case = self._repo.get_incident_case(case_id, tenant_id) or {}
+        binding = self._repo.get_agent_runtime_binding(case_id, tenant_id) or {}
+        result = self._collection_supervisor.propose_and_dispatch(
+            case_id=case_id, tenant_id=tenant_id, collector_id=collector_id,
+            target_selector={"agent_id": target["agent_id"], "target_pid": target["pid"]},
+            parameters={"target_pid": target["pid"]}, information_goal=information_goal,
+            reason_summary=str(step.get("purpose") or requested_goal or information_goal),
+            runtime_generation=int(binding.get("runtime_generation") or 1),
+            expected_control_revision=int(case.get("control_revision") or 1),
+            expected_scope_revision=scope_revision,
+            idempotency_key=f"plan-step:{step_id}", allowed_risk_levels={"R0", "R1"},
+            plan_step_id=step_id, plan_revision=plan_revision,
         )
+        task = result.get("task")
+        proposal = result.get("proposal") or {}
+        request = result.get("collection_request") or {}
+        if task is None:
+            self._block_step(case_id, tenant_id, step_id)
+            errors = (proposal.get("validation_result") or {}).get("errors") or []
+            return {
+                "step_id": step_id, "status": "REJECTED",
+                "reason": ",".join(errors) or "COLLECTION_NOT_DISPATCHED",
+                "proposal_id": proposal.get("proposal_id"), "kind": "single",
+            }
         self._mark_running(case_id, tenant_id, step_id)
-        return {"step_id": step_id, "status": "RUNNING", "task_id": task.id, "kind": "single"}
+        return {
+            "step_id": step_id, "status": "RUNNING", "task_id": task.id, "kind": "single",
+            "proposal_id": proposal.get("proposal_id"),
+            "collection_request_id": request.get("collection_request_id"),
+        }
 
 
     def _mark_running(self, case_id: str, tenant_id: str, step_id: str) -> None:
@@ -190,6 +206,14 @@ class PlanDriver:
             except ValueError:
                 # DISPATCHING → RUNNING 只在 QUEUED→DISPATCHING 已发生时执行
                 continue
+
+    def _block_step(self, case_id: str, tenant_id: str, step_id: str) -> None:
+        try:
+            self._plan_service.transition_step(
+                case_id, tenant_id, step_id, "BLOCKED", actor_id="mini-drop-plan-driver",
+            )
+        except ValueError:
+            pass
 
     def _resolve_single_target(self, case_id: str, tenant_id: str,
                                step: dict[str, Any]) -> Optional[dict[str, Any]]:

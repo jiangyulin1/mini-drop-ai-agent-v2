@@ -207,7 +207,7 @@ export default function OperationsOverview() {
           </Card>
         </Col>
         <Col xs={24} xl={9}>
-          <Card className={styles.primaryCard} title={<Space><RobotOutlined />Agent 采集能力</Space>} extra={<Tag color={aiReady ? "purple" : "default"}>{aiReady ? "AI 已就绪" : "AI 未配置"}</Tag>}>
+          <Card className={styles.primaryCard} title={<Space><RobotOutlined />Agent 采集能力</Space>} extra={<Tag color={aiReady ? "purple" : "default"}>{aiReady ? "AI 已就绪" : "按部署配置"}</Tag>}>
             <div className={styles.runtimeIdentity}>
               <div><span>Runtime</span><strong>{data.runtime?.runtime_type || "—"}</strong></div>
               <div><span>版本</span><strong>{data.runtime?.runtime_version || flags.pi_runtime_version || "—"}</strong></div>
@@ -291,7 +291,7 @@ export default function OperationsOverview() {
             <div className={styles.quickLinks}>
               <Button onClick={() => navigate("/tasks")}>查看任务与 Evidence</Button>
               <Button onClick={() => navigate("/agents")}>查看在线 Agent</Button>
-              <Button onClick={() => navigate("/runtime")}>Runtime 配置</Button>
+              <Button onClick={() => navigate("/audit")}>操作记录</Button>
             </div>
           </Card>
         </Col>

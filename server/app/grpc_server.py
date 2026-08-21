@@ -35,6 +35,22 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(int(default))).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def grpc_bind_address(port: int) -> str:
+    """Return the gRPC bind address without changing the historic default.
+
+    ``MINI_DROP_GRPC_HOST`` is useful for a native local Control process where
+    the Agent port must not be reachable from the LAN.  Existing deployments
+    leave it unset and retain the previous ``0.0.0.0:<port>`` binding.
+    """
+    host = os.getenv("MINI_DROP_GRPC_HOST", "0.0.0.0").strip() or "0.0.0.0"
+    if host.startswith("[") and host.endswith("]"):
+        return f"{host}:{port}"
+    if ":" in host:
+        # gRPC requires brackets around a literal IPv6 host in host:port form.
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
 def _add_port(server: grpc.Server, address: str) -> int:
     """Add a gRPC port, optionally secured with TLS."""
     if _env_bool("MINI_DROP_GRPC_SECURE", default=False):
@@ -95,7 +111,7 @@ def serve(repo: Any, port: int = 50051) -> grpc.Server:
     hotmethod_pb2_grpc.add_HotmethodServicer_to_server(HotmethodService(repo), server)
     _register_control_service(server, repo)
 
-    _add_port(server, f"0.0.0.0:{port}")
+    _add_port(server, grpc_bind_address(port))
     server.start()
     return server
 
@@ -110,7 +126,7 @@ def serve_in_background(repo: Any, port: int = 50051) -> grpc.Server:
     hotmethod_pb2_grpc.add_HotmethodServicer_to_server(HotmethodService(repo), grpc_server)
     _register_control_service(grpc_server, repo)
 
-    _add_port(grpc_server, f"0.0.0.0:{port}")
+    _add_port(grpc_server, grpc_bind_address(port))
     grpc_server.start()
 
     return grpc_server

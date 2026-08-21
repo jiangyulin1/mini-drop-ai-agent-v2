@@ -67,6 +67,7 @@ STRUCTURED_ARTIFACT_TYPES = {
     "top_json", "ebpf_metrics", "sys_metrics", "memory_json",
     "network_metrics", "database_metrics", "runtime_metrics", "log_scan",
     "connection_probe",
+    "network_discovery", "dependency_graph",
 }
 ALLOWED_DIAGNOSIS_TRANSITIONS = {
     "CREATED": {"UNDERSTANDING", "USER_CANCELED", "FAILED"},

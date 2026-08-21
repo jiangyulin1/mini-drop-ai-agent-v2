@@ -167,6 +167,39 @@ class AttachResourcesRequest(StrictModel):
     purpose: Optional[str] = Field(default=None, max_length=1000)
 
 
+class EvaluationEvidenceImportRequest(StrictModel):
+    """Bounded local replay input for offline/low-bandwidth evaluations.
+
+    The endpoint accepting this object is disabled by default.  It stores a
+    compact projection only; raw PR packs remain on the evaluator's disk and
+    are never sent on each model turn.
+    """
+
+    evidence_id: str = Field(min_length=1, max_length=256)
+    pack_kind: str = Field(min_length=1, max_length=64)
+    source_id: str = Field(min_length=1, max_length=256)
+    source_ref: str = Field(min_length=1, max_length=1024)
+    projection: dict[str, Any] = Field(default_factory=dict)
+    projection_hash: Optional[str] = Field(default=None, min_length=64, max_length=64)
+    content_hash: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    source_bytes: int = Field(default=0, ge=0, le=50_000_000)
+    synthetic: bool = False
+    observed_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_projection(self):
+        # Keep the HTTP boundary bounded even when a caller bypasses the
+        # evaluator script.  The canonical raw pack is intentionally not an
+        # accepted field here.
+        encoded = json.dumps(self.projection, ensure_ascii=False, default=str)
+        if len(encoded.encode("utf-8")) > 512 * 1024:
+            raise ValueError("evaluation projection exceeds 512 KiB")
+        forbidden = {"oracle", "expected_mechanism", "expected_verdict"}
+        if any(str(key) in forbidden for key in self.projection):
+            raise ValueError("evaluation projection cannot contain private oracle fields")
+        return self
+
+
 class ExcludeAttachmentRequest(StrictModel):
     reason: str = Field(min_length=1, max_length=1000)
 

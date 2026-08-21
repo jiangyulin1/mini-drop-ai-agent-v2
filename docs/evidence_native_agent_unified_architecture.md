@@ -2,25 +2,28 @@
 
 > 状态：当前融合架构与改造合同
 > 固化日期：2026-08-20
-> 上位产品决策：`ai_collector_architecture_and_migration_plan.md`
-> 目标：融合旧 v2/v6 的可靠性骨架与当前 AI Collector 方向，不恢复 rules-first RCA 主链。
+> 上位产品决策：本文档
+> 目标：恢复并完成 2026-08-18 的受监督诊断 Agent，同时保留新版 Evidence/Collector 能力，不恢复 rules-first RCA 主链。
 
 ## 1. 统一结论
 
-Mini-Drop 的唯一在线主线是 Evidence-native Diagnostic Agent：模型负责识别缺失事实、选择下一项已注册采集能力、分析 Evidence 和决定停止；确定性代码负责身份、权限、范围、预算、调度、投影、引用验证和状态提交。
+Mini-Drop 的唯一在线主线是 Evidence-native Supervised Diagnostic Agent：模型负责维护假设与反证、识别缺失事实、提出调查计划、选择下一项已注册采集能力、分析 Evidence、建立因果解释并决定停止；确定性代码负责身份、权限、范围、预算、审批、调度、投影、引用验证和状态提交。Linux 深度采集是执行核心，不是产品能力边界。
 
 ```text
-Case goal / correction / existing Evidence
+Case goal / alert / correction / existing Evidence
+                    |
+                    v
+HypothesisRevision + EvidenceGap + InvestigationPlanRevision
                     |
                     v
 Pi Agent Runtime (reasoning and information-gain decisions)
                     |
                     v
-Tool Gateway + RuntimePolicy
+Tool Gateway + RuntimePolicy + Supervisor
   schema | scope | risk | budget | revision | generation | approval
                     |
                     v
-CollectionSupervisor (the only AI collection write authority)
+PlanStep -> CollectionProposal -> CollectionRequest
                     |
                     v
 Task -> Attempt -> Agent Collector -> Artifact
@@ -32,7 +35,13 @@ CaseEvidence -> immutable identity + versioned Projection
 EvidenceAnalysisRun -> cited facts / conflicts / limits / next gap
                     |
                     v
-Human review -> new revision -> stale fencing -> exact continuation
+CausalGraphRevision -> ConclusionRevision / explicit abstention
+                    |
+                    v
+Optional RecoveryPlan -> approval -> execution -> repeated verification
+                    |
+                    v
+Human review/correction -> stale fencing -> exact continuation or Case close
 ```
 
 规则不再产生或排名根因。规则继续承担三类不可替代的职责：安全策略、事实合同验证和确定性数据投影。
@@ -51,7 +60,7 @@ Human review -> new revision -> stale fencing -> exact continuation
 | 重复回答稳定性 | 保留 | 使用 canonical input fingerprint 复用运行与结果 |
 | 外部 Holdout、Oracle 隔离、签名 | 保留 | 正式能力声明的信任边界 |
 | RulesOnlyReasoner / RCA 候选排名 | 退出在线主线 | 仅允许作为离线实验基线 |
-| 自动恢复执行 | 退出当前主线 | 未来作为独立受审批能力立项 |
+| 受审批恢复执行与重复验证 | 保留 | 只能从 Evidence-bound Conclusion 生成，沿用 digest、operation key、rollback 与 repeated verification |
 | 多套 diagnosis strategy 标签 | 退出产品主线 | 只在评测 Harness 中作为明确实现差异的实验条件 |
 
 旧文档是需求与失败经验的来源，不是运行时真源。任何旧能力重新进入默认链路前，必须证明它不与本合同的单一权威和 Evidence 语义冲突。
@@ -81,13 +90,21 @@ Human review -> new revision -> stale fencing -> exact continuation
 
 所有由 AI 发起的采集最终只能通过这里创建 Task。人工普通 Task、兼容迁移和系统修复工具可以保留独立入口，但必须明确标注来源，不能伪装成 Agent 自主行为。
 
-### 3.3 Evidence Store
+`InvestigationPlanService` 不得绕过该权威：普通 Plan Step 必须按 `PlanStep -> CollectionProposal -> CollectionRequest -> Task` 编译，并在 Proposal、Request、Task 上保存 `plan_step_id` 与 `plan_revision`。集群步骤继续走 MembershipSnapshot/Fanout，但服从同一 scope、risk 与 Evidence 语义。
+
+### 3.3 Investigation State
+
+`InvestigationStateService` 是模型提出假设、证据缺口和因果图的唯一状态入口。它验证 Case control/scope revision、ACTIVE Evidence 引用、图节点/边端点和大小上限；模型提出的角色与服务端 verifier 角色分别保存。`finish_investigation` 使用真实 blocker gap、未区分替代假设、因果边状态和 ClaimEvidenceBinding 决定最终状态。
+
+`INSUFFICIENT_EVIDENCE` 是合法终态：只有该状态可以在零 Evidence 时提交，并且必须包含明确 abstention reason。知识与 Skill 只能进入策略上下文，不能算作当前 Evidence。
+
+### 3.4 Evidence Store
 
 `Artifact` 是原始执行产物，`CaseEvidence` 是 Case 内稳定身份，`EvidenceProjection` 是供模型和 UI 使用的有界确定性视图。三者不能混为一张“工具结果”记录。
 
 Evidence 至少包含 source、target、event/ingest time、raw locator、content hash、projection hash、schema、producer、completeness、trust 和 lineage。物理删除不属于普通产品操作；人工使用 review revision 进行 `TRUSTED / LOW_TRUST / EXCLUDED / RESTORED` 治理。
 
-### 3.4 Evidence Analysis
+### 3.5 Evidence Analysis
 
 `EvidenceAnalysisRun` 固定以下输入：
 
@@ -142,15 +159,16 @@ QUEUED -> RUNNING -> COMPLETED
 Agent 每个 cycle 只做一个可解释的信息决策：
 
 ```text
-Observe snapshot
--> identify one decision-blocking fact
+Observe Case + hypothesis + gap + plan + Evidence + causal snapshot
+-> revise competing hypotheses and identify one decision-blocking fact
 -> compare eligible collectors by information gain / risk / cost
--> propose one collection or analyze current Evidence
+-> revise Plan and propose one collection or analyze current Evidence
 -> persist decision record
 -> suspend on task/approval/review boundary
 -> wake from durable event
 -> rebuild snapshot and fence old generation
--> stop with cited result or explicit EvidenceGap
+-> update contradictions and causal graph
+-> stop with cited ConclusionRevision or explicit insufficient-Evidence result
 ```
 
 恢复依赖数据库状态和 Outbox/Wakeup，不依赖 Sidecar 进程内 memory。重复事件必须由 dedupe key 和 consumer effect 表保证 exactly-once effect；模型调用本身按 request/response idempotency 记录重放。
@@ -161,13 +179,15 @@ Observe snapshot
 |---|---|---|
 | CollectorSpec 单一产品目录 | `mini_drop_contracts/collector_spec.py` | 已形成基线，需继续消除旧注册表漂移 |
 | Proposal -> Request -> Task | `diagnosis/collection_supervisor.py` | 自动低风险与审批精确恢复已可用；Outbox 原子派发待补 |
-| Evidence/Projection | `diagnosis/case_evidence.py`、`evidence_projection.py` | 可用；继续推进 projection 真正版本化而非覆盖 |
+| Hypothesis/Gap/Causal state | `diagnosis/investigation_state.py`、`v6_routes.py` | 已恢复受控提案、Evidence 引用与 revision fence |
+| Plan -> Proposal lineage | `diagnosis/plan_driver.py`、migration `0028` | 单节点计划已统一经过 CollectionSupervisor；Fanout 保留 |
+| Evidence/Projection | `diagnosis/case_evidence.py`、`evidence_projection.py` | Task Artifact 与 Source/MCP Envelope 均进入 canonical Evidence；继续推进 projection 真正版本化而非覆盖 |
 | Analysis fingerprint/reuse/fence | `diagnosis/evidence_analysis.py`、`sql_repository_v6.py` | 已落地 |
 | Citation verifier | `diagnosis/evidence_analysis.py` | 已支持 projection 前缀和数组路径；需扩展到 interpretations/conflicts |
 | Review invalidation | `investigation_plan.py`、`sql_repository_v6.py` | 已落地事务级 stale 标记 |
 | Pi Runtime 与安全 Tool Gateway | `agent_runtime/`、`v6_routes.py` | 已落地骨架 |
 | Durable Outbox/Wakeup | v6 persistence 与 app factory jobs | 已有基础，Collector 派发尚未完全接入 |
-| Evidence UI | `EvidenceDrawer.jsx`、AI workspace | 单 Evidence 可预览/下载/分析；多证据工作流待补 |
+| Supervised Workspace | `CanonicalCaseWorkspace.jsx`、Workspace aggregate API | 已合并 Plan、采集、Evidence、分析、假设、Gap、因果、结论、执行覆盖与建议 |
 | 公平 Agent 评测 | `benchmarks/collector_agent_v1/` 与 replay scripts | 已形成基线，真实外部 Holdout 仍需正式执行 |
 
 ## 7. 迁移顺序与删除门禁
@@ -187,15 +207,15 @@ Observe snapshot
 
 ### Phase C：产品主线切换
 
-- Case 首屏只呈现 Evidence、Agent decision、collection timeline 和 cited report；
-- 旧 diagnosis/causal/recovery 入口默认关闭并标记 compatibility；
+- Case 首屏呈现调查计划、Agent decision、collection timeline、Evidence、假设/反证、Gap、因果图、cited conclusion 与受审批恢复；
+- 旧 rules candidate/ranking 和独立 DiagnosisOrchestrator 写入路径默认关闭并标记 compatibility；
 - README、API catalog 和前端不再把规则归因描述为 AI。
 
 ### Phase D：删除旧 RCA
 
 只有同时满足以下条件才能删除，而不是长期双写：
 
-1. Collector Agent 主链在公开集和外部 Holdout 上通过门禁；
+1. Supervised Diagnostic Agent 主链在公开集和外部 Holdout 上通过门禁；
 2. 生产入口不再读取旧 candidate/ranking 输出；
 3. 必需的历史报告可通过只读适配器访问；
 4. 旧表和 API 有迁移/弃用说明；

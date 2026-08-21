@@ -24,10 +24,12 @@ from server.app.diagnosis.strategies.registry import (
 
 def test_canonical_tool_catalog_is_unique_and_policy_partitioned():
     names = [item.name for item in TOOL_CATALOG]
-    assert len(names) == len(set(names)) == 12
+    assert len(names) == len(set(names)) == 20
     assert READ_ONLY_TOOL_NAMES.isdisjoint(PROPOSE_ONLY_TOOL_NAMES)
     assert "propose_collection" in PROPOSE_ONLY_TOOL_NAMES
+    assert "discover_topology" in PROPOSE_ONLY_TOOL_NAMES
     assert "get_case_snapshot" in READ_ONLY_TOOL_NAMES
+    assert "get_dependency_graph" in READ_ONLY_TOOL_NAMES
     assert "evaluate_hypotheses" not in names
     assert "rca_candidate_analysis" not in names
 

@@ -41,9 +41,7 @@ jobs:
       - name: Validate diagnosis testsets
         run: uv run --locked python scripts/validate_testsets.py testsets
       - name: Check cross-runtime registry consistency
-        run: |
-          uv run --locked python scripts/check_registry_consistency.py
-          uv run --locked python scripts/check_capability_registry.py
+        run: uv run --locked python scripts/check_registry_consistency.py
       - name: Validate Agent strategy experiment matrix
         run: |
           uv run --locked python scripts/run_agent_strategy_matrix.py --matrix benchmarks/agent_strategy_matrix.example.json --validate-only

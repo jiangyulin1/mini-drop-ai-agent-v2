@@ -24,11 +24,15 @@ import {
 import {
   ArrowLeftOutlined,
   BarChartOutlined,
+  CheckOutlined,
+  CloseOutlined,
   DownloadOutlined,
   ExperimentOutlined,
   FileTextOutlined,
+  MinusOutlined,
   RedoOutlined,
   ReloadOutlined,
+  RobotOutlined,
   StopOutlined,
 } from "@ant-design/icons";
 import { useParams, useNavigate } from "react-router-dom";
@@ -271,8 +275,8 @@ export default function TaskResult() {
       const current = task || {};
       const result = await createIncidentCase({
         title: `调查：${current.name || `Task ${taskId}`}`.slice(0, 256),
-        problem_description: `基于 Task ${taskId} 的采集数据定位根因`,
-        recovery_goal: "定位根因并给出可验证建议",
+        problem_description: `基于 Task ${taskId} 的采集数据定位问题并形成可验证结论`,
+        recovery_goal: "形成可验证结论与后续处置建议",
         run_mode: "COLLABORATE",
         environment: current.environment || "production",
         target_scope: {
@@ -282,7 +286,7 @@ export default function TaskResult() {
         initial_tasks: [taskId],
       });
       message.success("已创建调查 Case，进入持续调查工作台");
-      navigate(`/ai-diagnosis?case_id=${encodeURIComponent(result.data.case_id)}`);
+      navigate(`/cases?caseId=${encodeURIComponent(result.case_id)}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -313,7 +317,6 @@ export default function TaskResult() {
   }
 
   // ── 产物提取 ──────────────────────────────────────────
-
   const report = diagnosis?.report?.report || {};
   const rankedCauses = diagnosis?.report?.ranked_causes || [];
   const repairPlan = diagnosis?.repair_plan;
@@ -561,7 +564,7 @@ export default function TaskResult() {
 
   if (loading) {
     return (
-      <Space direction="vertical" size={SPACING.lg} style={{ width: "100%" }}>
+      <div className={`${styles.page} ${styles.loadingPage}`}>
         <Skeleton.Input active size="small" style={{ width: 200 }} />
         <div className={styles.skeletonCard}>
           <Skeleton active paragraph={{ rows: 4 }} />
@@ -572,32 +575,34 @@ export default function TaskResult() {
         <div className={styles.skeletonCard}>
           <Skeleton.Input active block style={{ height: FLAMEGRAPH_HEIGHT, borderRadius: 8 }} />
         </div>
-      </Space>
+      </div>
     );
   }
 
   // ── 主渲染 ────────────────────────────────────────────
 
   return (
-    <Space direction="vertical" size={SPACING.lg} style={{ width: "100%" }}>
+    <div className={styles.page}>
       {/* 页面标题 + 返回 + 自动刷新指示 */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <Space align="center">
+      <header className={styles.pageHeader}>
+        <div className={styles.pageHeaderMain}>
           <Button
             icon={<ArrowLeftOutlined />}
             type="text"
-            onClick={() => navigate("/")}
+            size="small"
+            onClick={() => navigate("/tasks")}
           >
             返回任务面板
           </Button>
           <Typography.Title level={4} style={{ margin: 0 }}>
             任务详情
           </Typography.Title>
-        </Space>
-        <Space>
+        </div>
+        <div className={styles.headerActions}>
           {isActive && <Tag color="blue">自动刷新中（任务运行中）</Tag>}
           {isActive && (
             <Button
+              size="small"
               danger
               icon={<StopOutlined />}
               loading={cancelling}
@@ -608,6 +613,20 @@ export default function TaskResult() {
           )}
           {task && (
             <Button
+              size="small"
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={creatingCase}
+              disabled={isActive}
+              onClick={createInvestigationCase}
+              title={isActive ? "任务完成后可将采集结果加入 AI 调查" : "以当前任务和产物创建持续调查"}
+            >
+              加入 AI 调查
+            </Button>
+          )}
+          {task && (
+            <Button
+              size="small"
               icon={<RedoOutlined />}
               loading={recreating}
               disabled={isActive}
@@ -617,8 +636,8 @@ export default function TaskResult() {
               使用相同参数重新采集
             </Button>
           )}
-        </Space>
-      </div>
+        </div>
+      </header>
 
       <ErrorAlert error={error} style={{ marginBottom: 0 }} onClose={() => setError("")} />
 
@@ -1039,8 +1058,9 @@ export default function TaskResult() {
         </Card>
       )}
 
-      {/* Legacy deterministic attribution */}
+      {/* 保留旧版规则归因，用于查看已有诊断记录和结构化证据。 */}
       <Card
+        className={styles.diagnosisCard}
         title={
           <Space>
             <ExperimentOutlined style={{ color: COLORS.primary }} />
@@ -1049,18 +1069,20 @@ export default function TaskResult() {
         }
         size="small"
         extra={
-          <Space>
+          <Space wrap className={styles.diagnosisActions}>
             {diagnoses.length > 0 && <Tag>{diagnoses.length} 次诊断</Tag>}
             <Button
-              icon={<ExperimentOutlined />}
+              icon={<RobotOutlined />}
               loading={creatingCase}
+              disabled={isActive}
               onClick={createInvestigationCase}
               size="small"
             >
-              创建调查 Case
+              加入 AI 调查
             </Button>
             <Tooltip title="刷新诊断报告">
               <Button
+                aria-label="刷新诊断报告"
                 icon={<ReloadOutlined />}
                 size="small"
                 onClick={refreshDiagnosis}
@@ -1072,12 +1094,11 @@ export default function TaskResult() {
       >
         {!diagnosis ? (
           <Empty
-            description="暂无诊断报告，点击「创建调查 Case」基于当前证据进入 AI 持续调查"
+            description="暂无兼容规则归因报告，可将当前证据加入 AI 持续调查"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           />
         ) : (
           <Space direction="vertical" size={SPACING.lg} style={{ width: "100%" }}>
-            {/* 诊断元数据 */}
             <Descriptions column={{ xs: 1, sm: 2, md: 4 }} size="small">
               <Descriptions.Item label="诊断 ID">
                 <Typography.Text copyable={{ text: diagnosis.run?.id }} style={{ fontSize: 12 }}>
@@ -1085,12 +1106,10 @@ export default function TaskResult() {
                 </Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label="状态">
-                <StatusTag
-                  status={diagnosis.run?.status === "DONE" ? "DONE" : "FAILED"}
-                />
+                <StatusTag status={diagnosis.run?.status || "UNKNOWN"} />
               </Descriptions.Item>
               <Descriptions.Item label="模型">
-                <Tag>{diagnosis.run?.model_name}</Tag>
+                <Tag>{diagnosis.run?.model_name || "-"}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="校验">
                 <Tag color={diagnosis.run?.validated ? "green" : "orange"}>
@@ -1099,7 +1118,6 @@ export default function TaskResult() {
               </Descriptions.Item>
             </Descriptions>
 
-            {/* 摘要 */}
             <Alert
               type={historicalFlamegraphMismatch || report.not_enough_evidence ? "warning" : "info"}
               message={
@@ -1130,9 +1148,9 @@ export default function TaskResult() {
               showIcon
             />
 
-            {/* 证据概览 */}
-            <Card size="small" title="本次归因实际使用了什么">
-              <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <section className={styles.evidenceSummary}>
+              <Typography.Text strong>本次归因实际使用了什么</Typography.Text>
+              <Space direction="vertical" size={8} style={{ width: "100%", marginTop: 8 }}>
                 <Space wrap>
                   <Tag color="green">已获取 {evidenceOverview.available}</Tag>
                   <Tag color={evidenceOverview.missing > 0 ? "red" : "default"}>
@@ -1145,9 +1163,8 @@ export default function TaskResult() {
                   才会计为缺失；其他采集器的数据不会被当成任务失败。
                 </Typography.Text>
               </Space>
-            </Card>
+            </section>
 
-            {/* 归因列表 */}
             {rankedCauses.length > 0 && (
               <Table
                 rowKey={(record) => record.cause_id}
@@ -1259,33 +1276,37 @@ export default function TaskResult() {
               />
             )}
 
-            {/* 反馈 */}
-            <Space>
+            <Space wrap>
               <Button
+                aria-label="标记诊断为正确"
+                icon={<CheckOutlined />}
                 size="small"
                 onClick={() => sendFeedback("correct", topCause?.cause_id)}
                 disabled={!topCause}
               >
-                👍 正确
+                正确
               </Button>
               <Button
+                aria-label="标记诊断为部分正确"
+                icon={<MinusOutlined />}
                 size="small"
                 onClick={() => sendFeedback("partial", topCause?.cause_id)}
                 disabled={!topCause}
               >
-                🔶 部分正确
+                部分正确
               </Button>
               <Button
+                aria-label="标记诊断为错误"
+                icon={<CloseOutlined />}
                 size="small"
                 danger
                 onClick={() => sendFeedback("wrong", topCause?.cause_id)}
                 disabled={!topCause}
               >
-                👎 错误
+                错误
               </Button>
             </Space>
 
-            {/* 可折叠详情 */}
             <Collapse
               ghost
               items={[
@@ -1334,15 +1355,7 @@ export default function TaskResult() {
                                   key: "raw",
                                   label: "查看原始结构化结果",
                                   children: (
-                                    <pre
-                                      style={{
-                                        margin: 0,
-                                        maxHeight: 280,
-                                        overflow: "auto",
-                                        whiteSpace: "pre-wrap",
-                                        wordBreak: "break-word",
-                                      }}
-                                    >
+                                    <pre className={styles.rawDiagnosisResult}>
                                       {JSON.stringify({
                                         evidence_ref: record.evidence_ref,
                                         input: record.input,
@@ -1375,9 +1388,7 @@ export default function TaskResult() {
                       />
                       <Space wrap>
                         <Tag
-                          color={
-                            repairPlan.risk_level === "safe_auto" ? "green" : "orange"
-                          }
+                          color={repairPlan.risk_level === "safe_auto" ? "green" : "orange"}
                         >
                           {repairLabel(repairPlan.risk_level)}
                         </Tag>
@@ -1423,7 +1434,12 @@ export default function TaskResult() {
                               </Typography.Paragraph>
                             ),
                           },
-                          { title: "执行结果", dataIndex: "result", width: 160, render: (value) => value || "尚未执行" },
+                          {
+                            title: "执行结果",
+                            dataIndex: "result",
+                            width: 160,
+                            render: (value) => value || "尚未执行",
+                          },
                         ]}
                       />
                     </Space>
@@ -1436,6 +1452,7 @@ export default function TaskResult() {
           </Space>
         )}
       </Card>
-    </Space>
+
+    </div>
   );
 }

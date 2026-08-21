@@ -1,0 +1,90 @@
+# Low-bandwidth overlay for deploy/compose/jyl-secure.control.yml.
+#
+# The base file remains the source of truth for image names, TLS and required
+# credentials. This overlay only changes evaluation gates and upload behavior.
+# The env file passed to `docker compose --env-file` must provide the required
+# secrets in the base file; this overlay never contains credential values.
+
+services:
+  server:
+    # The live evaluator is host-side. Keep the direct HTTP control endpoint
+    # loopback-only; public traffic should continue through the TLS web proxy.
+    ports:
+      - "127.0.0.1:${MINI_DROP_SERVER_HOST_PORT:-8191}:8191"
+    environment:
+      # Pack-only evaluation does not need the analyzer readiness gate.
+      MINI_DROP_REQUIRE_ANALYZER: "${MINI_DROP_REQUIRE_ANALYZER:-0}"
+      MINI_DROP_ANALYZER_OFFLINE_TIMEOUT_SEC: "${MINI_DROP_ANALYZER_OFFLINE_TIMEOUT_SEC:-30}"
+      # Keep auth inputs explicit in the evaluation overlay. The base profile
+      # also requires them, so a blank protected env fails before startup.
+      MINI_DROP_API_KEY: "${MINI_DROP_API_KEY:?set MINI_DROP_API_KEY in an external env file}"
+      MINI_DROP_GRPC_TOKEN: "${MINI_DROP_GRPC_TOKEN:?set MINI_DROP_GRPC_TOKEN in an external env file}"
+
+      # Pi runtime and bounded model context.
+      MINI_DROP_AGENT_RUNTIME: "${MINI_DROP_AGENT_RUNTIME:-pi}"
+      # Containers address one another by service name; do not inherit the
+      # loopback URL used by the systemd example in the shared env template.
+      MINI_DROP_PI_RUNTIME_URL: "http://pi-sidecar:8899"
+      MINI_DROP_PI_RUNTIME_VERSION: "${MINI_DROP_PI_RUNTIME_VERSION:-0.84.2}"
+      MINI_DROP_PI_MODELS_PATH: "${MINI_DROP_PI_MODELS_PATH:-}"
+      MINI_DROP_PI_AUTH_PATH: "${MINI_DROP_PI_AUTH_PATH:-}"
+      MINI_DROP_PI_CONTEXT_MAX_CHARS: "${MINI_DROP_PI_CONTEXT_MAX_CHARS:-8000}"
+      MINI_DROP_AI_ENABLED: "${MINI_DROP_AI_ENABLED:-rca-only}"
+      MINI_DROP_AI_PROVIDER: "${MINI_DROP_AI_PROVIDER:-deepseek}"
+      MINI_DROP_AI_BASE_URL: "${MINI_DROP_AI_BASE_URL:-https://api.deepseek.com}"
+      MINI_DROP_AI_MODEL: "${MINI_DROP_AI_MODEL:-deepseek-v4-flash}"
+      MINI_DROP_NLP_ENABLED: "${MINI_DROP_NLP_ENABLED:-0}"
+      MINI_DROP_RCA_ENABLED: "${MINI_DROP_RCA_ENABLED:-1}"
+      MINI_DROP_SUMMARIZE_ENABLED: "${MINI_DROP_SUMMARIZE_ENABLED:-0}"
+      MINI_DROP_AI_CONTEXT_MAX_CHARS: "${MINI_DROP_AI_CONTEXT_MAX_CHARS:-8000}"
+      MINI_DROP_AI_CONTEXT_MAX_ITEMS: "${MINI_DROP_AI_CONTEXT_MAX_ITEMS:-5}"
+      MINI_DROP_AI_CONTEXT_MAX_STRING_CHARS: "${MINI_DROP_AI_CONTEXT_MAX_STRING_CHARS:-300}"
+
+      # Explicitly close optional network paths during the evaluation.
+      MINI_DROP_MCP_ENABLED: "${MINI_DROP_MCP_ENABLED:-0}"
+      MINI_DROP_AGENT_MCP_ENABLED: "${MINI_DROP_AGENT_MCP_ENABLED:-0}"
+      MINI_DROP_AGENT_CLUSTER_FANOUT_ENABLED: "${MINI_DROP_AGENT_CLUSTER_FANOUT_ENABLED:-0}"
+      MINI_DROP_AI_SOURCE_ACCESS_ENABLED: "${MINI_DROP_AI_SOURCE_ACCESS_ENABLED:-0}"
+      MINI_DROP_TRACING_ENABLED: "${MINI_DROP_TRACING_ENABLED:-0}"
+
+      # Agent concurrency and side-effect gates.
+      MINI_DROP_AGENT_AUTO_READ_LOW: "${MINI_DROP_AGENT_AUTO_READ_LOW:-0}"
+      MINI_DROP_AGENT_MAX_ACTIVE_CASES: "${MINI_DROP_AGENT_MAX_ACTIVE_CASES:-1}"
+      MINI_DROP_AGENT_MAX_FANOUT_TARGETS: "${MINI_DROP_AGENT_MAX_FANOUT_TARGETS:-1}"
+      MINI_DROP_AGENT_SKILLS_ENABLED: "${MINI_DROP_AGENT_SKILLS_ENABLED:-0}"
+      MINI_DROP_AGENT_SKILL_MAX_PER_TURN: "${MINI_DROP_AGENT_SKILL_MAX_PER_TURN:-0}"
+
+      # Evaluation import is disabled unless a short-lived token is injected.
+      MINI_DROP_EVAL_IMPORT_ENABLED: "${MINI_DROP_EVAL_IMPORT_ENABLED:-1}"
+      MINI_DROP_EVAL_IMPORT_TOKEN: "${MINI_DROP_EVAL_IMPORT_TOKEN:-}"
+
+      # The API key and Pi internal token are intentionally inherited from the
+      # required entries in the base Compose file.
+      MINI_DROP_API_AUTH_ENABLED: "${MINI_DROP_API_AUTH_ENABLED:-1}"
+      MINI_DROP_AUTH_COOKIE_SECURE: "${MINI_DROP_AUTH_COOKIE_SECURE:-1}"
+
+  analyzer:
+    environment:
+      # Avoid publishing generated analyzer artifacts for pack-only runs.
+      MINI_DROP_ANALYZER_UPLOAD: "${MINI_DROP_ANALYZER_UPLOAD:-0}"
+      MINI_DROP_TRACING_ENABLED: "${MINI_DROP_TRACING_ENABLED:-0}"
+
+  pi-sidecar:
+    # The live evaluator runs on the control host. Publish only on loopback so
+    # its health probe can reach the sidecar without making this port public.
+    ports:
+      - "127.0.0.1:${MINI_DROP_PI_SIDECAR_HOST_PORT:-8899}:8899"
+    environment:
+      # Keep Pi startup offline except for the configured completion request.
+      PI_OFFLINE: "${PI_OFFLINE:-1}"
+      MINI_DROP_PI_SIDECAR_PORT: "${MINI_DROP_PI_SIDECAR_PORT:-8899}"
+      # The sidecar calls the server over the Compose network, not its own
+      # loopback interface.
+      MINI_DROP_PI_INTERNAL_BASE: "http://server:8191"
+      MINI_DROP_PI_MODEL_PROVIDER: "${MINI_DROP_PI_MODEL_PROVIDER:-deepseek}"
+      MINI_DROP_PI_MODEL: "${MINI_DROP_PI_MODEL:-deepseek-v4-flash}"
+      MINI_DROP_PI_THINKING_LEVEL: "${MINI_DROP_PI_THINKING_LEVEL:-low}"
+      MINI_DROP_PI_MODELS_PATH: "${MINI_DROP_PI_MODELS_PATH:-}"
+      MINI_DROP_PI_AUTH_PATH: "${MINI_DROP_PI_AUTH_PATH:-}"
+      MINI_DROP_PI_CONTEXT_MAX_CHARS: "${MINI_DROP_PI_CONTEXT_MAX_CHARS:-8000}"
+      MINI_DROP_PI_RESET_SESSION_PER_TURN: "${MINI_DROP_PI_RESET_SESSION_PER_TURN:-1}"

@@ -19,8 +19,6 @@
 
 新增任何能力时，应在同一个变更中完成对应注册、实现、测试、文档和 CI 校验。
 
-> `scripts/check_capability_registry.py` 是 `scripts/check_registry_consistency.py` 的兼容别名，两者行为一致。
-
 ## 2. 新增 Agent Tool
 
 1. 在 `server/app/agent_runtime/catalog.py` 的 `TOOL_CATALOG` 增加 `ToolSpec`。

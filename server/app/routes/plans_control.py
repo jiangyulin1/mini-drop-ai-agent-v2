@@ -705,6 +705,42 @@ def run_incident_case_agent_turn(
     # v6 canonical Turn request contract: references, stable client command id,
     # requested disposition and after_attach semantics.
     references = list(payload.references or [])
+    intent = classify_turn(payload.message, payload.intent)
+    disposition, side_effect_policy, needs_user = route_disposition(
+        payload.message,
+        requested_disposition=payload.requested_disposition,
+        execute_safe_tools=payload.execute_safe_tools,
+        case_state=case["state"],
+    )
+    if references and payload.requested_disposition is None:
+        disposition = str(payload.after_attach or "ANSWER_ONLY").upper()
+        side_effect_policy = "READ_ONLY" if disposition == "ANSWER_ONLY" else (
+            "AUTO_READ_LOW" if payload.execute_safe_tools else "PROPOSE_ONLY"
+        )
+
+    # Reject a caller that asks for read-only output while simultaneously
+    # requesting an operation whose deterministic fallback can mutate Case
+    # state.  Validate before attaching references, so the rejected request
+    # leaves no durable side effects behind.
+    if (
+        disposition == "ANSWER_ONLY"
+        and payload.intent in {
+            AgentTurnIntent.INVESTIGATE,
+            AgentTurnIntent.CORRECT,
+            AgentTurnIntent.DEPLOYMENT_ASSESSMENT,
+        }
+    ):
+        raise HTTPException(status_code=422, detail="ANSWER_ONLY_INTENT_CONFLICT")
+
+    # ``requested_disposition`` is the authoritative user-facing routing
+    # choice.  A generic answer-only sentence is intentionally classified as
+    # ``INVESTIGATE`` by the legacy content classifier, but that label would
+    # leak into Runtime audit events and make the Case look active even though
+    # the turn is read-only.  Preserve explicit read-only explanation/status
+    # intents, while normalising the ambiguous fallback to ``EXPLAIN``.
+    if disposition == "ANSWER_ONLY" and intent == AgentTurnIntent.INVESTIGATE:
+        intent = AgentTurnIntent.EXPLAIN
+
     attachment_results: list[dict[str, Any]] = []
     if references:
         attachment_results = evidence_attachment_service.attach_resources(
@@ -724,19 +760,6 @@ def run_incident_case_agent_turn(
                     "items": attachment_results,
                 },
             )
-
-    intent = classify_turn(payload.message, payload.intent)
-    disposition, side_effect_policy, needs_user = route_disposition(
-        payload.message,
-        requested_disposition=payload.requested_disposition,
-        execute_safe_tools=payload.execute_safe_tools,
-        case_state=case["state"],
-    )
-    if references and payload.requested_disposition is None:
-        disposition = str(payload.after_attach or "ANSWER_ONLY").upper()
-        side_effect_policy = "READ_ONLY" if disposition == "ANSWER_ONLY" else (
-            "AUTO_READ_LOW" if payload.execute_safe_tools else "PROPOSE_ONLY"
-        )
 
     requested_policy = payload.runtime_policy
     requested_execution_mode = (
@@ -856,7 +879,7 @@ def run_incident_case_agent_turn(
                     case_id=case_id,
                     message=payload.message,
                     references=payload.model_dump(mode="json").get("references", []),
-                    requested_mode=payload.intent.value if payload.intent else None,
+                    requested_mode=intent.value,
                     client_command_id=None,
                     diagnostic_strategy_id=strategy.strategy_id,
                     strategy_params=effective_options.strategy_params,
@@ -872,7 +895,7 @@ def run_incident_case_agent_turn(
                     runtime_session_id=binding.runtime_session_id,
                     runtime_generation=binding.runtime_generation,
                     user_message=payload.message,
-                    requested_mode=payload.intent.value if payload.intent else None,
+                    requested_mode=intent.value,
                     status="ACCEPTED",
                     accepted_mode=accepted.mode,
                     detail=accepted.detail,
@@ -881,6 +904,13 @@ def run_incident_case_agent_turn(
                     side_effect_policy=side_effect_policy,
                     actor_id=principal_id,
                     client_command_id=payload.client_command_id,
+                )
+            # An accepted Pi turn must not resurrect or relabel a Case for a
+            # read-only answer.  Only an explicit investigation disposition
+            # is allowed to move the Case into INVESTIGATING.
+            if disposition == "INVESTIGATE" and hasattr(repo, "mark_incident_case_investigating"):
+                repo.mark_incident_case_investigating(
+                    case_id, tenant_id, actor_id="mini-drop-agent-runtime",
                 )
         except RuntimeError as exc:
             runtime_fallback_reason = str(exc)[:200]

@@ -99,7 +99,7 @@ if [ "$DOCKER_MODE" != "1" ]; then
     # 编译 proto
     if [ ! -f "server/app/generated/common_pb2.py" ]; then
         step "编译 gRPC proto…"
-        cd proto && bash compile.sh 2>/dev/null || true && cd "$PROJECT_DIR"
+        python3 scripts/compile_proto.py 2>/dev/null || true
     fi
 
     # 设置 perf 权限

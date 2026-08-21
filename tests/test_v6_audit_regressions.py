@@ -13,7 +13,8 @@ from server.app.database import init_db, reset_engine
 from server.app.main import app, repo
 from server.app.models import Base
 from server.app.schemas import CreateTaskRequest
-from server.app.state_machine import Actor, TaskStatus
+from server.app.state_machine import Actor, TaskStatus, now_utc
+from server.app.diagnosis.v6_policy import field_matches_projection
 
 TOKEN = "v6-audit-token"
 
@@ -40,6 +41,25 @@ def client_fixture():
 
 def _headers():
     return {"X-Internal-Token": TOKEN}
+
+
+def test_claim_projection_paths_accept_dotted_and_bracket_array_forms():
+    content = {
+        "topology": {
+            "edges": [{"destination_port": 52626}],
+            "nodes": [{"attributes": {"listening_endpoints": ["tcp://127.0.0.1:52626"]}}],
+        },
+    }
+    ok, value = field_matches_projection(
+        content, "topology.edges[0].destination_port",
+        {"operator": "eq", "value": 52626},
+    )
+    assert ok and value == 52626
+    ok, value = field_matches_projection(
+        content, "projection.topology.nodes[0].attributes.listening_endpoints[0]",
+    )
+    assert ok and value == "tcp://127.0.0.1:52626"
+    assert field_matches_projection(content, "topology.edges[-1].destination_port")[0] is False
 
 
 def _create_case(client: TestClient) -> dict:
@@ -132,6 +152,33 @@ def test_runtime_final_event_persists_assistant_message_and_completes_turn(clien
     events = repo.list_case_events(case["case_id"], "tenant-a")
     assert any(item["event_type"] == "assistant.message" for item in events)
     assert any(item["event_type"] == "turn.completed" for item in events)
+
+
+def test_runtime_tool_call_event_never_becomes_user_visible_message(client):
+    case = _create_case(client)
+    repo.upsert_agent_runtime_binding(
+        case["case_id"], "tenant-a", runtime_type="pi", runtime_version="pi-0.84.2",
+        runtime_session_id="sess-tools", runtime_generation=1, status="READY",
+    )
+    response = client.post(
+        f"/internal/runtime/v1/cases/{case['case_id']}/events",
+        json={
+            "runtime_generation": 1,
+            "events": [{
+                "event_id": "evt-tool-turn", "event_seq": 1, "event_type": "turn_end",
+                "payload": {
+                    "message": '{"role":"assistant","content":[{"type":"text","text":"internal narration"},{"type":"toolCall","name":"list_case_evidence"}]',
+                    "has_tool_calls": True,
+                    "visible_text": "",
+                    "trigger_turn_id": "turn-tool",
+                },
+            }],
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["assistant_message_id"] is None
+    assert repo.list_assistant_messages(case["case_id"], "tenant-a") == []
 
 
 def test_stale_runtime_generation_cannot_persist_event_or_message(client):
@@ -318,12 +365,69 @@ def test_task_wake_is_durable_when_sidecar_is_absent(client, monkeypatch):
     reset_runtime()
     from server.app import app_factory as main_module
     main_module._wake_case_from_task(task.id, TaskStatus.DONE.value)
+    second = repo.create_task(CreateTaskRequest(
+        name="v6-audit-wake-task-2",
+        agent_id="agent-v6-wake",
+        target_pid=4242,
+        collector_type="sys_metrics",
+        sample_rate=11,
+        duration_sec=15,
+        options={"source": "manual", "case_id": case["case_id"], "tenant_id": "tenant-a"},
+    ))
+    repo.add_artifacts(second.id, [{
+        "artifact_type": "sys_metrics",
+        "metadata": {"cpu_percent": 92.1, "window_sec": 15},
+    }])
+    for status in (TaskStatus.RUNNING, TaskStatus.UPLOADING, TaskStatus.ANALYZING, TaskStatus.DONE):
+        repo.transition_task(second.id, status, "audit", Actor.AGENT)
+    main_module._wake_case_from_task(second.id, TaskStatus.DONE.value)
     wakeups = repo.list_runtime_wakeups(case["case_id"], "tenant-a")
     assert wakeups, "task wake must be durable before sidecar delivery"
-    assert wakeups[0]["status"] in {"PENDING", "SEALED"}
+    assert len(wakeups) == 1, "same Evidence batch must coalesce before model delivery"
+    assert set(wakeups[0]["source_refs"]) == {f"task:{task.id}", f"task:{second.id}"}
+    assert wakeups[0]["status"] == "PENDING"
+    main_module._run_runtime_wakeup_pass()
     cycles = repo.list_agent_cycles(case["case_id"], "tenant-a")
     assert cycles, "wakeup dispatcher must create a persistent AgentCycle"
     assert cycles[0]["trigger_type"] == "EVIDENCE_COMMITTED"
+
+
+def test_runtime_wakeup_waits_for_collection_batch_and_quiet_window(monkeypatch):
+    from server.app import app_factory as main_module
+
+    now = now_utc()
+    requests = [{
+        "task_id": "task-a", "status": "RUNNING", "updated_at": now,
+    }, {
+        "task_id": "task-b", "status": "DONE", "updated_at": now,
+    }]
+    monkeypatch.setattr(main_module.repo._repository, "list_collection_requests", lambda *_: requests)
+    monkeypatch.setenv("MINI_DROP_WAKEUP_QUIET_SEC", "3")
+    assert main_module._collection_batch_ready_for_wakeup("case-a", "tenant-a") is False
+
+    requests[0]["status"] = "DONE"
+    assert main_module._collection_batch_ready_for_wakeup("case-a", "tenant-a") is False
+    monkeypatch.setenv("MINI_DROP_WAKEUP_QUIET_SEC", "0")
+    assert main_module._collection_batch_ready_for_wakeup("case-a", "tenant-a") is True
+
+
+def test_coalesced_runtime_wakeup_records_every_outbox_source():
+    wakeup = repo.create_runtime_wakeup(
+        case_id="case-a", tenant_id="tenant-a", investigation_run_id="run-a",
+        reason="batch", source_refs=["task:a"], dedupe_key="batch-a",
+    )
+    first = repo.add_runtime_wakeup_source(
+        wakeup_id=wakeup["wakeup_id"], outbox_id="outbox-a",
+        source_ref="task:a", evidence_watermark=1,
+    )
+    second = repo.add_runtime_wakeup_source(
+        wakeup_id=wakeup["wakeup_id"], outbox_id="outbox-b",
+        source_ref="task:b", evidence_watermark=2,
+    )
+
+    assert first["wakeup_id"] == second["wakeup_id"] == wakeup["wakeup_id"]
+    assert repo.get_runtime_wakeup_by_outbox("outbox-a")["wakeup_id"] == wakeup["wakeup_id"]
+    assert repo.get_runtime_wakeup_by_outbox("outbox-b")["wakeup_id"] == wakeup["wakeup_id"]
 
 
 def test_finish_rejects_wrong_projection_field_or_missing_projection(client):
@@ -403,6 +507,49 @@ def test_case_event_cursor_uses_monotonic_sequence(client):
     page = client.get(f"/api/v1/cases/{case['case_id']}/events", params={"after_seq": seqs[0]})
     assert page.status_code == 200
     assert [item["event_type"] for item in page.json()["data"]["items"] if item["event_type"] in {"a", "b"}] == ["b"]
+
+
+def test_case_event_latest_cursor_does_not_read_event_payloads(client):
+    case = _create_case(client)
+    repo.record_case_event(case["case_id"], "tenant-a", event_type="a", payload={"large": "x"})
+    repo.record_case_event(case["case_id"], "tenant-a", event_type="b", payload={"large": "y"})
+    response = client.get(
+        f"/api/v1/cases/{case['case_id']}/events",
+        params={"latest": "true"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["items"] == []
+    assert data["last_event_seq"] >= 2
+
+
+def test_internal_runtime_events_support_bounded_cursor_reads(client):
+    case = _create_case(client)
+    repo.upsert_agent_runtime_binding(
+        case["case_id"], "tenant-a", runtime_type="pi", runtime_version="pi-0.84.2",
+        runtime_session_id="session-page", runtime_generation=1, status="READY",
+    )
+    headers = _headers()
+    for seq in range(1, 4):
+        response = client.post(
+            f"/internal/runtime/v1/cases/{case['case_id']}/events",
+            json={
+                "runtime_generation": 1,
+                "events": [{
+                    "event_id": f"page-{seq}", "event_seq": seq,
+                    "event_type": "tool_result", "payload": {},
+                    "idempotency_key": f"page-{seq}",
+                }],
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+    page = client.get(
+        f"/internal/runtime/v1/cases/{case['case_id']}/events",
+        params={"after_seq": 1, "limit": 1}, headers=headers,
+    )
+    assert page.status_code == 200, page.text
+    assert [item["event_seq"] for item in page.json()["data"]["items"]] == [2]
 
 
 def test_evidence_upsert_never_reassigns_another_case(client):

@@ -52,6 +52,22 @@ class CaseEvidenceService:
         collector_id = str(getattr(task, "collector_type", "") or "")
         request_options = ((getattr(task, "request_params", None) or {}).get("options") or {})
         target_ref = f"task:{task_id}"
+        membership_snapshot_id = str(
+            request_options.get("membership_snapshot_id") or ""
+        ) or None
+        membership_snapshot = None
+        if membership_snapshot_id and hasattr(self._repo, "get_membership_snapshot"):
+            membership_snapshot = self._repo.get_membership_snapshot(
+                case_id, tenant_id, membership_snapshot_id,
+            )
+        projection_context = {
+            "membership_snapshot_id": membership_snapshot_id,
+            "membership_snapshot": membership_snapshot,
+            "discovery_run_id": request_options.get("discovery_run_id"),
+            "discovery_seed_ref": request_options.get("discovery_seed_ref"),
+            "scope_revision": request_options.get("scope_revision"),
+            "target_ref": request_options.get("target_ref") or target_ref,
+        }
         evidence_ids: list[str] = []
         for artifact in artifacts:
             if not artifact.get("artifact_type"):
@@ -59,7 +75,18 @@ class CaseEvidenceService:
             metadata = artifact.get("metadata") or {}
             evidence_id = evidence_id_for_artifact(case_id, task_id, artifact)
             try:
-                projection = project_artifact(artifact)
+                # The projection is built before the Case Evidence row is
+                # persisted, but its graph edges must still cite the canonical
+                # ``ev-...`` identifier rather than a collector-local event
+                # ID.  Pass the deterministic ID into the parser as lineage.
+                artifact_projection_context = {
+                    **projection_context,
+                    "evidence_id": evidence_id,
+                }
+                projection = project_artifact(
+                    artifact,
+                    projection_context=artifact_projection_context,
+                )
             except (TypeError, ValueError, OverflowError) as exc:
                 self._record_parser_failure(
                     case_id, tenant_id, task_id, artifact, actor_id, exc,
@@ -97,11 +124,15 @@ class CaseEvidenceService:
                 investigation_run_id=request_options.get("investigation_run_id"),
                 execution_unit_id=getattr(task, "execution_unit_id", None),
                 source_call_id=request_options.get("source_call_id"),
+                membership_snapshot_id=membership_snapshot_id,
                 lineage={
                     "task_id": task_id,
                     "artifact_id": artifact.get("id"),
                     "attachment_id": attachment_id,
                     "collector_id": collector_id,
+                    "discovery_run_id": request_options.get("discovery_run_id"),
+                    "discovery_seed_ref": request_options.get("discovery_seed_ref"),
+                    "discovery_parent_task_id": request_options.get("discovery_parent_task_id"),
                 },
                 trace_id=str(getattr(task, "traceparent", "") or "") or None,
                 actor_id=actor_id,
@@ -117,10 +148,190 @@ class CaseEvidenceService:
                     projection_version=projection["projection_version"],
                     truncated=projection["truncated"],
                     source_bytes=projection["source_bytes"],
-                    parser_version="deterministic.v1",
+                    parser_version=(
+                        "deterministic-network-discovery.v1"
+                        if projection["projection_kind"] in {"DEPENDENCY_GRAPH", "TOPOLOGY_GRAPH"}
+                        else "deterministic.v1"
+                    ),
                 )
             evidence_ids.append(evidence_id)
         return evidence_ids
+
+    def materialize_source_envelope(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        envelope: dict[str, Any],
+        actor_id: str = "mini-drop-source-evidence-service",
+    ) -> str:
+        """Commit a SourceGateway/MCP EvidenceEnvelope to the canonical store."""
+        envelope_case = str(envelope.get("case_id") or case_id)
+        if envelope_case != case_id or str(envelope.get("tenant_id") or "") != tenant_id:
+            raise ValueError("SOURCE_EVIDENCE_OWNERSHIP_CONFLICT")
+        evidence_id = str(envelope.get("evidence_id") or "").strip()
+        source_id = str(envelope.get("source_id") or "").strip()
+        projection = envelope.get("content_projection") or {}
+        if not evidence_id or not source_id or not isinstance(projection, dict):
+            raise ValueError("INVALID_EVIDENCE_ENVELOPE")
+        observed_at = envelope.get("observed_at")
+        valid_time = envelope.get("valid_time") or {}
+        redactions = envelope.get("redactions") or {}
+        projection_hash = stable_projection_hash(projection)
+        self._repo.upsert_case_evidence(
+            case_id=case_id, tenant_id=tenant_id, evidence_id=evidence_id,
+            attachment_id=None, task_id=None, artifact_id=None,
+            artifact_type="source_envelope", collector_id=None,
+            source_type="source_gateway", source_id=source_id, source_channel="MCP",
+            target_ref=json.dumps(envelope.get("resource_scope") or {}, sort_keys=True),
+            content_hash=str(envelope.get("content_hash") or projection_hash),
+            projection_hash=projection_hash, quality="COMPLETE", freshness="FRESH",
+            time_window={
+                "start": valid_time.get("start") or observed_at,
+                "end": valid_time.get("end") or observed_at,
+                "source": "source_envelope",
+            },
+            event_time_start=valid_time.get("start") or observed_at,
+            event_time_end=valid_time.get("end") or observed_at,
+            artifact_schema="evidence-envelope.v1",
+            schema_version=str(envelope.get("schema_version") or "evidence-envelope.v1"),
+            producer_version=str(envelope.get("source_version") or ""),
+            raw_locator=f"source:{source_id}:{envelope.get('query_fingerprint') or ''}",
+            size_bytes=int(redactions.get("projected_bytes") or 0),
+            sha256=str(envelope.get("content_hash") or projection_hash),
+            completeness="COMPLETE", trust_level="AUTHORIZED_SOURCE",
+            source_call_id=str(envelope.get("query_fingerprint") or "") or None,
+            lineage={
+                "source_id": source_id, "operation": envelope.get("operation"),
+                "query_fingerprint": envelope.get("query_fingerprint"),
+                "envelope_projection_hash": envelope.get("projection_hash"),
+                "principal_id": envelope.get("principal_id"),
+                "policy": envelope.get("policy") or {},
+            },
+            actor_id=actor_id,
+        )
+        self._repo.upsert_evidence_projection(
+            evidence_id=evidence_id, case_id=case_id, tenant_id=tenant_id,
+            projection_kind="source_projection", content=projection,
+            projection_schema="source-envelope.projection.v1", projection_version=1,
+            truncated=bool(redactions.get("truncated")),
+            source_bytes=int(redactions.get("source_bytes") or redactions.get("projected_bytes") or 0),
+            parser_version="source-gateway.v1",
+        )
+        self._repo.record_case_event(
+            case_id, tenant_id, event_type="source_evidence_committed",
+            payload={"evidence_id": evidence_id, "source_id": source_id}, actor_id=actor_id,
+        )
+        return evidence_id
+
+    def materialize_evaluation_projection(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        evidence_id: str,
+        pack_kind: str,
+        source_id: str,
+        source_ref: str,
+        projection: dict[str, Any],
+        content_hash: str | None = None,
+        source_bytes: int = 0,
+        synthetic: bool = False,
+        observed_at: Any = None,
+        actor_id: str = "mini-drop-evaluation-import",
+    ) -> dict[str, Any]:
+        """Materialize a bounded public-evaluation projection.
+
+        This is deliberately separate from ``materialize_source_envelope``:
+        GitHub replay data is neither an MCP response nor a live collector
+        artifact.  The explicit ``EVALUATION``/``REPLAY`` provenance keeps the
+        distinction visible to the UI, verifier, and manual evaluator.
+        """
+        case = self._repo.get_incident_case(case_id, tenant_id)
+        if case is None:
+            raise ValueError("CASE_NOT_FOUND")
+        evidence_id = str(evidence_id or "").strip()
+        pack_kind = str(pack_kind or "").strip()
+        source_id = str(source_id or "").strip()
+        source_ref = str(source_ref or "").strip()
+        if not evidence_id or not pack_kind or not source_id or not source_ref:
+            raise ValueError("INVALID_EVALUATION_PROJECTION_METADATA")
+        if not isinstance(projection, dict):
+            raise ValueError("INVALID_EVALUATION_PROJECTION")
+        projection_hash = stable_projection_hash(projection)
+        content_hash = str(content_hash or projection_hash)
+        timestamp_dt = observed_at if isinstance(observed_at, datetime) else now_utc()
+        timestamp = timestamp_dt.isoformat()
+        trust_level = "SYNTHETIC_EVAL" if synthetic else "DEVELOPMENT_EVAL"
+        row = self._repo.upsert_case_evidence(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            evidence_id=evidence_id,
+            attachment_id=None,
+            task_id=None,
+            artifact_id=None,
+            artifact_type=f"github_pr_{pack_kind}",
+            collector_id=None,
+            source_type="evaluation_pack",
+            source_id=source_id,
+            source_channel="EVALUATION",
+            data_origin="REPLAY",
+            target_ref=source_ref,
+            content_hash=content_hash,
+            projection_hash=projection_hash,
+            quality="COMPLETE",
+            freshness="HISTORICAL",
+            time_window={"observed_at": timestamp, "source": "github_pr_eval"},
+            event_time_start=timestamp_dt,
+            event_time_end=timestamp_dt,
+            artifact_schema="github-pr-eval.projection.v1",
+            schema_version="github-pr-eval.projection.v1",
+            producer_version="run_github_pr_attribution_eval.v1",
+            raw_locator=source_ref,
+            size_bytes=int(source_bytes or 0),
+            sha256=content_hash,
+            completeness="COMPLETE",
+            trust_level=trust_level,
+            lineage={
+                "source_ref": source_ref,
+                "pack_kind": pack_kind,
+                "synthetic": bool(synthetic),
+                "import_mode": "projection_only",
+            },
+            actor_id=actor_id,
+        )
+        projection_row = self._repo.upsert_evidence_projection(
+            evidence_id=evidence_id,
+            case_id=case_id,
+            tenant_id=tenant_id,
+            projection_kind="evaluation_projection",
+            content=projection,
+            projection_schema="github-pr-eval.projection.v1",
+            projection_version=1,
+            truncated=False,
+            source_bytes=int(source_bytes or 0),
+            parser_version="github-pr-eval.v1",
+        )
+        self._repo.record_case_event(
+            case_id,
+            tenant_id,
+            event_type="evaluation_evidence_imported",
+            payload={
+                "evidence_id": evidence_id,
+                "pack_kind": pack_kind,
+                "projection_hash": projection_hash,
+                "synthetic": bool(synthetic),
+            },
+            actor_id=actor_id,
+        )
+        return {
+            "evidence": row,
+            "projection": projection_row,
+            "evidence_id": evidence_id,
+            "projection_hash": projection_hash,
+            "projected_bytes": int(projection_row.get("projected_bytes") or 0),
+            "synthetic": bool(synthetic),
+        }
 
     def _record_parser_failure(
         self,

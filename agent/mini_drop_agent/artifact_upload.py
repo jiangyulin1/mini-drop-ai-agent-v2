@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import os
 
+import urllib3
+
 from agent.mini_drop_agent.config import AgentConfig
 
 
@@ -35,11 +37,21 @@ def _minio_client(config: AgentConfig):
     else:
         secure = inferred_secure
 
+    ca_cert = os.getenv("MINIO_CA_CERT", "").strip()
+    http_client = None
+    if secure and ca_cert:
+        http_client = urllib3.PoolManager(
+            cert_reqs="CERT_REQUIRED",
+            ca_certs=ca_cert,
+            retries=urllib3.Retry(total=0, connect=0, read=0, redirect=0),
+        )
+
     return Minio(
         endpoint=endpoint,
         access_key=config.minio_access_key,
         secret_key=config.minio_secret_key,
         secure=secure,
+        http_client=http_client,
     )
 
 

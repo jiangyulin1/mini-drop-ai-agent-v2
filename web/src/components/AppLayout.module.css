@@ -29,21 +29,16 @@
 .brand {
   height: var(--app-header-height);
   flex: 0 0 var(--app-header-height);
-  padding: 0 16px;
+  padding: 0 17px;
   display: flex;
   align-items: center;
   gap: 10px;
   color: #fff;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 0;
   background: transparent;
   cursor: pointer;
   text-align: left;
-}
-
-.brand:hover .brandMark {
-  transform: translateY(-1px);
-  box-shadow: 0 7px 18px rgba(45, 100, 245, 0.28);
 }
 
 .brandCompact {
@@ -52,16 +47,15 @@
 }
 
 .brandMark {
-  width: 31px;
-  height: 31px;
-  flex: 0 0 31px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   display: grid;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 7px;
   color: #fff;
   background: linear-gradient(145deg, #2467ed, #6b8cff);
   box-shadow: 0 5px 14px rgba(36, 103, 237, 0.2);
-  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
 .brandText {
@@ -72,18 +66,18 @@
 }
 
 .brandText strong {
-  font-size: 15px;
-  letter-spacing: 0.2px;
+  font-size: 16px;
+  letter-spacing: 0;
 }
 
 .brandText small {
   margin-top: 3px;
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 9px;
 }
 
 .navigation {
-  padding: 10px 6px;
+  padding: 6px 8px;
 }
 
 .navigation :global(.ant-menu) {
@@ -92,42 +86,90 @@
 }
 
 .navigation :global(.ant-menu-item) {
-  margin-block: 4px;
-  border-radius: 9px;
+  height: 40px;
+  margin: 3px 0;
+  padding-inline: 13px !important;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.62);
 }
 
-.sidebarHelp {
-  margin: auto 12px 18px;
-  padding: 12px;
+.navigation :global(.ant-menu-item:hover) {
+  color: rgba(255, 255, 255, 0.92) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+}
+
+.navigation :global(.ant-menu-item-selected) {
+  color: #fff !important;
+  background: #1677ff !important;
+}
+
+.accountMenu {
+  width: calc(100% - 16px);
+  min-height: 54px;
+  margin: auto 8px 40px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.7);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.accountMenu:hover,
+.accountMenu:focus-visible {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.accountMenuCompact {
+  width: 48px;
+  justify-content: center;
+  margin-inline: 8px;
+  padding: 8px;
+}
+
+.accountAvatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.accountCopy {
+  min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 11px;
-  color: rgba(255, 255, 255, 0.74);
-  background: rgba(255, 255, 255, 0.035);
 }
 
-.sidebarHelp > span {
-  color: #7ca3ff;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+.accountCopy strong,
+.accountCopy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.sidebarHelp > strong {
+.accountCopy strong {
+  color: rgba(255, 255, 255, 0.86);
   font-size: 12px;
 }
 
-.sidebarHelp > small {
-  color: rgba(255, 255, 255, 0.42);
+.accountCopy small {
+  color: rgba(255, 255, 255, 0.4);
   font-size: 10px;
-  line-height: 1.55;
 }
 
 .header {
   height: var(--app-header-height);
-  padding: 0 18px;
+  padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -221,7 +263,7 @@
 
 .globalBar {
   min-height: 34px;
-  padding: 0 16px;
+  padding: 0 13px;
   display: flex;
   align-items: stretch;
   overflow-x: auto;

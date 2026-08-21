@@ -1,0 +1,189 @@
+.markdown {
+  min-width: 0;
+  color: var(--app-text);
+  font-size: 14px;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown hr,
+.tableViewport {
+  margin: 0 0 12px;
+}
+
+.markdown p {
+  white-space: pre-wrap;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 18px 0 8px;
+  color: var(--app-text);
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.markdown h1 {
+  font-size: 18px;
+}
+
+.markdown h2 {
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--app-border);
+  font-size: 16px;
+}
+
+.markdown h3 {
+  font-size: 15px;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 14px;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 22px;
+}
+
+.markdown li {
+  margin: 4px 0;
+  padding-left: 2px;
+}
+
+.markdown li > p {
+  margin: 0;
+}
+
+.markdown input[type="checkbox"] {
+  margin: 0 7px 0 0;
+  accent-color: #1677ff;
+}
+
+.markdown blockquote {
+  padding: 8px 12px;
+  border-left: 3px solid #1677ff;
+  color: var(--app-text-secondary);
+  background: var(--app-accent-surface);
+}
+
+.markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown a {
+  color: var(--app-accent-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.markdown a:hover {
+  color: #1677ff;
+}
+
+.unavailableLink {
+  color: var(--app-text-secondary);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.imageReference {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+
+.markdown code {
+  padding: 2px 5px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  color: var(--app-text);
+  background: var(--app-surface-subtle);
+  font: 0.9em/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.markdown pre {
+  max-width: 100%;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  background: var(--app-surface-subtle);
+  overscroll-behavior-inline: contain;
+}
+
+.markdown pre code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--app-border);
+}
+
+.tableViewport {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  overscroll-behavior-inline: contain;
+}
+
+.tableViewport table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.tableViewport th,
+.tableViewport td {
+  min-width: 88px;
+  padding: 8px 10px;
+  border-right: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.tableViewport th {
+  color: var(--app-text);
+  background: var(--app-surface-subtle);
+  font-weight: 700;
+}
+
+.tableViewport tr:last-child td {
+  border-bottom: 0;
+}
+
+.tableViewport th:last-child,
+.tableViewport td:last-child {
+  border-right: 0;
+}

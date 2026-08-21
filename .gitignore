@@ -85,6 +85,9 @@ reports/eval/ai-ops-v2/live-vm-*/
 # 执行状态 / 部署候选 / 评测输出（可复现或大体积，不入库）
 reports/implementation/
 reports/eval/
+/reports/evaluation/*
+!/reports/evaluation/README.md
+!/reports/evaluation/verified-*.md
 /reports/pi-agent-eval/
 /reports/strategy-matrix/
 /reports/strategy-matrix-live*/

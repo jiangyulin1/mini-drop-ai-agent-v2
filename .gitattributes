@@ -16,3 +16,8 @@
 *.ps1 text eol=lf
 *.cmd text eol=crlf
 *.bat text eol=crlf
+
+# This legacy integration test is intentionally mixed-EOL in the current
+# baseline; preserve it byte-for-byte until it is normalized in a dedicated
+# change so unrelated test additions do not rewrite the whole file.
+tests/test_grpc_services.py -text

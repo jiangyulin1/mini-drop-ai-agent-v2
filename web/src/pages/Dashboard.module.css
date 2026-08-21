@@ -1,15 +1,18 @@
 .page {
   width: 100%;
+  min-width: 0;
+  padding: 14px 18px 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  overflow-x: clip;
 }
 
 .pageHeader {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
 }
 
 .pageHeaderCopy {
@@ -20,14 +23,15 @@
   color: #3971e8;
   font-size: 10px;
   font-weight: 750;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
 }
 
 .titleRow {
-  margin-top: 5px;
+  margin-top: 2px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  flex-wrap: wrap;
+  gap: 7px;
 }
 
 .titleRow > :global(.anticon) {
@@ -38,18 +42,21 @@
 .titleRow :global(.ant-typography) {
   margin: 0;
   color: var(--app-text);
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .pageHeaderCopy > :global(.ant-typography) {
   max-width: 720px;
-  margin: 7px 0 0;
+  margin: 3px 0 0;
   color: var(--app-text-secondary);
-  line-height: 1.65;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .pageActions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -62,12 +69,13 @@
 
 .summaryCard {
   min-width: 0;
-  padding: 13px 15px;
+  min-height: 52px;
+  padding: 9px 12px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 1px 10px;
   border: 1px solid var(--app-border);
-  border-radius: 11px;
+  border-radius: 8px;
   background: var(--app-surface-subtle);
 }
 
@@ -82,7 +90,7 @@
   grid-row: span 2;
   align-self: center;
   color: var(--app-text);
-  font-size: 24px;
+  font-size: 21px;
   line-height: 1;
 }
 
@@ -100,34 +108,37 @@
 .summary_danger { border-left: 3px solid #d94b4b; }
 
 .workspaceGrid {
-  min-height: 560px;
+  min-height: max(440px, calc(100dvh - 260px));
   display: grid;
-  grid-template-columns: minmax(300px, 350px) minmax(0, 1fr);
+  grid-template-columns: minmax(290px, 334px) minmax(0, 1fr);
   align-items: stretch;
-  gap: 12px;
+  gap: 10px;
 }
 
 .sideColumn {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .agentCard,
 .taskCard,
 .timelineCard {
   border-color: var(--app-border);
+  border-radius: 8px;
   background: var(--app-surface);
+  box-shadow: none;
 }
 
 .agentCard :global(.ant-card-head),
 .taskCard :global(.ant-card-head) {
-  min-height: 42px;
+  min-height: 38px;
+  padding-inline: 10px;
 }
 
 .agentCard :global(.ant-card-body) {
-  padding: 7px 10px;
+  padding: 6px 8px;
 }
 
 .agentList {
@@ -137,11 +148,12 @@
 }
 
 .agentLink {
-  padding: 7px 6px;
+  min-width: 0;
+  padding: 6px;
   display: flex;
   align-items: center;
   gap: 8px;
-  border-radius: 8px;
+  border-radius: 6px;
   color: inherit;
   transition: background 140ms ease;
 }
@@ -187,7 +199,7 @@
 }
 
 .taskCard :global(.ant-card-body) {
-  padding: 8px;
+  padding: 7px;
 }
 
 .taskFilters {
@@ -198,7 +210,7 @@
 }
 
 .taskList {
-  max-height: 560px;
+  max-height: min(540px, calc(100dvh - 340px));
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -207,12 +219,12 @@
 
 .taskButton {
   width: 100%;
-  padding: 9px 10px;
+  padding: 7px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 7px;
   color: var(--app-text);
   background: transparent;
   cursor: pointer;
@@ -261,17 +273,18 @@
   scroll-margin-top: calc(var(--app-header-height, 56px) + 8px);
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 11px;
+  border-radius: 8px;
   background: var(--app-surface);
 }
 
 .detailContent {
   min-height: 100%;
-  padding: 14px;
+  min-width: 0;
+  padding: 12px;
 }
 
 .detailHeader {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -309,11 +322,16 @@
 }
 
 .timelineCard {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+
+.timelineCard :global(.ant-card-head) {
+  min-height: 36px;
+  padding-inline: 10px;
 }
 
 .timelineCard :global(.ant-card-body) {
-  padding-bottom: 0;
+  padding: 10px 10px 0;
 }
 
 .timelineEvent {
@@ -336,7 +354,7 @@
 }
 
 .detailEmpty {
-  min-height: 560px;
+  min-height: max(420px, calc(100dvh - 280px));
   display: grid;
   place-items: center;
   padding: 28px;
@@ -360,9 +378,28 @@
 .loadingPage { width: 100%; }
 .loadingTitle { width: 180px !important; }
 
+.createDrawer :global(.ant-drawer-content),
+.createDrawer :global(.ant-card) {
+  border-radius: 8px;
+}
+
+.createDrawer :global(.ant-card) {
+  border-color: var(--app-border);
+  box-shadow: none;
+}
+
+.createDrawer :global(.ant-card-head) {
+  min-height: 40px;
+  padding-inline: 12px;
+}
+
+.createDrawer :global(.ant-card-body) {
+  padding: 12px;
+}
+
 @media (max-width: 1100px) {
   .workspaceGrid {
-    grid-template-columns: minmax(280px, 315px) minmax(0, 1fr);
+    grid-template-columns: minmax(276px, 306px) minmax(0, 1fr);
   }
 
   .summaryCard {
@@ -377,7 +414,7 @@
   }
 
   .taskList {
-    max-height: 360px;
+    max-height: 320px;
   }
 
   .detailPane,
@@ -387,17 +424,26 @@
 }
 
 @media (max-width: 680px) {
+  .page {
+    padding: 10px;
+    gap: 10px;
+  }
+
   .pageHeader {
     align-items: flex-start;
     flex-direction: column;
+    gap: 8px;
   }
 
   .pageActions {
     width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .pageActions > button {
-    flex: 1;
+    min-width: 0;
+    padding-inline: 6px;
   }
 
   .summaryGrid {
@@ -410,12 +456,31 @@
 
   .detailActions {
     width: 100%;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
+    justify-content: stretch;
+  }
+
+  .detailActions > span,
+  .detailActions > a,
+  .detailActions button {
+    min-width: 0;
+    width: 100%;
   }
 }
 
 @media (max-width: 420px) {
   .taskFilters {
     grid-template-columns: 1fr;
+  }
+
+  .titleRow :global(.ant-typography) {
+    font-size: 20px;
+  }
+
+  .taskMetaRow {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1px;
   }
 }

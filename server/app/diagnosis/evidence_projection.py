@@ -12,13 +12,19 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
+
+from server.app.diagnosis.network_discovery import build_network_discovery_projection
 
 MAX_SAMPLES = 20
 MAX_TOP_ITEMS = 10
 MAX_LOG_EVENTS = 12
 MAX_ERRORS = 10
+MAX_TOPOLOGY_NODES = 40
+MAX_TOPOLOGY_EDGES = 80
+MAX_IDENTITY_ASSERTIONS = 40
 # Upper bound for pulling a stored artifact body into memory for projection.
 # Larger objects keep the metadata-only projection and stay reachable through
 # the raw_ref locator.
@@ -112,6 +118,8 @@ def _signal_map(artifact_type: str, data: dict[str, Any]) -> dict[str, Any]:
         "runtime_metrics": ("gc_pause_ms_p99", "gc_pause_ms", "thread_count", "heap_used", "cpu_percent", "lock_wait_ms"),
         "process_scan": ("process_count", "thread_count", "fd_count", "cpu_percent", "rss_bytes"),
         "connection_probe": ("latency_ms", "connect_latency_ms", "http_status", "success", "retransmit_ratio"),
+        "network_discovery": ("process_count", "socket_count", "event_count", "listener_count", "connection_count", "established_count", "unresolved_socket_count"),
+        "dependency_graph": ("node_count", "edge_count", "managed_target_count", "external_endpoint_count", "virtual_endpoint_count", "coverage_ratio"),
         "log_scan": ("error_count", "warning_count", "exception_count", "matched_lines"),
         "network_metrics": ("tcp_retransmit_ratio", "tcp_timeout_delta", "rx_bytes", "tx_bytes", "connection_count"),
         "database_metrics": ("active_connections", "connection_count", "lock_wait_ms", "query_latency_ms", "deadlocks"),
@@ -135,20 +143,119 @@ def _signal_map(artifact_type: str, data: dict[str, Any]) -> dict[str, Any]:
     return signals
 
 
+def _topology_from(
+    artifact_type: str,
+    data: dict[str, Any],
+    *,
+    projection_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if artifact_type not in {"network_discovery", "dependency_graph"}:
+        return None
+    topology: dict[str, Any] = {
+        "schema_version": data.get("schema_version"),
+        "graph_digest": data.get("graph_digest") or data.get("digest"),
+        "discovery_run_id": data.get("discovery_run_id"),
+        "membership_snapshot_id": data.get("membership_snapshot_id"),
+        "seed_ref": data.get("seed_ref"),
+        "coverage": data.get("coverage") or {},
+        "limitations": list(data.get("limitations") or [])[:12],
+    }
+    if artifact_type == "dependency_graph":
+        raw_nodes = [item for item in data.get("nodes") or [] if isinstance(item, dict)]
+        node_by_id = {
+            str(item.get("entity_id") or ""): item
+            for item in raw_nodes if item.get("entity_id")
+        }
+        retained_edges: list[dict[str, Any]] = []
+        referenced_nodes: set[str] = set()
+        for edge in [item for item in data.get("edges") or [] if isinstance(item, dict)]:
+            source = str(edge.get("source_entity") or "")
+            target = str(edge.get("target_entity") or "")
+            if source not in node_by_id or target not in node_by_id:
+                continue
+            expanded = referenced_nodes | {source, target}
+            if len(expanded) > MAX_TOPOLOGY_NODES or len(retained_edges) >= MAX_TOPOLOGY_EDGES:
+                continue
+            referenced_nodes = expanded
+            retained_edges.append(edge)
+        retained_nodes = [
+            node_by_id[node_id] for node_id in sorted(referenced_nodes)
+        ]
+        if len(retained_nodes) < MAX_TOPOLOGY_NODES:
+            for node_id in sorted(node_by_id):
+                if node_id in referenced_nodes:
+                    continue
+                retained_nodes.append(node_by_id[node_id])
+                if len(retained_nodes) >= MAX_TOPOLOGY_NODES:
+                    break
+        topology.update({
+            "nodes": retained_nodes,
+            "edges": retained_edges,
+            "identity_assertions": [
+                item for item in data.get("identity_assertions") or [] if isinstance(item, dict)
+            ][:MAX_IDENTITY_ASSERTIONS],
+            "frontier": data.get("frontier") or {},
+        })
+        canonical_evidence_id = str((projection_context or {}).get("evidence_id") or "").strip()
+        if canonical_evidence_id:
+            # Dependency graph artifacts can be produced by the discovery
+            # coordinator after the original network snapshots.  Normalize
+            # each edge's citation namespace at this boundary: canonical Case
+            # Evidence IDs remain usable by the verifier/UI, while collector
+            # event IDs are retained as non-addressable lineage.
+            normalized_edges = []
+            for edge in topology["edges"]:
+                edge = dict(edge)
+                refs = [str(item) for item in edge.get("evidence_refs") or [] if item]
+                event_refs = [str(item) for item in edge.get("event_refs") or [] if item]
+                canonical_refs = [
+                    item for item in refs
+                    if item.startswith(("ev-", "eval:", "evidence:"))
+                ]
+                event_refs.extend(item for item in refs if item not in canonical_refs)
+                if canonical_evidence_id not in canonical_refs:
+                    canonical_refs.append(canonical_evidence_id)
+                edge["evidence_refs"] = sorted(set(canonical_refs))
+                edge["event_refs"] = sorted(set(event_refs))
+                normalized_edges.append(edge)
+            topology["edges"] = normalized_edges
+    else:
+        topology.update({
+            "agent": data.get("agent") or {},
+            "processes": [item for item in data.get("processes") or [] if isinstance(item, dict)][:20],
+            "listeners": [item for item in data.get("listeners") or [] if isinstance(item, dict)][:20],
+            "connections": [item for item in data.get("connections") or [] if isinstance(item, dict)][:40],
+        })
+    return topology
+
+
 def build_evidence_projection(
     artifact_type: str,
     metadata: dict[str, Any],
     *,
     source_bytes: int = 0,
     raw_locator: str | None = None,
+    projection_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a complete projection envelope (kind, content, projected bytes)."""
     artifact_type = str(artifact_type or "raw")
     data = dict(metadata or {})
+    if artifact_type == "network_discovery":
+        return build_network_discovery_projection(
+            data,
+            source_bytes=source_bytes,
+            raw_locator=raw_locator,
+            projection_context=projection_context,
+        )
     signals = _signal_map(artifact_type, data)
     top_items = _top_items_from(data)
     samples = _samples_from(data)
     errors = _errors_from(data)
+    topology = _topology_from(
+        artifact_type,
+        data,
+        projection_context=projection_context,
+    )
     logs = []
     for key in ("log_events", "logs", "lines"):
         value = data.get(key)
@@ -163,6 +270,8 @@ def build_evidence_projection(
         kind = "LOG_EVENTS"
     elif artifact_type in {"sys_metrics", "memory_json", "runtime_metrics", "network_metrics", "database_metrics", "ebpf_metrics"}:
         kind = "TIMESERIES" if samples else "MODEL_SUMMARY"
+    elif artifact_type in {"network_discovery", "dependency_graph"}:
+        kind = "TOPOLOGY_GRAPH"
     elif artifact_type in {"process_scan", "connection_probe"}:
         kind = "TOP_ITEMS"
     else:
@@ -188,6 +297,7 @@ def build_evidence_projection(
         "log_events": logs,
         "errors": errors,
         "coverage": data.get("coverage") or {},
+        "topology": topology,
         "window": _window_from(data),
         "target": data.get("target_ref") or data.get("target"),
         "quality": data.get("quality"),
@@ -242,23 +352,38 @@ def _load_raw_artifact_body(artifact: dict[str, Any]) -> dict[str, Any] | None:
     metadata-only projection rather than failing evidence materialization.
     """
 
-    bucket = str(artifact.get("bucket") or "")
-    object_key = str(artifact.get("object_key") or "")
-    if not bucket or not object_key:
-        return None
     size = int(artifact.get("size_bytes") or artifact.get("size") or 0)
     if size > MAX_RAW_FETCH_BYTES:
         return None
     try:
-        from server.app.storage import read_object_bytes
+        if artifact.get("local_path"):
+            from server.app.artifact_service import read_artifact_bytes
 
-        payload = json.loads(read_object_bytes(bucket, object_key))
+            raw = read_artifact_bytes(artifact)
+        else:
+            from server.app.storage import read_object_bytes
+
+            bucket = str(artifact.get("bucket") or os.getenv("MINIO_BUCKET", "mini-drop"))
+            object_key = str(artifact.get("object_key") or "")
+            if not object_key:
+                return None
+            # Projection reads are already bounded by the persisted size. Avoid
+            # a separate object_size probe so temporary storage-control outages
+            # do not hide an otherwise readable Artifact body.
+            raw = read_object_bytes(bucket, object_key)
+        if len(raw) > MAX_RAW_FETCH_BYTES:
+            return None
+        payload = json.loads(raw)
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
 
 
-def project_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+def project_artifact(
+    artifact: dict[str, Any],
+    *,
+    projection_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     metadata = artifact.get("metadata") or {}
     raw_locator = artifact.get("identity_key") or artifact.get("object_key") or str(artifact.get("id") or "")
     # Prefer the stored body; metadata stays as the fallback and as a source of
@@ -273,4 +398,5 @@ def project_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         source,
         source_bytes=int(artifact.get("size_bytes") or artifact.get("size") or 0),
         raw_locator=str(raw_locator),
+        projection_context=projection_context,
     )

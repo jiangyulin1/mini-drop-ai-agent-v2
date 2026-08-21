@@ -204,6 +204,7 @@ def _has_analysis_result(artifacts: list[dict]) -> bool:
         "runtime_metrics",
         "actuation_result",
         "connection_probe",
+        "network_discovery",
     } & artifact_types)
 
 
@@ -223,6 +224,8 @@ def _analysis_done_reason(artifacts: list[dict]) -> str:
         return "运行时线程快照已生成"
     if "connection_probe" in artifact_types:
         return "下游连通性探测结果已生成"
+    if "network_discovery" in artifact_types:
+        return "TCP 进程与依赖拓扑快照已生成"
     if "actuation_result" in artifact_types:
         return "受控处置结果已记录"
     if "continuous_summary" in artifact_types:

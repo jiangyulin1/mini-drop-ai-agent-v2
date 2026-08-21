@@ -3,6 +3,7 @@ const entry = (label, color, description) => ({ label, color, description });
 export const CASE_STATUS = {
   OPEN: entry("待开始", "blue", "Case 已创建，等待启动调查"),
   INVESTIGATING: entry("正在调查", "blue", "Agent 正在验证假设并收集证据"),
+  WAITING_USER: entry("等待审查", "gold", "Agent 已形成结论，等待继续追问或选择恢复方案"),
   WAITING_EVIDENCE: entry("等待证据", "gold", "采集任务已下发，等待 Worker 返回证据"),
   WAITING_APPROVAL: entry("需要人工审批", "orange", "策略要求人工确认后才能继续"),
   NEEDS_SCOPE_CONFIRMATION: entry("等待范围确认", "orange", "目标范围不完整，Agent 不会猜测执行目标"),
@@ -24,6 +25,10 @@ export const TASK_STATUS = {
 };
 
 export const PLAN_STATUS = {
+  PROPOSED: entry("待选择", "blue"),
+  COLLECTING: entry("采集中", "blue"),
+  EVIDENCE_READY: entry("Evidence 已就绪", "green"),
+  RESOLVED: entry("已解决", "green"),
   DRAFT: entry("草拟中", "default"),
   QUEUED: entry("待执行", "blue"),
   DISPATCHING: entry("正在下发", "cyan"),

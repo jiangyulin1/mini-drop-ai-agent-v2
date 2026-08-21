@@ -18,8 +18,13 @@ import http from "node:http";
 import { URL } from "node:url";
 import { RuntimeManager } from "./runtime.mjs";
 
-const PORT = Number(process.env.MINI_DROP_PI_SIDECAR_PORT || 8899);
 const INTERNAL_BASE = process.env.MINI_DROP_PI_INTERNAL_BASE || "http://127.0.0.1:8191";
+
+export function sidecarListenOptions(env = process.env) {
+  const port = Number(env.MINI_DROP_PI_SIDECAR_PORT || 8899);
+  const host = String(env.MINI_DROP_PI_SIDECAR_HOST || "").trim();
+  return host ? { port, host } : { port };
+}
 
 async function readBody(req) {
   const chunks = [];
@@ -144,7 +149,11 @@ import { pathToFileURL } from "node:url";
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const server = await createServer();
-  server.listen(PORT, () => {
-    console.log(`[sidecar] listening on ${PORT}`);
+  const listenOptions = sidecarListenOptions();
+  server.listen(listenOptions, () => {
+    const address = listenOptions.host
+      ? `${listenOptions.host}:${listenOptions.port}`
+      : String(listenOptions.port);
+    console.log(`[sidecar] listening on ${address}`);
   });
 }

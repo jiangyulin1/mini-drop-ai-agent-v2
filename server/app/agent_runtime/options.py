@@ -22,6 +22,9 @@ class RuntimeOptions(BaseModel):
     max_tokens: int | None = Field(default=None, ge=128, le=65536)
     seed: int | None = Field(default=None, ge=0, le=2_147_483_647)
     capture_reasoning_trace: bool = False
+    # Evaluation/low-bandwidth mode: keep durable Case state but do not replay
+    # the Pi SDK conversation history into the next Provider request.
+    fresh_session: bool = False
 
     def audit_summary(self) -> dict[str, Any]:
         return {
@@ -36,6 +39,7 @@ class RuntimeOptions(BaseModel):
                 "temperature": "experiment_metadata_only",
                 "max_tokens": "experiment_metadata_only",
                 "seed": "experiment_metadata_only",
+                "fresh_session": "applied",
             },
         }
 

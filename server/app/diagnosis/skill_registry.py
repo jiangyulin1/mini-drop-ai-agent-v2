@@ -131,6 +131,25 @@ SKILLS: tuple[SkillSpec, ...] = (
         stop_conditions=["覆盖率不足时拒绝全局结论"],
     ),
     SkillSpec(
+        skill_id="unknown_topology_discovery",
+        title="未知拓扑依赖发现与边界归因",
+        applies_to=["network", "cluster", "distributed"],
+        triggers=["未知拓扑", "调用链", "上游", "下游", "跨主机", "依赖发现", "pid"],
+        negative_triggers=["已确认完整拓扑"],
+        required_evidence=["network_discovery", "dependency_graph", "sys_metrics"],
+        procedure=[
+            "从已授权的种子 PID/Agent 开始，先读取 network_discovery 和 dependency_graph 投影",
+            "只沿中高置信且能映射到已注册 Agent 的边扩展；未注册远端保留 external_unmanaged_endpoint",
+            "NAT、负载均衡、代理或 VIP 无法唯一解析时保留 virtual_endpoint，不伪装成真实后端",
+            "通信边只能证明依赖和传播路径；根因仍需远端资源、日志、Profile 或失败信号闭合",
+            "分别标注 primary cause、contributing factor、amplifier 与 propagation",
+        ],
+        stop_conditions=[
+            "达到跳数、主机、进程、边或采集预算时停止扩展",
+            "覆盖不足、时间不对齐或身份冲突时输出 insufficient_coverage",
+        ],
+    ),
+    SkillSpec(
         skill_id="evidence_gap",
         title="证据缺口报告",
         applies_to=["all"],

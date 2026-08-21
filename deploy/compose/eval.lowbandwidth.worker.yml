@@ -1,0 +1,12 @@
+# Low-bandwidth overlay for deploy/compose/jyl-secure.worker.yml.
+#
+# Use this only when a case needs a real Worker collector. Public GitHub PR
+# packs are already bounded inputs and do not require this service.
+
+services:
+  agent:
+    environment:
+      # Do not upload raw collector artifacts during the pack evaluation.
+      AGENT_UPLOAD_ARTIFACTS: "${AGENT_UPLOAD_ARTIFACTS:-0}"
+      AGENT_HEARTBEAT_INTERVAL_SEC: "${AGENT_HEARTBEAT_INTERVAL_SEC:-15}"
+      MINI_DROP_TRACING_ENABLED: "${MINI_DROP_TRACING_ENABLED:-0}"

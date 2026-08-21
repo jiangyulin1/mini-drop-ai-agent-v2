@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -48,6 +51,210 @@ def _create_case(client: TestClient) -> dict:
     return created.json()["data"]
 
 
+def _create_topology_case(client: TestClient) -> dict:
+    repo.register_agent(
+        "agent-topology", "topology-host", "10.30.0.10",
+        capabilities=["network_discovery", "sys_metrics"],
+    )
+    created = client.post("/api/v1/cases", json={
+        "title": "topology-tool-case",
+        "problem_description": "只知道种子 PID，需要发现跨主机依赖",
+        "recovery_goal": "形成有覆盖边界的依赖图",
+        "run_mode": "COLLABORATE",
+        "environment": "test",
+        "target_scope": {
+            "service_id": "seed-service",
+            "instances": [{
+                "service_id": "seed-service",
+                "instance_id": "seed-1",
+                "agent_id": "agent-topology",
+                "host_id": "topology-host",
+                "pid": 4321,
+            }],
+        },
+    })
+    assert created.status_code == 200, created.text
+    return created.json()["data"]
+
+
+def _create_top_level_target_case(
+    client: TestClient, *, agent_id: str, pid: int | None,
+) -> dict:
+    target_scope = {"agent_id": agent_id}
+    if pid is not None:
+        target_scope["pid"] = pid
+    created = client.post("/api/v1/cases", json={
+        "title": "top-level-target-case",
+        "problem_description": "验证顶层 Agent 目标范围",
+        "recovery_goal": "只采集明确授权的目标",
+        "run_mode": "COLLABORATE",
+        "environment": "test",
+        "target_scope": target_scope,
+    })
+    assert created.status_code == 200, created.text
+    return created.json()["data"]
+
+
+def _persist_discovered_remote_authority(
+    case_id: str,
+    *,
+    run_id: str = "discovery-0123456789abcdefabcd",
+    evidence_id: str = "ev-discovered-remote",
+    remote_agent_id: str = "agent-discovered-remote",
+    remote_pid: int = 9876,
+    membership_snapshot_id: str = "snap-discovery-authority",
+    projection_membership_snapshot_id: str | None = None,
+    create_membership_snapshot: bool = True,
+    membership_scope_revision_delta: int = 0,
+    include_remote_member: bool = True,
+    remote_entity_type: str = "process",
+) -> tuple[str, str]:
+    case = repo.get_incident_case(case_id, "tenant-a")
+    assert case is not None
+    if create_membership_snapshot and repo.get_membership_snapshot(
+        case_id, "tenant-a", membership_snapshot_id,
+    ) is None:
+        members = [{
+            "agent_id": "agent-topology",
+            "hostname": "topology-host",
+            "ip_addr": "10.30.0.10",
+            "online": True,
+            "pid": 4321,
+        }]
+        if include_remote_member:
+            members.append({
+                "agent_id": remote_agent_id,
+                "hostname": "remote-host",
+                "ip_addr": "10.30.0.20",
+                "online": True,
+                "pid": remote_pid,
+            })
+        repo.create_membership_snapshot(case_id, "tenant-a", {
+            "snapshot_id": membership_snapshot_id,
+            "environment_id": str(case.get("environment") or "test"),
+            "cluster_id": "",
+            "topology_version": "network-discovery.v1",
+            "scope_revision": (
+                int(case.get("scope_revision") or 1)
+                + membership_scope_revision_delta
+            ),
+            "members": members,
+        })
+    seed_entity = "process:agent-topology:boot-seed:4321:100"
+    remote_entity = (
+        f"process:{remote_agent_id}:boot-remote:{remote_pid}:200"
+        if remote_entity_type == "process"
+        else f"{remote_entity_type}:tcp://10.30.0.20:8080"
+    )
+    remote_node = {
+        "entity_id": remote_entity,
+        "entity_type": remote_entity_type,
+        "display_name": "remote-payment",
+        "agent_id": remote_agent_id,
+        "confidence": 0.95,
+        "attributes": {},
+    }
+    if remote_entity_type == "process":
+        remote_node["process"] = {
+            "agent_id": remote_agent_id,
+            "boot_id": "boot-remote",
+            "pid": remote_pid,
+            "process_start_time": 200,
+        }
+    content = {
+        "artifact_type": "dependency_graph",
+        "discovery_run_id": run_id,
+        "membership_snapshot_id": (
+            membership_snapshot_id
+            if projection_membership_snapshot_id is None
+            else projection_membership_snapshot_id
+        ),
+        "graph": {
+            "schema_version": "dependency-graph.v1",
+            "nodes": [
+                {
+                    "entity_id": seed_entity,
+                    "entity_type": "process",
+                    "display_name": "seed",
+                    "agent_id": "agent-topology",
+                    "confidence": 0.95,
+                    "attributes": {},
+                    "process": {
+                        "agent_id": "agent-topology",
+                        "boot_id": "boot-seed",
+                        "pid": 4321,
+                        "process_start_time": 100,
+                    },
+                },
+                remote_node,
+            ],
+            "edges": [{
+                "schema_version": "dependency-edge.v1",
+                "edge_id": "dep-discovered-remote",
+                "source_entity": seed_entity,
+                "target_entity": remote_entity,
+                "relation": "calls",
+                "protocol": "tcp",
+                "destination_port": 8080,
+                "window": {
+                    "start": "2026-08-21T01:00:00Z",
+                    "end": "2026-08-21T01:00:01Z",
+                },
+                "metrics": {"connections": 1, "active_connections": 1},
+                "identity_confidence": 0.95,
+                "direction_confidence": 0.9,
+                "observation_points": ["client", "server"],
+                "evidence_refs": [evidence_id],
+                "event_refs": ["event-client", "event-server"],
+            }],
+            "identity_assertions": [],
+        },
+        "coverage": {
+            "status": "complete",
+            "conclusion": "dependency",
+            "managed_unresolved_count": 0,
+            "external_unmanaged_count": 0,
+            "virtual_endpoint_count": 0,
+        },
+        "limitations": ["dependency_edges_are_observations_not_causal_claims"],
+    }
+    projection_hash = hashlib.sha256(json.dumps(
+        content, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    repo.upsert_case_evidence(
+        case_id=case_id,
+        tenant_id="tenant-a",
+        evidence_id=evidence_id,
+        attachment_id=None,
+        task_id=None,
+        artifact_id=None,
+        artifact_type="dependency_graph",
+        collector_id="network_discovery",
+        source_type="task_artifact",
+        target_ref=seed_entity,
+        content_hash=projection_hash,
+        projection_hash=projection_hash,
+        membership_snapshot_id=membership_snapshot_id,
+        time_window={
+            "start": "2026-08-21T01:00:00Z",
+            "end": "2026-08-21T01:00:01Z",
+        },
+    )
+    repo.upsert_evidence_projection(
+        evidence_id=evidence_id,
+        case_id=case_id,
+        tenant_id="tenant-a",
+        projection_kind="DEPENDENCY_GRAPH",
+        content=content,
+        projection_schema="dependency-graph-projection.v1",
+        projection_version=1,
+        truncated=False,
+        source_bytes=len(json.dumps(content)),
+        parser_version="test-discovery-authority.v1",
+    )
+    return run_id, evidence_id
+
+
 def test_internal_tool_requires_token(client: TestClient):
     resp = client.post("/internal/agent/tools/case-snapshot", json={"case_id": "x"})
     assert resp.status_code == 401
@@ -62,9 +269,27 @@ def test_internal_catalog_is_authenticated_and_canonical(client: TestClient):
     catalog = response.json()["data"]
     assert catalog["schema_version"] == "tool-catalog.v1"
     names = {item["name"] for item in catalog["tools"]}
-    assert len(names) == 12
-    assert {"get_case_snapshot", "propose_collection", "submit_evidence_analysis", "finish_investigation"} <= names
-    assert {"evaluate_hypotheses", "rca_candidate_analysis", "request_operation", "propose_plan_revision"}.isdisjoint(names)
+    assert len(names) == 20
+    assert {
+        "get_case_snapshot", "propose_collection", "propose_plan_revision",
+        "get_dependency_graph", "discover_topology",
+        "propose_hypothesis_revision", "record_evidence_gaps", "propose_causal_graph",
+        "submit_evidence_analysis", "finish_investigation",
+    } <= names
+    assert {"evaluate_hypotheses", "rca_candidate_analysis", "request_operation"}.isdisjoint(names)
+    by_name = {item["name"]: item for item in catalog["tools"]}
+    recommendation = by_name["finish_investigation"]["parameters"]["properties"]["recommendations"]["items"]
+    assert set(recommendation["required"]) == {"cause_or_edge_ref", "target", "concrete_action"}
+    graph = by_name["propose_causal_graph"]["parameters"]["properties"]
+    assert "node_id" in graph["nodes"]["items"]["properties"]
+    assert "source_node_id" in graph["edges"]["items"]["properties"]
+    hypotheses = by_name["propose_hypothesis_revision"]["parameters"]["properties"]["hypotheses"]["items"]
+    assert set(hypotheses["required"]) == {"hypothesis_id", "statement", "status"}
+    gaps = by_name["record_evidence_gaps"]["parameters"]["properties"]["gaps"]["items"]
+    assert set(gaps["required"]) == {"required_fact", "status"}
+    collection = by_name["propose_collection"]["parameters"]["properties"]
+    assert collection["discovery_run_id"]["pattern"] == r"^discovery-[0-9a-f]{20}$"
+    assert collection["discovery_evidence_refs"]["maxItems"] == 32
 
 
 def test_public_runtime_config_exposes_safe_strategy_and_schema_summaries(client: TestClient):
@@ -76,7 +301,7 @@ def test_public_runtime_config_exposes_safe_strategy_and_schema_summaries(client
     assert data["ai_ready"] is False
     assert data["ai_status"] == "NOT_CONFIGURED"
     assert {item["strategy_id"] for item in data["available_strategies"]} == {"hybrid"}
-    assert len(data["tool_catalog"]["tools"]) == 12
+    assert len(data["tool_catalog"]["tools"]) == 20
     assert all("internal_path" not in item for item in data["tool_catalog"]["tools"])
     assert data["runtime_policy_schema"]["title"] == "RuntimePolicy"
     assert data["runtime_options_schema"]["title"] == "RuntimeOptions"
@@ -100,6 +325,132 @@ def test_runtime_policy_can_remove_proposal_tools_at_gateway(client: TestClient)
     assert response.json()["detail"] == "TURN_READ_ONLY"
 
 
+def test_topology_tool_propose_only_persists_bounded_seed_without_task(client: TestClient):
+    case = _create_topology_case(client)
+    response = client.post(
+        "/internal/agent/tools/topology-discovery",
+        json={
+            "case_id": case["case_id"],
+            "seed_agent_id": "agent-topology",
+            "seed_pid": 4321,
+            "wait_timeout_sec": 0,
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "idempotency_key": "agent-proposed-topology",
+            "runtime_policy": {"side_effect_policy": "PROPOSE_ONLY"},
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "PROPOSED"
+    assert data["proposal"]["status"] == "PROPOSED"
+    assert data["task_ids"] == []
+    assert not [task for task in repo.tasks.values() if task.collector_type == "network_discovery"]
+    started = next(
+        event for event in repo.list_case_events(case["case_id"], "tenant-a", limit=100)
+        if event["event_type"] == "topology_discovery_started"
+    )
+    assert started["payload"]["membership_snapshot_id"]
+    assert started["payload"]["execution_authority"] == "PROPOSE_ONLY"
+
+
+def test_topology_tool_auto_read_low_dispatches_only_case_seed(client: TestClient):
+    case = _create_topology_case(client)
+    response = client.post(
+        "/internal/agent/tools/topology-discovery",
+        json={
+            "case_id": case["case_id"],
+            "seed_agent_id": "agent-topology",
+            "seed_pid": 4321,
+            "wait_timeout_sec": 0,
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {
+                "side_effect_policy": "AUTO_READ_LOW",
+                "allowed_risk_levels": ["R1"],
+                "max_collection_requests": 2,
+                "max_collection_duration_sec": 20,
+            },
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "COLLECTING"
+    task = repo.tasks[data["task_ids"][0]]
+    assert task.agent_id == "agent-topology"
+    assert task.target_pid == 4321
+    assert task.collector_type == "network_discovery"
+    options = task.request_params["options"]
+    assert options["membership_snapshot_id"]
+    assert options["discovery_phase"] == "seed"
+
+
+def test_topology_tool_ignores_provider_invented_first_call_run_id(client: TestClient):
+    case = _create_topology_case(client)
+    response = client.post(
+        "/internal/agent/tools/topology-discovery",
+        json={
+            "case_id": case["case_id"],
+            "run_id": "topo_run_001",
+            "seed_agent_id": "agent-topology",
+            "seed_pid": 4321,
+            "wait_timeout_sec": 0,
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {
+                "side_effect_policy": "AUTO_READ_LOW",
+                "allowed_risk_levels": ["R1"],
+                "max_collection_requests": 2,
+                "max_collection_duration_sec": 20,
+            },
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "COLLECTING"
+    assert data["run_id"].startswith("discovery-")
+    assert data["run_id"] != "topo_run_001"
+    assert data["compatibility"] == {
+        "ignored_unrecognized_run_id": "topo_run_001",
+        "reason": "FIRST_CALL_RUN_ID_IS_SERVER_OWNED",
+    }
+    task = repo.tasks[data["task_ids"][0]]
+    assert task.collector_type == "network_discovery"
+
+
+def test_topology_tool_rejects_read_only_and_stale_scope_before_snapshot(client: TestClient):
+    case = _create_topology_case(client)
+    read_only = client.post(
+        "/internal/agent/tools/topology-discovery",
+        json={
+            "case_id": case["case_id"],
+            "runtime_policy": {"side_effect_policy": "READ_ONLY"},
+        },
+        headers=_headers(),
+    )
+    assert read_only.status_code == 409
+    assert read_only.json()["detail"] == "TURN_READ_ONLY"
+
+    stale = client.post(
+        "/internal/agent/tools/topology-discovery",
+        json={
+            "case_id": case["case_id"],
+            "expected_scope_revision": case["scope_revision"] + 1,
+            "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+        },
+        headers=_headers(),
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "STALE_SCOPE_REVISION"
+    assert not [
+        event for event in repo.list_case_events(case["case_id"], "tenant-a", limit=100)
+        if event["event_type"] == "topology_discovery_started"
+    ]
+
+
 def test_internal_case_snapshot_returns_projection(client: TestClient):
     case = _create_case(client)
     resp = client.post(
@@ -117,6 +468,18 @@ def test_internal_case_snapshot_returns_projection(client: TestClient):
 
 def test_collection_proposal_requires_scope_fence(client: TestClient):
     case = _create_case(client)
+    turn_id = "turn-collection-scheduled"
+    repo.record_agent_runtime_turn(
+        turn_id=turn_id,
+        case_id=case["case_id"],
+        tenant_id="tenant-a",
+        runtime_session_id=case["case_id"],
+        runtime_generation=1,
+        user_message="collect CPU evidence",
+        requested_mode=None,
+        status="ACCEPTED",
+        accepted_mode="pi",
+    )
     repo.register_agent(
         "agent-collector", "node-a", "192.168.9.10", version="0.3.0",
         capabilities=["sys_metrics"],
@@ -131,6 +494,7 @@ def test_collection_proposal_requires_scope_fence(client: TestClient):
             "information_goal": "主机和目标进程资源饱和度",
             "expected_control_revision": case["control_revision"],
             "expected_scope_revision": case["scope_revision"],
+            "trigger_turn_id": turn_id,
         },
         headers=_headers(),
     )
@@ -138,6 +502,14 @@ def test_collection_proposal_requires_scope_fence(client: TestClient):
     assert ok.json()["data"]["proposal"]["status"] == "ACCEPTED"
     assert ok.json()["data"]["collection_request"]["status"] == "DISPATCHED"
     assert ok.json()["data"]["task"]["collector_type"] == "sys_metrics"
+    workspace = client.get(f"/api/v1/cases/{case['case_id']}/workspace")
+    assert workspace.status_code == 200, workspace.text
+    goal = workspace.json()["data"]["information_goals"][0]
+    assert goal["title"] == "主机和目标进程资源饱和度"
+    assert goal["status"] == "COLLECTING"
+    assert goal["collection_request_id"] == ok.json()["data"]["collection_request"]["collection_request_id"]
+    assert goal["task_id"] == ok.json()["data"]["task"]["id"]
+    assert repo.get_agent_runtime_turn(turn_id, "tenant-a")["status"] == "COMPLETED"
 
     stale = client.post(
         "/internal/agent/tools/collection-proposal",
@@ -154,6 +526,473 @@ def test_collection_proposal_requires_scope_fence(client: TestClient):
     )
     assert stale.status_code == 409
     assert "STALE_SCOPE_REVISION" in stale.json()["detail"]
+
+
+def test_collection_proposal_authorizes_one_discovered_remote_target(client: TestClient):
+    case = _create_topology_case(client)
+    remote_agent_id = "agent-discovered-remote"
+    remote_pid = 9876
+    repo.register_agent(
+        remote_agent_id, "remote-host", "10.30.0.20", version="0.3.0",
+        capabilities=["sys_metrics"],
+    )
+    run_id, evidence_id = _persist_discovered_remote_authority(
+        case["case_id"], remote_agent_id=remote_agent_id, remote_pid=remote_pid,
+    )
+
+    response = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"],
+            "collector_id": "sys_metrics",
+            "target_selector": {
+                "agent_id": remote_agent_id, "target_pid": remote_pid,
+            },
+            "parameters": {"duration_sec": 15},
+            "information_goal": "主机和目标进程资源饱和度",
+            "input_evidence_refs": [evidence_id],
+            "discovery_run_id": run_id,
+            "discovery_evidence_refs": [evidence_id],
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["proposal"]["validation_result"]["discovery_scope_expansion"] is True
+    assert data["proposal"]["input_evidence_refs"] == [evidence_id]
+    assert data["task"]["agent_id"] == remote_agent_id
+    assert data["task"]["target_pid"] == remote_pid
+    options = repo.tasks[data["task"]["id"]].request_params["options"]
+    assert options["agent_id"] == remote_agent_id
+    assert options["discovery_run_id"] == run_id
+    assert options["discovery_authority_evidence_ref"] == evidence_id
+    assert options["discovery_authority_evidence_refs"] == [evidence_id]
+    assert options["discovery_followup_authority"] is True
+    assert options["membership_snapshot_id"] == "snap-discovery-authority"
+    assert options["expected_boot_id"] == "boot-remote"
+    assert options["expected_process_start_time"] == 200
+    assert options["expected_entity_id"] == (
+        f"process:{remote_agent_id}:boot-remote:{remote_pid}:200"
+    )
+    # The authorization is proposal-scoped; the persisted Case scope remains
+    # exactly the original seed Agent and is never globally widened.
+    current = repo.get_incident_case(case["case_id"], "tenant-a")
+    assert {
+        item["agent_id"] for item in current["target_scope"]["instances"]
+    } == {"agent-topology"}
+
+
+def test_same_agent_new_pid_requires_and_accepts_exact_discovery_authority(
+    client: TestClient,
+):
+    case = _create_topology_case(client)
+    remote_pid = 9876
+    payload = {
+        "case_id": case["case_id"],
+        "collector_id": "sys_metrics",
+        "target_selector": {
+            "agent_id": "agent-topology", "target_pid": remote_pid,
+        },
+        "parameters": {"duration_sec": 15},
+        "information_goal": "主机和目标进程资源饱和度",
+        "expected_control_revision": case["control_revision"],
+        "expected_scope_revision": case["scope_revision"],
+        "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+    }
+
+    unproven = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json=payload,
+        headers=_headers(),
+    )
+    assert unproven.status_code == 409
+    assert unproven.json()["detail"] == "DISCOVERY_AUTHORITY_RUN_REQUIRED"
+    assert not repo.list_collection_proposals(case["case_id"], "tenant-a")
+
+    run_id, evidence_id = _persist_discovered_remote_authority(
+        case["case_id"],
+        remote_agent_id="agent-topology",
+        remote_pid=remote_pid,
+    )
+    authorized = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            **payload,
+            "discovery_run_id": run_id,
+            "discovery_evidence_refs": [evidence_id],
+        },
+        headers=_headers(),
+    )
+
+    assert authorized.status_code == 200, authorized.text
+    assert authorized.json()["data"]["task"]["agent_id"] == "agent-topology"
+    assert authorized.json()["data"]["task"]["target_pid"] == remote_pid
+    assert authorized.json()["data"]["proposal"]["validation_result"][
+        "discovery_scope_expansion"
+    ] is True
+
+
+@pytest.mark.parametrize("pid", [4321, None])
+def test_top_level_target_scope_preserves_explicit_agent_semantics(
+    client: TestClient, pid: int | None,
+):
+    repo.register_agent(
+        "agent-top-level", "top-level-host", "10.31.0.10",
+        version="0.3.0", capabilities=["sys_metrics"],
+    )
+    case = _create_top_level_target_case(
+        client, agent_id="agent-top-level", pid=pid,
+    )
+    target_pid = pid or 9876
+    response = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"],
+            "collector_id": "sys_metrics",
+            "target_selector": {
+                "agent_id": "agent-top-level", "target_pid": target_pid,
+            },
+            "parameters": {"duration_sec": 15},
+            "information_goal": "主机和目标进程资源饱和度",
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["task"]["agent_id"] == "agent-top-level"
+    assert response.json()["data"]["task"]["target_pid"] == target_pid
+    assert response.json()["data"]["proposal"]["validation_result"][
+        "discovery_scope_expansion"
+    ] is False
+
+
+@pytest.mark.parametrize(
+    ("authority_kwargs", "expected_error"),
+    [
+        (
+            {
+                "membership_snapshot_id": "",
+                "create_membership_snapshot": False,
+            },
+            "DISCOVERY_AUTHORITY_MEMBERSHIP_SNAPSHOT_REQUIRED:ev-discovered-remote",
+        ),
+        (
+            {"create_membership_snapshot": False},
+            "DISCOVERY_AUTHORITY_MEMBERSHIP_SNAPSHOT_NOT_FOUND:snap-discovery-authority",
+        ),
+        (
+            {"membership_scope_revision_delta": 1},
+            "DISCOVERY_AUTHORITY_MEMBERSHIP_SCOPE_MISMATCH:snap-discovery-authority",
+        ),
+        (
+            {"include_remote_member": False},
+            "DISCOVERY_AUTHORITY_TARGET_NOT_IN_MEMBERSHIP:agent-discovered-remote",
+        ),
+        (
+            {"projection_membership_snapshot_id": "snap-other"},
+            "DISCOVERY_AUTHORITY_PROJECTION_MEMBERSHIP_MISMATCH:ev-discovered-remote",
+        ),
+    ],
+)
+def test_discovered_remote_authority_requires_current_bound_membership_snapshot(
+    client: TestClient,
+    authority_kwargs: dict,
+    expected_error: str,
+):
+    case = _create_topology_case(client)
+    repo.register_agent(
+        "agent-discovered-remote", "remote-host", "10.30.0.20",
+        version="0.3.0", capabilities=["sys_metrics"],
+    )
+    run_id, evidence_id = _persist_discovered_remote_authority(
+        case["case_id"], **authority_kwargs,
+    )
+
+    response = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"],
+            "collector_id": "sys_metrics",
+            "target_selector": {
+                "agent_id": "agent-discovered-remote", "target_pid": 9876,
+            },
+            "parameters": {"duration_sec": 15},
+            "information_goal": "主机和目标进程资源饱和度",
+            "discovery_run_id": run_id,
+            "discovery_evidence_refs": [evidence_id],
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == expected_error
+    assert not repo.list_collection_proposals(case["case_id"], "tenant-a")
+
+
+@pytest.mark.parametrize(
+    "entity_type",
+    ["external_unmanaged_endpoint", "virtual_endpoint"],
+)
+def test_discovered_remote_authority_rejects_non_collectable_endpoint_types(
+    client: TestClient, entity_type: str,
+):
+    case = _create_topology_case(client)
+    repo.register_agent(
+        "agent-discovered-remote", "remote-host", "10.30.0.20",
+        version="0.3.0", capabilities=["sys_metrics"],
+    )
+    run_id, evidence_id = _persist_discovered_remote_authority(
+        case["case_id"], remote_entity_type=entity_type,
+    )
+    target_entity_id = f"{entity_type}:tcp://10.30.0.20:8080"
+
+    response = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"],
+            "collector_id": "sys_metrics",
+            "target_selector": {
+                "agent_id": "agent-discovered-remote",
+                "target_pid": 9876,
+                "target_entity_id": target_entity_id,
+            },
+            "parameters": {"duration_sec": 15},
+            "information_goal": "主机和目标进程资源饱和度",
+            "discovery_run_id": run_id,
+            "discovery_evidence_refs": [evidence_id],
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        f"DISCOVERY_AUTHORITY_ENDPOINT_NOT_COLLECTABLE:{entity_type}"
+    )
+
+
+def test_discovery_authority_cannot_be_reused_for_an_unproven_agent_pid(
+    client: TestClient,
+):
+    case = _create_topology_case(client)
+    for agent_id, address in (
+        ("agent-discovered-remote", "10.30.0.20"),
+        ("agent-unproven", "10.30.0.30"),
+    ):
+        repo.register_agent(
+            agent_id, f"{agent_id}-host", address,
+            version="0.3.0", capabilities=["sys_metrics"],
+        )
+    run_id, evidence_id = _persist_discovered_remote_authority(case["case_id"])
+
+    response = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"],
+            "collector_id": "sys_metrics",
+            "target_selector": {
+                "agent_id": "agent-unproven", "target_pid": 7777,
+            },
+            "parameters": {"duration_sec": 15},
+            "information_goal": "主机和目标进程资源饱和度",
+            "discovery_run_id": run_id,
+            "discovery_evidence_refs": [evidence_id],
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "DISCOVERY_AUTHORITY_TARGET_NOT_IN_MEMBERSHIP:agent-unproven"
+    )
+    assert not [
+        task for task in repo.tasks.values()
+        if task.agent_id == "agent-unproven" and task.target_pid == 7777
+    ]
+
+
+@pytest.mark.parametrize(
+    ("override", "expected_error"),
+    [
+        ({"discovery_run_id": ""}, "DISCOVERY_AUTHORITY_RUN_REQUIRED"),
+        ({"discovery_run_id": "discovery-aaaaaaaaaaaaaaaaaaaa"},
+         "DISCOVERY_AUTHORITY_RUN_EVIDENCE_MISMATCH:ev-discovered-remote"),
+        ({"target_selector": {"agent_id": "agent-discovered-remote", "target_pid": 9999}},
+         "DISCOVERY_AUTHORITY_TARGET_NOT_FOUND"),
+        ({"discovery_evidence_refs": ["ev-not-active"]},
+         "DISCOVERY_AUTHORITY_EVIDENCE_NOT_ACTIVE:ev-not-active"),
+    ],
+)
+def test_collection_proposal_rejects_unproven_discovered_remote_target(
+    client: TestClient, override: dict, expected_error: str,
+):
+    case = _create_topology_case(client)
+    remote_agent_id = "agent-discovered-remote"
+    remote_pid = 9876
+    repo.register_agent(
+        remote_agent_id, "remote-host", "10.30.0.20", version="0.3.0",
+        capabilities=["sys_metrics"],
+    )
+    run_id, evidence_id = _persist_discovered_remote_authority(
+        case["case_id"], remote_agent_id=remote_agent_id, remote_pid=remote_pid,
+    )
+    payload = {
+        "case_id": case["case_id"],
+        "collector_id": "sys_metrics",
+        "target_selector": {
+            "agent_id": remote_agent_id, "target_pid": remote_pid,
+        },
+        "parameters": {"duration_sec": 15},
+        "information_goal": "主机和目标进程资源饱和度",
+        "input_evidence_refs": [evidence_id],
+        "discovery_run_id": run_id,
+        "discovery_evidence_refs": [evidence_id],
+        "expected_control_revision": case["control_revision"],
+        "expected_scope_revision": case["scope_revision"],
+        "runtime_policy": {"side_effect_policy": "AUTO_READ_LOW"},
+    }
+    payload.update(override)
+
+    response = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json=payload,
+        headers=_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == expected_error
+    assert not repo.list_collection_proposals(case["case_id"], "tenant-a")
+    assert not [
+        task for task in repo.tasks.values()
+        if task.agent_id == remote_agent_id and task.collector_type == "sys_metrics"
+    ]
+
+
+def test_discovered_remote_authority_is_revalidated_on_human_approval(client: TestClient):
+    case = _create_topology_case(client)
+    remote_agent_id = "agent-discovered-remote"
+    remote_pid = 9876
+    repo.register_agent(
+        remote_agent_id, "remote-host", "10.30.0.20", version="0.3.0",
+        capabilities=["sys_metrics"],
+    )
+    run_id, evidence_id = _persist_discovered_remote_authority(
+        case["case_id"], remote_agent_id=remote_agent_id, remote_pid=remote_pid,
+    )
+    proposed = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"],
+            "collector_id": "sys_metrics",
+            "target_selector": {
+                "agent_id": remote_agent_id, "target_pid": remote_pid,
+            },
+            "parameters": {"duration_sec": 15},
+            "information_goal": "主机和目标进程资源饱和度",
+            "discovery_run_id": run_id,
+            "discovery_evidence_refs": [evidence_id],
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {"side_effect_policy": "PROPOSE_ONLY"},
+        },
+        headers=_headers(),
+    )
+    assert proposed.status_code == 200, proposed.text
+    proposal = proposed.json()["data"]["proposal"]
+    assert proposal["status"] == "PROPOSED"
+    pinned = proposal["validation_result"]["approval_context"]["dispatch_context"]
+    assert pinned["discovery_authority_evidence_refs"] == [evidence_id]
+    assert pinned["membership_snapshot_id"] == "snap-discovery-authority"
+    assert pinned["expected_boot_id"] == "boot-remote"
+    assert pinned["expected_process_start_time"] == 200
+    assert pinned["expected_entity_id"] == (
+        f"process:{remote_agent_id}:boot-remote:{remote_pid}:200"
+    )
+
+    approved = client.post(
+        f"/api/v1/cases/{case['case_id']}/collection-proposals/{proposal['proposal_id']}/decision",
+        json={
+            "decision": "APPROVE",
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["data"]["task"]["agent_id"] == remote_agent_id
+    assert approved.json()["data"]["task"]["target_pid"] == remote_pid
+
+
+def test_human_approval_rejects_discovery_authority_excluded_after_proposal(
+    client: TestClient,
+):
+    case = _create_topology_case(client)
+    remote_agent_id = "agent-discovered-remote"
+    remote_pid = 9876
+    repo.register_agent(
+        remote_agent_id, "remote-host", "10.30.0.20", version="0.3.0",
+        capabilities=["sys_metrics"],
+    )
+    run_id, evidence_id = _persist_discovered_remote_authority(
+        case["case_id"], remote_agent_id=remote_agent_id, remote_pid=remote_pid,
+    )
+    proposed = client.post(
+        "/internal/agent/tools/collection-proposal",
+        json={
+            "case_id": case["case_id"],
+            "collector_id": "sys_metrics",
+            "target_selector": {
+                "agent_id": remote_agent_id, "target_pid": remote_pid,
+            },
+            "parameters": {"duration_sec": 15},
+            "information_goal": "主机和目标进程资源饱和度",
+            "discovery_run_id": run_id,
+            "discovery_evidence_refs": [evidence_id],
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+            "runtime_policy": {"side_effect_policy": "PROPOSE_ONLY"},
+        },
+        headers=_headers(),
+    )
+    assert proposed.status_code == 200, proposed.text
+    proposal = proposed.json()["data"]["proposal"]
+    assert proposal["status"] == "PROPOSED"
+    repo.exclude_case_evidence(case["case_id"], "tenant-a", evidence_id)
+
+    approved = client.post(
+        f"/api/v1/cases/{case['case_id']}/collection-proposals/"
+        f"{proposal['proposal_id']}/decision",
+        json={
+            "decision": "APPROVE",
+            "expected_control_revision": case["control_revision"],
+            "expected_scope_revision": case["scope_revision"],
+        },
+    )
+
+    assert approved.status_code == 409
+    assert approved.json()["detail"] == (
+        f"DISCOVERY_AUTHORITY_EVIDENCE_NOT_ACTIVE:{evidence_id}"
+    )
+    assert not [
+        task for task in repo.tasks.values()
+        if task.agent_id == remote_agent_id
+        and task.target_pid == remote_pid
+        and task.collector_type == "sys_metrics"
+    ]
 
 
 def test_duplicate_collection_proposal_reuses_request_without_budget(client: TestClient):
@@ -401,10 +1240,24 @@ def test_collection_proposal_is_not_accepted_when_task_dispatch_fails(
     assert proposal["status"] == "FAILED"
     assert collection_request["status"] == "DISPATCH_FAILED"
     assert collection_request["task_id"] is None
+    workspace = client.get(f"/api/v1/cases/{case['case_id']}/workspace")
+    assert workspace.status_code == 200, workspace.text
+    goal = workspace.json()["data"]["information_goals"][0]
+    assert goal["status"] == "BLOCKED"
 
 
 def test_internal_finish_requires_evidence_refs(client: TestClient):
     case = _create_case(client)
+    invalid_state = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"], "summary": "invalid",
+            "evidence_ids": [], "state": "DONE",
+        },
+        headers=_headers(),
+    )
+    assert invalid_state.status_code == 400
+    assert invalid_state.json()["detail"] == "INVALID_CONCLUSION_STATE"
     missing = client.post(
         "/internal/agent/tools/finish",
         json={"case_id": case["case_id"], "evidence_ids": []},
@@ -423,6 +1276,18 @@ def test_internal_finish_requires_evidence_refs(client: TestClient):
 
 def test_internal_finish_accepts_known_evidence_refs(client: TestClient):
     case = _create_case(client)
+    turn_id = "turn-finish-with-trigger"
+    repo.record_agent_runtime_turn(
+        turn_id=turn_id,
+        case_id=case["case_id"],
+        tenant_id="tenant-a",
+        runtime_session_id=case["case_id"],
+        runtime_generation=1,
+        user_message="finish the investigation",
+        requested_mode=None,
+        status="ACCEPTED",
+        accepted_mode="pi",
+    )
     repo.upsert_case_attachment(
         case["case_id"],
         "tenant-a",
@@ -442,16 +1307,25 @@ def test_internal_finish_accepts_known_evidence_refs(client: TestClient):
             "case_id": case["case_id"],
             "summary": "根因是 CPU 饱和",
             "evidence_ids": ["ev-valid"],
+            "state": "CONCLUDED",
+            "trigger_turn_id": turn_id,
         },
         headers=_headers(),
     )
     assert ok.status_code == 200, ok.text
     assert ok.json()["data"]["accepted"] is True
+    assert ok.json()["data"]["state"] == "PARTIALLY_CONFIRMED"
+    assert ok.json()["data"]["assistant_message_id"]
     events = client.get(f"/api/v1/cases/{case['case_id']}/events").json()["data"]["items"]
     assert events[-1]["event_type"] == "agent_finish_investigation"
     updated = client.get(f"/api/v1/cases/{case['case_id']}").json()["data"]
     assert updated["summary"]["current_finding"]["status"] == "concluded"
     assert updated["summary"]["current_finding"]["evidence_refs"] == ["ev-valid"]
+    assert updated["state"] == "WAITING_USER"
+    messages = repo.list_assistant_messages(case["case_id"], "tenant-a")
+    assert len(messages) == 1
+    assert messages[0]["content"].startswith("PARTIALLY_CONFIRMED：根因是 CPU 饱和")
+    assert repo.get_agent_runtime_turn(turn_id, "tenant-a")["status"] == "COMPLETED"
 
 
 def test_tool_policy_error_enforces_needs_approval(monkeypatch):

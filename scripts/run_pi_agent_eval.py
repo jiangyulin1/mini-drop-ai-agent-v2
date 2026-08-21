@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import ssl
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -18,6 +19,17 @@ from pathlib import Path
 from typing import Any
 
 import paramiko
+
+
+_HTTP_API_KEY = ""
+_HTTP_SSL_CONTEXT: ssl.SSLContext | None = None
+
+
+def configure_http(*, api_key: str = "", ca_file: str | None = None) -> None:
+    """Configure authenticated HTTPS without placing credentials in URLs."""
+    global _HTTP_API_KEY, _HTTP_SSL_CONTEXT
+    _HTTP_API_KEY = api_key.strip()
+    _HTTP_SSL_CONTEXT = ssl.create_default_context(cafile=ca_file) if ca_file else None
 
 
 FAULT_SYMPTOMS = {
@@ -36,39 +48,94 @@ def symptom_for_fault(fault: str) -> str:
         raise ValueError(f"unsupported blind-evaluation fault: {fault}") from exc
 
 
-def ssh_run(host: str, user: str, password: str, cmd: str, timeout: int = 30) -> str:
+def ssh_run(
+    host: str,
+    user: str,
+    password: str,
+    cmd: str,
+    timeout: int = 30,
+    *,
+    key_filename: str | None = None,
+) -> str:
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, username=user, password=password, timeout=15)
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    connect_kwargs: dict[str, Any] = {
+        "hostname": host,
+        "username": user,
+        "timeout": 15,
+    }
+    if password:
+        connect_kwargs["password"] = password
+    if key_filename:
+        connect_kwargs["key_filename"] = key_filename
+        connect_kwargs["look_for_keys"] = False
+    client.connect(**connect_kwargs)
     _, out, err = client.exec_command(cmd, timeout=timeout)
     data = out.read().decode() + err.read().decode()
+    status = out.channel.recv_exit_status()
     client.close()
+    if status != 0:
+        raise RuntimeError(f"ssh command failed ({status}): {data[-600:]}")
     return data.strip()
 
 
 def http_json(url: str, method: str = "GET", payload: dict | None = None, timeout: int = 20) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    headers = {"Content-Type": "application/json"}
+    if _HTTP_API_KEY:
+        headers["X-API-Key"] = _HTTP_API_KEY
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout, context=_HTTP_SSL_CONTEXT) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def start_fault(host: str, user: str, password: str, fault: str, duration: int) -> int:
+def start_fault(
+    host: str,
+    user: str,
+    password: str,
+    fault: str,
+    duration: int,
+    *,
+    key_filename: str | None = None,
+) -> int:
     symptom_for_fault(fault)  # Reject scenarios without a blind public prompt.
-    ssh_run(host, user, password, "systemctl stop pi-agent-eval 2>/dev/null; systemctl reset-failed pi-agent-eval 2>/dev/null || true")
+    ssh_run(
+        host, user, password,
+        "systemctl stop pi-agent-eval 2>/dev/null; "
+        "systemctl reset-failed pi-agent-eval 2>/dev/null || true",
+        key_filename=key_filename,
+    )
     cmd = (
         f"systemd-run --unit=pi-agent-eval --collect --setenv=MINI_DROP_EVAL_SCENARIO={fault} sh -c "
-        f"'cd /jyl/mini-drop && exec python3 demo/vm_test_targets.py "
+        f"'cd /jyl/mini-drop-active && exec python3 demo/vm_test_targets.py "
         f"--inject-fault-env MINI_DROP_EVAL_SCENARIO --duration {duration} "
         f">/tmp/pi_agent_eval.log 2>&1'"
     )
-    ssh_run(host, user, password, cmd)
+    ssh_run(host, user, password, cmd, key_filename=key_filename)
     time.sleep(3)
     pid_line = ssh_run(
         host, user, password,
         "pgrep -f '^python3 demo/vm_test_targets.py --inject-fault-env MINI_DROP_EVAL_SCENARIO' | head -1",
+        key_filename=key_filename,
     )
     return int(pid_line.strip())
+
+
+def stop_fault(
+    host: str,
+    user: str,
+    password: str,
+    *,
+    key_filename: str | None = None,
+) -> None:
+    ssh_run(
+        host, user, password,
+        "systemctl stop pi-agent-eval 2>/dev/null || true; "
+        "systemctl reset-failed pi-agent-eval 2>/dev/null || true; "
+        "rm -f /tmp/mini_drop_io_test.bin /tmp/mini_drop_dd_test",
+        key_filename=key_filename,
+    )
 
 
 def create_case_and_turn(
@@ -81,8 +148,7 @@ def create_case_and_turn(
     runtime_options: dict[str, Any] | None = None,
     runtime_policy: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
-    with urllib.request.urlopen(f"{control_url.rstrip('/')}/api/agents", timeout=10) as resp:
-        agents = json.load(resp)["data"]["items"]
+    agents = http_json(f"{control_url.rstrip('/')}/api/agents", timeout=10)["data"]["items"]
     host_id = next((a["hostname"] for a in agents if a["id"] == agent_id), agent_id)
 
     scope = {
@@ -140,14 +206,18 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
     conclusion_verifier = ""
     conclusion_state = ""
     settled = False
+    stable_after_conclusion = 0
+    previous_runtime_seq = -1
     deadline = time.time() + timeout
     while time.time() < deadline:
         events = http_json(f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/events")["data"]["items"]
         try:
             runtime = http_json(f"{control_url.rstrip('/')}/api/v1/cases/{case_id}/agent/runtime-state")["data"]
             runtime_events = runtime.get("events") or []
+            runtime_seq = int((runtime.get("binding") or {}).get("last_event_seq") or 0)
         except Exception:
             runtime_events = []
+            runtime_seq = 0
         for event in runtime_events:
             payload = event.get("payload") or {}
             etype = event.get("event_type", "")
@@ -180,10 +250,17 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
                 settled = True
             elif etype in ("assistant.message", "turn.completed", "agent_settled") and payload.get("content") and not conclusion_text:
                 final_text = payload["content"]
-            if etype in ("agent_settled", "agent_finish_investigation"):
-                settled = True
+            # agent_settled is only a Pi run boundary. A collection proposal
+            # intentionally settles while Mini-Drop waits for durable Evidence;
+            # only the verified finish event is terminal for this evaluation.
         if settled and final_text:
-            break
+            if runtime_seq > 0 and runtime_seq == previous_runtime_seq:
+                stable_after_conclusion += 1
+                if stable_after_conclusion >= 3:
+                    break
+            else:
+                stable_after_conclusion = 0
+        previous_runtime_seq = runtime_seq
         time.sleep(5)
     return {
         "settled": settled,
@@ -253,7 +330,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control-url", default="http://47.112.10.137")
     parser.add_argument("--worker-host", required=True)
     parser.add_argument("--worker-user", default="root")
-    parser.add_argument("--worker-password", required=True)
+    parser.add_argument("--worker-password", default="")
+    parser.add_argument("--worker-ssh-key", type=Path)
+    parser.add_argument("--api-key-file", type=Path)
+    parser.add_argument("--ca-file", type=Path)
     parser.add_argument("--agent-id", default="linux-worker-1")
     parser.add_argument("--fault", default="cpu-hotspot")
     parser.add_argument("--duration", type=int, default=360)
@@ -262,28 +342,89 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--case-id", default=None, help="reuse an existing case instead of injecting a new fault")
     args = parser.parse_args(argv)
 
-    if args.case_id:
-        case_id = args.case_id
-        pid = 0
-        print(f"[pi-eval] reusing case {case_id}", flush=True)
-    else:
-        print(f"[pi-eval] starting fault {args.fault} on {args.worker_host}", flush=True)
-        pid = start_fault(args.worker_host, args.worker_user, args.worker_password, args.fault, args.duration)
-        print(f"[pi-eval] injector pid={pid}", flush=True)
+    api_key = ""
+    if args.api_key_file:
+        api_key = args.api_key_file.read_text(encoding="utf-8").strip()
+    configure_http(
+        api_key=api_key,
+        ca_file=str(args.ca_file.resolve()) if args.ca_file else None,
+    )
+    ssh_key = str(args.worker_ssh_key.resolve()) if args.worker_ssh_key else None
+    started_at = datetime.now(timezone.utc).isoformat()
+    fault_started = False
 
-        case_id, message = create_case_and_turn(args.control_url, args.agent_id, pid, args.fault)
-        print(f"[pi-eval] case={case_id} turn submitted", flush=True)
+    try:
+        if args.case_id:
+            case_id = args.case_id
+            pid = 0
+            print(f"[pi-eval] reusing case {case_id}", flush=True)
+        else:
+            print(f"[pi-eval] starting fault {args.fault} on {args.worker_host}", flush=True)
+            pid = start_fault(
+                args.worker_host, args.worker_user, args.worker_password,
+                args.fault, args.duration, key_filename=ssh_key,
+            )
+            fault_started = True
+            print(f"[pi-eval] injector pid={pid}", flush=True)
 
-    result = wait_for_settle(args.control_url, case_id, args.timeout)
-    scores = score(result["tools"], result["final_answer"], args.fault)
+            case_id, _message = create_case_and_turn(
+                args.control_url, args.agent_id, pid, args.fault,
+            )
+            print(f"[pi-eval] case={case_id} turn submitted", flush=True)
+
+        result = wait_for_settle(args.control_url, case_id, args.timeout)
+        try:
+            workspace = http_json(
+                f"{args.control_url.rstrip('/')}/api/v1/cases/{case_id}/workspace",
+            )["data"]
+        except Exception:
+            workspace = {}
+        collectors_used = sorted({
+            str(item.get("collector_id"))
+            for item in (workspace.get("collection_requests") or [])
+            if item.get("collector_id") and item.get("status") in {"DISPATCHED", "COMPLETED"}
+        })
+        scores = score(collectors_used, result["final_answer"], args.fault)
+        try:
+            evidence = http_json(
+                f"{args.control_url.rstrip('/')}/api/v1/cases/{case_id}/evidence",
+            )["data"]["items"]
+        except Exception:
+            evidence = []
+        try:
+            attempts = http_json(
+                f"{args.control_url.rstrip('/')}/api/v1/cases/{case_id}/model-attempts",
+            )["data"]["items"]
+        except Exception:
+            attempts = []
+        citation_score = score_evidence_citations(result["conclusion"], evidence)
+    finally:
+        if fault_started:
+            stop_fault(
+                args.worker_host, args.worker_user, args.worker_password,
+                key_filename=ssh_key,
+            )
+
+    usage = {
+        "attempt_count": len(attempts),
+        "input_tokens": sum(int(item.get("input_tokens") or 0) for item in attempts),
+        "output_tokens": sum(int(item.get("output_tokens") or 0) for item in attempts),
+        "latency_ms": sum(int(item.get("latency_ms") or 0) for item in attempts),
+        "cost": round(sum(float(item.get("cost") or 0.0) for item in attempts), 6),
+    }
     report = {
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "case_id": case_id,
         "fault": args.fault,
         "injector_pid": pid,
         **result,
         "scores": scores,
+        "collectors_used": collectors_used,
+        "citation_score": citation_score,
+        "usage": usage,
+        "evidence_count": len(evidence),
+        "cleanup_completed": fault_started,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "pi-agent-eval.json").write_text(

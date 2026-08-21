@@ -18,7 +18,8 @@
 | Pi Shadow | `pi_shadow` | 连接 Pi Sidecar，但只生成 Shadow Plan，不创建真实 Task |
 | Pi 实时 | `pi` | 连接 Pi Sidecar，模型参与 Turn，仍受服务端权限/审批约束 |
 
-当前云服务器运行在 `deterministic` 模式，`MINI_DROP_AI_ENABLED=off`，尚未启用 Pi Sidecar。
+部署状态属于带日期的运行报告，不在本设计文档中固定。未启用 Pi 时使用
+`MINI_DROP_AGENT_RUNTIME=deterministic` 和 `MINI_DROP_AI_ENABLED=none`。
 
 ### 1.2 实验策略（仅离线 Harness）
 
@@ -99,7 +100,7 @@ Pi 0.84.2 当前真正应用 `model`、`reasoning_effort`、`prompt_variant`；`
 
 ### 1.10 注册一致性
 
-`scripts/check_registry_consistency.py`（兼容别名 `scripts/check_capability_registry.py`）检查：
+`scripts/check_registry_consistency.py` 检查：
 
 - TaskKind ↔ Worker Collector；
 - Probe ↔ TaskKind / Collector；
@@ -139,10 +140,9 @@ CI 已纳入该检查。
 
 ### 2.4 当前部署边界（云服务器）
 
-- Control 当前运行 `deterministic` 模式，`MINI_DROP_AI_ENABLED=off`。
-- 未配置 Pi Sidecar URL / Internal Token / 模型 API Key。
-- 因此当前云环境只能跑离线确定性实验矩阵，不能跑 live Pi 矩阵。
-- Worker 节点 Agent 容器已运行，可作为探针/采集执行端。
+- 部署是否启用 Pi、Provider 和 Worker 必须由当次环境报告和健康检查确认。
+- Sidecar 存活不等于 Provider completion 可用；至少执行一次真实受控 Turn。
+- 本机轻量模式可以使用 SQLite 和 DeepSeek API，不要求下载本地模型。
 
 ---
 
@@ -212,8 +212,8 @@ AgentRuntimePort（可替换运行时）
 
 ### 4.2 待推进
 
-- ⏳ 云服务器启用 Pi 实时模式（需要配置 API Key、Pi Sidecar URL、Internal Token）
-- ⏳ 云服务器跑 live Pi 策略矩阵
+- ⏳ 按目标环境持续验证 Pi 实时模式（需要 Provider Key、Pi Sidecar URL、Internal Token）
+- ⏳ 在需要稳定性结论时再跑 live Pi 多轮矩阵
 - ⚠️ Pi SDK `createAgentSession` 不暴露 `temperature` / `max_tokens` / `seed`，当前仅作为实验元数据记录，不伪造“已生效”
 - ⏳ 更多真实 Case / Problem Registry 数据
 - ⏳ 成本与延迟指标纳入矩阵报告
@@ -226,7 +226,7 @@ AgentRuntimePort（可替换运行时）
 ### 第 1 步：云服务器启用 Pi
 
 1. 在 Control `.env` 配置：
-   - `MINI_DROP_AI_ENABLED=on`
+   - `MINI_DROP_AI_ENABLED=full`（仅启用 Pi Agent 时可保持 `none`）
    - `MINI_DROP_AI_API_KEY=...`
    - `MINI_DROP_AGENT_RUNTIME=pi` 或先 `pi_shadow`
    - `MINI_DROP_PI_RUNTIME_URL=http://127.0.0.1:8899`

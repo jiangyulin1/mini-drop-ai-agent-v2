@@ -224,6 +224,8 @@ def _pi_sidecar(monkeypatch):
 def test_pi_runtime_longitudinal_chain_with_follow_up_and_stop(client: TestClient, monkeypatch):
     import server.app.app_factory as main_module
 
+    monkeypatch.setenv("MINI_DROP_WAKEUP_QUIET_SEC", "0")
+
     _register_agent("agent-x")
     case = _create_case(client)
     with _pi_sidecar(monkeypatch):
@@ -264,10 +266,11 @@ def test_pi_runtime_longitudinal_chain_with_follow_up_and_stop(client: TestClien
     # 4. Wake path materializes canonical Evidence and calls Runtime.followUp.
     with _pi_sidecar(monkeypatch):
         main_module._wake_case_from_task(task_id, "DONE")
+        main_module._run_runtime_wakeup_pass()
         followups = [item for item in PiLoopHandler.received if item[0].endswith("/follow-up")]
-        assert followups, "task wake must follow-up the Pi runtime"
-        evidence_ids = followups[-1][2]["evidence_ids"]
-        assert evidence_ids
+    assert followups, "task wake must follow-up the Pi runtime"
+    evidence_ids = followups[-1][2]["evidence_ids"]
+    assert evidence_ids
 
     evidence = client.get(f"/api/v1/cases/{case['case_id']}/evidence").json()["data"]
     assert {item["evidence_id"] for item in evidence["items"]} == set(evidence_ids)

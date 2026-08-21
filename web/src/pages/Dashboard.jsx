@@ -271,7 +271,7 @@ export default function Dashboard() {
         ));
       }
       if (agentResult.status === "fulfilled") {
-        setAgents(agentResult.value || []);
+        setAgents((agentResult.value || []).filter((agent) => agent.id !== "demo-worker"));
         setAgentsLoaded(true);
       } else {
         setAgentsLoaded(false);
@@ -373,7 +373,15 @@ export default function Dashboard() {
     });
   }, [deferredSearch, statusFilter, tasks]);
 
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId);
+  useEffect(() => {
+    setSelectedTaskId((current) => (
+      current && filteredTasks.some((task) => task.id === current)
+        ? current
+        : filteredTasks[0]?.id || ""
+    ));
+  }, [filteredTasks]);
+
+  const selectedTask = filteredTasks.find((task) => task.id === selectedTaskId);
 
   const focusDetail = useCallback(() => {
     if (!isMobile) return;
@@ -424,9 +432,7 @@ export default function Dashboard() {
           </Typography.Paragraph>
         </div>
         <div className={styles.pageActions}>
-          {isMobile && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建采集</Button>
-          )}
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建采集</Button>
           <Button icon={<ClusterOutlined />} onClick={() => setMultiOpen(true)}>多机采集</Button>
           <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => refresh({ quiet: true })}>刷新</Button>
         </div>
@@ -458,12 +464,6 @@ export default function Dashboard() {
           tone={stats.failedCount ? "danger" : "default"}
         />
       </section>
-
-      {!isMobile && (
-        <section aria-label="新建采集">
-          <NLPTaskInput onTaskCreated={handleTaskCreated} />
-        </section>
-      )}
 
       <ErrorAlert error={error} onClose={() => setError("")} />
 
@@ -559,27 +559,27 @@ export default function Dashboard() {
 
         <div className={styles.detailPane} ref={detailPaneRef} tabIndex={-1}>
           <TaskDetailPanel
-            taskId={selectedTaskId}
+            taskId={selectedTask?.id || ""}
             taskRevision={selectedTask?.updated_at || selectedTask?.status || ""}
             onDeleted={handleDeleteTask}
-            onAnalyze={(task) => navigate(`/ai-diagnosis?fromTask=${encodeURIComponent(task.id)}`)}
+            onAnalyze={(task) => navigate(`/cases?fromTask=${encodeURIComponent(task.id)}`)}
           />
         </div>
       </section>
 
-      {isMobile && (
-        <Drawer
-          title="新建采集任务"
-          placement="bottom"
-          height="calc(100dvh - 56px)"
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-          destroyOnHidden
-          styles={{ body: { padding: 12, background: "var(--app-bg)" } }}
-        >
-          <NLPTaskInput onTaskCreated={handleTaskCreated} />
-        </Drawer>
-      )}
+      <Drawer
+        title="新建采集任务"
+        placement={isMobile ? "bottom" : "right"}
+        height={isMobile ? "calc(100dvh - 56px)" : undefined}
+        width={isMobile ? undefined : 620}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        destroyOnHidden
+        rootClassName={styles.createDrawer}
+        styles={{ body: { padding: 12, background: "var(--app-background)" } }}
+      >
+        <NLPTaskInput onTaskCreated={handleTaskCreated} />
+      </Drawer>
 
       <MultiAgentCollectionModal
         open={multiOpen}

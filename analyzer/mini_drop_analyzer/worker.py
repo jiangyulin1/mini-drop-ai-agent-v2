@@ -52,6 +52,8 @@ ANALYSIS_RESULT_TYPES = {
     "log_scan",
     "runtime_metrics",
     "actuation_result",
+    "connection_probe",
+    "network_discovery",
 }
 ANALYZER_VERSION = "0.2.0"
 DEFAULT_MAX_INPUT_BYTES = 1024 * 1024 * 1024

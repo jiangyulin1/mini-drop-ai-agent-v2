@@ -8,7 +8,6 @@ import {
   message,
   Skeleton,
   Space,
-  Tabs,
   Tag,
   Typography,
 } from "antd";
@@ -30,9 +29,21 @@ import {
 } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import AuditLogs from "./AuditLogs";
-import DiagnosisHistory from "./DiagnosisHistory";
 import StorageMaintenance from "../components/StorageMaintenance";
 import { COLORS, FONT_SIZES, SPACING } from "../theme";
+
+const CONFIG_DETAIL_PATTERN = /(api[\s_-]?key|token|secret|credential|password|authorization|not[\s_-]?configured|missing)/i;
+
+function aiConfigErrorMessage(reason) {
+  if (reason?.status === 404) return "AI 服务由部署环境管理";
+  const detail = String(reason?.message || "").trim();
+  if (!detail) return "AI 服务请求失败，请刷新重试。";
+  if (CONFIG_DETAIL_PATTERN.test(detail)) {
+    const status = reason?.status ? `（HTTP ${reason.status}）` : "";
+    return `AI 服务请求失败${status}，请刷新重试或联系部署管理员。`;
+  }
+  return detail;
+}
 
 export default function Settings() {
   const [loading, setLoading] = useState(true);
@@ -60,11 +71,7 @@ export default function Settings() {
         setAiConfig(results[1].value);
       } else {
         setAiConfig(null);
-        setAiConfigError(
-          results[1].reason?.status === 404
-            ? "当前服务未启用 AI Provider"
-            : results[1].reason?.message || "AI 配置读取失败",
-        );
+        setAiConfigError(aiConfigErrorMessage(results[1].reason));
       }
       if (results[2].status === "fulfilled") setCurrentUser(results[2].value);
       const failures = [
@@ -96,7 +103,7 @@ export default function Settings() {
     try {
       await saveApiKey(apiKey.trim());
       setApiKey("");
-      message.success(apiKey.trim() ? "API Key 已验证并保存" : "API Key 已清除");
+      message.success(apiKey.trim() ? "访问凭据已保存" : "访问凭据已清除");
       window.dispatchEvent(new Event("mini-drop:auth-changed"));
       await load();
     } catch (err) {
@@ -207,15 +214,15 @@ export default function Settings() {
         title={
           <Space>
             <RobotOutlined style={{ color: COLORS.warning }} />
-            AI Provider 配置
+            AI 服务
           </Space>
         }
         size="small"
         extra={
           aiConfig?.enabled && aiConfig.enabled !== "none" ? (
-            <Tag color="orange">AI: {aiConfig.enabled}</Tag>
+            <Tag color="orange">AI 已接入</Tag>
           ) : (
-            <Tag>AI 未启用</Tag>
+            <Tag>按部署配置</Tag>
           )
         }
       >
@@ -236,18 +243,11 @@ export default function Settings() {
                 {aiConfig.base_url || "N/A"}
               </Typography.Text>
             </Descriptions.Item>
-            <Descriptions.Item label="API Key">
-              <Tag color={aiConfig.has_api_key ? "green" : "red"}>
-                {aiConfig.has_api_key ? "已配置" : "未配置"}
-              </Tag>
-            </Descriptions.Item>
             <Descriptions.Item label="策略模式">
               <Tag color="purple">{aiConfig.enabled || "none"}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="功能开关" span={2}>
               <Space wrap>
-                {featureStatus(aiConfig.features?.rca)}
-                <Typography.Text style={{ fontSize: FONT_SIZES.sm }}>兼容规则归因</Typography.Text>
                 {featureStatus(aiConfig.features?.summarize)}
                 <Typography.Text style={{ fontSize: FONT_SIZES.sm }}>AI 总结</Typography.Text>
               </Space>
@@ -255,9 +255,9 @@ export default function Settings() {
           </Descriptions>
         ) : (
           <Alert
-            type="warning"
-            message={aiConfigError || "AI Provider 未启用"}
-            description="需要 AI 能力时，请配置 MINI_DROP_AI_ENABLED 及对应 Provider 环境变量"
+            type="info"
+            message={aiConfigError || "AI 服务按部署配置"}
+            description="这里仅展示能力状态；即使 AI 暂不可用，采集、火焰图和证据工作台仍可继续使用。"
             showIcon
           />
         )}
@@ -268,7 +268,7 @@ export default function Settings() {
         title={
           <Space>
             <SafetyOutlined style={{ color: COLORS.primary }} />
-            API 认证
+            访问设置
           </Space>
         }
         size="small"
@@ -283,13 +283,13 @@ export default function Settings() {
         <Space direction="vertical" style={{ width: "100%" }} size={12}>
           <Alert
             type="info"
-            message="验证通过后优先保存在 HttpOnly Cookie，浏览器不会继续保留可读取的明文副本"
+            message="当前访问正常时无需重复设置；凭据由部署环境和安全 Cookie 管理。"
             showIcon
           />
           <Input.Password
-            placeholder="输入 API Key（留空清除）"
+            placeholder="输入访问凭据（留空清除）"
             value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
+            onChange={(event) => setApiKey(event.target.value)}
             onPressEnter={handleSaveKey}
             allowClear
           />
@@ -314,7 +314,7 @@ export default function Settings() {
             )}
           </Space>
           <Typography.Text type="secondary" style={{ fontSize: FONT_SIZES.sm }}>
-            清除 Key 后需要重新设置才能访问受保护的 API。
+            仅在访问异常或更换环境时重新设置。
           </Typography.Text>
         </Space>
       </Card>
@@ -322,7 +322,7 @@ export default function Settings() {
       {/* 存储维护（低风险可回滚修复） */}
       <StorageMaintenance />
 
-      {/* 存档：审计日志与诊断历史（配置类功能收纳于此） */}
+      {/* 操作记录属于低频管理能力，不占用主导航。 */}
       <Card
         title={
           <Space>
@@ -332,20 +332,7 @@ export default function Settings() {
         }
         size="small"
       >
-        <Tabs
-          items={[
-            {
-              key: "audit",
-              label: "审计日志",
-              children: <AuditLogs />,
-            },
-            {
-              key: "history",
-              label: "诊断历史",
-              children: <DiagnosisHistory />,
-            },
-          ]}
-        />
+        <AuditLogs />
       </Card>
     </Space>
   );

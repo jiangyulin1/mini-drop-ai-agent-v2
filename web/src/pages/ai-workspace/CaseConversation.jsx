@@ -5,12 +5,14 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Segmented,
   Spin,
   Tag,
   Tooltip,
   message,
 } from "antd";
 import { verifyCaseRecovery } from "../../api/client";
+import { useNavigate } from "react-router-dom";
 import { riskCode } from "../../utils/opsMappings";
 import {
   CheckOutlined,
@@ -24,6 +26,7 @@ import {
 } from "@ant-design/icons";
 import styles from "../AIDiagnosis.module.css";
 import { confidenceGuide, findingSummaries, humanDiagnosis } from "../../utils/diagnosisHumanize";
+import AssistantMessageContent from "./AssistantMessageContent";
 import {
   CASE_STATE_META,
   AGENT_PHASE_META,
@@ -54,6 +57,28 @@ function Message({ ai = false, author, time, children }) {
 
 function collectionIdFromText(value) {
   return String(value || "").match(/\[collection:([^\]]+)\]/)?.[1] || "";
+}
+
+function knowledgeChunkIds(payload) {
+  const explicit = payload?.knowledge_refs || payload?.knowledge_chunk_refs || [];
+  const content = `${payload?.content || ""} ${payload?.assistant_message || ""}`;
+  const parsed = content.match(/chunk-[a-f0-9]{12,}/gi) || [];
+  return [...new Set([...explicit.map((item) => typeof item === "string" ? item : item.chunk_id), ...parsed].filter(Boolean))];
+}
+
+function ReferenceChips({ payload, onOpenEvidence, onOpenKnowledge, onOpenTask }) {
+  const evidence = (payload?.evidence_refs || payload?.evidence_chain || []).map(
+    (item) => typeof item === "string" ? item : item.evidence_id,
+  ).filter(Boolean);
+  const knowledge = knowledgeChunkIds(payload);
+  const content = `${payload?.content || ""} ${payload?.assistant_message || ""}`;
+  const tasks = [...new Set(content.match(/task-[a-z0-9_-]{6,}/gi) || [])];
+  if (!evidence.length && !knowledge.length && !tasks.length) return null;
+  return <div className={styles.referenceChips}>
+    {evidence.map((id) => <Button key={`ev:${id}`} size="small" icon={<DatabaseOutlined />} onClick={() => onOpenEvidence?.(id)}>{id}</Button>)}
+    {knowledge.map((id) => <Button key={`kn:${id}`} size="small" onClick={() => onOpenKnowledge?.(id)}>知识片段 {id.slice(-8)}</Button>)}
+    {tasks.map((id) => <Button key={`task:${id}`} size="small" onClick={() => onOpenTask?.(id)}>任务 {id.slice(-8)}</Button>)}
+  </div>;
 }
 
 function CurrentResult({
@@ -358,7 +383,7 @@ function RecoveryPlanCards({ plans, loading, onAction }) {
         <div><strong>Dry Run：</strong>影响 {confirmation?.plan.dry_run?.candidate_count ?? "未返回"} 项</div>
         <div><strong>验证方式：</strong>{confirmation?.plan.verification_method || "需服务端验证"}</div>
         <div><strong>回滚：</strong>{confirmation?.plan.rollback_method || confirmation?.plan.policy?.rollback || "使用计划绑定的服务端回滚动作"}</div>
-        <div><strong>授权：</strong>{confirmation?.plan.policy?.approval_binding ? "已绑定本次审批摘要" : "等待服务端校验 Capability Key"}</div>
+        <div><strong>授权：</strong>{confirmation?.plan.policy?.approval_binding ? "已绑定本次审批摘要" : "等待服务端校验本次授权"}</div>
         <Input
           value={confirmationText}
           onChange={(event) => setConfirmationText(event.target.value)}
@@ -433,7 +458,10 @@ export default function CaseConversation({
   onAdvanceAgent,
   onOpenRecovery,
   onRecoveryAction,
+  onOpenEvidence,
+  onOpenKnowledge,
 }) {
+  const navigate = useNavigate();
   const state = CASE_STATE_META[detail.state] || { label: detail.state, color: "default", tone: "idle" };
   const status = DIAGNOSIS_STATUS_META[diagnosis?.status] || { label: diagnosis?.status, color: "default" };
   const userEvents = useMemo(() => {
@@ -467,6 +495,7 @@ export default function CaseConversation({
   const readOnly = detail.state === "STOPPED" || detail.state === "RESOLVED";
   const agentLoop = detail.summary?.recovery?.agent_loop || detail.recovery?.agent_loop || {};
   const autonomous = detail.run_mode === "AUTHORIZED_AUTONOMY";
+  const [sendMode, setSendMode] = useState("answer");
   const scrollRef = useRef(null);
   const scrollState = useRef({ caseId: "", scrollHeight: 0, scrollTop: 0, nearBottom: true });
   const agentPhase = AGENT_PHASE_META[agentLoop.phase] || {
@@ -492,6 +521,10 @@ export default function CaseConversation({
       nearBottom: element.scrollHeight - element.scrollTop - element.clientHeight < 80,
     };
   }, [detail.case_id, events?.length, diagnosis?.status, diagnosis?.updated_at, agentLoop.phase]);
+
+  useEffect(() => {
+    setSendMode("answer");
+  }, [detail.case_id]);
 
   function rememberScroll(event) {
     const element = event.currentTarget;
@@ -530,7 +563,7 @@ export default function CaseConversation({
     if (event.isComposing || event.nativeEvent?.isComposing) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (messageText.trim() && !readOnly && !actionLoading) onSend();
+      if (messageText.trim() && !readOnly && !actionLoading) onSend(sendMode);
     }
   }
 
@@ -612,10 +645,8 @@ export default function CaseConversation({
                 const payload = event.payload || {};
                 return (
                   <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
-                    <p className={styles.messageText}>{payload.assistant_message || "本轮处理完成。"}</p>
-                    {(payload.evidence_chain || []).length > 0 && (
-                      <div className={styles.cardDescription}>引用 {payload.evidence_chain.length} 条受控证据</div>
-                    )}
+                    <AssistantMessageContent content={payload.assistant_message || "本轮处理完成。"} />
+                    <ReferenceChips payload={payload} onOpenEvidence={onOpenEvidence} onOpenKnowledge={onOpenKnowledge} onOpenTask={(id) => navigate(`/task/${encodeURIComponent(id)}`)} />
                     {(payload.limitations || []).length > 0 && (
                       <div className={styles.cardDescription}>仍缺：{payload.limitations.slice(0, 3).join("；")}</div>
                     )}
@@ -626,10 +657,8 @@ export default function CaseConversation({
                 const payload = event.payload || {};
                 return (
                   <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
-                    <p className={styles.messageText}>{payload.content || ""}</p>
-                    {(payload.evidence_refs || []).length > 0 && (
-                      <div className={styles.cardDescription}>引用证据：{payload.evidence_refs.slice(0, 4).join("、")}</div>
-                    )}
+                    <AssistantMessageContent content={payload.content || ""} />
+                    <ReferenceChips payload={payload} onOpenEvidence={onOpenEvidence} onOpenKnowledge={onOpenKnowledge} onOpenTask={(id) => navigate(`/task/${encodeURIComponent(id)}`)} />
                   </Message>
                 );
               }
@@ -637,7 +666,7 @@ export default function CaseConversation({
                 const payload = event.payload || {};
                 return (
                   <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
-                    <p className={styles.messageText}>{payload.assistant_message || "已提交给 Agent Runtime 处理。"}</p>
+                    <AssistantMessageContent content={payload.assistant_message || "已提交给 Agent Runtime 处理。"} />
                     {(payload.next_actions || []).length > 0 && (
                       <div className={styles.cardDescription}>Turn {payload.turn_id || ""}</div>
                     )}
@@ -648,7 +677,7 @@ export default function CaseConversation({
                 const payload = event.payload || {};
                 return (
                   <Message key={event.event_id} ai author="Mini-Drop" time={event.created_at}>
-                    <p className={styles.messageText}>{payload.assistant_message || "Agent Runtime 不可用，本轮未启动调查。"}</p>
+                    <AssistantMessageContent content={payload.assistant_message || "Agent Runtime 不可用，本轮未启动调查。"} />
                   </Message>
                 );
               }
@@ -759,34 +788,31 @@ export default function CaseConversation({
             aria-label="会话输入"
           />
           <div className={styles.composerFooter}>
+            <Segmented
+              size="small"
+              value={sendMode}
+              onChange={setSendMode}
+              aria-label="消息处理方式"
+              options={[
+                { label: "仅回答", value: "answer" },
+                { label: "继续调查", value: "investigate" },
+              ]}
+            />
             <span className={styles.composerHint}>补充现象、时间点或纠正结论 · Enter 发送</span>
-            <Button className={styles.sendButton} type="primary" size="small" icon={<SendOutlined />} loading={actionLoading} disabled={!messageText.trim() || readOnly || actionLoading} onClick={onSend}>发送并分析</Button>
+            <Button
+              className={styles.sendButton}
+              type="primary"
+              size="small"
+              icon={<SendOutlined />}
+              loading={actionLoading}
+              disabled={!messageText.trim() || readOnly || actionLoading}
+              onClick={() => onSend(sendMode)}
+            >
+              {sendMode === "investigate" ? "发送并调查" : "发送"}
+            </Button>
           </div>
         </div>
       </footer>}
-    </div>
-  );
-}
-
-export function LegacyConversation({ diagnosis, loading, onOpenScope, onOpenTechnical }) {
-  const status = DIAGNOSIS_STATUS_META[diagnosis.status] || { label: diagnosis.status, color: "default" };
-  return (
-    <div className={styles.main}>
-      <header className={styles.caseHeader}>
-        <div className={styles.caseHeaderMain}><h1 className={styles.caseHeaderTitle}>{diagnosis.target_scope?.target_service || "历史诊断"}</h1><div className={styles.caseHeaderMeta}><Tag color={status.color}>{status.label}</Tag><span>旧诊断会话</span></div></div>
-        {!diagnosis.latest_conclusion && <div className={styles.caseHeaderActions}><Button onClick={onOpenTechnical}>详情</Button></div>}
-      </header>
-      <div className={styles.conversationScroll}>
-        <Spin spinning={loading}>
-          <div className={styles.conversation}>
-            <div className={styles.dayDivider}>历史诊断</div>
-            <Message author="你" time={diagnosis.created_at}><p className={styles.messageText}>{diagnosis.raw_query}</p></Message>
-            <Message ai author="Mini-Drop" time={diagnosis.updated_at}>
-              <CurrentResult diagnosis={diagnosis} caseId="" onOpenTechnical={onOpenTechnical} onOpenScope={onOpenScope} />
-            </Message>
-          </div>
-        </Spin>
-      </div>
     </div>
   );
 }

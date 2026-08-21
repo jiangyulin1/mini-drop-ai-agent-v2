@@ -245,6 +245,8 @@
 .messageAuthor { margin-bottom: 5px; display: flex; gap: 8px; align-items: center; font-weight: 650; }
 .messageTime { color: var(--quiet); font-size: 11px; font-weight: 400; }
 .messageText { margin: 0; color: var(--app-text); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.referenceChips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.referenceChips :global(.ant-btn) { max-width: 100%; overflow: hidden; color: #285fc7; border-color: color-mix(in srgb, #3974ed 30%, var(--line)); background: color-mix(in srgb, #3974ed 5%, var(--app-surface)); text-overflow: ellipsis; }
 .systemEvent { margin: 0 0 18px 40px; color: var(--muted); font-size: 12px; }
 
 .actionCard, .resultCard, .dataLinkCard {
@@ -326,8 +328,11 @@
 .previewMeta { color: var(--muted); font-size: 11px; }
 
 .targetList { display: grid; gap: 8px; }
-.targetRow { padding: 9px 10px; display: grid; grid-template-columns: 24px minmax(130px, 1fr) 150px; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 8px; }
+.targetRow { padding: 9px 10px; display: grid; grid-template-columns: 24px minmax(160px, .8fr) minmax(220px, 1.2fr); align-items: start; gap: 9px; border: 1px solid var(--line); border-radius: 8px; }
+.targetRow > :first-child { margin-top: 4px; }
 .targetAgentCol { min-width: 0; }
+.targetAgent,
+.targetMeta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .targetAgent { font-weight: 650; }
 .targetMeta { color: var(--muted); font-size: 10px; }
 .targetPicker { min-width: 0; }
@@ -379,14 +384,6 @@
   .targetRow { grid-template-columns: 24px 1fr; }
   .targetRow > :last-child { grid-column: 2; }
 }
-.canonicalWorkspace {
-  margin: 0 18px 18px;
-  padding: 16px;
-  border: 1px solid #dbe4f0;
-  border-radius: 14px;
-  background: #f8fafc;
-}
-
 .workspaceHeader,
 .workspaceHeaderMeta,
 .workspaceRevisionBar,

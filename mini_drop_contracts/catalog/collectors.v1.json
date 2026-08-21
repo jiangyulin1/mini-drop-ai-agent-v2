@@ -84,6 +84,15 @@
       "preview_modes": ["table","json"], "download_supported": true, "enabled": true, "presentation": {"color":"lime","flamegraph":false}, "semantic_operation": "process.list"
     },
     {
+      "collector_id": "network_discovery", "spec_version": "1.0", "implementation_version": "procfs-lsof.v1",
+      "display_name": "网络拓扑快照", "description": "从种子 PID 只读发现 TCP 监听与活动连接；Linux 使用 procfs，macOS 本机联调用 lsof 降级。", "result_label": "进程、监听端口与一跳 TCP 依赖快照",
+      "information_goals": ["从未知 PID 发现一跳 TCP 上下游", "把本机 endpoint 映射到稳定进程身份", "为跨 Agent endpoint 解析提供受控监听清单"], "output_signals": ["process_identity","tcp_listeners","tcp_connections","peer_endpoints","coverage"], "target_types": ["linux_process","linux_host"],
+      "parameter_schema": {"type":"object","additionalProperties":false,"properties":{"target_pid":{"type":"integer","minimum":1,"maximum":4194304},"duration_sec":{"type":"integer","minimum":1,"maximum":10,"default":2},"sample_rate":{"type":"integer","minimum":1,"maximum":1,"default":1},"scope":{"type":"string","enum":["target","host"],"default":"target"},"listener_ports":{"type":"array","maxItems":32,"items":{"type":"integer","minimum":1,"maximum":65535}},"include_listeners":{"type":"boolean","default":true},"include_connections":{"type":"boolean","default":true},"include_loopback":{"type":"boolean","default":true},"max_processes":{"type":"integer","minimum":1,"maximum":2000,"default":500},"max_sockets":{"type":"integer","minimum":1,"maximum":2000,"default":500},"max_events":{"type":"integer","minimum":1,"maximum":2000,"default":500}},"required":["target_pid"]},
+      "risk_level": "R1", "required_capabilities": ["network_discovery"], "default_duration": 2, "max_duration": 10, "default_sample_rate": 1,
+      "estimated_overhead": {"cpu_percent":"<2","disk_mb":"<2"}, "max_result_bytes": 5242880, "artifact_types": ["network_discovery"], "projection_kind": "dependency_inventory", "projection_version": "1.0",
+      "preview_modes": ["table","json"], "download_supported": true, "enabled": true, "presentation": {"color":"geekblue","flamegraph":false}, "semantic_operation": "topology.discover"
+    },
+    {
       "collector_id": "log_scan", "spec_version": "1.0", "implementation_version": "native.v1",
       "display_name": "日志扫描", "description": "读取目标进程日志尾部并提取错误与警告模式。", "result_label": "目标进程日志尾部与错误行",
       "information_goals": ["目标进程近期错误与超时模式", "应用日志中的故障时间线"], "output_signals": ["error_patterns","warning_patterns","log_timestamps"], "target_types": ["linux_process"],

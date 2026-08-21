@@ -638,6 +638,56 @@ export function getCaseCurrentUnderstanding(caseId) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/understanding`);
 }
 
+// ── 会话记忆与 RAG 知识 ─────────────────────────────────────────
+
+export function listKnowledgeDocuments(caseId) {
+  return api.get("/v1/knowledge-documents", { params: { case_id: caseId } }).then(itemsOf);
+}
+
+export function getKnowledgeDocument(documentId) {
+  return api.get(`/v1/knowledge-documents/${encodeURIComponent(documentId)}`);
+}
+
+export function getKnowledgeChunk(chunkId, caseId) {
+  return api.get(`/v1/knowledge-chunks/${encodeURIComponent(chunkId)}`, { params: { case_id: caseId } });
+}
+
+export function createKnowledgeText(payload) {
+  return api.post("/v1/knowledge-documents/text", payload, { timeout: 120000 });
+}
+
+export function uploadKnowledgeDocument(file, { caseId, scope = "CASE", title = "" } = {}) {
+  return api.post("/v1/knowledge-documents/upload", file, {
+    params: { filename: file.name, case_id: caseId, scope, title: title || undefined },
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    timeout: 120000,
+  });
+}
+
+export function updateKnowledgeDocument(documentId, payload) {
+  return api.patch(`/v1/knowledge-documents/${encodeURIComponent(documentId)}`, payload);
+}
+
+export function searchKnowledge(payload) {
+  return api.post("/v1/knowledge-search", payload, { timeout: 60000 });
+}
+
+export function getCaseMemory(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/memory`);
+}
+
+export function refreshCaseMemory(caseId) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/memory/refresh`, {});
+}
+
+export function updateCaseMemory(caseId, payload) {
+  return api.patch(`/v1/cases/${encodeURIComponent(caseId)}/memory`, payload);
+}
+
+export function promoteCaseMemory(caseId) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/memory/promote`, {});
+}
+
 export function listCaseProposals(caseId) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/proposals`);
 }

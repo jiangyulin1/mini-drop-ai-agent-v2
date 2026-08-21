@@ -1,6 +1,7 @@
 """Agent 配置加载单元测试。"""
 
 from dataclasses import FrozenInstanceError
+import os
 
 import pytest
 
@@ -136,14 +137,17 @@ class TestAgentCollectorDispatch:
              ):
             detected = _detect_capabilities()
 
-        assert detected == [
+        expected = [
             "connection_probe", "go_pprof", "log_scan", "memory_smaps",
             "process_scan", "runtime_snapshot", "sys_metrics",
         ]
+        if os.path.isdir("/proc"):
+            expected.append("network_discovery")
+        assert detected == sorted(expected)
 
     def test_detect_capabilities_includes_available_external_tools(self):
         def which(name):
-            return f"/usr/bin/{name}" if name in {"perf", "bpftrace"} else None
+            return f"/usr/bin/{name}" if name in {"perf", "bpftrace", "lsof"} else None
 
         with mock.patch("shutil.which", side_effect=which), \
              mock.patch(

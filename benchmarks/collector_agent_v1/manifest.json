@@ -4,7 +4,7 @@
   "minimum_formal_scenarios": 30,
   "prompt_version": "collector-agent.v1",
   "policy_version": "collector-runtime-policy.v1",
-  "catalog_hash": "64cca75376d3331dc42e20c173d3ab7f37274d60b81196a0e9401fdf74baa936",
+  "catalog_hash": "6a07f3e81206a4beb384e8db2545c001d4f0e349a2650c5ca9e6d955f8b3240f",
   "scenario_hash": "99612fafb1a4af131ed86a6b4193904dff51605d8f469bd74058c8cbc1dda0e7",
   "evidence_hash": "a687a3612e83177a2124570f50b3c7a6c6f8b30e8f58011c6ce6f7846695ac1e",
   "model_lock_required": true,

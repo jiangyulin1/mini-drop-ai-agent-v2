@@ -6,7 +6,7 @@
 #
 # Usage:
 #   npm --prefix web run build
-#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build server agent web
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build server analyzer agent web
 
 services:
   server:

@@ -3,7 +3,7 @@ PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,$(if $(wildcard .ve
 .PHONY: server mcp agent analyzer analyzer-worker test testsets eval eval-smoke eval-quick coverage lint fmt demo proto deploy deploy-down package-native
 
 proto:
-	cd proto && bash compile.sh
+	$(PYTHON) scripts/compile_proto.py
 
 server:
 	$(PYTHON) -m server.app.main

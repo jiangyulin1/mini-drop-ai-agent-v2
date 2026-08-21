@@ -1,0 +1,36 @@
+name: mini-drop-jyl-worker
+
+services:
+  agent:
+    build:
+      context: ../..
+      dockerfile: deploy/dockerfiles/agent.Dockerfile
+    hostname: ${AGENT_ID:?set AGENT_ID}
+    environment:
+      AGENT_ID: ${AGENT_ID}
+      AGENT_IP_ADDR: ${AGENT_IP_ADDR:?set AGENT_IP_ADDR}
+      AGENT_GRPC_ADDR: ${AGENT_GRPC_ADDR:?set AGENT_GRPC_ADDR}
+      AGENT_HEARTBEAT_INTERVAL_SEC: ${AGENT_HEARTBEAT_INTERVAL_SEC:-5}
+      AGENT_GRPC_SECURE: "1"
+      AGENT_GRPC_CA_CERT: /certs/ca.crt
+      AGENT_GRPC_TLS_SERVER_NAME: ${AGENT_GRPC_TLS_SERVER_NAME:-}
+      MINI_DROP_GRPC_TOKEN: ${MINI_DROP_GRPC_TOKEN:?set MINI_DROP_GRPC_TOKEN}
+      AGENT_UPLOAD_ARTIFACTS: "1"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:?set MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-mini-drop}
+      MINIO_SECURE: "1"
+      MINIO_CA_CERT: /certs/ca.crt
+      ASYNC_PROFILER_HOME: ${ASYNC_PROFILER_HOME:-/opt/async-profiler}
+      MINI_DROP_TRACING_ENABLED: ${MINI_DROP_TRACING_ENABLED:-0}
+      MINI_DROP_ENVIRONMENT: vm
+    volumes:
+      - ../certs:/certs:ro
+      - /sys/kernel/debug:/sys/kernel/debug
+      - /lib/modules:/lib/modules:ro
+    privileged: true
+    pid: host
+    cap_add: [SYS_PTRACE, PERFMON, SYS_ADMIN, BPF, SYS_RESOURCE]
+    security_opt: [no-new-privileges:true, seccomp:unconfined]
+    restart: unless-stopped
