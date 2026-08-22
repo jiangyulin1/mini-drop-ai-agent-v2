@@ -1,0 +1,27 @@
+{
+  "schema": "mini-drop.adapter-manifest.v1",
+  "agent_id": "mini-drop",
+  "source_sha": "651c450867c4d6db26cc78de5928bb14f7b3c3b9",
+  "status": "executed_thin_adapter",
+  "tracks": [
+    "common_replay",
+    "common_acquisition",
+    "native_appendix"
+  ],
+  "common_tools": [
+    "list_evidence",
+    "query_metrics",
+    "search_logs",
+    "get_profile_topn",
+    "get_evidence_slice"
+  ],
+  "forbidden": [
+    "network",
+    "shell",
+    "raw_export",
+    "remediation"
+  ],
+  "model": "deepseek-v4-flash",
+  "run_count": 27,
+  "note": "Unified replay adapter runs completed; upstream runtime not executed."
+}

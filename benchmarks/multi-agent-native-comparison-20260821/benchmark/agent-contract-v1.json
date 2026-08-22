@@ -1,0 +1,36 @@
+{
+  "schema": "mini-drop.agent-benchmark-contract.v1",
+  "input": {
+    "incident": ["case_id", "symptom", "service_scope", "time_window"],
+    "evidence": ["evidence_id", "kind", "summary", "source", "observed_at", "integrity_hash", "trust", "lifecycle"],
+    "oracle_hidden": true
+  },
+  "common_tools": [
+    {"name": "list_evidence", "max_result_bytes": 16384},
+    {"name": "query_metrics", "max_result_bytes": 65536},
+    {"name": "search_logs", "max_result_bytes": 65536},
+    {"name": "get_profile_topn", "max_result_bytes": 65536},
+    {"name": "get_evidence_slice", "max_result_bytes": 65536}
+  ],
+  "safety": {
+    "max_tool_calls": 16,
+    "max_case_minutes": 30,
+    "max_single_result_bytes": 65536,
+    "raw_export_allowed": false,
+    "network_access": false,
+    "shell_access": false
+  },
+  "output": {
+    "required": ["conclusion", "root_location", "mechanism", "confidence", "supporting_evidence", "counter_evidence", "missing_evidence", "next_action", "abstain"],
+    "confidence_rule": "confidence must be justified by support, counter evidence and missing evidence",
+    "evidence_rule": "every causal claim must reference valid evidence ids",
+    "abstention_allowed": true
+  },
+  "intervention_events": [
+    "EVIDENCE_REVIEW",
+    "SCOPE_CORRECTION",
+    "HYPOTHESIS_CHALLENGE",
+    "OPERATOR_HINT_UNVERIFIED",
+    "PLAN_REPRIORITIZE"
+  ]
+}

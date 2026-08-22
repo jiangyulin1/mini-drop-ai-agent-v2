@@ -1,0 +1,39 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-04",
+  "evidence": [
+    {
+      "evidence_id": "ev-04-capacity",
+      "kind": "retained_capacity",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "active_items": 120,
+        "backing_capacity": 16384,
+        "capacity_after_shrink": 16384,
+        "reachable_payload_mb": 4.2
+      },
+      "integrity_hash": "sha256:46cc391fda9ff1f47cb04bd6c0206692cd80cbf0ba5b54999b560a04f59204a6"
+    },
+    {
+      "evidence_id": "ev-04-boundary",
+      "kind": "benchmark_boundary",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "reproduced": false,
+        "fixture_items": 120,
+        "old_peak_mb": 96,
+        "new_peak_mb": 91
+      },
+      "integrity_hash": "sha256:a7d745427dbf4e5b276b046eb25e8fb668dc0d15ae013e78ddcaac4ec2c8449b"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

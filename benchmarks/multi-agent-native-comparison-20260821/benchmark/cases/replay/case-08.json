@@ -1,0 +1,37 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-08",
+  "evidence": [
+    {
+      "evidence_id": "ev-08-nodes",
+      "kind": "retained_nodes",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "detached_nodes": 64,
+        "reachable_from_root": 64,
+        "after_cleanup": true
+      },
+      "integrity_hash": "sha256:3cd61bd747b13f82e9221909fa554f5d55210de52108b1c665cb3748166af9c4"
+    },
+    {
+      "evidence_id": "ev-08-map",
+      "kind": "map_entries",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "map_entries_before": 64,
+        "map_entries_after": 64,
+        "release_verified": false
+      },
+      "integrity_hash": "sha256:7ecd0706faa7d5fae659384babb29938faedcf05af3de9fb3333fbb4e0e0a715"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

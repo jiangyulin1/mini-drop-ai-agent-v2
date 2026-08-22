@@ -1,0 +1,72 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-05",
+  "evidence": [
+    {
+      "evidence_id": "ev-05-backlog",
+      "kind": "expired_backlog",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "expired_count": [
+          1200,
+          4100,
+          9700
+        ],
+        "window_minutes": [
+          5,
+          10,
+          15
+        ]
+      },
+      "integrity_hash": "sha256:22719ffafc4a22a4e8a7547d40e345e99a43ee08c0de72586a05de85d887a7c3"
+    },
+    {
+      "evidence_id": "ev-05-cpu",
+      "kind": "cpu_context",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "cpu_pct": [
+          42,
+          47,
+          45
+        ],
+        "worker_idle_pct": [
+          58,
+          53,
+          55
+        ]
+      },
+      "integrity_hash": "sha256:05a742af834ab5c0e6691d263f65b666f93f63c22d393ab1758f7fb7035bdef9"
+    },
+    {
+      "evidence_id": "ev-05-cursor",
+      "kind": "cursor_overlap",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "scan_cursor_delta": [
+          128,
+          128,
+          128
+        ],
+        "expiry_cursor_delta": [
+          128,
+          128,
+          128
+        ],
+        "overlap_pct": 100
+      },
+      "integrity_hash": "sha256:dd4df29f5df67a98d3a817403f02f07fedf942512d116f585767b7a493b6e9a5"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

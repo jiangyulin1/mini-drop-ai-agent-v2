@@ -1,0 +1,60 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-09",
+  "evidence": [
+    {
+      "evidence_id": "ev-09-rss",
+      "kind": "rss_trend",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "rss_mb": [
+          220,
+          236,
+          258
+        ],
+        "queue_depth": [
+          100,
+          140,
+          190
+        ]
+      },
+      "integrity_hash": "sha256:7030ce27ef56541dc26d18044f9a649a9a7127cc0419efe7d5599afabe2d78e7"
+    },
+    {
+      "evidence_id": "ev-09-queue",
+      "kind": "workqueue_depth",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "depth": [
+          100,
+          140,
+          190
+        ],
+        "dedupe_rate_pct": 2
+      },
+      "integrity_hash": "sha256:d52b5cc73f66d9ab2f1ba1ff0b152cd9808b9f13e7c34385ae5dc43561f420bf"
+    },
+    {
+      "evidence_id": "ev-09-retention",
+      "kind": "retention_profile",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "retained_graph_mb": 18.4,
+        "item_identity_class": "pointer_identity",
+        "dedupe_rate_pct": 2
+      },
+      "integrity_hash": "sha256:32b87de75a6fea896303f9b290a6513a106ab3ccd7bfd334ce3ebc2df32eb036"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

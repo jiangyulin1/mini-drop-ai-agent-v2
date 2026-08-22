@@ -1,0 +1,11 @@
+{
+  "schema": "mini-drop.intervention.v1",
+  "case_id": "case-09",
+  "trigger": {"event": "after_first_rss_only_claim_or_confidence_above_0.60", "type": "state_based"},
+  "events": [
+    {"event_id": "i-09-1", "type": "EVIDENCE_REVIEW", "evidence_id": "ev-09-rss", "lifecycle": "EXCLUDED", "trust": "LOW_TRUST", "reason": "RSS correlation does not identify a mechanism"},
+    {"event_id": "i-09-2", "type": "EVIDENCE_REVIEW", "evidence_id": "ev-09-queue", "lifecycle": "ACTIVE", "trust": "TRUSTED", "reason": "queue growth is directly relevant"},
+    {"event_id": "i-09-3", "type": "EVIDENCE_REVIEW", "evidence_id": "ev-09-retention", "lifecycle": "ACTIVE", "trust": "TRUSTED", "reason": "retention evidence is mechanism-bearing"}
+  ],
+  "expected_post_state": {"must_not_cite": ["ev-09-rss"], "must_cite_one_of": ["ev-09-queue", "ev-09-retention"], "must": "recalculate_conclusion"}
+}

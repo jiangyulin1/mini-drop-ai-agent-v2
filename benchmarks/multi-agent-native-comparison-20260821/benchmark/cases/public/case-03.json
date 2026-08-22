@@ -1,0 +1,47 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-03",
+  "incident": {
+    "symptom": "Resident memory grows with repeated exporter/reader activity and garbage collection does not explain the retained objects.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-03-rss",
+      "kind": "rss_trend",
+      "summary": "RSS rises across repeated activity and does not return to its initial level after collection.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:1e1de39b3cb5d389f7183b43089f24b5c849b3722cceb5a076978535d0087eb8",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-03-refs",
+      "kind": "reference_retention",
+      "summary": "A reachability sample shows exporter and reader objects remain linked after the activity window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:6493ae7b7a2caefab018474b71ac705c6bf796821b58fae16bf0f29dd36eed57",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_evidence_slice"
+      ]
+    }
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

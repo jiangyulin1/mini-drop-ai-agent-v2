@@ -1,0 +1,13 @@
+benchmark/cases/private-oracles/
+benchmark/runs/
+benchmark/runs-native/
+benchmark/work/
+benchmark/__pycache__/
+benchmark/**/__pycache__/
+**/.DS_Store
+*.log
+*.key
+*.pem
+*kubeconfig*
+.env
+.env.*

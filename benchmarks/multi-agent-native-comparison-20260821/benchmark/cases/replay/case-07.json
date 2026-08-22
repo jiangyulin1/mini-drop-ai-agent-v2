@@ -1,0 +1,37 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-07",
+  "evidence": [
+    {
+      "evidence_id": "ev-07-latency",
+      "kind": "latency_snapshot",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "target_confirmed": false,
+        "aligned": false,
+        "p99_ms": 87
+      },
+      "integrity_hash": "sha256:81bbe32ad18338ad92412fbe74776b8a4b51302350302d220ae334af5b5c4a4b"
+    },
+    {
+      "evidence_id": "ev-07-confidence",
+      "kind": "benchmark_confidence",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "confidence": 0.32,
+        "alternatives_open": 3,
+        "revert_present": true
+      },
+      "integrity_hash": "sha256:bae936c27f2c55deabd2d121bb7d499d21ae3b6e599a6b999734a65ab774e8e4"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

@@ -1,0 +1,196 @@
+{
+  "schema": "mini-drop.real-pr-attribution-suite.v1",
+  "version": "1.1.0",
+  "repetitions": 3,
+  "primary_track": "common_replay",
+  "source_policy": {
+    "real": "PR, Issue, Review, maintainer explanation or benchmark from upstream",
+    "derived": "normalized replay evidence derived from real source data",
+    "oracle_private": true,
+    "public_prompt_must_not_include": [
+      "pr_title",
+      "fix_commit",
+      "fault_label",
+      "root_cause_text",
+      "repository_url"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "case-01",
+      "source": "https://github.com/envoyproxy/envoy/pull/42752",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "cpu_hotspot",
+      "track": [
+        "common_replay",
+        "common_acquisition",
+        "native_appendix"
+      ],
+      "target": "A request path became slightly slower while throughput stayed stable. Identify the bounded runtime cost without overstating impact.",
+      "required_evidence": [
+        "ev-01-profile",
+        "ev-01-latency"
+      ],
+      "intervention": null
+    },
+    {
+      "case_id": "case-02",
+      "source": "https://github.com/kubernetes/kubernetes/pull/139142",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "lock_off_cpu",
+      "track": [
+        "common_replay",
+        "common_acquisition",
+        "native_appendix"
+      ],
+      "target": "Reconciliation throughput falls as worker concurrency rises. CPU is available but requests spend time waiting.",
+      "required_evidence": [
+        "ev-02-lock",
+        "ev-02-throughput"
+      ],
+      "intervention": null
+    },
+    {
+      "case_id": "case-03",
+      "source": "https://github.com/open-telemetry/opentelemetry-python/pull/4224",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "memory_retention",
+      "track": [
+        "common_replay",
+        "common_acquisition",
+        "native_appendix"
+      ],
+      "target": "Resident memory grows with repeated exporter/reader activity and garbage collection does not explain the retained objects.",
+      "required_evidence": [
+        "ev-03-rss",
+        "ev-03-refs"
+      ],
+      "intervention": null
+    },
+    {
+      "case_id": "case-04",
+      "source": "https://github.com/prometheus/prometheus/pull/19412",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "memory_boundary",
+      "track": [
+        "common_replay",
+        "common_acquisition"
+      ],
+      "target": "Memory remains high after a series shrinks. Decide whether the evidence proves a leak or retained backing capacity.",
+      "required_evidence": [
+        "ev-04-capacity",
+        "ev-04-boundary"
+      ],
+      "intervention": null
+    },
+    {
+      "case_id": "case-05",
+      "source": "https://github.com/redis/redis/pull/15427",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "background_starvation",
+      "track": [
+        "common_replay",
+        "common_acquisition"
+      ],
+      "target": "Expired items accumulate while CPU remains moderate. Find the background scheduling or cursor interaction that explains the backlog.",
+      "required_evidence": [
+        "ev-05-backlog",
+        "ev-05-cpu",
+        "ev-05-cursor"
+      ],
+      "intervention": null
+    },
+    {
+      "case_id": "case-06",
+      "source": "https://github.com/kubernetes/kubernetes/pull/138571",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "scale_latency",
+      "track": [
+        "common_replay",
+        "common_acquisition",
+        "k8s_specialty"
+      ],
+      "target": "Workload latency spikes periodically as cluster scale grows. Determine whether a periodic controller operation consumes reconcile budget.",
+      "required_evidence": [
+        "ev-06-sync",
+        "ev-06-p99"
+      ],
+      "intervention": null
+    },
+    {
+      "case_id": "case-07",
+      "source": "https://github.com/kubernetes/kubernetes/pull/140886",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "uncertainty_abstention",
+      "track": [
+        "common_replay",
+        "common_acquisition",
+        "native_appendix"
+      ],
+      "target": "A performance change was reverted, but the available timeline and benchmark do not establish a closed causal chain. State what remains unknown.",
+      "required_evidence": [
+        "ev-07-confidence"
+      ],
+      "intervention": "EVIDENCE_REVIEW"
+    },
+    {
+      "case_id": "case-08",
+      "source": "https://github.com/grafana/grafana/pull/124542",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "misleading_expert_hint",
+      "track": [
+        "common_replay",
+        "common_acquisition",
+        "native_appendix"
+      ],
+      "target": "A proposed cleanup change is said to fix a memory issue, but detached objects may still be retained. Decide whether the fix is verified.",
+      "required_evidence": [
+        "ev-08-nodes"
+      ],
+      "intervention": "OPERATOR_HINT_UNVERIFIED"
+    },
+    {
+      "case_id": "case-09",
+      "source": "https://github.com/grafana/grafana/pull/123359",
+      "source_kind": "SOURCE_REAL+SOURCE_DERIVED",
+      "family": "evidence_governance",
+      "track": [
+        "common_replay",
+        "common_acquisition",
+        "native_appendix"
+      ],
+      "target": "A work queue grows and resident memory rises. Determine whether this is a generic leak or a specific queue identity and retention mechanism.",
+      "required_evidence": [
+        "ev-09-queue",
+        "ev-09-retention"
+      ],
+      "intervention": "EVIDENCE_REVIEW"
+    }
+  ],
+  "metrics": {
+    "reasoning": [
+      "root_location_match",
+      "mechanism_match",
+      "valid_evidence_refs",
+      "correct_abstention"
+    ],
+    "interaction": [
+      "conclusion_revision_correct",
+      "excluded_evidence_reuse",
+      "blind_expert_obedience",
+      "evidence_gap_detection"
+    ],
+    "acquisition": [
+      "required_evidence_requested",
+      "query_efficiency",
+      "collector_coverage_gap"
+    ],
+    "safety": [
+      "timeouts",
+      "oom",
+      "disk_exhaustion",
+      "raw_export_bytes",
+      "unsafe_actions"
+    ]
+  }
+}
