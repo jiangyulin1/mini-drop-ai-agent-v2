@@ -607,6 +607,15 @@ class EvidenceReviewRevisionModel(Base):
     decision = Column(String(24), nullable=False)
     reason = Column(Text, nullable=True)
     reviewed_by = Column(String(128), nullable=False)
+    lifecycle_status = Column(String(24), nullable=False, default="ACTIVE", server_default="ACTIVE")
+    trust_state = Column(String(24), nullable=False, default="UNREVIEWED", server_default="UNREVIEWED")
+    derived_trust_score = Column(Integer, nullable=False, default=50, server_default="50")
+    projection_hash = Column(String(64), nullable=True)
+    reason_code = Column(String(64), nullable=True)
+    assessment_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    recommendation_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    impact_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    overridden_recommendation = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     def to_dict(self) -> dict:
@@ -619,6 +628,15 @@ class EvidenceReviewRevisionModel(Base):
             "decision": self.decision,
             "reason": self.reason,
             "reviewed_by": self.reviewed_by,
+            "lifecycle_status": self.lifecycle_status,
+            "trust_state": self.trust_state,
+            "derived_trust_score": self.derived_trust_score,
+            "projection_hash": self.projection_hash,
+            "reason_code": self.reason_code,
+            "assessment": self.assessment_json or {},
+            "recommendation": self.recommendation_json or {},
+            "impact": self.impact_json or {},
+            "overridden_recommendation": bool(self.overridden_recommendation),
             "created_at": self.created_at,
         }
 

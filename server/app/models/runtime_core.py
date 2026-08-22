@@ -170,6 +170,8 @@ class CaseEvidenceModel(Base):
         UniqueConstraint(
             "case_id", "tenant_id", "evidence_id", name="uq_case_evidence",
         ),
+        Index("ix_case_evidence_lifecycle_status", "lifecycle_status"),
+        Index("ix_case_evidence_review_trust_state", "review_trust_state"),
     )
 
     evidence_id = Column(String(128), primary_key=True)
@@ -212,6 +214,12 @@ class CaseEvidenceModel(Base):
     trust_level = Column(String(24), nullable=False, default="INTERNAL", server_default="INTERNAL")
     lineage_json = Column(JSON, nullable=False, default=dict)
     trace_id = Column(String(128), nullable=True)
+    lifecycle_status = Column(String(24), nullable=False, default="ACTIVE", server_default="ACTIVE")
+    review_trust_state = Column(String(24), nullable=False, default="UNREVIEWED", server_default="UNREVIEWED")
+    review_revision = Column(Integer, nullable=False, default=0, server_default="0")
+    derived_trust_score = Column(Integer, nullable=False, default=50, server_default="50")
+    ui_hidden = Column(Boolean, nullable=False, default=False, server_default="0")
+    ui_archived = Column(Boolean, nullable=False, default=False, server_default="0")
     late_after_cancel = Column(Boolean, nullable=False, default=False, server_default="0")
     stale_for_current_revision = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(DateTime(timezone=True), nullable=False)
@@ -259,6 +267,12 @@ class CaseEvidenceModel(Base):
             "trust_level": self.trust_level,
             "lineage": self.lineage_json or {},
             "trace_id": self.trace_id,
+            "lifecycle_status": self.lifecycle_status,
+            "review_trust_state": self.review_trust_state,
+            "review_revision": self.review_revision,
+            "derived_trust_score": self.derived_trust_score,
+            "ui_hidden": bool(self.ui_hidden),
+            "ui_archived": bool(self.ui_archived),
             "late_after_cancel": bool(self.late_after_cancel),
             "stale_for_current_revision": bool(self.stale_for_current_revision),
             "created_at": self.created_at,
@@ -267,5 +281,3 @@ class CaseEvidenceModel(Base):
 
 
 # ── v6 canonical Agent core: Turn/Run/Cycle/Model/Proposal/Message ─────
-
-

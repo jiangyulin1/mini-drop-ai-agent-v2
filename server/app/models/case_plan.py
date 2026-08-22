@@ -652,6 +652,8 @@ class CaseRecoveryPlanModel(Base):
     approved_by = Column(String(128), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     rejection_reason = Column(Text, nullable=True)
+    evidence_refs_json = Column(JSON, nullable=False, default=list, server_default="[]")
+    evidence_hold_json = Column(JSON, nullable=False, default=dict, server_default="{}")
     row_version = Column(Integer, nullable=False, default=0)
     created_by = Column(String(128), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
@@ -674,6 +676,8 @@ class CaseRecoveryPlanModel(Base):
             "execution": self.execution_json or {},
             "verification": self.verification_json or {},
             "rollback": self.rollback_json or {},
+            "evidence_refs": self.evidence_refs_json or [],
+            "evidence_hold": self.evidence_hold_json or {},
             "requires_approval": bool(self.requires_approval),
             "approved_by": self.approved_by,
             "approved_at": self.approved_at,
