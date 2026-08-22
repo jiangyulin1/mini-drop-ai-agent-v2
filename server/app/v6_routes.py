@@ -197,7 +197,18 @@ def _build_runtime_case_context(
         projections = repo.list_evidence_projections(
             case_id, tenant_id, evidence_id=item.get("evidence_id"),
         ) if hasattr(repo, "list_evidence_projections") else []
-        for projection in projections[:2]:
+        # Projection rows are persisted oldest-first. A runtime snapshot must
+        # expose the newest row for each kind, otherwise post-review turns can
+        # receive stale hashes and lifecycle state.
+        latest_by_kind: dict[str, dict[str, Any]] = {}
+        for projection in projections:
+            kind = str(projection.get("projection_kind") or "default")
+            latest_by_kind[kind] = projection
+        for projection in sorted(
+            latest_by_kind.values(),
+            key=lambda item: str(item.get("created_at") or ""),
+            reverse=True,
+        ):
             content = projection.get("content") or {}
             evidence_summary.append({
                 "evidence_id": item.get("evidence_id"),
@@ -1021,6 +1032,16 @@ def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Requ
     projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
     selected = []
     for projection in projections:
+        evidence = repo.get_case_evidence(
+            case_id, tenant_id, str(projection.get("evidence_id") or ""),
+        )
+        if evidence is None:
+            continue
+        evidence_status = str(evidence.get("status") or "ACTIVE")
+        # Ordinary investigation reads cannot resurrect excluded Evidence.
+        # Audit reads may inspect it, but the lifecycle is explicit in output.
+        if evidence_status == "EXCLUDED" and not bool(payload.get("audit_read")):
+            continue
         if evidence_ids and projection.get("evidence_id") not in evidence_ids:
             continue
         if kinds and projection.get("projection_kind") not in kinds:
@@ -1032,7 +1053,14 @@ def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Requ
                 "projected_bytes": projection.get("projected_bytes"),
             })
             continue
-        selected.append(projection)
+        selected.append({
+            **projection,
+            "evidence_status": evidence_status,
+            "review_revision": len(repo.list_evidence_reviews(
+                case_id, tenant_id,
+                evidence_id=str(projection.get("evidence_id") or ""),
+            )),
+        })
     return APIResponse(data={
         "items": selected,
         "max_bytes": max_bytes,
@@ -1490,6 +1518,18 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             canonical["evidence_id"] = evidence_id
             normalized_claims.append(canonical)
     claims = normalized_claims
+    declared_evidence_ids = set(evidence_ids)
+    claim_evidence_ids = {
+        str(claim.get("evidence_id") or "")
+        for claim in claims
+        if claim.get("evidence_id")
+    }
+    undeclared_claim_ids = sorted(claim_evidence_ids - declared_evidence_ids)
+    if undeclared_claim_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CLAIM_EVIDENCE_NOT_DECLARED:{','.join(undeclared_claim_ids[:6])}",
+        )
 
     claim_errors: list[str] = []
     for claim in claims:
@@ -1745,6 +1785,10 @@ def internal_runtime_events(
         if event_seq <= 0:
             continue
         payload_json = raw.get("payload") or {}
+        if payload_json.get("foreign_turn_event"):
+            # Keep the late/foreign lifecycle record for audit, but never let
+            # it publish an assistant message or complete another turn.
+            payload_json = {**payload_json, "business_projection": "FENCED"}
         cycle_id = str(raw.get("cycle_id") or payload_json.get("cycle_id") or "")
         model_request_id = str(raw.get("model_request_id") or payload_json.get("model_request_id") or "")
         persisted_event = repo.record_agent_runtime_event(
@@ -1791,7 +1835,10 @@ def internal_runtime_events(
                     case_id=case_id,
                 )
         max_seq = max(max_seq, event_seq)
-        if event_type in {"turn_end", "assistant.completed", "final"}:
+        if (
+            event_type in {"turn_end", "assistant.completed", "final"}
+            and not payload_json.get("foreign_turn_event")
+        ):
             text = _runtime_visible_content(payload_json)
             if text:
                 final_content = text

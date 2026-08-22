@@ -268,9 +268,55 @@ def review_case_evidence(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     repo.record_case_event(
         case_id, tenant_id, event_type="evidence_reviewed",
-        payload={"evidence_id": evidence_id, "decision": review["decision"], "actor_id": principal_id},
+        payload={
+            "evidence_id": evidence_id,
+            "decision": review["decision"],
+            "review_revision": review.get("review_revision"),
+            "actor_id": principal_id,
+        },
         actor_id=principal_id,
     )
+    # A review changes the authority of existing Evidence without creating a
+    # collection outbox event. Persist an explicit durable wakeup so a Pi
+    # runtime is forced to rebuild its snapshot and re-read lifecycle state.
+    if hasattr(repo, "create_runtime_wakeup"):
+        runs = repo.list_investigation_runs(case_id, tenant_id) if hasattr(
+            repo, "list_investigation_runs",
+        ) else []
+        active_run = next(
+            (
+                item for item in runs
+                if item.get("status") not in {
+                    "RESOLVED", "STOPPED", "INSUFFICIENT_EVIDENCE", "FAILED",
+                }
+            ),
+            None,
+        )
+        if active_run is None and hasattr(repo, "create_investigation_run"):
+            active_run = repo.create_investigation_run(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                created_from_turn_id=None,
+            )
+        if active_run is not None:
+            current_case = repo.get_incident_case(case_id, tenant_id) or {}
+            revision = int(review.get("review_revision") or 1)
+            repo.create_runtime_wakeup(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                investigation_run_id=str(active_run["run_id"]),
+                reason=(
+                    f"Evidence review changed {evidence_id} to {review.get('decision')}; "
+                    "the Agent must rebuild its Evidence snapshot before continuing."
+                ),
+                source_refs=[f"evidence-review:{evidence_id}:r{revision}"],
+                control_revision=int(current_case.get("control_revision") or 1),
+                scope_revision=int(current_case.get("scope_revision") or 1),
+                reason_class="EVIDENCE_REVIEWED",
+                dedupe_key=(
+                    f"evidence-review-wakeup:{case_id}:{evidence_id}:{revision}"
+                ),
+            )
     return APIResponse(data=review)
 
 

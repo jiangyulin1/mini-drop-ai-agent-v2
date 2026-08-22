@@ -362,7 +362,7 @@ def test_evidence_analysis_requires_valid_field_citation_and_review_marks_stale(
                     "field_path": "does.not.exist",
                 }],
             }],
-            "runtime_policy": {"side_effect_policy": "READ_ONLY"},
+            "runtime_policy": {"side_effect_policy": "PROPOSE_ONLY"},
         },
         headers={"X-Internal-Token": TOKEN},
     )
@@ -382,7 +382,7 @@ def test_evidence_analysis_requires_valid_field_citation_and_review_marks_stale(
                 }],
             }],
             "limitations": ["单一时间窗"],
-            "runtime_policy": {"side_effect_policy": "READ_ONLY"},
+            "runtime_policy": {"side_effect_policy": "PROPOSE_ONLY"},
         },
         headers={"X-Internal-Token": TOKEN},
     )

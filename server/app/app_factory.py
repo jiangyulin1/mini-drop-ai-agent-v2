@@ -695,6 +695,15 @@ def _deliver_one_wakeup(
                 "只有在仍缺少决定性事实时，才选择一个可执行的替代 Collector。"
             )
             follow_up_evidence_ids: list[str] = []
+        elif reason_class == "EVIDENCE_REVIEWED":
+            source_refs = ", ".join(str(item) for item in (wakeup.get("source_refs") or []))
+            note = (
+                f"专家已修改 Evidence 生命周期：{source_refs}。"
+                "必须先调用 get_case_snapshot 或 list_evidence，确认最新 status、"
+                "review_revision 和 projection_hash；排除证据不得继续作为支持依据。"
+                "随后重新评估假设、反证和缺失事实，并通过 finish_investigation 提交新结论。"
+            )
+            follow_up_evidence_ids = []
         else:
             queued_analyses = [
                 item for item in evidence_analysis_service.list_runs(case_id, tenant_id)

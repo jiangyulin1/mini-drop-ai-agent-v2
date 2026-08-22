@@ -6,6 +6,7 @@
 
 | 文档 | 用途 | 状态 |
 |---|---|---|
+| [`ai_current_design_interview_handbook.md`](ai_current_design_interview_handbook.md) | AI 功能当前设计、Pi Agent 接入、结构化证据、执行链、分层门禁、可信度与面试追问核实 | 当前设计与面试答辩入口 |
 | [`environment-setup.md`](environment-setup.md) | Python/Node/Pi/DeepSeek、SQLite 与本机轻量启动 | 当前环境入口 |
 | [`deployment-profiles.md`](deployment-profiles.md) | Native、Local Compose、Linux 全栈、Control/Worker、Pi 与低带宽评测模式 | 当前部署入口 |
 | [`repository-maintenance.md`](repository-maintenance.md) | 文档归档、生成物清理、凭据、依赖和提交门禁 | 当前维护规范 |

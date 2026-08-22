@@ -230,18 +230,9 @@ class PlanDriver:
                         return self._instance_target(item)
         for item in instances:
             return self._instance_target(item)
-        # 兜底：Case 未携带实例清单时取任一在线 Agent
-        agents = self._repo.list_agents() if hasattr(self._repo, "list_agents") else \
-            list(getattr(self._repo, "agents", {}).values())
-        for agent in agents:
-            if isinstance(agent, dict):
-                agent_id = str(agent.get("agent_id") or agent.get("id") or "")
-                status = str(agent.get("status") or "ONLINE")
-            else:
-                agent_id = str(getattr(agent, "id", "") or "")
-                status = str(getattr(agent, "status", "") or "ONLINE")
-            if status == "ONLINE" and agent_id:
-                return {"agent_id": agent_id, "pid": 1}
+        # Process-level collection must never guess PID 1 on an arbitrary
+        # online Agent. Establish an explicit Case target or discovery
+        # authority first; otherwise the step remains NO_TARGET.
         return None
 
     def _instance_target(self, item: dict[str, Any]) -> dict[str, Any]:
@@ -320,11 +311,14 @@ class PlanDriver:
                 return True
             if not target_set and not other_targets:
                 return True
-        if self._has_reusable_task(case_id, tenant_id, collector_id):
+        if self._has_reusable_task(case_id, tenant_id, collector_id, step=step):
             return True
         return False
 
-    def _has_reusable_task(self, case_id: str, tenant_id: str, collector_id: str) -> bool:
+    def _has_reusable_task(
+        self, case_id: str, tenant_id: str, collector_id: str,
+        *, step: dict[str, Any] | None = None,
+    ) -> bool:
         """Case 内是否存在已完成且证据未被排除的同类采集任务。
 
         覆盖两种来源：
@@ -334,6 +328,8 @@ class PlanDriver:
         case = self._repo.get_incident_case(case_id, tenant_id) or {}
         initial_ids = set(case.get("initial_task_ids") or [])
         tasks = getattr(self._repo, "tasks", {})
+        requested_targets = set((step or {}).get("target_refs") or [])
+        requested_goal = str((step or {}).get("expected_information") or "").strip()
         for task in (tasks.values() if isinstance(tasks, dict) else tasks):
             status = str(getattr(task, "status", "") or "")
             if status != "DONE":
@@ -344,8 +340,14 @@ class PlanDriver:
             if task_id in initial_ids:
                 return True
             options = (getattr(task, "request_params", None) or {}).get("options") or {}
-            if str(options.get("case_id") or "") == case_id:
-                return True
+            if str(options.get("case_id") or "") != case_id:
+                continue
+            task_target = str(options.get("target_ref") or "")
+            if requested_targets and task_target and not requested_targets.intersection({task_target}):
+                continue
+            if requested_goal and str(options.get("information_goal") or "") not in {"", requested_goal}:
+                continue
+            return True
         return False
 
     # ── Task 完成唤醒 ──────────────────────────────────────────────────

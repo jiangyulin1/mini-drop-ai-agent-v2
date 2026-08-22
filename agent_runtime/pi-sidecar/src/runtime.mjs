@@ -564,6 +564,9 @@ export class RuntimeManager {
       pendingWakeup: "",
       wakeupWaitScheduled: false,
       terminalReminderCount: 0,
+      terminalReminderToken: 0,
+      activeTurnId: null,
+      fencedTurnIds: new Set(),
     };
     this.sessions.set(caseId, entry);
     // Pi only honors terminate=true when every result in a parallel tool batch
@@ -710,10 +713,21 @@ export class RuntimeManager {
         entry.lastError = `session_reset_skipped:${String(err?.message || err)}`;
       }
     }
+    if (entry.session.isStreaming || Number(entry.session.pendingMessageCount || 0) > 0) {
+      if (typeof entry.session.waitForIdle === "function") {
+        await Promise.race([
+          entry.session.waitForIdle(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("turn_busy_timeout")), 30_000)),
+        ]);
+      }
+      if (entry.session.isStreaming || Number(entry.session.pendingMessageCount || 0) > 0) {
+        throw new Error("TURN_BUSY");
+      }
+    }
     const turnId = input.client_command_id
       ? `turn-${case_id}-${input.client_command_id}`
       : `turn-${case_id}-${Date.now()}`;
-    entry.currentTurnId = turnId;
+    this._activateTurn(entry, turnId);
     // Explicit user work may reopen analysis. Evidence wakeups use followUp and
     // therefore cannot reopen a conclusion by themselves.
     entry.concluded = false;
@@ -770,6 +784,9 @@ export class RuntimeManager {
         contextPayload,
         userMessage: input.message,
       });
+      if (entry.session.isStreaming && typeof entry.session.waitForIdle === "function") {
+        await entry.session.waitForIdle();
+      }
       void entry.session.prompt(boundedPrompt.prompt).catch((err) => {
         entry.lastError = String(err);
       });
@@ -811,7 +828,7 @@ export class RuntimeManager {
           if (!pending || entry.concluded) return;
           entry.runStopRequested = false;
           entry.terminalReminderCount = 0;
-          entry.currentTurnId = `turn-${case_id}-wakeup-${Date.now()}`;
+          this._activateTurn(entry, `turn-${case_id}-wakeup-${Date.now()}`);
           if (entry.toolEnvelope) {
             entry.toolEnvelope.current = this._toolEnvelope(entry.context, entry.currentTurnId);
           }
@@ -832,7 +849,7 @@ export class RuntimeManager {
     }
     entry.runStopRequested = false;
     entry.terminalReminderCount = 0;
-    entry.currentTurnId = `turn-${case_id}-wakeup-${Date.now()}`;
+    this._activateTurn(entry, `turn-${case_id}-wakeup-${Date.now()}`);
     if (entry.toolEnvelope) {
       entry.toolEnvelope.current = this._toolEnvelope(entry.context, entry.currentTurnId);
     }
@@ -852,6 +869,15 @@ export class RuntimeManager {
         this._scheduleTerminalReminder(case_id, entry);
       }
     });
+  }
+
+  _activateTurn(entry, turnId) {
+    if (entry.activeTurnId && entry.activeTurnId !== turnId) {
+      entry.fencedTurnIds.add(entry.activeTurnId);
+    }
+    entry.currentTurnId = turnId;
+    entry.activeTurnId = turnId;
+    entry.terminalReminderToken = Number(entry.terminalReminderToken || 0) + 1;
   }
 
   _markConcluded(case_id) {
@@ -887,6 +913,7 @@ export class RuntimeManager {
       || Number(entry.terminalReminderCount || 0) >= 1
     ) return;
     entry.terminalReminderCount = Number(entry.terminalReminderCount || 0) + 1;
+    const reminderToken = Number(entry.terminalReminderToken || 0);
     setTimeout(() => {
       const current = this.sessions.get(case_id);
       if (
@@ -894,8 +921,9 @@ export class RuntimeManager {
         || current.concluded
         || current.runStopRequested
         || current.session.isStreaming
+        || Number(current.terminalReminderToken || 0) !== reminderToken
       ) return;
-      current.currentTurnId = `turn-${case_id}-terminal-${Date.now()}`;
+      this._activateTurn(current, `turn-${case_id}-terminal-${Date.now()}`);
       void current.session.prompt(
         "The prior run settled without a verified terminal outcome. Do not restate a plain-text conclusion. " +
         "Use finish_investigation now with evidence-bound claims, or submit INSUFFICIENT_EVIDENCE through that tool.",
@@ -1131,10 +1159,13 @@ export class RuntimeManager {
     const projection = this._auditProjection(event);
     const modelAttempt = this._modelAttemptForEvent(case_id, entry, event);
     if (modelAttempt) projection.model_attempt = modelAttempt;
+    const eventTurnId = event.turnId || event.turn_id || event.metadata?.turn_id || null;
+    const foreignTurn = Boolean(eventTurnId && eventTurnId !== entry.activeTurnId);
     if (event.type === "turn_end") {
       if (projection.visible_text) this.lastAnswers.set(case_id, projection.visible_text);
     }
-    projection.trigger_turn_id = entry.currentTurnId || null;
+    projection.trigger_turn_id = eventTurnId || entry.currentTurnId || null;
+    projection.foreign_turn_event = foreignTurn;
     projection.side_effect_policy = entry.context?.side_effect_policy || null;
     projection.context_snapshot_id = entry.context?.context_snapshot_id || null;
     projection.diagnostic_strategy_id = entry.context?.diagnostic_strategy_id || "hybrid";

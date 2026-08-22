@@ -29,7 +29,15 @@ def _as_bool(name: str, default: str) -> bool:
 
 
 def runtime_mode() -> AgentRuntimeMode:
-    raw = os.getenv("MINI_DROP_AGENT_RUNTIME", "deterministic").strip().lower()
+    configured = os.getenv("MINI_DROP_AGENT_RUNTIME")
+    # A configured Sidecar URL means the operator opted into the real Agent
+    # path. Keep deterministic only as the explicit offline fallback, rather
+    # than silently running it during a Pi deployment.
+    raw = (
+        configured.strip().lower()
+        if configured is not None and configured.strip()
+        else ("pi" if pi_runtime_url() else "deterministic")
+    )
     try:
         return AgentRuntimeMode(raw)
     except ValueError:

@@ -329,7 +329,7 @@ TOOL_CATALOG: tuple[ToolSpec, ...] = (
             "token_usage": {"type": "object"},
             "latency_ms": {"type": "integer", "minimum": 0},
         }, ["case_id", "analysis_run_id", "facts"]),
-        "/internal/agent/tools/evidence-analysis", "READ_ONLY",
+        "/internal/agent/tools/evidence-analysis", "PROPOSE_ONLY",
     ),
     ToolSpec(
         "get_evidence_analyses", "Read persisted EvidenceAnalysisRuns and stale-input state.",
