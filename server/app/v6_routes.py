@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json as _json
+import math
 import os
+import re
 import secrets
 from typing import Any
 
@@ -182,6 +184,7 @@ def _build_runtime_case_context(
     runtime_policy: RuntimePolicy | dict[str, Any] | None = None,
     runtime_options: RuntimeOptions | dict[str, Any] | None = None,
     strategy_id: str | None = None,
+    intervention: dict[str, Any] | None = None,
 ) -> CaseContextSnapshot:
     """Build the L0/L1 Case projection handed to an AgentRuntimePort before a Turn."""
     case_id = str(case.get("case_id") or "")
@@ -192,7 +195,11 @@ def _build_runtime_case_context(
     ) else []
     canonical_evidence = case_evidence_service.list_evidence(case_id, tenant_id, status=None)
     for item in canonical_evidence:
-        if item.get("status") == "EXCLUDED":
+        if str(item.get("status") or item.get("lifecycle_status") or "ACTIVE").upper() in {
+            "EXCLUDED", "SUPERSEDED", "INVALID",
+        } or str(item.get("lifecycle_status") or "").upper() in {
+            "EXCLUDED", "SUPERSEDED", "INVALID",
+        }:
             continue
         projections = repo.list_evidence_projections(
             case_id, tenant_id, evidence_id=item.get("evidence_id"),
@@ -219,6 +226,9 @@ def _build_runtime_case_context(
                 "signals": content.get("signals") or {},
                 "target_ref": item.get("target_ref"),
                 "status": item.get("status"),
+                "lifecycle_status": item.get("lifecycle_status") or item.get("status") or "ACTIVE",
+                "trust_state": item.get("review_trust_state") or "UNREVIEWED",
+                "review_revision": int(item.get("review_revision") or 0),
                 "freshness": item.get("freshness"),
                 "quality": item.get("quality"),
                 "time_window": item.get("time_window") or {},
@@ -241,7 +251,66 @@ def _build_runtime_case_context(
     evidence_analyses = repo.list_evidence_analysis_runs(case_id, tenant_id)
     investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
     hypothesis_graph = investigation_state["hypothesis_graph"]
-    hypotheses = hypothesis_graph.get("hypotheses") or []
+    active_evidence_ids = {
+        str(item.get("evidence_id")) for item in evidence_summary if item.get("evidence_id")
+    }
+    hypotheses = []
+    for original in hypothesis_graph.get("hypotheses") or []:
+        item = dict(original)
+        support = [str(ref) for ref in item.get("supporting_evidence_refs") or []]
+        contradiction = [str(ref) for ref in item.get("contradicting_evidence_refs") or []]
+        item["invalidated_evidence_refs"] = sorted(
+            set(support + contradiction) - active_evidence_ids,
+        )
+        item["supporting_evidence_refs"] = [ref for ref in support if ref in active_evidence_ids]
+        item["contradicting_evidence_refs"] = [ref for ref in contradiction if ref in active_evidence_ids]
+        hypotheses.append(item)
+    current_support = [
+        {
+            "hypothesis_id": item.get("hypothesis_id"),
+            "evidence_refs": list(item.get("supporting_evidence_refs") or []),
+        }
+        for item in hypotheses
+        if item.get("supporting_evidence_refs")
+    ]
+    counterevidence = [
+        {
+            "hypothesis_id": item.get("hypothesis_id"),
+            "evidence_refs": list(item.get("contradicting_evidence_refs") or []),
+        }
+        for item in hypotheses
+        if item.get("contradicting_evidence_refs")
+    ]
+    sanitized_hypothesis_edges = []
+    for edge in hypothesis_graph.get("edges") or []:
+        edge_view = dict(edge)
+        if "supporting_evidence_refs" in edge_view:
+            edge_view["supporting_evidence_refs"] = [
+                str(ref) for ref in edge_view.get("supporting_evidence_refs") or []
+                if str(ref) in active_evidence_ids
+            ]
+        sanitized_hypothesis_edges.append(edge_view)
+    causal_graph_view = dict(investigation_state["causal_graph"] or {})
+    for key in ("nodes", "edges"):
+        causal_items = []
+        for original in causal_graph_view.get(key) or []:
+            item = dict(original)
+            for ref_key in ("supporting_evidence_refs", "opposing_evidence_refs"):
+                if ref_key in item:
+                    item[ref_key] = [
+                        str(ref) for ref in item.get(ref_key) or []
+                        if str(ref) in active_evidence_ids
+                    ]
+            causal_items.append(item)
+        if key in causal_graph_view:
+            causal_graph_view[key] = causal_items
+    recommendations_view = []
+    for original in investigation_state["recommendations"][:20]:
+        item = dict(original)
+        refs = [str(ref) for ref in item.get("evidence_refs") or []]
+        item["invalidated_evidence_refs"] = sorted(set(refs) - active_evidence_ids)
+        item["evidence_refs"] = [ref for ref in refs if ref in active_evidence_ids]
+        recommendations_view.append(item)
     evidence_gaps = investigation_state["evidence_gaps"]
     information_goals: list[str] = []
     for analysis in evidence_analyses:
@@ -329,11 +398,11 @@ def _build_runtime_case_context(
         evidence_analyses=analysis_summary,
         information_goals=information_goals[:20],
         hypotheses=hypotheses[:30],
-        hypothesis_edges=(hypothesis_graph.get("edges") or [])[:60],
+        hypothesis_edges=sanitized_hypothesis_edges[:60],
         evidence_gaps=evidence_gaps[:30],
-        causal_graph=investigation_state["causal_graph"] or {},
+        causal_graph=causal_graph_view,
         conclusion=investigation_state["conclusion"] or {},
-        recommendations=investigation_state["recommendations"][:20],
+        recommendations=recommendations_view,
         evidence_summary=evidence_summary[:20],
         missing_facts=missing_facts[:20],
         running_task_ids=running_task_ids,
@@ -368,6 +437,9 @@ def _build_runtime_case_context(
                 "scope_or_approval_required",
             ],
         },
+        intervention=intervention or {},
+        current_support=current_support[:30],
+        counterevidence=counterevidence[:30],
     )
 def _case_investigation_footprint(case_id: str, tenant_id: str) -> dict[str, int]:
     plan = investigation_plan_service.read_plan(case_id, tenant_id) or {}
@@ -431,6 +503,21 @@ def _tool_fence(
         return policy_error
     if tool_name not in read_only_tools and policy.execution_mode == "deny_write":
         return "WRITE_DENIED_BY_RUNTIME_POLICY"
+    # An intervention is a protocol barrier, not merely a write permission.
+    # The first model action must acknowledge the exact intervention before it
+    # can read or mutate through any other tool.
+    if tool_name != "acknowledge_intervention":
+        intervention_id = str(payload.get("intervention_id") or "").strip()
+        if intervention_id:
+            acknowledged = False
+            for event in repo.list_case_events(case_id, tenant_id, limit=500) or []:
+                if event.get("event_type") != "intervention_acknowledged":
+                    continue
+                event_payload = event.get("payload") or {}
+                if str(event_payload.get("intervention_id") or "") == intervention_id:
+                    acknowledged = bool(event_payload.get("evidence_state_rechecked"))
+            if not acknowledged:
+                return "INTERVENTION_ACK_REQUIRED"
     supplied_generation = payload.get("runtime_generation")
     if supplied_generation is not None and binding is not None:
         if int(supplied_generation) != int(binding.get("runtime_generation") or 0):
@@ -442,6 +529,114 @@ def _tool_fence(
         if state in {"STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
             return "RUN_TERMINAL"
     return None
+
+
+@router.post("/internal/agent/tools/acknowledge-intervention")
+def internal_tool_acknowledge_intervention(payload: dict[str, Any], request: Request) -> APIResponse:
+    """Record the mandatory first response to an operator Evidence intervention."""
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    intervention_id = str(payload.get("intervention_id") or "").strip()
+    trust_state = str(payload.get("trust_state") or "").strip().upper()
+    if not intervention_id:
+        raise HTTPException(status_code=400, detail="INTERVENTION_ID_REQUIRED")
+    if payload.get("evidence_state_rechecked") is not True:
+        raise HTTPException(status_code=409, detail="EVIDENCE_STATE_RECHECK_REQUIRED")
+    if not trust_state:
+        raise HTTPException(status_code=400, detail="TRUST_STATE_REQUIRED")
+    if trust_state not in {
+        "RECHECK_REQUIRED", "EXCLUDED", "SUPERSEDED", "INVALID", "LOW_TRUST",
+        "TRUSTED", "UNREVIEWED", "ACTIVE",
+    }:
+        raise HTTPException(status_code=409, detail="INTERVENTION_TRUST_STATE_INVALID")
+    # Resolve the intervention against the durable wakeup and canonical
+    # Evidence.  An arbitrary intervention_id/revision must never be enough
+    # to unlock a write-capable tool.
+    wakeup_id = intervention_id.removeprefix("intervention-")
+    wakeup = None
+    if hasattr(repo, "list_runtime_wakeups"):
+        wakeup = next(
+            (item for item in repo.list_runtime_wakeups(case_id, tenant_id)
+             if str(item.get("wakeup_id") or "") == wakeup_id),
+            None,
+        )
+    if wakeup is None or str(wakeup.get("reason_class") or "") != "EVIDENCE_REVIEWED":
+        raise HTTPException(status_code=409, detail="INTERVENTION_NOT_CURRENT")
+    affected_ids: list[str] = []
+    expected_revisions: dict[str, int] = {}
+    for ref in wakeup.get("source_refs") or []:
+        raw = str(ref)
+        evidence_id = raw
+        revision = None
+        if raw.startswith("evidence-review:"):
+            evidence_id = raw[len("evidence-review:"):].split(":r", 1)[0]
+            try:
+                revision = int(raw.rsplit(":r", 1)[1])
+            except (IndexError, ValueError):
+                revision = None
+        if evidence_id and evidence_id not in affected_ids:
+            affected_ids.append(evidence_id)
+        if revision is not None:
+            expected_revisions[evidence_id] = revision
+    evidence_rows = {
+        str(item.get("evidence_id")): item
+        for item in case_evidence_service.list_evidence(case_id, tenant_id)
+    }
+    if not affected_ids or any(item not in evidence_rows for item in affected_ids):
+        raise HTTPException(status_code=409, detail="INTERVENTION_EVIDENCE_NOT_FOUND")
+    actual_revisions = [
+        int(evidence_rows[item].get("review_revision") or 0) for item in affected_ids
+    ]
+    observed_states = {
+        state
+        for evidence_id in affected_ids
+        for state in (
+            str(evidence_rows[evidence_id].get("status") or "").upper(),
+            str(evidence_rows[evidence_id].get("lifecycle_status") or "").upper(),
+            str(evidence_rows[evidence_id].get("review_trust_state") or "").upper(),
+        )
+        if state
+    }
+    if trust_state != "RECHECK_REQUIRED" and trust_state not in observed_states:
+        raise HTTPException(status_code=409, detail="INTERVENTION_TRUST_STATE_MISMATCH")
+    for evidence_id, expected in expected_revisions.items():
+        if int(evidence_rows[evidence_id].get("review_revision") or 0) != expected:
+            raise HTTPException(status_code=409, detail="INTERVENTION_REVISION_STALE")
+    revision_after = int(payload.get("revision_after") or 0)
+    expected_after = max(actual_revisions or [0])
+    if revision_after != expected_after:
+        raise HTTPException(status_code=409, detail="INTERVENTION_REVISION_AFTER_MISMATCH")
+    revision_before = payload.get("revision_before")
+    if revision_before is not None and int(revision_before) != max(0, expected_after - 1):
+        raise HTTPException(status_code=409, detail="INTERVENTION_REVISION_BEFORE_MISMATCH")
+    ack = {
+        "intervention_id": intervention_id,
+        "trust_state": trust_state,
+        "evidence_state_rechecked": True,
+        "revision_before": revision_before,
+        "revision_after": revision_after,
+        "affected_evidence_ids": affected_ids,
+        "evidence_states": {
+            evidence_id: {
+                "status": evidence_rows[evidence_id].get("status"),
+                "lifecycle_status": evidence_rows[evidence_id].get("lifecycle_status"),
+                "review_revision": int(evidence_rows[evidence_id].get("review_revision") or 0),
+            }
+            for evidence_id in affected_ids
+        },
+        "actor_id": "mini-drop-pi-runtime",
+    }
+    repo.record_case_event(
+        case_id,
+        tenant_id,
+        event_type="intervention_acknowledged",
+        payload=ack,
+        actor_id="mini-drop-pi-runtime",
+    )
+    return APIResponse(data={"accepted": True, **ack})
 
 
 def _runtime_policy_from_tool_payload(payload: dict[str, Any]) -> RuntimePolicy:
@@ -496,6 +691,39 @@ def _runtime_visible_content(payload: dict[str, Any]) -> str:
     return ""
 
 
+def _intervention_audit_for_finish(
+    case_id: str,
+    tenant_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Project the acknowledged intervention into the terminal contract."""
+    intervention_id = str(payload.get("intervention_id") or "").strip()
+    if not intervention_id:
+        return {}
+    for event in reversed(repo.list_case_events(case_id, tenant_id, limit=500) or []):
+        if event.get("event_type") != "intervention_acknowledged":
+            continue
+        ack = event.get("payload") or {}
+        if str(ack.get("intervention_id") or "") != intervention_id:
+            continue
+        return {
+            "intervention_ack": True,
+            "intervention_id": intervention_id,
+            "trust_state": ack.get("trust_state"),
+            "evidence_state_rechecked": bool(ack.get("evidence_state_rechecked")),
+            "revision_before": ack.get("revision_before"),
+            "revision_after": ack.get("revision_after"),
+            "excluded_evidence_used": False,
+            "invalidated_evidence_ids": ack.get("affected_evidence_ids") or [],
+        }
+    return {
+        "intervention_ack": False,
+        "intervention_id": intervention_id,
+        "evidence_state_rechecked": False,
+        "excluded_evidence_used": False,
+    }
+
+
 def _business_symptom_missing_direct_evidence(
     graph: dict[str, Any], case_id: str, tenant_id: str,
 ) -> list[str]:
@@ -545,9 +773,71 @@ def _visible_evidence_ids(content: str, case_id: str, tenant_id: str) -> list[st
     """Return canonical evidence IDs that are both persisted and visibly cited."""
     known = [
         str(item.get("evidence_id") or "")
-        for item in repo.list_case_evidence(case_id, tenant_id, status="ACTIVE")
+        for item in repo.list_case_evidence(case_id, tenant_id, status=None)
+        if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper()
+        not in {"EXCLUDED", "SUPERSEDED", "INVALID"}
     ]
     return [item for item in known if item and item in content]
+
+
+def _nested_string_values(value: Any):
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _nested_string_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _nested_string_values(item)
+    elif isinstance(value, str):
+        yield value
+
+
+def _nested_scalar_values(value: Any):
+    """Yield meaningful scalar values for the server-side Evidence firewall."""
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _nested_scalar_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _nested_scalar_values(item)
+    elif isinstance(value, str):
+        normalized = value.strip()
+        # Free-form labels such as "CPU" or "summary" are too common to be
+        # useful firewall tokens. Keep distinctive strings that carry a value
+        # (usually a metric, identifier, or timestamp) and all non-trivial
+        # numeric scalars.
+        if len(normalized) >= 6 and any(char.isdigit() for char in normalized):
+            yield normalized
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+        if math.isfinite(numeric) and abs(numeric) >= 10:
+            yield str(value)
+
+
+def _excluded_projection_value_leaks(
+    case_id: str,
+    tenant_id: str,
+    excluded_evidence_ids: set[str],
+    conclusion: dict[str, Any],
+) -> list[str]:
+    """Find excluded projection values repeated in a proposed conclusion."""
+    if not excluded_evidence_ids:
+        return []
+    serialized = _json.dumps(conclusion, ensure_ascii=False, sort_keys=True, default=str)
+    leaks: list[str] = []
+    for evidence_id in sorted(excluded_evidence_ids):
+        projections = repo.list_evidence_projections(
+            case_id, tenant_id, evidence_id=evidence_id,
+        ) if hasattr(repo, "list_evidence_projections") else []
+        for projection in projections:
+            for value in _nested_scalar_values(projection.get("content") or {}):
+                if value.isdigit() or re.fullmatch(r"-?\d+(?:\.\d+)?", value):
+                    pattern = rf"(?<!\d){re.escape(value)}(?!\d)"
+                    matched = re.search(pattern, serialized)
+                else:
+                    matched = value in serialized
+                if matched:
+                    leaks.append(f"{evidence_id}:{value[:80]}")
+    return sorted(set(leaks))
 
 
 @router.post("/internal/agent/tools/case-snapshot")
@@ -562,8 +852,22 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
     attachments = evidence_attachment_service.list_attachments(case_id, tenant_id)
     investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
     evidence_items: list[dict[str, Any]] = []
+    excluded_evidence: list[dict[str, Any]] = []
     projection_count = 0
     for item in case_evidence_service.list_evidence(case_id, tenant_id):
+        if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper() in {
+            "EXCLUDED", "SUPERSEDED", "INVALID",
+        }:
+            # Keep only a non-content audit marker. The Agent must not receive
+            # the excluded projection or its original numerical values.
+            excluded_evidence.append({
+                "evidence_id": item.get("evidence_id"),
+                "status": item.get("status"),
+                "lifecycle_status": item.get("lifecycle_status"),
+                "trust_state": item.get("review_trust_state"),
+                "review_revision": item.get("review_revision"),
+            })
+            continue
         projections = repo.list_evidence_projections(
             case_id, tenant_id, evidence_id=item.get("evidence_id"),
         ) if hasattr(repo, "list_evidence_projections") else []
@@ -572,6 +876,9 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
             "evidence_id": item.get("evidence_id"),
             "artifact_type": item.get("artifact_type"),
             "status": item.get("status"),
+            "lifecycle_status": item.get("lifecycle_status") or item.get("status"),
+            "trust_state": item.get("review_trust_state") or "UNREVIEWED",
+            "review_revision": int(item.get("review_revision") or 0),
             "freshness": item.get("freshness"),
             "quality": item.get("quality"),
             "target_ref": item.get("target_ref"),
@@ -591,6 +898,48 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
                 for projection in projections
             ],
         })
+    active_ids = {str(item.get("evidence_id")) for item in evidence_items if item.get("evidence_id")}
+    hypothesis_view = dict(investigation_state["hypothesis_graph"] or {})
+    hypothesis_view["hypotheses"] = [
+        {
+            **node,
+            "supporting_evidence_refs": [
+                ref for ref in node.get("supporting_evidence_refs") or [] if str(ref) in active_ids
+            ],
+            "contradicting_evidence_refs": [
+                ref for ref in node.get("contradicting_evidence_refs") or [] if str(ref) in active_ids
+            ],
+        }
+        for node in hypothesis_view.get("hypotheses") or []
+    ]
+    causal_view = dict(investigation_state["causal_graph"] or {})
+    for key in ("nodes", "edges"):
+        causal_view[key] = [
+            {
+                **item,
+                "supporting_evidence_refs": [
+                    ref for ref in item.get("supporting_evidence_refs") or [] if str(ref) in active_ids
+                ],
+                "opposing_evidence_refs": [
+                    ref for ref in item.get("opposing_evidence_refs") or [] if str(ref) in active_ids
+                ],
+            }
+            for item in causal_view.get(key) or []
+        ]
+    conclusion_view = investigation_state["conclusion"]
+    if isinstance(conclusion_view, dict):
+        stale_claim = any(
+            str(claim.get("evidence_id") or "") not in active_ids
+            for claim in conclusion_view.get("claims") or []
+            if claim.get("evidence_id")
+        )
+        if stale_claim:
+            conclusion_view = {
+                "conclusion_id": conclusion_view.get("conclusion_id"),
+                "revision": conclusion_view.get("revision"),
+                "state": "RECHECK_REQUIRED",
+                "report_text": "结论引用的 Evidence 生命周期已变化，请重新读取 ACTIVE Evidence。",
+            }
     return APIResponse(data={
         "case_id": case_id,
         "goal": case.get("problem_description", "")[:500],
@@ -607,11 +956,12 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
             for item in attachments
         ],
         "evidence": evidence_items,
+        "excluded_evidence": excluded_evidence,
         "evidence_watermark": projection_count,
-        "hypothesis_graph": investigation_state["hypothesis_graph"],
+        "hypothesis_graph": hypothesis_view,
         "evidence_gaps": investigation_state["evidence_gaps"],
-        "causal_graph": investigation_state["causal_graph"],
-        "conclusion": investigation_state["conclusion"],
+        "causal_graph": causal_view,
+        "conclusion": conclusion_view,
         "recommendations": investigation_state["recommendations"],
         "query_operations": [
             item.get("operation_id")
@@ -632,9 +982,17 @@ def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) 
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
     filters = payload.get("filters") or {}
     status = filters.get("status")
+    if str(status or "").upper() in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
+        raise HTTPException(status_code=409, detail="EXCLUDED_EVIDENCE_AUDIT_ONLY")
     items = case_evidence_service.list_evidence(
         case_id, tenant_id, status=status, limit=int(payload.get("limit") or 200),
     )
+    if not status:
+        items = [
+            item for item in items
+            if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper()
+            not in {"EXCLUDED", "SUPERSEDED", "INVALID"}
+        ]
     projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
     by_evidence: dict[str, list[dict[str, Any]]] = {}
     for projection in projections:
@@ -1366,6 +1724,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
     fence_error = _tool_fence(case, tenant_id, payload, "finish_investigation")
     if fence_error:
         raise HTTPException(status_code=409, detail=fence_error)
+    intervention_audit = _intervention_audit_for_finish(case_id, tenant_id, payload)
 
     # Real Pi tool calls always carry trigger_turn_id. Resolve it before the
     # first durable write so a bad application boundary cannot half-finish.
@@ -1382,15 +1741,26 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
 
     # 校验 Evidence ID 必须来自当前 Case 已接受的 Attachment 或 Diagnosis Evidence。
     known_evidence_ids: set[str] = set()
+    excluded_evidence_ids: set[str] = set()
     for attachment in evidence_attachment_service.list_attachments(case_id, tenant_id):
         if attachment.get("status") == "EXCLUDED_BY_USER":
             continue
         known_evidence_ids.update(attachment.get("evidence_ids") or [])
     if hasattr(repo, "list_case_evidence"):
-        for item in repo.list_case_evidence(case_id, tenant_id, status="ACTIVE"):
+        for item in repo.list_case_evidence(case_id, tenant_id, status=None):
+            if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper() in {
+                "EXCLUDED", "SUPERSEDED", "INVALID",
+            } or str(item.get("status") or "").upper() == "EXCLUDED":
+                evidence_id = str(item.get("evidence_id") or "")
+                if evidence_id:
+                    excluded_evidence_ids.add(evidence_id)
+                continue
             known_evidence_ids.add(str(item.get("evidence_id") or ""))
         for item in repo.list_case_evidence(case_id, tenant_id, status="EXCLUDED"):
-            known_evidence_ids.discard(str(item.get("evidence_id") or ""))
+            evidence_id = str(item.get("evidence_id") or "")
+            known_evidence_ids.discard(evidence_id)
+            if evidence_id:
+                excluded_evidence_ids.add(evidence_id)
     diagnosis_id = case.get("diagnosis_session_id")
     if diagnosis_id:
         diagnosis = diagnosis_orchestrator.store.get_detail(diagnosis_id) or {}
@@ -1404,8 +1774,38 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             status_code=400,
             detail=f"INVALID_EVIDENCE_REFS:{','.join(unknown[:5])}",
         )
+    evidence_rows = {
+        str(item.get("evidence_id")): item
+        for item in repo.list_case_evidence(case_id, tenant_id, status=None)
+        if item.get("evidence_id")
+    }
     if not summary:
         raise HTTPException(status_code=400, detail="SUMMARY_REQUIRED")
+    structured_conclusion = {
+        key: payload.get(key)
+        for key in (
+            "claims", "primary_root_causes", "contributing_factors", "amplifiers",
+            "propagated_effects", "symptoms", "coincidental_anomalies", "ruled_out",
+            "recommendations",
+        )
+    }
+    leaked_excluded = sorted(
+        set(_nested_string_values(structured_conclusion)) & excluded_evidence_ids,
+    )
+    leaked_excluded.extend(_excluded_projection_value_leaks(
+        case_id,
+        tenant_id,
+        excluded_evidence_ids,
+        {"summary": summary, **structured_conclusion},
+    ))
+    if leaked_excluded:
+        # Do not echo the matched value in the rejection body: that would
+        # reintroduce the excluded numeric/string content into the Agent turn.
+        leak_ids = sorted({item.split(":", 1)[0] for item in leaked_excluded})
+        raise HTTPException(
+            status_code=400,
+            detail=f"EXCLUDED_EVIDENCE_IN_CONCLUSION:{','.join(leak_ids[:6])}",
+        )
 
     # Recovery-only continuation for a conclusion committed by the previous
     # non-atomic implementation. Only the missing Case/message/Turn projection
@@ -1434,6 +1834,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             message_id=message_id,
             visible_content=visible_summary,
             trigger_turn_id=trigger_turn_id or None,
+            intervention_audit=intervention_audit,
         )
         return APIResponse(data={
             "accepted": True,
@@ -1445,6 +1846,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             "assistant_message_id": finalized["message"]["message_id"],
             "event_type": "agent_finish_investigation",
             "resumed": True,
+            **intervention_audit,
         })
 
     # v6 finish: ClaimEvidenceBinding must reference the current projection hash
@@ -1603,6 +2005,12 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             raise HTTPException(status_code=400, detail="INVALID_RECOMMENDATION_CONFIDENCE") from exc
         if confidence < 0.0 or confidence > 1.0:
             raise HTTPException(status_code=400, detail="INVALID_RECOMMENDATION_CONFIDENCE")
+        recommendation_trust = [
+            str(evidence_rows.get(ref, {}).get("review_trust_state") or "UNREVIEWED").upper()
+            for ref in refs
+        ]
+        if recommendation_trust and all(state == "LOW_TRUST" for state in recommendation_trust):
+            confidence = min(confidence, 0.5)
         recommendation["concrete_action"] = action
         recommendation["target"] = target
         recommendation["cause_or_edge_ref"] = cause_ref
@@ -1618,6 +2026,17 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
         ) + len(unsupported_business_symptoms),
         alternative_primary_not_distinguished=unresolved_alternatives > 1,
     )
+    supporting_trust = [
+        str(evidence_rows.get(str(claim.get("evidence_id")), {}).get("review_trust_state") or "UNREVIEWED").upper()
+        for claim in claims
+        if str(claim.get("support_kind") or "SUPPORTS").upper() == "SUPPORTS"
+    ]
+    if verified_state == "CONFIRMED" and supporting_trust and all(
+        state == "LOW_TRUST" for state in supporting_trust
+    ):
+        # LOW_TRUST is visible and citable, but cannot be the sole basis for a
+        # high-certainty terminal conclusion.
+        verified_state = "PARTIALLY_CONFIRMED"
     if legacy_compat:
         verified_state = "PARTIALLY_CONFIRMED"
     signature_payload = {
@@ -1701,6 +2120,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
         trigger_turn_id=trigger_turn_id or None,
         limitation_refs=unsupported_business_symptoms,
         actor_id="mini-drop-pi-runtime",
+        intervention_audit=intervention_audit,
     )
     assistant_message = finalized["message"]
     return APIResponse(data={
@@ -1712,6 +2132,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
         "conclusion_id": conclusion_id,
         "assistant_message_id": assistant_message["message_id"],
         "event_type": "agent_finish_investigation",
+        **intervention_audit,
     })
 
 

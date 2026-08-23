@@ -254,6 +254,16 @@ class EvidenceReviewRequest(StrictModel):
     reason: Optional[str] = Field(default=None, max_length=1000)
 
 
+class EvidenceChainConfidenceRequest(StrictModel):
+    """Operator adjustment for an existing, evidence-backed chain node."""
+
+    chain_type: Literal["hypothesis", "causal_node"]
+    chain_id: str = Field(min_length=1, max_length=128)
+    confidence: float = Field(ge=0.0, le=1.0)
+    expected_revision: int = Field(default=0, ge=0)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
 class CaseCorrectionRequest(StrictModel):
     problem_description: Optional[str] = Field(default=None, min_length=3, max_length=4000)
     recovery_goal: Optional[str] = Field(default=None, min_length=3, max_length=2000)

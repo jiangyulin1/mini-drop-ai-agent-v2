@@ -198,7 +198,11 @@ OPERATION_TO_TOOL = {
 
 
 def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> dict[str, Any]:
-    tools: list[str] = []
+    # Keep every invocation as an ordered event.  A set of tool names loses
+    # retries and makes it impossible to explain why the second call happened.
+    tool_calls_by_key: dict[str, dict[str, Any]] = {}
+    tool_order: list[str] = []
+    seen_event_keys: set[str] = set()
     operations: list[str] = []
     final_text = ""
     conclusion_text = ""
@@ -221,24 +225,70 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
         for event in runtime_events:
             payload = event.get("payload") or {}
             etype = event.get("event_type", "")
-            if etype == "tool_execution_start" and payload.get("tool_name"):
-                name = payload["tool_name"]
-                if name not in tools:
-                    tools.append(name)
+            if etype not in {"tool_execution_start", "tool_execution_end"}:
+                continue
+            audit = payload.get("tool_audit") or {}
+            call_id = str(payload.get("tool_call_id") or audit.get("tool_call_id") or "")
+            name = str(payload.get("tool_name") or audit.get("tool_name") or "")
+            if not name:
+                continue
+            event_key = str(event.get("event_id") or "") or (
+                f"{event.get('runtime_generation', '')}:{event.get('event_seq', '')}:"
+                f"{etype}:{call_id}:{name}"
+            )
+            if event_key in seen_event_keys:
+                continue
+            seen_event_keys.add(event_key)
+            key = call_id or event_key
+            record = tool_calls_by_key.setdefault(key, {
+                "event_seq": event.get("event_seq"),
+                "tool_call_id": call_id or None,
+                "tool_name": name,
+                "audit": {},
+            })
+            record["audit"].update(audit)
+            if etype == "tool_execution_start":
+                record["started_event_seq"] = event.get("event_seq")
+                tool_order.append(name)
         for event in events:
             payload = event.get("payload") or {}
             etype = event.get("event_type", "")
-            if etype == "tool_execution_start" and payload.get("tool_name"):
-                name = payload["tool_name"]
-                if name not in tools:
-                    tools.append(name)
+            if etype in {"tool_execution_start", "tool_execution_end"}:
+                audit = payload.get("tool_audit") or {}
+                call_id = str(payload.get("tool_call_id") or audit.get("tool_call_id") or "")
+                name = str(payload.get("tool_name") or audit.get("tool_name") or "")
+                if name:
+                    event_key = str(event.get("event_id") or "") or (
+                        f"{event.get('runtime_generation', '')}:{event.get('event_seq', '')}:"
+                        f"{etype}:{call_id}:{name}"
+                    )
+                    if event_key not in seen_event_keys:
+                        seen_event_keys.add(event_key)
+                        key = call_id or event_key
+                        record = tool_calls_by_key.setdefault(key, {
+                            "event_seq": event.get("event_seq"),
+                            "tool_call_id": call_id or None,
+                            "tool_name": name,
+                            "audit": {},
+                        })
+                        record["audit"].update(audit)
+                        if etype == "tool_execution_start":
+                            record["started_event_seq"] = event.get("event_seq")
+                            tool_order.append(name)
             if etype == "case_query_task_created" and payload.get("operation"):
                 op = payload["operation"]
                 if op not in operations:
                     operations.append(op)
                     mapped = OPERATION_TO_TOOL.get(op)
-                    if mapped and mapped not in tools:
-                        tools.append(mapped)
+                    if mapped:
+                        tool_order.append(mapped)
+                        synthetic_key = f"operation:{event.get('event_id') or op}"
+                        tool_calls_by_key.setdefault(synthetic_key, {
+                            "event_seq": event.get("event_seq"),
+                            "tool_call_id": None,
+                            "tool_name": mapped,
+                            "audit": {"source": "case_query_task", "operation": op},
+                        })
             if etype == "agent_finish_investigation" and payload.get("summary"):
                 # The persisted conclusion is the authoritative final answer.
                 # A later assistant retry/rejection message must not overwrite it.
@@ -264,7 +314,12 @@ def wait_for_settle(control_url: str, case_id: str, timeout: float = 600.0) -> d
         time.sleep(5)
     return {
         "settled": settled,
-        "tools": sorted(tools),
+        "tools": sorted({str(item.get("tool_name")) for item in tool_calls_by_key.values()}),
+        "tool_sequence": tool_order,
+        "tool_counts": {
+            name: tool_order.count(name) for name in sorted(set(tool_order))
+        },
+        "tool_calls": list(tool_calls_by_key.values()),
         "operations": sorted(operations),
         "final_answer": final_text,
         "conclusion": {

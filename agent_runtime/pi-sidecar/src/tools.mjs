@@ -7,6 +7,36 @@
  */
 
 import { Type } from "typebox";
+import { createHash } from "node:crypto";
+
+function sha256Text(value) {
+  return createHash("sha256").update(String(value ?? "")).digest("hex");
+}
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]),
+    );
+  }
+  return value;
+}
+
+function evidenceRefsFrom(value) {
+  const refs = new Set();
+  const visit = (item) => {
+    if (!item || typeof item !== "object") return;
+    if (Array.isArray(item)) return item.forEach(visit);
+    for (const [key, child] of Object.entries(item)) {
+      if (key === "evidence_id" && typeof child === "string") refs.add(child);
+      if (key === "evidence_ids" && Array.isArray(child)) child.forEach((id) => refs.add(String(id)));
+      visit(child);
+    }
+  };
+  visit(value);
+  return [...refs].filter(Boolean).slice(0, 64);
+}
 
 /** Proxy that forwards a tool call back to Mini-Drop FastAPI over internal HTTP. */
 function makeInternalTool(
@@ -19,6 +49,7 @@ function makeInternalTool(
   onAcceptedFinish,
   onCollectionScheduled,
   onDiscoveryCollecting,
+  onInterventionAck,
 ) {
   return {
     name,
@@ -26,6 +57,17 @@ function makeInternalTool(
     description,
     parameters,
     execute: async (_toolCallId, params) => {
+      const startedMs = Date.now();
+      const startedAt = new Date(startedMs).toISOString();
+      const argumentsJson = JSON.stringify(canonicalize(params ?? {}));
+      const argumentsHash = sha256Text(argumentsJson);
+      const auditBase = {
+        tool_call_id: _toolCallId || null,
+        tool_name: name,
+        arguments_hash: argumentsHash,
+        started_at: startedAt,
+        retry_count: 0,
+      };
       const headers = { "Content-Type": "application/json" };
       const internalToken = process.env.MINI_DROP_PI_INTERNAL_TOKEN || "";
       if (internalToken) {
@@ -44,15 +86,31 @@ function makeInternalTool(
           bodyText = "";
         }
         const detail = bodyText.slice(0, 1000);
+        const finishedAt = new Date().toISOString();
         return {
           content: [{
             type: "text",
             text: `tool ${name} failed: HTTP ${resp.status}${detail ? `: ${detail}` : ""}`,
           }],
-          details: { http_status: resp.status, error_body: detail },
+          details: {
+            ...auditBase,
+            http_status: resp.status,
+            error_body: detail,
+            finished_at: finishedAt,
+            duration_ms: Math.max(0, Date.now() - startedMs),
+            result_hash: sha256Text(bodyText),
+            result_bytes: Buffer.byteLength(bodyText),
+            result_truncated: bodyText.length > detail.length,
+            evidence_refs: evidenceRefsFrom(bodyText),
+          },
         };
       }
       const payload = await resp.json();
+      const resultText = JSON.stringify(payload);
+      const finishedAt = new Date().toISOString();
+      if (name === "acknowledge_intervention" && payload?.data?.accepted === true) {
+        onInterventionAck?.(payload.data);
+      }
       const finishAccepted = name === "finish_investigation" && payload?.data?.accepted === true;
       if (finishAccepted) {
         onAcceptedFinish?.(payload.data);
@@ -72,7 +130,17 @@ function makeInternalTool(
       }
       return {
         content: [{ type: "text", text: JSON.stringify(payload).slice(0, 24000) }],
-        details: { projection_bytes: JSON.stringify(payload).length },
+        details: {
+          ...auditBase,
+          finished_at: finishedAt,
+          duration_ms: Math.max(0, Date.now() - startedMs),
+          http_status: resp.status,
+          result_hash: sha256Text(resultText),
+          result_bytes: Buffer.byteLength(resultText),
+          result_truncated: resultText.length > 24000,
+          evidence_refs: evidenceRefsFrom(payload),
+          projection_bytes: resultText.length,
+        },
         // A verified finish is the structured output of this Agent run. A
         // scheduled collection/discovery run must instead await durable
         // Evidence. PROPOSED, COMPLETED and PARTIAL discovery results remain
@@ -92,9 +160,25 @@ export function buildToolCatalog({
   onAcceptedFinish = null,
   onCollectionScheduled = null,
   onDiscoveryCollecting = null,
+  onInterventionAck = null,
 } = {}) {
   const base = `${internalBase}/internal/agent/tools`;
   const fallbackTools = [
+    makeInternalTool(
+      "acknowledge_intervention",
+      "Acknowledge Intervention",
+      "Record the mandatory Evidence lifecycle recheck before continuing after an operator intervention.",
+      Type.Object({
+        case_id: Type.String({ description: "Case ID" }),
+        intervention_id: Type.String({ description: "Active intervention ID" }),
+        trust_state: Type.String({ description: "Observed trust/lifecycle state after recheck" }),
+        evidence_state_rechecked: Type.Literal(true),
+        revision_before: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
+        revision_after: Type.Integer({ minimum: 0 }),
+      }),
+      `${base}/acknowledge-intervention`, getEnvelope,
+      null, null, null, onInterventionAck,
+    ),
     makeInternalTool(
       "get_case_snapshot",
       "Get Case Snapshot",
@@ -470,6 +554,7 @@ export function buildToolCatalog({
         onAcceptedFinish,
         onCollectionScheduled,
         onDiscoveryCollecting,
+        onInterventionAck,
       ))
     : [];
   const tools = remoteTools.length === ALLOWED_TOOL_NAMES.length ? remoteTools : fallbackTools;
@@ -535,6 +620,7 @@ const READ_ONLY_TOOL_NAMES = new Set([
 ]);
 
 export const ALLOWED_TOOL_NAMES = [
+  "acknowledge_intervention",
   "get_case_snapshot",
   "list_case_evidence",
   "get_evidence_projection",

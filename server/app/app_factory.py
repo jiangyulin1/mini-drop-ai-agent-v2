@@ -586,13 +586,59 @@ def _deliver_one_wakeup(
     # finish_investigation is terminal for the current run. Evidence that races
     # with an accepted conclusion stays durable, but must not enqueue another
     # autonomous model turn after the Agent has explicitly stopped.
-    if hasattr(repo, "get_conclusion") and repo.get_conclusion(case_id, tenant_id) is not None:
+    reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
+    # A lifecycle review is specifically how an already-concluded case is
+    # reopened.  Do not let the terminal-conclusion fast path swallow it.
+    if (
+        reason_class != "EVIDENCE_REVIEWED"
+        and hasattr(repo, "get_conclusion")
+        and repo.get_conclusion(case_id, tenant_id) is not None
+    ):
         if hasattr(repo, "consume_runtime_wakeup"):
             repo.consume_runtime_wakeup(wakeup_id, "SKIPPED_CONCLUDED")
         return False
     inherited_policy, inherited_options, inherited_strategy_id = (
         _latest_runtime_turn_preferences(case_id, tenant_id)
     )
+    cycle = (
+        repo.get_agent_cycle(str(wakeup.get("cycle_id")))
+        if wakeup.get("cycle_id") and hasattr(repo, "get_agent_cycle")
+        else None
+    )
+    intervention: dict[str, Any] = {}
+    if reason_class == "EVIDENCE_REVIEWED":
+        review_refs = [str(item) for item in (wakeup.get("source_refs") or [])]
+        evidence_items = case_evidence_service.list_evidence(case_id, tenant_id)
+        affected_ids: list[str] = []
+        revision_after = 0
+        for ref in review_refs:
+            # Review wakeups use evidence-review:<id>:r<revision> refs. Keep
+            # the original ref for audit, but expose the canonical ID and
+            # current revision in the structured intervention.
+            evidence_id = ref
+            if ref.startswith("evidence-review:"):
+                evidence_id = ref[len("evidence-review:"):].split(":r", 1)[0]
+            if evidence_id and evidence_id not in affected_ids:
+                affected_ids.append(evidence_id)
+            matching = next(
+                (item for item in evidence_items if str(item.get("evidence_id")) == evidence_id),
+                None,
+            )
+            if matching:
+                revision_after = max(revision_after, int(matching.get("review_revision") or 0))
+        revision_before = max(0, revision_after - 1)
+        intervention = {
+            "intervention_id": f"intervention-{wakeup_id}",
+            "kind": "EVIDENCE_REVIEWED",
+            "source_refs": review_refs,
+            "affected_evidence_ids": affected_ids,
+            "required": True,
+            "trust_state": "RECHECK_REQUIRED",
+            "evidence_state_rechecked": False,
+            "revision_before": revision_before,
+            "revision_after": revision_after,
+            "wakeup_id": wakeup_id,
+        }
     context = _build_runtime_case_context(
         case, tenant_id,
         disposition="INVESTIGATE",
@@ -601,13 +647,31 @@ def _deliver_one_wakeup(
         runtime_policy=inherited_policy,
         runtime_options=inherited_options,
         strategy_id=inherited_strategy_id,
+        intervention=intervention,
     )
-    reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
-    cycle = (
-        repo.get_agent_cycle(str(wakeup.get("cycle_id")))
-        if wakeup.get("cycle_id") and hasattr(repo, "get_agent_cycle")
-        else None
-    )
+    # Evidence lifecycle changes invalidate every old Pi transcript. Rotate
+    # the durable generation before creating the cycle so stale tool events
+    # are rejected by the server as well as discarded by the Sidecar.
+    if reason_class == "EVIDENCE_REVIEWED" and cycle is None:
+        binding = repo.get_agent_runtime_binding(case_id, tenant_id) or {}
+        new_generation = int(binding.get("runtime_generation") or 1) + 1
+        context = context.model_copy(update={
+            "runtime_generation": new_generation,
+            "runtime_session_id": "",
+        })
+        if hasattr(repo, "upsert_agent_runtime_binding"):
+            repo.upsert_agent_runtime_binding(
+                case_id,
+                tenant_id,
+                runtime_type=binding.get("runtime_type") or "pi",
+                runtime_version=binding.get("runtime_version") or "pi",
+                runtime_session_id="",
+                runtime_generation=new_generation,
+                status="REBUILD_REQUIRED",
+                last_event_seq=0,
+                last_context_snapshot_id=None,
+                lease_owner=binding.get("lease_owner"),
+            )
     snapshot = None
     model_request = None
     if cycle is None:
@@ -744,6 +808,7 @@ def _deliver_one_wakeup(
                 case_id=case_id,
                 note=note,
                 evidence_ids=follow_up_evidence_ids,
+                intervention=intervention,
             ),
         )
         if hasattr(repo, "consume_runtime_wakeup"):

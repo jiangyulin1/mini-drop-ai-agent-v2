@@ -36,9 +36,19 @@ def client_fixture():
 
 
 def _create_case(client: TestClient, *, cluster: bool = False) -> dict:
-    target_scope = {"service_id": "checkout"}
+    # Process collectors require an explicit agent + PID scope.  Keeping the
+    # service anchor as well exercises the normal service scoping contract
+    # without relying on an unsafe implicit online-agent fallback.
+    target_scope = {
+        "service_id": "checkout",
+        "instances": [{"instance_id": "inst-a", "agent_id": "agent-a", "pid": 1}],
+    }
     if cluster:
-        target_scope = {"cluster_id": "prod-a", "service_id": "checkout"}
+        target_scope = {
+            "cluster_id": "prod-a",
+            "service_id": "checkout",
+            "instances": [{"instance_id": "inst-a", "agent_id": "agent-a", "pid": 1}],
+        }
     created = client.post("/api/v1/cases", json={
         "title": "plan-driver-case",
         "problem_description": "支付接口超时，请定位根因",

@@ -63,6 +63,11 @@ class CaseContextSnapshot(StrictModel):
     knowledge_context: list[dict[str, Any]] = Field(default_factory=list)
     skill_context: list[dict[str, Any]] = Field(default_factory=list)
     investigation_directive: dict[str, Any] = Field(default_factory=dict)
+    current_support: list[dict[str, Any]] = Field(default_factory=list)
+    counterevidence: list[dict[str, Any]] = Field(default_factory=list)
+    # A durable operator/review intervention that must be acknowledged before
+    # any write-capable tool can continue the investigation.
+    intervention: dict[str, Any] = Field(default_factory=dict)
 
 
 class RuntimeBinding(StrictModel):
@@ -108,6 +113,7 @@ class RuntimeFollowUp(StrictModel):
     case_id: str
     note: str = Field(min_length=1, max_length=4000)
     evidence_ids: list[str] = Field(default_factory=list)
+    intervention: dict[str, Any] = Field(default_factory=dict)
 
 
 class RuntimeState(StrictModel):

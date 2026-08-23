@@ -168,7 +168,11 @@ def verify_claim_binding(
 ) -> tuple[bool, str]:
     """Factual verification of one ClaimEvidenceBinding."""
     evidence_id = claim.get("evidence_id")
-    if not evidence_id or evidence.get("status") not in {"ACTIVE"}:
+    lifecycle = str(evidence.get("lifecycle_status") or evidence.get("status") or "ACTIVE").upper()
+    status = str(evidence.get("status") or "ACTIVE").upper()
+    # LOW_TRUST remains citable for transparent reasoning, but EXCLUDED (and
+    # any other non-current lifecycle) is never a valid Claim input.
+    if not evidence_id or lifecycle == "EXCLUDED" or status in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
         return False, "EVIDENCE_NOT_ACTIVE"
     if evidence.get("stale_for_current_revision"):
         return False, "EVIDENCE_REVISION_STALE"
@@ -206,8 +210,10 @@ def verify_claim_binding(
         if not ok:
             return False, "PROJECTION_PREDICATE_FAILED"
         claim["observed_value"] = {"field_path": field_path, "value": observed}
-    claim["verifier_result"] = "VERIFIED"
-    return True, "VERIFIED"
+    trust_state = str(evidence.get("review_trust_state") or ("LOW_TRUST" if status == "LOW_TRUST" else "UNREVIEWED")).upper()
+    claim["trust_state"] = trust_state
+    claim["verifier_result"] = "VERIFIED_LOW_TRUST" if trust_state == "LOW_TRUST" else "VERIFIED"
+    return True, claim["verifier_result"]
 
 
 def verify_primary_confirmation(

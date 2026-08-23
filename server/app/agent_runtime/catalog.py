@@ -68,6 +68,19 @@ _PLAN_STEP = _object({
 
 TOOL_CATALOG: tuple[ToolSpec, ...] = (
     ToolSpec(
+        "acknowledge_intervention",
+        "Acknowledge the active operator intervention and record the Evidence recheck revision.",
+        _object({
+            **_CASE,
+            "intervention_id": {"type": "string", "minLength": 1, "maxLength": 256},
+            "trust_state": {"type": "string", "minLength": 1, "maxLength": 64},
+            "evidence_state_rechecked": {"type": "boolean", "const": True},
+            "revision_before": {"type": ["integer", "null"], "minimum": 0},
+            "revision_after": {"type": "integer", "minimum": 0},
+        }, ["case_id", "intervention_id", "trust_state", "evidence_state_rechecked", "revision_after"]),
+        "/internal/agent/tools/acknowledge-intervention", "PROPOSE_ONLY",
+    ),
+    ToolSpec(
         "get_case_snapshot", "Return Case goal, revisions, plan and evidence inventory.",
         _object(_CASE, ["case_id"]), "/internal/agent/tools/case-snapshot", "READ_ONLY",
     ),

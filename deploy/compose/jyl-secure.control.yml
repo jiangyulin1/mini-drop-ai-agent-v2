@@ -77,6 +77,10 @@ services:
       MINI_DROP_AI_BASE_URL: ${MINI_DROP_AI_BASE_URL:-https://api.deepseek.com}
       MINI_DROP_AI_API_KEY: ${MINI_DROP_AI_API_KEY:?set MINI_DROP_AI_API_KEY}
       MINI_DROP_AI_MODEL: ${MINI_DROP_AI_MODEL:-deepseek-v4-flash}
+      # Evaluation-only bounded projection import. Keep disabled by default;
+      # the benchmark environment supplies a short-lived token explicitly.
+      MINI_DROP_EVAL_IMPORT_ENABLED: ${MINI_DROP_EVAL_IMPORT_ENABLED:-0}
+      MINI_DROP_EVAL_IMPORT_TOKEN: ${MINI_DROP_EVAL_IMPORT_TOKEN:-}
     ports:
       - "0.0.0.0:${CONTROL_GRPC_PORT:-51051}:50051"
     expose: ["8191"]

@@ -410,6 +410,7 @@ class SqlRepositoryV6Mixin:
         evidence_refs: list[str], limitations: list[str], conclusion_state: str,
         conclusion_id: str | None, message_id: str, visible_content: str,
         trigger_turn_id: str | None, limitation_refs: list[str] | None = None,
+        intervention_audit: dict[str, Any] | None = None,
         actor_id: str = "mini-drop-pi-runtime",
     ) -> dict[str, Any]:
         """Atomically publish the Case conclusion, assistant message and Turn completion."""
@@ -484,6 +485,7 @@ class SqlRepositoryV6Mixin:
                     "state": conclusion_state,
                     "conclusion_id": conclusion_id,
                     "assistant_message_id": message_id,
+                    **(intervention_audit or {}),
                 }),
             ]
             if trigger_turn_id:
@@ -968,6 +970,28 @@ class SqlRepositoryV6Mixin:
                     "INVALID": "INVALID",
                     "LOW_TRUST": "LOW_TRUST",
                 }.get(decision, "ACTIVE")
+                # Keep the canonical Evidence governance fields in sync with
+                # the review-revision ledger.  The legacy ``status`` field is
+                # still emitted for compatibility, but lifecycle_status,
+                # review_trust_state and review_revision are what the Case
+                # snapshot and Pi runtime use to decide whether an Evidence
+                # item remains citable.  Previously a review was recorded in
+                # evidence_review_revisions while these fields stayed at
+                # ACTIVE/UNREVIEWED/0, making a successful EXCLUDED review
+                # appear to the runtime as if it had not persisted.
+                evidence.lifecycle_status = {
+                    "EXCLUDED": "EXCLUDED",
+                    "SUPERSEDED": "SUPERSEDED",
+                    "INVALID": "INVALID",
+                    "RESTORED": "ACTIVE",
+                }.get(decision, "ACTIVE")
+                evidence.review_trust_state = {
+                    "TRUSTED": "TRUSTED",
+                    "LOW_TRUST": "LOW_TRUST",
+                    "EXCLUDED": "EXCLUDED",
+                    "RESTORED": "UNREVIEWED",
+                }.get(decision, "UNREVIEWED")
+                evidence.review_revision = revision
                 evidence.updated_at = now
             self._invalidate_analysis_rows(
                 session,
@@ -1014,7 +1038,8 @@ class SqlRepositoryV6Mixin:
         valid_support = [
             binding for binding in previous_bindings
             if (evidence_rows.get(binding.evidence_id) is not None)
-            and evidence_rows[binding.evidence_id].status == "ACTIVE"
+            and evidence_rows[binding.evidence_id].status in {"ACTIVE", "LOW_TRUST"}
+            and evidence_rows[binding.evidence_id].lifecycle_status not in {"EXCLUDED", "SUPERSEDED", "INVALID"}
             and binding.support_kind == "SUPPORTS"
         ]
         new_state = "PARTIALLY_CONFIRMED" if valid_support else "INSUFFICIENT_EVIDENCE"
@@ -1026,24 +1051,30 @@ class SqlRepositoryV6Mixin:
             investigation_run_id=latest.investigation_run_id,
             revision=int(latest.revision or 0) + 1,
             state=new_state,
-            primary_root_causes=latest.primary_root_causes or [],
-            ranked_primary_candidates=latest.ranked_primary_candidates or [],
-            contributing_factors=latest.contributing_factors or [],
-            amplifiers=latest.amplifiers or [],
-            propagated_effects=latest.propagated_effects or [],
-            symptoms=latest.symptoms or [],
-            coincidental_anomalies=latest.coincidental_anomalies or [],
+            # Do not carry values derived from an invalidated Evidence item
+            # into the new effective conclusion. The prior revision remains in
+            # history for audit, while this revision is an explicit abstention.
+            primary_root_causes=[],
+            ranked_primary_candidates=[],
+            contributing_factors=[],
+            amplifiers=[],
+            propagated_effects=[],
+            symptoms=[],
+            coincidental_anomalies=[],
             ruled_out=latest.ruled_out or [],
             causal_graph_revision_id=latest.causal_graph_revision_id,
-            claims=latest.claims or [],
+            claims=[],
             evidence_gap_ids=latest.evidence_gap_ids or [],
-            recommendation_ids=latest.recommendation_ids or [],
+            recommendation_ids=[],
             limitations=list(dict.fromkeys([*(latest.limitations or []), limitation])),
             abstention_reason=(
                 "Previously supporting evidence is no longer active"
                 if new_state == "INSUFFICIENT_EVIDENCE" else latest.abstention_reason
             ),
-            report_text=latest.report_text,
+            report_text=(
+                "结论已因 Evidence 生命周期变更而失效；不得继续使用原结论中的数值或机制，"
+                "请先重新读取 Evidence lifecycle 和 review_revision。"
+            ),
             created_from_cycle_id=latest.created_from_cycle_id,
             model_request_id=latest.model_request_id,
             verifier_version="causal-report-verifier.v2-revalidation",
@@ -1055,7 +1086,9 @@ class SqlRepositoryV6Mixin:
             current_evidence = evidence_rows.get(old.evidence_id)
             result = (
                 old.verifier_result
-                if current_evidence is not None and current_evidence.status == "ACTIVE"
+                if current_evidence is not None
+                and current_evidence.status in {"ACTIVE", "LOW_TRUST"}
+                and current_evidence.lifecycle_status not in {"EXCLUDED", "SUPERSEDED", "INVALID"}
                 else f"EVIDENCE_{getattr(current_evidence, 'status', 'MISSING')}"
             )
             session.add(ClaimEvidenceBindingModel(

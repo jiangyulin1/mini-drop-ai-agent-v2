@@ -20,6 +20,7 @@ from server.app.capability_tokens import canonical_hash
 from server.app.case_collaboration import (
     CaseMessageRequest,
     EvidenceReviewRequest,
+    EvidenceChainConfidenceRequest,
     PlanUpdateRequest,
     ReprioritizeStepRequest,
     RetargetStepRequest,
@@ -71,6 +72,320 @@ from server.app.v6_routes import _build_runtime_case_context, _case_investigatio
 
 
 router = APIRouter()
+
+
+def _evidence_review_impact(
+    case_id: str,
+    tenant_id: str,
+    evidence_id: str,
+    decision: str,
+    review_revision: int,
+) -> dict[str, Any]:
+    """Build a user-facing dependency impact report without deleting history."""
+    evidence_rows = {
+        str(item.get("evidence_id")): item
+        for item in repo.list_case_evidence(case_id, tenant_id, status=None)
+        if item.get("evidence_id")
+    }
+    excluded = {
+        ref for ref, item in evidence_rows.items()
+        if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper()
+        in {"EXCLUDED", "SUPERSEDED", "INVALID"}
+    }
+    low_trust = {
+        ref for ref, item in evidence_rows.items()
+        if str(item.get("review_trust_state") or "").upper() == "LOW_TRUST"
+    }
+    graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
+    broken_links: list[dict[str, Any]] = []
+    weakened_links: list[dict[str, Any]] = []
+    broken_causal_links: list[dict[str, Any]] = []
+    weakened_causal_links: list[dict[str, Any]] = []
+    graph_changed = False
+    updated_hypotheses = []
+    for node in graph.get("hypotheses") or []:
+        supports = [str(item) for item in node.get("supporting_evidence_refs") or []]
+        invalidated = sorted(set(supports) & excluded)
+        active_support = sorted(
+            ref for ref in supports if ref not in excluded
+        )
+        trusted_support = sorted(
+            ref for ref in active_support if ref not in low_trust
+        )
+        if not invalidated and evidence_id not in supports:
+            updated_hypotheses.append(node)
+            continue
+        before = float(
+            (node.get("score_components") or {}).get("confidence")
+            or (node.get("score_components") or {}).get("evidence_score")
+            or 1.0
+        )
+        weighted = (len(trusted_support) + 0.5 * (len(active_support) - len(trusted_support)))
+        after = round(max(0.0, min(1.0, before * weighted / max(1, len(supports)))), 4)
+        impact = {
+            "invalidated_evidence_refs": invalidated,
+            "remaining_active_support": active_support,
+            "remaining_trusted_support": trusted_support,
+            "confidence_before": round(before, 4),
+            "confidence_after": after,
+            "status": "RECHECK_REQUIRED" if not active_support else "CONFIDENCE_REDUCED",
+            "review_revision": review_revision,
+        }
+        changed = dict(node)
+        score = dict(node.get("score_components") or {})
+        score["confidence"] = after
+        score["lifecycle_impact"] = impact
+        changed["score_components"] = score
+        if not active_support and str(node.get("status") or "") in {"CONFIRMED", "ACTIVE"}:
+            changed["status"] = "WEAKENED"
+        updated_hypotheses.append(changed)
+        graph_changed = True
+        entry = {"hypothesis_id": node.get("hypothesis_id"), **impact}
+        if invalidated:
+            broken_links.append(entry)
+        else:
+            weakened_links.append(entry)
+    if graph_changed and hasattr(repo, "sync_case_hypothesis_graph"):
+        graph = repo.sync_case_hypothesis_graph(
+            case_id,
+            tenant_id,
+            graph={"hypotheses": updated_hypotheses, "edges": graph.get("edges") or []},
+            source="evidence_lifecycle",
+            actor_id="operator-evidence-review",
+        )
+
+    causal_graph = repo.get_causal_graph(case_id, tenant_id) if hasattr(repo, "get_causal_graph") else None
+    causal_nodes = [dict(item) for item in (causal_graph or {}).get("nodes") or []]
+    causal_edges = [dict(item) for item in (causal_graph or {}).get("edges") or []]
+    causal_graph_changed = False
+    for link_type in ("nodes", "edges"):
+        for item in (causal_graph or {}).get(link_type) or []:
+            refs = [str(ref) for ref in item.get("supporting_evidence_refs") or []]
+            invalidated = sorted(set(refs) & excluded)
+            if not invalidated and evidence_id not in refs:
+                continue
+            remaining = sorted(set(refs) - excluded)
+            entry = {
+                "link_type": link_type[:-1],
+                "link_id": item.get("node_id") or item.get("edge_id"),
+                "invalidated_evidence_refs": invalidated,
+                "remaining_active_support": remaining,
+                "status": "INVALIDATED" if invalidated and not remaining else "RECHECK_REQUIRED",
+            }
+            (broken_causal_links if invalidated else weakened_causal_links).append(entry)
+            target = causal_nodes if link_type == "nodes" else causal_edges
+            target_id = item.get("node_id") or item.get("edge_id")
+            for changed in target:
+                if (changed.get("node_id") or changed.get("edge_id")) != target_id:
+                    continue
+                remaining = sorted(set(refs) - excluded)
+                old_confidence = float(changed.get("confidence") or 1.0)
+                weighted = len(remaining) / max(1, len(refs))
+                changed["confidence"] = round(old_confidence * weighted, 4)
+                if link_type == "edges":
+                    changed["verification_state"] = "INVALIDATED" if not remaining else "RECHECK_REQUIRED"
+                else:
+                    changed["role_rationale"] = "Evidence lifecycle changed; recheck required"
+                causal_graph_changed = True
+    causal_graph_revision_after = None
+    if causal_graph_changed and hasattr(repo, "submit_causal_graph_revision"):
+        updated_graph = repo.submit_causal_graph_revision(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            investigation_run_id=(causal_graph or {}).get("investigation_run_id"),
+            evidence_watermark=int((causal_graph or {}).get("evidence_watermark") or 0),
+            nodes=causal_nodes,
+            edges=causal_edges,
+            verifier_version="causal-graph-verifier.v1-lifecycle-recheck",
+        )
+        causal_graph_revision_after = updated_graph.get("graph_revision")
+
+    conclusion = repo.get_conclusion(case_id, tenant_id) if hasattr(repo, "get_conclusion") else None
+    invalidated_claims: list[dict[str, Any]] = []
+    if conclusion:
+        for claim in conclusion.get("claims") or []:
+            refs = [str(claim.get("evidence_id") or "")] + [str(item) for item in claim.get("evidence_ids") or []]
+            refs = [item for item in refs if item]
+            invalid = sorted(set(refs) & excluded)
+            if invalid:
+                invalidated_claims.append({
+                    "claim_id": claim.get("claim_id"),
+                    "invalidated_evidence_refs": invalid,
+                    "remaining_active_support": sorted(set(refs) - excluded),
+                    "status": "RETRACTED" if not (set(refs) - excluded) else "RECHECK_REQUIRED",
+                })
+    report = {
+        "evidence_id": evidence_id,
+        "decision": decision,
+        "review_revision": review_revision,
+        "evidence_retained_for_audit": True,
+        "current_evidence_status": evidence_rows.get(evidence_id, {}).get("status"),
+        "broken_links": broken_links,
+        "weakened_links": weakened_links,
+        "broken_causal_links": broken_causal_links,
+        "weakened_causal_links": weakened_causal_links,
+        "causal_graph_revision_after": causal_graph_revision_after,
+        "invalidated_claims": invalidated_claims,
+        "active_evidence_after_review": sorted(ref for ref in evidence_rows if ref not in excluded),
+        "user_actions": [
+            "重新读取 Case Snapshot 和 ACTIVE Evidence",
+            "为仍有 ACTIVE 支持的链路补充证据或提交受控置信度调整",
+        ],
+    }
+    repo.record_case_event(
+        case_id,
+        tenant_id,
+        event_type="evidence_review_impact_reported",
+        payload=report,
+        actor_id="operator-evidence-review",
+    )
+    return report
+
+
+@router.post("/api/v1/cases/{case_id}/evidence-chain-confidence")
+def adjust_evidence_chain_confidence(
+    case_id: str,
+    payload: EvidenceChainConfidenceRequest,
+    request: Request,
+) -> APIResponse:
+    """Let an operator strengthen an existing chain without inventing support."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    actor_id = _request_principal(request)
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    evidence_rows = {
+        str(item.get("evidence_id")): item
+        for item in repo.list_case_evidence(case_id, tenant_id, status=None)
+        if item.get("evidence_id")
+    }
+    excluded = {
+        ref for ref, item in evidence_rows.items()
+        if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper()
+        in {"EXCLUDED", "SUPERSEDED", "INVALID"}
+    }
+    if payload.chain_type == "hypothesis":
+        graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
+        node = next(
+            (item for item in graph.get("hypotheses") or []
+             if str(item.get("hypothesis_id") or "") == payload.chain_id),
+            None,
+        )
+        if node is None:
+            raise HTTPException(status_code=404, detail="HYPOTHESIS_NOT_FOUND")
+        current_revision = int(node.get("revision") or 0)
+        if payload.expected_revision and payload.expected_revision != current_revision:
+            raise HTTPException(status_code=409, detail="HYPOTHESIS_REVISION_STALE")
+        refs = [str(item) for item in node.get("supporting_evidence_refs") or []]
+        if not refs or any(ref in excluded for ref in refs):
+            raise HTTPException(status_code=409, detail="CHAIN_HAS_EXCLUDED_EVIDENCE")
+        low_only = all(
+            str(evidence_rows.get(ref, {}).get("review_trust_state") or "").upper() == "LOW_TRUST"
+            for ref in refs
+        )
+        if low_only and payload.confidence > 0.5:
+            raise HTTPException(status_code=409, detail="LOW_TRUST_CONFIDENCE_CAP")
+        before = float(
+            (node.get("score_components") or {}).get("confidence")
+            or (node.get("score_components") or {}).get("evidence_score")
+            or 0.0
+        )
+        if payload.confidence < before:
+            raise HTTPException(status_code=409, detail="CONFIDENCE_ADJUSTMENT_MUST_INCREASE")
+        changed = dict(node)
+        score = dict(node.get("score_components") or {})
+        score["confidence"] = payload.confidence
+        score["operator_adjustment"] = {
+            "before": before,
+            "after": payload.confidence,
+            "reason": payload.reason,
+            "actor_id": actor_id,
+            "evidence_refs": refs,
+        }
+        changed["score_components"] = score
+        result = repo.sync_case_hypothesis_graph(
+            case_id,
+            tenant_id,
+            graph={
+                "hypotheses": [changed if item.get("hypothesis_id") == payload.chain_id else item
+                              for item in graph.get("hypotheses") or []],
+                "edges": graph.get("edges") or [],
+            },
+            source="operator_confidence_adjustment",
+            actor_id=actor_id,
+        )
+        new_revision = next(
+            (int(item.get("revision") or 0) for item in result.get("hypotheses") or []
+             if item.get("hypothesis_id") == payload.chain_id),
+            current_revision + 1,
+        )
+        chain_result = {
+            "chain_type": payload.chain_type,
+            "chain_id": payload.chain_id,
+            "confidence_before": before,
+            "confidence_after": payload.confidence,
+            "revision_before": current_revision,
+            "revision_after": new_revision,
+            "evidence_refs": refs,
+        }
+    else:
+        graph = repo.get_causal_graph(case_id, tenant_id)
+        if not graph:
+            raise HTTPException(status_code=404, detail="CAUSAL_GRAPH_NOT_FOUND")
+        current_revision = int(graph.get("graph_revision") or 0)
+        if payload.expected_revision and payload.expected_revision != current_revision:
+            raise HTTPException(status_code=409, detail="CAUSAL_GRAPH_REVISION_STALE")
+        node = next(
+            (item for item in graph.get("nodes") or [] if str(item.get("node_id") or "") == payload.chain_id),
+            None,
+        )
+        if node is None:
+            raise HTTPException(status_code=404, detail="CAUSAL_NODE_NOT_FOUND")
+        refs = [str(item) for item in node.get("supporting_evidence_refs") or []]
+        if not refs or any(ref in excluded for ref in refs):
+            raise HTTPException(status_code=409, detail="CHAIN_HAS_EXCLUDED_EVIDENCE")
+        low_only = all(
+            str(evidence_rows.get(ref, {}).get("review_trust_state") or "").upper() == "LOW_TRUST"
+            for ref in refs
+        )
+        if low_only and payload.confidence > 0.5:
+            raise HTTPException(status_code=409, detail="LOW_TRUST_CONFIDENCE_CAP")
+        before = float(node.get("confidence") or 0.0)
+        if payload.confidence < before:
+            raise HTTPException(status_code=409, detail="CONFIDENCE_ADJUSTMENT_MUST_INCREASE")
+        nodes = [dict(item) for item in graph.get("nodes") or []]
+        for item in nodes:
+            if str(item.get("node_id") or "") == payload.chain_id:
+                item["confidence"] = payload.confidence
+                item["role_rationale"] = (
+                    f"operator_confidence_adjustment:{payload.reason}; prior={before:.4f}"
+                )
+        result = repo.submit_causal_graph_revision(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            investigation_run_id=graph.get("investigation_run_id"),
+            evidence_watermark=int(graph.get("evidence_watermark") or 0),
+            nodes=nodes,
+            edges=graph.get("edges") or [],
+            verifier_version="causal-graph-verifier.v1-operator-adjustment",
+        )
+        chain_result = {
+            "chain_type": payload.chain_type,
+            "chain_id": payload.chain_id,
+            "confidence_before": before,
+            "confidence_after": payload.confidence,
+            "revision_before": current_revision,
+            "revision_after": int(result.get("graph_revision") or current_revision + 1),
+            "evidence_refs": refs,
+        }
+    repo.record_case_event(
+        case_id,
+        tenant_id,
+        event_type="evidence_chain_confidence_adjusted",
+        payload={**chain_result, "reason": payload.reason, "actor_id": actor_id},
+        actor_id=actor_id,
+    )
+    return APIResponse(data={"accepted": True, **chain_result})
 
 # ── E2 持久化调查计划与双通道控制 ────────────────────────────────
 
@@ -317,7 +632,15 @@ def review_case_evidence(
                     f"evidence-review-wakeup:{case_id}:{evidence_id}:{revision}"
                 ),
             )
-    return APIResponse(data=review)
+    reviewed_evidence = repo.get_case_evidence(case_id, tenant_id, evidence_id) if hasattr(repo, "get_case_evidence") else None
+    impact = _evidence_review_impact(
+        case_id,
+        tenant_id,
+        evidence_id,
+        str(review.get("decision") or payload.decision),
+        int(review.get("review_revision") or (reviewed_evidence or {}).get("review_revision") or 0),
+    )
+    return APIResponse(data={**review, "impact_report": impact})
 
 
 @router.get("/api/v1/cases/{case_id}/evidence-reviews")

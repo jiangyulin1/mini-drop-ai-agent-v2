@@ -32,6 +32,16 @@ const PERSISTED_RUNTIME_EVENT_TYPES = new Set([
   "turn_start", "turn_end", "agent_start", "agent_end", "agent_settled",
 ]);
 
+function canonicalizeAudit(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeAudit);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonicalizeAudit(value[key])]),
+    );
+  }
+  return value;
+}
+
 const DEFAULT_CONTEXT_MAX_CHARS = 24_000;
 const MIN_CONTEXT_MAX_CHARS = 256;
 const MAX_CONTEXT_MAX_CHARS = 200_000;
@@ -118,7 +128,8 @@ function compactValue(value, {
 const EVIDENCE_REFERENCE_KEYS = [
   "evidence_id", "evidence_ids", "projection_hash", "projection_kind", "summary",
   "field_path", "artifact_type", "target_ref", "status", "freshness", "quality",
-  "time_window", "truncated", "attachment_id", "resource_ref",
+  "lifecycle_status", "trust_state", "review_revision", "time_window", "truncated",
+  "attachment_id", "resource_ref",
 ];
 
 function compactEvidenceItem(item, stringLimit = 600) {
@@ -200,14 +211,14 @@ export function boundCaseContextPayload(payload, maxChars = contextMaxChars()) {
 
   const trimLists = [
     "skills", "collection_requests", "collection_proposals", "evidence_analyses",
-    "recommendations", "hypothesis_edges", "evidence_gaps", "hypotheses",
-    "information_goals", "running_task_ids",
+    "recommendations", "hypothesis_edges", "hypotheses", "information_goals",
+    "running_task_ids", "current_support", "counterevidence",
   ];
   const dropFields = [
-    "causal_graph", "conclusion", "directive", "strategy_guidance", "runtime_options",
+    "causal_graph", "directive", "strategy_guidance", "runtime_options",
     "runtime_policy", "budget", "skills", "collection_requests", "collection_proposals",
-    "evidence_analyses", "recommendations", "hypothesis_edges", "evidence_gaps",
-    "hypotheses", "information_goals", "running_task_ids", "target_scope",
+    "evidence_analyses", "recommendations", "hypothesis_edges", "hypotheses",
+    "information_goals", "running_task_ids",
   ];
 
   const refreshMeta = () => {
@@ -267,15 +278,58 @@ export function boundCaseContextPayload(payload, maxChars = contextMaxChars()) {
   // only. This branch is deterministic for unusually small configured limits.
   if (jsonChars(result) > limit) {
     const refs = evidenceSource.map((item) => evidenceReference(item));
-    const coreMeta = {
-      bounded: true,
-      max_chars: limit,
-      original_chars: originalChars,
-      omitted_evidence_count: 0,
+    const coreMeta = limit < 256
+      ? { bounded: true }
+      : {
+        bounded: true,
+        max_chars: limit,
+        original_chars: originalChars,
+        omitted_evidence_count: 0,
+      };
+    // Preserve the audit contract before optional evidence tails. These fields
+    // explain what changed and what the Agent must re-check after compaction.
+    const core = limit < 256 ? {} : { _context_meta: coreMeta };
+    const compactPriorityField = (field, value) => {
+      if (field === "intervention" && value && typeof value === "object") {
+        return {
+          intervention_id: value.intervention_id,
+          kind: value.kind,
+          required: Boolean(value.required),
+          trust_state: value.trust_state,
+          evidence_state_rechecked: Boolean(value.evidence_state_rechecked),
+          revision_before: value.revision_before,
+          revision_after: value.revision_after,
+          affected_evidence_ids: (value.affected_evidence_ids || []).slice(0, 8),
+        };
+      }
+      if (field === "conclusion" && value && typeof value === "object") {
+        return {
+          conclusion_id: value.conclusion_id,
+          state: value.state,
+          revision: value.revision,
+          report_text: truncateText(value.report_text || value.summary || "", 120),
+        };
+      }
+      return compactValue(value, { stringLimit: 120, listLimit: 4, maxDepth: 3 });
     };
-    // Reference identity gets first claim on the residual budget. Optional
-    // case prose/revision fields are added only after evidence refs fit.
-    const core = { evidence_summary: [], _context_meta: coreMeta };
+    for (const field of [
+      "intervention", "evidence_summary", "case_id", "runtime_generation", "control_revision", "scope_revision", "plan_revision",
+      "evidence_watermark", "conclusion", "evidence_gaps",
+      "target_scope", "current_support", "counterevidence",
+    ]) {
+      if (result[field] === undefined) continue;
+      let fieldValue = compactPriorityField(field, result[field]);
+      let candidate = { ...core, [field]: fieldValue };
+      if (field === "intervention" && jsonChars(candidate) > limit) {
+        fieldValue = {
+          intervention_id: result.intervention?.intervention_id,
+          required: Boolean(result.intervention?.required),
+        };
+        candidate = { ...core, [field]: fieldValue };
+      }
+      if (jsonChars(candidate) <= limit) Object.assign(core, { [field]: candidate[field] });
+    }
+    core.evidence_summary = [];
     for (const ref of refs) {
       const candidate = {
         ...core,
@@ -287,10 +341,7 @@ export function boundCaseContextPayload(payload, maxChars = contextMaxChars()) {
         coreMeta.omitted_evidence_count += 1;
       }
     }
-    for (const field of [
-      "case_id", "case_goal", "control_revision", "scope_revision", "plan_revision",
-      "evidence_watermark", "side_effect_policy",
-    ]) {
+    for (const field of ["side_effect_policy"]) {
       if (result[field] === undefined) continue;
       const candidate = { ...core, [field]: truncateText(result[field], 320) };
       if (jsonChars(candidate) <= limit) Object.assign(core, { [field]: candidate[field] });
@@ -305,6 +356,13 @@ export function boundCaseContextPayload(payload, maxChars = contextMaxChars()) {
   if (jsonChars(result) > limit) {
     const omittedCount = Number(result?._context_meta?.omitted_evidence_count || evidenceSource.length);
     const candidates = [
+      {
+        _context_meta: { bounded: true, max_chars: limit },
+        intervention: result.intervention && {
+          intervention_id: result.intervention.intervention_id,
+          required: Boolean(result.intervention.required),
+        },
+      },
       {
         _context_meta: {
           bounded: true,
@@ -388,6 +446,8 @@ export function buildBoundedAgentPrompt({
       let minimal = boundCaseContextPayload({
         case_id: contextPayload?.case_id || "",
         case_goal: contextPayload?.case_goal || "",
+        runtime_generation: contextPayload?.runtime_generation,
+        intervention: contextPayload?.intervention || {},
         evidence_summary: contextPayload?.evidence_summary || [],
       }, minimalBudget);
       let minimalBlock = JSON.stringify(minimal, null, 2);
@@ -411,6 +471,8 @@ export function buildEvidenceAgentSystemPrompt(promptVariant = "default") {
     "only from registered Case, hypotheses, Evidence, causal state, Collector Catalog and analysis state; " +
     "never use shell/file access. " +
     "Always read the Case Snapshot and existing Evidence before answering. " +
+    "When CaseContext.intervention.required is true, your first tool call MUST be acknowledge_intervention with the exact intervention_id; " +
+    "set evidence_state_rechecked=true only after re-reading Evidence lifecycle and review_revision, and include revision_before and revision_after. " +
     "When historical procedures, operator knowledge, or prior Case memory may help, call search_knowledge with a precise query. " +
     "Treat returned Knowledge chunks as background only, cite their chunk_id separately, and never present Knowledge as current Evidence. " +
     "For READ_ONLY turns use only read-only tools and never request data " +
@@ -444,6 +506,7 @@ export class RuntimeManager {
     this.lastUsage = new Map(); // case_id -> cumulative SessionStats token/cost snapshot
     this.messageStarts = new Map(); // case_id -> message_start wall-clock ms
     this.recordedModelResponses = new Map(); // case_id -> response hashes already audited
+    this.toolStarts = new Map(); // case_id:tool_call_id -> monotonic wall-clock audit timing
     this.noSkills = noSkills;
     this.toolCatalog = null;
     this.eventSpool = eventSpool || new EventSpool(
@@ -488,6 +551,19 @@ export class RuntimeManager {
         if (optionsChanged && incomingGeneration <= existing.generation) {
           generation = existing.generation + 1;
         }
+        // Stop the old SDK session before dropping it. This prevents an
+        // in-flight turn from publishing tool results after Evidence review
+        // rotated the generation, and guarantees no old transcript is reused.
+        for (const method of ["abort", "close", "dispose"]) {
+          if (typeof existing.session?.[method] !== "function") continue;
+          try {
+            await existing.session[method]();
+          } catch {
+            // Generation fencing remains the final authority if the SDK has
+            // no graceful shutdown path for the current in-flight request.
+          }
+          break;
+        }
         this.sessions.delete(caseId);
         this.lastSeq.delete(caseId);
         this.lastAnswers.delete(caseId);
@@ -506,6 +582,7 @@ export class RuntimeManager {
           runtimePolicy: caseContext?.runtime_policy,
           getEnvelope: () => existing.toolEnvelope.current,
           onAcceptedFinish: () => this._markConcluded(caseId),
+          onInterventionAck: (ack) => this._markInterventionAck(caseId, ack),
         }).map((tool) => tool.name);
         existing.session.setActiveToolsByName(activeNames);
         await this.replayPending(caseId);
@@ -525,6 +602,7 @@ export class RuntimeManager {
       onAcceptedFinish: () => this._markConcluded(caseId),
       onCollectionScheduled: () => this._markCollectionScheduled(caseId),
       onDiscoveryCollecting: () => this._markDiscoveryCollecting(caseId),
+      onInterventionAck: (ack) => this._markInterventionAck(caseId, ack),
     });
     const allowedNames = buildToolCatalog({
       internalBase: this.internalBase,
@@ -533,6 +611,7 @@ export class RuntimeManager {
       runtimePolicy: caseContext?.runtime_policy,
       getEnvelope: () => toolEnvelope.current,
       onAcceptedFinish: () => this._markConcluded(caseId),
+      onInterventionAck: (ack) => this._markInterventionAck(caseId, ack),
     }).map((tool) => tool.name);
     const requestedEffort = caseContext?.runtime_options?.reasoning_effort
       || process.env.MINI_DROP_PI_THINKING_LEVEL || "high";
@@ -617,6 +696,7 @@ export class RuntimeManager {
       strategy_params: context?.strategy_params || {},
       runtime_policy: context?.runtime_policy || {},
       runtime_options: context?.runtime_options || {},
+      intervention_id: context?.intervention?.intervention_id || undefined,
       trigger_turn_id: triggerTurnId || undefined,
     };
   }
@@ -758,6 +838,8 @@ export class RuntimeManager {
         hypotheses: (context.hypotheses || []).slice(0, 20),
         hypothesis_edges: (context.hypothesis_edges || []).slice(0, 40),
         evidence_gaps: (context.evidence_gaps || []).slice(0, 20),
+        current_support: (context.current_support || []).slice(0, 20),
+        counterevidence: (context.counterevidence || []).slice(0, 20),
         causal_graph: context.causal_graph || {},
         conclusion: context.conclusion || {},
         recommendations: (context.recommendations || []).slice(0, 20),
@@ -778,6 +860,7 @@ export class RuntimeManager {
         runtime_policy: context.runtime_policy || {},
         runtime_options: context.runtime_options || {},
         previous_answer: String(this.lastAnswers.get(case_id) || "").slice(0, 2000),
+        intervention: context.intervention || {},
       };
       const boundedPrompt = buildBoundedAgentPrompt({
         policy,
@@ -811,6 +894,10 @@ export class RuntimeManager {
     if (!entry) throw new Error(`session not started for ${case_id}`);
     if (entry.concluded) {
       return { accepted: false, reason: "CONCLUDED" };
+    }
+    if (note?.intervention && typeof note.intervention === "object") {
+      entry.context.intervention = note.intervention;
+      entry.toolEnvelope.current = this._toolEnvelope(entry.context, entry.currentTurnId);
     }
     // A wakeup can be the first prompt after a Sidecar restart or an option-
     // driven session rebuild. Subscribe here as well as in submitTurn so the
@@ -893,6 +980,19 @@ export class RuntimeManager {
     this._markAwaitingEvidence(case_id);
   }
 
+  _markInterventionAck(case_id, ack) {
+    const entry = this.sessions.get(case_id);
+    if (!entry || !entry.context?.intervention) return;
+    entry.context.intervention = {
+      ...entry.context.intervention,
+      ...ack,
+      acknowledged: true,
+    };
+    if (entry.toolEnvelope) {
+      entry.toolEnvelope.current = this._toolEnvelope(entry.context, entry.currentTurnId);
+    }
+  }
+
   _markDiscoveryCollecting(case_id) {
     this._markAwaitingEvidence(case_id);
   }
@@ -965,6 +1065,14 @@ export class RuntimeManager {
     if (event.type === "message_start") {
       this.messageStarts.set(case_id, Date.now());
     }
+    if (event.type === "tool_execution_start") {
+      const id = event.toolCallId || event.tool_call_id || event.details?.tool_call_id
+        || `${event.toolName || event.tool_name || "unknown"}:${seq}`;
+      this.toolStarts.set(`${case_id}:${id}`, {
+        startedMs: Date.now(),
+        startedAt: new Date().toISOString(),
+      });
+    }
   }
 
   _auditProjection(event) {
@@ -1023,6 +1131,35 @@ export class RuntimeManager {
     if (event.text !== undefined) payload.text = project(stripThinking(event.text));
     if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
     if (event.toolName !== undefined) payload.tool_name = event.toolName;
+    if (event.details && typeof event.details === "object") {
+      // Tool proxies provide a credential-free audit envelope. Never copy the
+      // raw arguments or full result body into the runtime event.
+      payload.tool_audit = { ...event.details };
+      if (!payload.tool_call_id && event.details.tool_call_id) {
+        payload.tool_call_id = event.details.tool_call_id;
+      }
+      if (!payload.tool_name && event.details.tool_name) {
+        payload.tool_name = event.details.tool_name;
+      }
+    }
+    const rawArguments = event.arguments ?? event.args ?? event.params ?? event.input;
+    if (rawArguments !== undefined) {
+      const canonicalArguments = JSON.stringify(canonicalizeAudit(rawArguments));
+      payload.tool_audit = {
+        ...(payload.tool_audit || {}),
+        arguments_hash: createHash("sha256").update(canonicalArguments).digest("hex"),
+      };
+    }
+    const rawResult = event.result ?? event.output ?? event.toolResult;
+    if (rawResult !== undefined) {
+      const resultText = typeof rawResult === "string" ? rawResult : JSON.stringify(rawResult);
+      payload.tool_audit = {
+        ...(payload.tool_audit || {}),
+        result_hash: createHash("sha256").update(resultText).digest("hex"),
+        result_bytes: Buffer.byteLength(resultText),
+        result_truncated: Boolean(event.truncated || event.result_truncated),
+      };
+    }
     if (event.message !== undefined) payload.message = project(stripThinking(event.message));
     if (event.content !== undefined) payload.content = project(stripThinking(event.content));
     if (event.role !== undefined) payload.role = event.role;
@@ -1157,6 +1294,20 @@ export class RuntimeManager {
       return;
     }
     const projection = this._auditProjection(event);
+    if (event.type === "tool_execution_end") {
+      const id = event.toolCallId || event.tool_call_id || event.details?.tool_call_id;
+      const timing = id ? this.toolStarts.get(`${case_id}:${id}`) : null;
+      if (timing) {
+        const finishedMs = Date.now();
+        projection.tool_audit = {
+          ...(projection.tool_audit || {}),
+          started_at: projection.tool_audit?.started_at || timing.startedAt,
+          finished_at: projection.tool_audit?.finished_at || new Date(finishedMs).toISOString(),
+          duration_ms: projection.tool_audit?.duration_ms ?? Math.max(0, finishedMs - timing.startedMs),
+        };
+        this.toolStarts.delete(`${case_id}:${id}`);
+      }
+    }
     const modelAttempt = this._modelAttemptForEvent(case_id, entry, event);
     if (modelAttempt) projection.model_attempt = modelAttempt;
     const eventTurnId = event.turnId || event.turn_id || event.metadata?.turn_id || null;
@@ -1171,6 +1322,13 @@ export class RuntimeManager {
     projection.diagnostic_strategy_id = entry.context?.diagnostic_strategy_id || "hybrid";
     projection.runtime_policy = entry.context?.runtime_policy || {};
     projection.runtime_options = entry.context?.runtime_options || {};
+    projection.case_revision = {
+      case_command_revision: Number(entry.context?.case_command_revision || 1),
+      control_revision: Number(entry.context?.control_revision || 1),
+      scope_revision: Number(entry.context?.scope_revision || 1),
+      plan_revision: Number(entry.context?.plan_revision || 0),
+      evidence_watermark: Number(entry.context?.evidence_watermark || 0),
+    };
     const record = {
       case_id,
       runtime_generation: entry.generation,
