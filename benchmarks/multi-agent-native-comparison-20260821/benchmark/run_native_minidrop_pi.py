@@ -1,14 +1,32 @@
 #!/usr/bin/env python3
 """Run Mini-Drop native via real Case/Evidence/Agent Runtime + Pi sidecar."""
 
-import json, hashlib, pathlib, re, time, uuid, urllib.request, urllib.error
+import hashlib
+import json
+import os
+import pathlib
+import re
+import ssl
+import time
+import urllib.error
+import urllib.request
+import uuid
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BENCHMARK = ROOT / "benchmark"
 SOURCE_SHA = "651c450867c4d6db26cc78de5928bb14f7b3c3b9"
-BASE = "http://127.0.0.1:8192"
-EVAL_TOKEN = "benchmark-eval-token"
+BASE = os.getenv("MINI_DROP_BASE_URL", "http://127.0.0.1:8192").rstrip("/")
+EVAL_TOKEN = os.getenv("MINI_DROP_EVAL_IMPORT_TOKEN", "").strip()
+API_KEY = os.getenv("MINI_DROP_API_KEY", "").strip()
+URL_CONTEXT = (
+    ssl._create_unverified_context()
+    if os.getenv("MINI_DROP_TLS_INSECURE", "0").strip().lower() in {"1", "true", "yes"}
+    else None
+)
+
+_PACKAGED_SOURCE_ROOT = ROOT / "agents" / "mini-drop-ai-agent-v2"
+SOURCE_ROOT = _PACKAGED_SOURCE_ROOT if _PACKAGED_SOURCE_ROOT.exists() else ROOT.parents[1]
 CONTRACT_HASH = "sha256:8c53e398a3d87dca87f2816c142decf34b588949b26d185016cbfb128764a1b8"
 MODEL_HASH = "sha256:4d8b0cc142d0cb2e31c471b1c01d70b5c7424be927ea346295ba2ebd4f65e27a"
 TOOLS_HASH = "sha256:b8fdb34d2ccd2312986aeac63c74454d0a8254f59e20dca7695d1d2456b8972d"
@@ -24,10 +42,12 @@ def stable_hash(value):
 def req(path, method='GET', body=None, headers=None):
     data=json.dumps(body).encode() if body is not None else None
     h={'Content-Type':'application/json'}
+    if API_KEY:
+        h['X-API-Key'] = API_KEY
     if headers: h.update(headers)
     r=urllib.request.Request(BASE+path, data=data, headers=h, method=method)
     try:
-        with urllib.request.urlopen(r, timeout=120) as resp:
+        with urllib.request.urlopen(r, timeout=120, context=URL_CONTEXT) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         return {'http_error':e.code,'body':e.read().decode()}
@@ -135,7 +155,15 @@ def perform_turn(cid, msg, start_seq=0):
             payload=e.get('payload') or {}
             if et == 'turn.completed':
                 completed_tid=payload.get('turn_id') or ''
-                if not turn_id or completed_tid == turn_id or completed_tid:
+                outcome = str(payload.get('outcome') or '').lower()
+                # A collection/topology dispatch completes the current model
+                # turn deliberately; the Evidence wakeup owns the next turn.
+                # Do not mistake that intermediate event for the final answer.
+                intermediate = outcome in {
+                    'collection_scheduled',
+                    'topology_discovery_collecting',
+                }
+                if not intermediate and (not turn_id or completed_tid == turn_id or completed_tid):
                     completed=True
                     continue
             if et != 'assistant.message':
@@ -229,8 +257,17 @@ def run_case(case_id, repeat, seed, run_root):
     replay=load_json(BENCHMARK/"cases"/"replay"/f"{case_id}.json")
     for ev in replay['evidence']:
         eid=f"eval:{cid}:{ev['evidence_id']}"
-        import_body={"evidence_id":eid,"pack_kind":"SOURCE_DERIVED","source_id":f"benchmark-{cid}-{ev['evidence_id']}","source_ref":f"benchmark://{cid}/{ev['evidence_id']}","projection":ev.get('projection',{}),"projection_hash":stable_hash(ev.get('projection',{})),"content_hash":ev['integrity_hash'],"source_bytes":len(json.dumps(ev).encode()),"synthetic":True}
-        req(f"/api/v1/cases/{cid}/evidence/import",'POST',import_body,headers={'X-Evaluation-Import-Token':EVAL_TOKEN})
+        # The public pack uses ``sha256:<digest>`` labels while the canonical
+        # Evidence columns store the 64-character digest only.
+        import_body={"evidence_id":eid,"pack_kind":"SOURCE_DERIVED","source_id":f"benchmark-{cid}-{ev['evidence_id']}","source_ref":f"benchmark://{cid}/{ev['evidence_id']}","projection":ev.get('projection',{}),"projection_hash":stable_hash(ev.get('projection',{})),"content_hash":ev['integrity_hash'].split(':', 1)[-1],"source_bytes":len(json.dumps(ev).encode()),"synthetic":True}
+        imported = req(
+            f"/api/v1/cases/{cid}/evidence/import",
+            'POST',
+            import_body,
+            headers={'X-Evaluation-Import-Token': EVAL_TOKEN},
+        )
+        if imported.get('http_error'):
+            raise RuntimeError(f"evidence import failed: {imported}")
     base_msg="Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
     interventions=[]
     all_events=[]
@@ -310,13 +347,13 @@ def run_case(case_id, repeat, seed, run_root):
     run_dir.mkdir(parents=True, exist_ok=True)
     public_hash=sha256_text(json.dumps(public, ensure_ascii=False, sort_keys=True))
     prompt_hash=sha256_text(COMMON_PROMPT)
-    sidecar_dir = ROOT / "agents" / "mini-drop-ai-agent-v2" / "agent_runtime" / "pi-sidecar"
+    sidecar_dir = SOURCE_ROOT / "agent_runtime" / "pi-sidecar"
     sidecar_lock = sidecar_dir / "package-lock.json"
     sidecar_hash = sha256_text(sidecar_lock.read_text(encoding="utf-8") if sidecar_lock.exists() else str(sidecar_dir))
     native_runtime={
         "framework":"mini-drop","framework_entrypoint":"POST /api/v1/cases/{case_id}/agent/turn + official Pi Sidecar",
-        "source_sha":SOURCE_SHA,"source_path":str(ROOT/"agents"/"mini-drop-ai-agent-v2"),
-        "dependency_lock_hash":sha256_text((ROOT/"agents"/"mini-drop-ai-agent-v2"/"pyproject.toml").read_text()),
+        "source_sha":SOURCE_SHA,"source_path":str(SOURCE_ROOT),
+        "dependency_lock_hash":sha256_text((SOURCE_ROOT/"pyproject.toml").read_text()),
         "sidecar_source":"agents/mini-drop-ai-agent-v2/agent_runtime/pi-sidecar",
         "sidecar_package_lock_hash":sidecar_hash,
         "runtime_type":"pi","runtime_version":"pi-0.84.2","process_id":"mini-drop-server-127.0.0.1:8192",
