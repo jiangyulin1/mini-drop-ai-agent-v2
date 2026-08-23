@@ -1089,7 +1089,57 @@ class ExecutionUnitModel(Base):
         }
 
 
-# ── v6 Causal / Gap / Conclusion / Repair ───────────────────────────
+# ── v6 Evidence dependency / Causal / Gap / Conclusion / Repair ─────
+
+
+class EvidenceDependencyEdgeModel(Base):
+    """Durable Evidence-to-inference dependency and invalidation ledger."""
+
+    __tablename__ = "evidence_dependency_edges"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "source_kind", "source_id",
+            "target_kind", "target_id", "relation",
+            name="uq_evidence_dependency_edge",
+        ),
+        Index("ix_evidence_dependency_source", "case_id", "tenant_id", "source_id"),
+        Index("ix_evidence_dependency_target", "case_id", "tenant_id", "target_kind", "target_id"),
+    )
+
+    dependency_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    source_kind = Column(String(24), nullable=False, default="EVIDENCE")
+    source_id = Column(String(256), nullable=False)
+    target_kind = Column(String(24), nullable=False)
+    target_id = Column(String(256), nullable=False)
+    relation = Column(String(32), nullable=False, default="SUPPORTS")
+    support_weight = Column(Float, nullable=False, default=1.0)
+    status = Column(String(24), nullable=False, default="ACTIVE", index=True)
+    invalidated_by_evidence_id = Column(String(128), nullable=True)
+    invalidated_review_revision = Column(Integer, nullable=True)
+    invalidated_reason = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "dependency_id": self.dependency_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "source_kind": self.source_kind,
+            "source_id": self.source_id,
+            "target_kind": self.target_kind,
+            "target_id": self.target_id,
+            "relation": self.relation,
+            "support_weight": self.support_weight,
+            "status": self.status,
+            "invalidated_by_evidence_id": self.invalidated_by_evidence_id,
+            "invalidated_review_revision": self.invalidated_review_revision,
+            "invalidated_reason": self.invalidated_reason,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
 
 
 class CausalGraphRevisionModel(Base):
@@ -1191,6 +1241,9 @@ class CausalEdgeModel(Base):
     supporting_evidence_refs = Column(JSON, nullable=False, default=list)
     knowledge_refs = Column(JSON, nullable=False, default=list)
     verification_state = Column(String(24), nullable=False, default="UNVERIFIED")
+    dependency_status = Column(String(24), nullable=False, default="ACTIVE")
+    invalidated_evidence_refs = Column(JSON, nullable=False, default=list)
+    remaining_active_support = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     def to_dict(self) -> dict:
@@ -1210,6 +1263,9 @@ class CausalEdgeModel(Base):
             "supporting_evidence_refs": self.supporting_evidence_refs or [],
             "knowledge_refs": self.knowledge_refs or [],
             "verification_state": self.verification_state,
+            "dependency_status": self.dependency_status,
+            "invalidated_evidence_refs": self.invalidated_evidence_refs or [],
+            "remaining_active_support": self.remaining_active_support or [],
             "created_at": self.created_at,
         }
 
@@ -1296,6 +1352,8 @@ class ConclusionRevisionModel(Base):
     created_from_cycle_id = Column(String(128), nullable=True)
     model_request_id = Column(String(128), nullable=True)
     verifier_version = Column(String(64), nullable=False, default="causal-report-verifier.v1")
+    invalidated_claims = Column(JSON, nullable=False, default=list)
+    remaining_active_support = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     def to_dict(self) -> dict:
@@ -1324,6 +1382,8 @@ class ConclusionRevisionModel(Base):
             "created_from_cycle_id": self.created_from_cycle_id,
             "model_request_id": self.model_request_id,
             "verifier_version": self.verifier_version,
+            "invalidated_claims": self.invalidated_claims or [],
+            "remaining_active_support": self.remaining_active_support or {},
             "created_at": self.created_at,
         }
 
@@ -1349,6 +1409,9 @@ class ClaimEvidenceBindingModel(Base):
     observed_value = Column(JSON, nullable=False, default=dict)
     support_kind = Column(String(16), nullable=False, default="SUPPORTS")
     verifier_result = Column(String(24), nullable=False, default="PENDING")
+    claim_status = Column(String(24), nullable=False, default="ACTIVE")
+    invalidated_evidence_refs = Column(JSON, nullable=False, default=list)
+    remaining_active_support = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     def to_dict(self) -> dict:
@@ -1368,6 +1431,9 @@ class ClaimEvidenceBindingModel(Base):
             "observed_value": self.observed_value or {},
             "support_kind": self.support_kind,
             "verifier_result": self.verifier_result,
+            "claim_status": self.claim_status,
+            "invalidated_evidence_refs": self.invalidated_evidence_refs or [],
+            "remaining_active_support": self.remaining_active_support or [],
             "created_at": self.created_at,
         }
 

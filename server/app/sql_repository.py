@@ -2775,6 +2775,8 @@ class SqlRepository(SqlRepositoryV6Mixin):
                     CaseHypothesisNodeModel.hypothesis_id == hypothesis_id,
                 ).first()
                 previous_status = row.status if row else None
+                previous_invalidated_refs = list(row.invalidated_evidence_refs_json or []) if row else []
+                previous_remaining_support = list(row.remaining_active_support_json or []) if row else []
                 if row is None:
                     row = CaseHypothesisNodeModel(
                         id=f"hyp_node_{uuid4().hex}",
@@ -2791,7 +2793,14 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 row.root_entity = item.get("root_entity") or item.get("target_ref")
                 row.mechanism = item.get("mechanism") or item.get("type")
                 row.affected_entities_json = item.get("affected_entities") or []
-                row.status = status
+                # Lifecycle propagation is authoritative. A graph resync may
+                # update wording/refs, but must not erase a durable recheck
+                # marker until Evidence is explicitly restored and propagated.
+                row.status = (
+                    previous_status if previous_status in {"RECHECK_REQUIRED", "RETRACTED"}
+                    and status in {"PROPOSED", "ACTIVE", "WEAKENED"}
+                    else status
+                )
                 row.supporting_evidence_refs_json = item.get("supporting_evidence_refs") or []
                 row.contradicting_evidence_refs_json = item.get("contradicting_evidence_refs") or []
                 row.missing_evidence_json = item.get("missing_evidence") or []
@@ -2799,6 +2808,12 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 row.score_components_json = item.get("score_components") or {
                     "evidence_score": item.get("evidence_score", 0),
                 }
+                row.invalidated_evidence_refs_json = list(
+                    dict.fromkeys([*previous_invalidated_refs, *(item.get("invalidated_evidence_refs") or [])]),
+                )
+                row.remaining_active_support_json = list(
+                    item.get("remaining_active_support") or previous_remaining_support,
+                )
                 row.source = source
                 row.updated_at = now
                 changes.append({

@@ -883,6 +883,8 @@ class CaseHypothesisNodeModel(Base):
     missing_evidence_json = Column(JSON, default=list)
     alternatives_json = Column(JSON, default=list)
     score_components_json = Column(JSON, default=dict)
+    invalidated_evidence_refs_json = Column(JSON, default=list)
+    remaining_active_support_json = Column(JSON, default=list)
     source = Column(String(64), nullable=False)
     revision = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime(timezone=True), nullable=False)
@@ -903,6 +905,8 @@ class CaseHypothesisNodeModel(Base):
             "missing_evidence": self.missing_evidence_json or [],
             "alternatives": self.alternatives_json or [],
             "score_components": self.score_components_json or {},
+            "invalidated_evidence_refs": self.invalidated_evidence_refs_json or [],
+            "remaining_active_support": self.remaining_active_support_json or [],
             "source": self.source,
             "revision": self.revision,
             "created_at": self.created_at,

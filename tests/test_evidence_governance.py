@@ -260,6 +260,76 @@ def test_intervention_ack_accepts_governance_outbox_reference(client: TestClient
     assert response.json()["data"]["affected_evidence_ids"] == [evidence_id]
 
 
+def test_generation_bound_intervention_requires_snapshot_and_evidence_read_receipts(client: TestClient):
+    case, evidence_id = _case_and_evidence(client, "ev-receipts")
+    repo.create_investigation_run(case_id=case["case_id"], tenant_id="tenant-a")
+    _submit(client, case["case_id"], evidence_id, "EXCLUDED")
+    outbox = [
+        item for item in repo.list_domain_outbox(status="PENDING")
+        if item["event_type"] == "EVIDENCE_ELIGIBILITY_CHANGED"
+    ][-1]
+    app_factory._dispatch_domain_outbox_event(outbox)
+    wakeup = repo.get_runtime_wakeup_by_outbox(outbox["outbox_id"])
+    payload = {
+        "case_id": case["case_id"],
+        "intervention_id": f"intervention-{wakeup['wakeup_id']}",
+        "trust_state": "EXCLUDED",
+        "evidence_state_rechecked": True,
+        "revision_before": 0,
+        "revision_after": 1,
+        "runtime_generation": 2,
+    }
+    acknowledged = client.post(
+        "/internal/agent/tools/acknowledge-intervention",
+        headers={"X-Internal-Token": "governance-internal-token"}, json=payload,
+    )
+    assert acknowledged.status_code == 200, acknowledged.text
+    for path, body in (
+        ("/internal/agent/tools/case-snapshot", {"case_id": case["case_id"]}),
+        ("/internal/agent/tools/list-case-evidence", {"case_id": case["case_id"]}),
+    ):
+        response = client.post(
+            path,
+            headers={"X-Internal-Token": "governance-internal-token"},
+            json={**body, "intervention_id": payload["intervention_id"], "runtime_generation": 2},
+        )
+        assert response.status_code == 200, response.text
+    assert set(acknowledged.json()["data"]["read_receipts_required"]) == {"get_case_snapshot", "list_case_evidence"}
+
+
+def test_excluded_evidence_propagates_to_hypothesis_claim_and_dependency_ledger(client: TestClient):
+    case, evidence_id = _case_and_evidence(client, "ev-propagate")
+    repo.sync_case_hypothesis_graph(
+        case["case_id"], "tenant-a", source="test", actor_id="operator",
+        graph={"hypotheses": [{
+            "hypothesis_id": "hyp-root",
+            "statement": "checkout CPU saturation",
+            "status": "ACTIVE",
+            "supporting_evidence_refs": [evidence_id],
+        }], "edges": []},
+    )
+    conclusion = repo.submit_conclusion_revision(
+        case_id=case["case_id"], tenant_id="tenant-a", investigation_run_id="run-propagate",
+        state="CONFIRMED", claims=[{
+            "claim_id": "claim-root", "evidence_id": evidence_id,
+            "projection_hash": "projection-governed", "observed_value": {"value": "high"},
+        }], report_text="root cause",
+    )
+    impact = _preview(client, case["case_id"], evidence_id, "EXCLUDED")
+    response = _submit(client, case["case_id"], evidence_id, "EXCLUDED", preview=impact)
+    assert response.status_code == 200, response.text
+    hypotheses = repo.get_case_hypothesis_graph(case["case_id"], "tenant-a")["hypotheses"]
+    hypothesis = next(item for item in hypotheses if item["hypothesis_id"] == "hyp-root")
+    assert hypothesis["status"] == "RECHECK_REQUIRED"
+    assert hypothesis["invalidated_evidence_refs"] == [evidence_id]
+    stored = repo.get_conclusion(case["case_id"], "tenant-a", conclusion["conclusion_id"])
+    assert stored["invalidated_claims"]
+    assert stored["remaining_active_support"]
+    assert all(not refs for refs in stored["remaining_active_support"].values())
+    edges = repo.list_evidence_dependency_edges(case["case_id"], "tenant-a")
+    assert any(item["source_id"] == evidence_id and item["status"] == "INVALIDATED" for item in edges)
+
+
 def test_review_and_outbox_are_atomic(client: TestClient, monkeypatch):
     case, evidence_id = _case_and_evidence(client)
     impact = repo.preview_evidence_review(

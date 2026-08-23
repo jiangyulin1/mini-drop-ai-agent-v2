@@ -50,6 +50,7 @@ function makeInternalTool(
   onCollectionScheduled,
   onDiscoveryCollecting,
   onInterventionAck,
+  getRetryCount = null,
 ) {
   return {
     name,
@@ -61,12 +62,16 @@ function makeInternalTool(
       const startedAt = new Date(startedMs).toISOString();
       const argumentsJson = JSON.stringify(canonicalize(params ?? {}));
       const argumentsHash = sha256Text(argumentsJson);
+      const envelope = getEnvelope?.() || {};
+      const retryCount = getRetryCount?.(name, argumentsHash, _toolCallId)
+        ?? envelope.__get_retry_count?.(name, argumentsHash, _toolCallId)
+        ?? 0;
       const auditBase = {
         tool_call_id: _toolCallId || null,
         tool_name: name,
         arguments_hash: argumentsHash,
         started_at: startedAt,
-        retry_count: 0,
+        retry_count: retryCount,
       };
       const headers = { "Content-Type": "application/json" };
       const internalToken = process.env.MINI_DROP_PI_INTERNAL_TOKEN || "";
@@ -76,7 +81,7 @@ function makeInternalTool(
       const resp = await fetch(internalPath, {
         method: "POST",
         headers,
-        body: JSON.stringify({ ...params, tool: name, ...(getEnvelope?.() || {}) }),
+        body: JSON.stringify({ ...params, tool: name, ...envelope }),
       });
       if (!resp.ok) {
         let bodyText = "";

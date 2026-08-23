@@ -38,6 +38,7 @@ from server.app.models import (
     DomainOutboxModel,
     EvidenceGapModel,
     EvidenceAnalysisRunModel,
+    EvidenceDependencyEdgeModel,
     EvidenceProjectionModel,
     EvidenceReviewRevisionModel,
     EvidenceReviewModel,
@@ -961,6 +962,283 @@ class SqlRepositoryV6Mixin:
             return any(SqlRepositoryV6Mixin._evidence_ref_contains(item, evidence_id) for item in value)
         return False
 
+    @staticmethod
+    def _dependency_id(*parts: Any) -> str:
+        digest = hashlib.sha256("|".join(str(item) for item in parts).encode("utf-8")).hexdigest()[:24]
+        return f"dep_{digest}"
+
+    def _sync_evidence_dependency_edges_in_session(
+        self, session: OrmSession, case_id: str, tenant_id: str,
+    ) -> None:
+        """Materialize dependency edges from the existing canonical projections.
+
+        The legacy graph JSON remains the write contract. This ledger gives
+        lifecycle review a durable, queryable propagation surface without
+        changing model-facing payloads.
+        """
+        now = now_utc()
+        desired: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+
+        def add(source_id: str, target_kind: str, target_id: str, relation: str = "SUPPORTS"):
+            if not source_id or not target_id:
+                return
+            key = ("EVIDENCE", source_id, target_kind, target_id, relation)
+            desired[key] = {"source_id": source_id, "target_kind": target_kind, "target_id": target_id, "relation": relation}
+
+        hypotheses = session.query(CaseHypothesisNodeModel).filter(
+            CaseHypothesisNodeModel.case_id == case_id,
+            CaseHypothesisNodeModel.tenant_id == tenant_id,
+        ).all()
+        for row in hypotheses:
+            for ref in row.supporting_evidence_refs_json or []:
+                add(str(ref), "HYPOTHESIS", row.hypothesis_id, "SUPPORTS")
+            for ref in row.contradicting_evidence_refs_json or []:
+                add(str(ref), "HYPOTHESIS", row.hypothesis_id, "CONTRADICTS")
+
+        graph = session.query(CausalGraphRevisionModel).filter(
+            CausalGraphRevisionModel.case_id == case_id,
+            CausalGraphRevisionModel.tenant_id == tenant_id,
+        ).order_by(CausalGraphRevisionModel.graph_revision.desc()).first()
+        if graph is not None:
+            for node in session.query(CausalNodeModel).filter(CausalNodeModel.graph_id == graph.graph_id).all():
+                for ref in node.supporting_evidence_refs or []:
+                    add(str(ref), "CAUSAL_NODE", f"{graph.graph_id}:{node.node_id}")
+            for edge in session.query(CausalEdgeModel).filter(CausalEdgeModel.graph_id == graph.graph_id).all():
+                for ref in edge.supporting_evidence_refs or []:
+                    add(str(ref), "CAUSAL_EDGE", f"{graph.graph_id}:{edge.edge_id}")
+
+        conclusions = session.query(ConclusionRevisionModel).filter(
+            ConclusionRevisionModel.case_id == case_id,
+            ConclusionRevisionModel.tenant_id == tenant_id,
+        ).all()
+        for conclusion in conclusions:
+            bindings = session.query(ClaimEvidenceBindingModel).filter(
+                ClaimEvidenceBindingModel.conclusion_id == conclusion.conclusion_id,
+            ).all()
+            for binding in bindings:
+                add(binding.evidence_id, "CLAIM", f"{conclusion.conclusion_id}:{binding.claim_id}")
+            claims_by_id = {
+                str(item.get("claim_id")): item
+                for item in conclusion.claims or []
+                if isinstance(item, dict) and item.get("claim_id")
+            }
+            for claim_id, claim in claims_by_id.items():
+                refs = claim.get("hypothesis_refs") or []
+                if claim.get("hypothesis_id"):
+                    refs = [*refs, claim.get("hypothesis_id")]
+                for hypothesis_id in dict.fromkeys(str(ref) for ref in refs if ref):
+                    key = ("HYPOTHESIS", hypothesis_id, "CLAIM", f"{conclusion.conclusion_id}:{claim_id}", "SUPPORTS")
+                    desired[key] = {
+                        "source_kind": "HYPOTHESIS", "source_id": hypothesis_id,
+                        "target_kind": "CLAIM", "target_id": f"{conclusion.conclusion_id}:{claim_id}",
+                        "relation": "SUPPORTS",
+                    }
+
+        existing = session.query(EvidenceDependencyEdgeModel).filter(
+            EvidenceDependencyEdgeModel.case_id == case_id,
+            EvidenceDependencyEdgeModel.tenant_id == tenant_id,
+        ).all()
+        existing_by_key = {
+            (row.source_kind, row.source_id, row.target_kind, row.target_id, row.relation): row
+            for row in existing
+        }
+        for key, item in desired.items():
+            row = existing_by_key.get(key)
+            if row is None:
+                row = EvidenceDependencyEdgeModel(
+                    dependency_id=self._dependency_id(case_id, tenant_id, *key),
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    source_kind=item.get("source_kind", key[0]),
+                    source_id=item["source_id"],
+                    target_kind=item["target_kind"],
+                    target_id=item["target_id"],
+                    relation=item["relation"],
+                    support_weight=1.0,
+                    status="ACTIVE",
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.updated_at = now
+
+    def _propagate_evidence_lifecycle_in_session(
+        self, session: OrmSession, *, case_id: str, tenant_id: str,
+        evidence: CaseEvidenceModel, decision: str, review_revision: int,
+    ) -> dict[str, Any]:
+        self._sync_evidence_dependency_edges_in_session(session, case_id, tenant_id)
+        session.flush()
+        lifecycle = str(evidence.lifecycle_status or "ACTIVE").upper()
+        trust = str(evidence.review_trust_state or "UNREVIEWED").upper()
+        if lifecycle != "ACTIVE":
+            edge_status = "INVALIDATED"
+            reason = f"EVIDENCE_{lifecycle}"
+        elif trust == "LOW_TRUST":
+            edge_status = "RECHECK_REQUIRED"
+            reason = "EVIDENCE_LOW_TRUST"
+        else:
+            edge_status = "ACTIVE"
+            reason = "EVIDENCE_RESTORED"
+        source_edges = session.query(EvidenceDependencyEdgeModel).filter(
+            EvidenceDependencyEdgeModel.case_id == case_id,
+            EvidenceDependencyEdgeModel.tenant_id == tenant_id,
+            EvidenceDependencyEdgeModel.source_kind == "EVIDENCE",
+            EvidenceDependencyEdgeModel.source_id == evidence.evidence_id,
+        ).all()
+        for edge in source_edges:
+            edge.status = edge_status
+            edge.invalidated_by_evidence_id = evidence.evidence_id if edge_status != "ACTIVE" else None
+            edge.invalidated_review_revision = review_revision if edge_status != "ACTIVE" else None
+            edge.invalidated_reason = reason if edge_status != "ACTIVE" else None
+            edge.updated_at = now_utc()
+
+        active_rows = session.query(CaseEvidenceModel).filter(
+            CaseEvidenceModel.case_id == case_id,
+            CaseEvidenceModel.tenant_id == tenant_id,
+        ).all()
+        active_ids = {
+            row.evidence_id for row in active_rows
+            if str(row.lifecycle_status or "ACTIVE").upper() == "ACTIVE"
+            and str(row.status or "ACTIVE").upper() in {"ACTIVE", "LOW_TRUST"}
+        }
+        # The causal-edge projection above needs the active set; update it now
+        # after the set is materialized for databases that evaluate the loop
+        # before this point.
+        for edge in source_edges:
+            if edge.target_kind != "CAUSAL_EDGE":
+                continue
+            try:
+                graph_id, causal_edge_id = str(edge.target_id).split(":", 1)
+            except ValueError:
+                continue
+            causal = session.query(CausalEdgeModel).filter(
+                CausalEdgeModel.graph_id == graph_id,
+                CausalEdgeModel.edge_id == causal_edge_id,
+            ).first()
+            if causal is not None:
+                causal.dependency_status = edge_status
+                invalidated_refs = set(causal.invalidated_evidence_refs or [])
+                if edge_status != "ACTIVE":
+                    invalidated_refs.add(evidence.evidence_id)
+                causal.invalidated_evidence_refs = sorted(invalidated_refs)
+                causal.remaining_active_support = sorted(
+                    ref for ref in (causal.supporting_evidence_refs or []) if ref in active_ids
+                )
+        invalidated_hypotheses: list[str] = []
+        affected_hypotheses: list[str] = []
+        for row in session.query(CaseHypothesisNodeModel).filter(
+            CaseHypothesisNodeModel.case_id == case_id,
+            CaseHypothesisNodeModel.tenant_id == tenant_id,
+        ).all():
+            refs = [str(ref) for ref in row.supporting_evidence_refs_json or []]
+            contradicting = [str(ref) for ref in row.contradicting_evidence_refs_json or []]
+            if evidence.evidence_id not in refs and evidence.evidence_id not in contradicting:
+                continue
+            affected_hypotheses.append(row.hypothesis_id)
+            remaining = sorted({ref for ref in refs if ref in active_ids and ref != evidence.evidence_id})
+            invalidated = sorted(set(row.invalidated_evidence_refs_json or []) | ({evidence.evidence_id} if edge_status != "ACTIVE" else set()))
+            row.invalidated_evidence_refs_json = invalidated
+            row.remaining_active_support_json = remaining
+            if edge_status == "INVALIDATED" and not remaining:
+                row.status = "RECHECK_REQUIRED"
+                invalidated_hypotheses.append(row.hypothesis_id)
+            elif edge_status != "ACTIVE":
+                row.status = "RECHECK_REQUIRED"
+            elif row.status == "RECHECK_REQUIRED" and remaining:
+                row.status = "ACTIVE"
+            row.revision = int(row.revision or 0) + 1
+            row.updated_at = now_utc()
+
+        # Propagate hypothesis invalidation into the durable hypothesis->claim
+        # ledger and the latest conclusion projection. A claim with independent
+        # active support remains reviewable; a claim with none is retracted.
+        affected_hypothesis_set = set(affected_hypotheses)
+        hypothesis_claim_edges = session.query(EvidenceDependencyEdgeModel).filter(
+            EvidenceDependencyEdgeModel.case_id == case_id,
+            EvidenceDependencyEdgeModel.tenant_id == tenant_id,
+            EvidenceDependencyEdgeModel.source_kind == "HYPOTHESIS",
+        ).all()
+        for edge in hypothesis_claim_edges:
+            if edge.source_id not in affected_hypothesis_set:
+                continue
+            edge.status = "RECHECK_REQUIRED" if edge_status != "ACTIVE" else "ACTIVE"
+            edge.invalidated_by_evidence_id = evidence.evidence_id if edge_status != "ACTIVE" else None
+            edge.invalidated_review_revision = review_revision if edge_status != "ACTIVE" else None
+            edge.invalidated_reason = reason if edge_status != "ACTIVE" else None
+            edge.updated_at = now_utc()
+
+        invalidated_claims: list[str] = []
+        remaining_support: dict[str, list[str]] = {}
+        affected_claims: list[str] = []
+        bindings = session.query(ClaimEvidenceBindingModel).join(
+            ConclusionRevisionModel,
+            ClaimEvidenceBindingModel.conclusion_id == ConclusionRevisionModel.conclusion_id,
+        ).filter(
+            ConclusionRevisionModel.case_id == case_id,
+            ConclusionRevisionModel.tenant_id == tenant_id,
+            ClaimEvidenceBindingModel.evidence_id == evidence.evidence_id,
+        ).all()
+        for binding in bindings:
+            claim_key = f"{binding.conclusion_id}:{binding.claim_id}"
+            affected_claims.append(claim_key)
+            supports = session.query(ClaimEvidenceBindingModel).filter(
+                ClaimEvidenceBindingModel.conclusion_id == binding.conclusion_id,
+                ClaimEvidenceBindingModel.claim_id == binding.claim_id,
+                ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
+            ).all()
+            remaining = sorted({item.evidence_id for item in supports if item.evidence_id in active_ids and item.evidence_id != evidence.evidence_id})
+            remaining_support[claim_key] = remaining
+            binding.invalidated_evidence_refs = sorted(set(binding.invalidated_evidence_refs or []) | ({evidence.evidence_id} if edge_status != "ACTIVE" else set()))
+            binding.remaining_active_support = remaining
+            if edge_status == "INVALIDATED" and not remaining:
+                binding.claim_status = "RETRACTED"
+                # Keep the historical verifier code for compatibility; the
+                # structured claim_status carries the stronger propagation
+                # state without losing the original lifecycle reason.
+                binding.verifier_result = f"EVIDENCE_{lifecycle}"
+                invalidated_claims.append(claim_key)
+            elif edge_status != "ACTIVE":
+                binding.claim_status = "RECHECK_REQUIRED"
+                binding.verifier_result = "RECHECK_REQUIRED"
+            else:
+                binding.claim_status = "ACTIVE"
+                binding.verifier_result = "VALIDATED"
+
+        for conclusion_id in sorted({claim_key.split(":", 1)[0] for claim_key in affected_claims}):
+            conclusion = session.query(ConclusionRevisionModel).filter(
+                ConclusionRevisionModel.conclusion_id == conclusion_id,
+            ).first()
+            if conclusion is None:
+                continue
+            conclusion.invalidated_claims = sorted(
+                set(conclusion.invalidated_claims or []) | set(invalidated_claims),
+            )
+            current_support = dict(conclusion.remaining_active_support or {})
+            current_support.update(remaining_support)
+            conclusion.remaining_active_support = current_support
+
+        return {
+            "edge_status": edge_status,
+            "invalidated_hypotheses": sorted(set(invalidated_hypotheses)),
+            "affected_hypotheses": sorted(set(affected_hypotheses)),
+            "invalidated_claims": sorted(set(invalidated_claims)),
+            "affected_claims": sorted(set(affected_claims)),
+            "remaining_active_support": remaining_support,
+        }
+
+    def list_evidence_dependency_edges(
+        self, case_id: str, tenant_id: str, *, target_kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(EvidenceDependencyEdgeModel).filter(
+                EvidenceDependencyEdgeModel.case_id == case_id,
+                EvidenceDependencyEdgeModel.tenant_id == tenant_id,
+            )
+            if target_kind:
+                query = query.filter(EvidenceDependencyEdgeModel.target_kind == target_kind)
+            return [row.to_dict() for row in query.order_by(EvidenceDependencyEdgeModel.created_at.asc()).all()]
+
     def _evidence_review_impact_in_session(
         self,
         session: OrmSession,
@@ -1043,6 +1321,37 @@ class SqlRepositoryV6Mixin:
             "conclusions": len(conclusion_ids),
             "recovery_plans": len(plans),
         }
+        active_evidence_ids = {
+            row.evidence_id for row in session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+            ).all()
+            if row.evidence_id != evidence.evidence_id
+            and str(row.lifecycle_status or "ACTIVE").upper() == "ACTIVE"
+            and str(row.status or "ACTIVE").upper() in {"ACTIVE", "LOW_TRUST"}
+        }
+        predicted_invalidated_hypotheses = [
+            row.hypothesis_id for row in hypotheses
+            if evidence.evidence_id in (row.supporting_evidence_refs_json or [])
+            and not any(str(ref) in active_evidence_ids for ref in (row.supporting_evidence_refs_json or []))
+        ] if decision == "EXCLUDED" else []
+        predicted_invalidated_claims: list[str] = []
+        predicted_remaining_support: dict[str, list[str]] = {}
+        for binding in bindings:
+            if str(binding.support_kind or "SUPPORTS").upper() != "SUPPORTS":
+                continue
+            claim_key = f"{binding.conclusion_id}:{binding.claim_id}"
+            supports = session.query(ClaimEvidenceBindingModel).filter(
+                ClaimEvidenceBindingModel.conclusion_id == binding.conclusion_id,
+                ClaimEvidenceBindingModel.claim_id == binding.claim_id,
+                ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
+            ).all()
+            remaining = sorted({item.evidence_id for item in supports if item.evidence_id in active_evidence_ids})
+            predicted_remaining_support[claim_key] = remaining
+            if decision == "EXCLUDED" and not remaining:
+                predicted_invalidated_claims.append(claim_key)
+        affected["invalidated_hypotheses"] = len(predicted_invalidated_hypotheses)
+        affected["dependency_edges"] = len(hypotheses) + len(bindings)
         requires_approval = bool(
             plans
             or (
@@ -1064,6 +1373,11 @@ class SqlRepositoryV6Mixin:
             "outcome": outcome,
             "affected": affected,
             "predicted_conclusion_state": predicted,
+            "propagation": {
+                "invalidated_hypotheses": sorted(set(predicted_invalidated_hypotheses)),
+                "invalidated_claims": sorted(set(predicted_invalidated_claims)),
+                "remaining_active_support": predicted_remaining_support,
+            },
             "recovery_plan_ids": sorted(row.id for row in plans),
             "requires_approval": requires_approval,
         }
@@ -1214,7 +1528,7 @@ class SqlRepositoryV6Mixin:
                     "case_id", "tenant_id", "evidence_id", "decision", "assessment",
                     "expected_review_revision", "projection_hash", "current_lifecycle_status",
                     "current_trust_state", "outcome", "affected", "predicted_conclusion_state",
-                    "recovery_plan_ids", "requires_approval",
+                    "propagation", "recovery_plan_ids", "requires_approval",
                 )
             }
             if not verify_impact_token(impact_token, token_payload):
@@ -1266,6 +1580,7 @@ class SqlRepositoryV6Mixin:
                     "affected": preview["affected"],
                     "predicted_conclusion_state": preview["predicted_conclusion_state"],
                     "recommended_recollection": preview["recommended_recollection"],
+                    "propagation": preview.get("propagation") or {},
                 },
                 overridden_recommendation=overridden,
                 reviewed_by=actor_id,
@@ -1284,6 +1599,13 @@ class SqlRepositoryV6Mixin:
             invalidated = 0
             held_plans: list[str] = []
             resumed_plans: list[str] = []
+            propagation = {
+                "invalidated_hypotheses": [],
+                "affected_hypotheses": [],
+                "invalidated_claims": [],
+                "affected_claims": [],
+                "remaining_active_support": {},
+            }
             if decision in INFERENCE_DECISIONS:
                 invalidated = self._invalidate_analysis_rows(
                     session,
@@ -1293,6 +1615,14 @@ class SqlRepositoryV6Mixin:
                 )
                 self._revalidate_conclusions_after_evidence_status(
                     session, evidence, outcome["status"], now,
+                )
+                propagation = self._propagate_evidence_lifecycle_in_session(
+                    session,
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    evidence=evidence,
+                    decision=decision,
+                    review_revision=revision,
                 )
                 if outcome["lifecycle_status"] == "EXCLUDED" or outcome["trust_state"] == "LOW_TRUST":
                     held_plans = self._hold_recovery_plans_for_evidence(
@@ -1322,6 +1652,7 @@ class SqlRepositoryV6Mixin:
                 "invalidated_analysis_runs": invalidated,
                 "held_recovery_plan_ids": held_plans,
                 "resumed_recovery_plan_ids": resumed_plans,
+                "propagation": propagation,
             }
             session.add(CaseEventModel(
                 case_id=case_id,
@@ -1372,6 +1703,7 @@ class SqlRepositoryV6Mixin:
                 "invalidated_analysis_runs": invalidated,
                 "held_recovery_plan_ids": held_plans,
                 "resumed_recovery_plan_ids": resumed_plans,
+                "propagation": propagation,
             }
 
     def add_evidence_review_revision(
@@ -2234,6 +2566,9 @@ class SqlRepositoryV6Mixin:
                     supporting_evidence_refs=edge.get("supporting_evidence_refs") or [],
                     knowledge_refs=edge.get("knowledge_refs") or [],
                     verification_state=edge.get("verification_state", "UNVERIFIED"),
+                    dependency_status=edge.get("dependency_status", "ACTIVE"),
+                    invalidated_evidence_refs=edge.get("invalidated_evidence_refs") or [],
+                    remaining_active_support=edge.get("remaining_active_support") or [],
                     created_at=now,
                 ))
             session.flush()
@@ -2360,8 +2695,33 @@ class SqlRepositoryV6Mixin:
                 ConclusionRevisionModel.tenant_id == tenant_id,
             ).order_by(ConclusionRevisionModel.revision.desc()).first()
             revision = int(previous.revision or 0) + 1 if previous else 1
+            evidence_rows = {
+                row.evidence_id: row for row in session.query(CaseEvidenceModel).filter(
+                    CaseEvidenceModel.case_id == case_id,
+                    CaseEvidenceModel.tenant_id == tenant_id,
+                ).all()
+            }
+            active_ids = {
+                evidence_id for evidence_id, row in evidence_rows.items()
+                if str(row.lifecycle_status or "ACTIVE").upper() == "ACTIVE"
+                and str(row.status or "ACTIVE").upper() in {"ACTIVE", "LOW_TRUST"}
+            }
+            invalidated_claims: list[str] = []
+            remaining_active_support: dict[str, list[str]] = {}
+            effective_conclusion_id = conclusion_id or self._new_id("concl")
+            for claim in claims or []:
+                claim_id = str(claim.get("claim_id") or "")
+                if not claim_id:
+                    continue
+                refs = [str(ref) for ref in claim.get("evidence_refs") or []]
+                if claim.get("evidence_id"):
+                    refs.append(str(claim.get("evidence_id")))
+                remaining = sorted(set(ref for ref in refs if ref in active_ids))
+                remaining_active_support[f"{effective_conclusion_id}:{claim_id}"] = remaining
+                if refs and not remaining:
+                    invalidated_claims.append(claim_id)
             conclusion = ConclusionRevisionModel(
-                conclusion_id=conclusion_id or self._new_id("concl"),
+                conclusion_id=effective_conclusion_id,
                 case_id=case_id,
                 tenant_id=tenant_id,
                 investigation_run_id=investigation_run_id,
@@ -2385,6 +2745,8 @@ class SqlRepositoryV6Mixin:
                 created_from_cycle_id=created_from_cycle_id,
                 model_request_id=model_request_id,
                 verifier_version=verifier_version,
+                invalidated_claims=invalidated_claims,
+                remaining_active_support=remaining_active_support,
                 created_at=now,
             )
             session.add(conclusion)
@@ -2406,6 +2768,14 @@ class SqlRepositoryV6Mixin:
                     observed_value=claim.get("observed_value") or {},
                     support_kind=claim.get("support_kind", "SUPPORTS"),
                     verifier_result=claim.get("verifier_result", "VERIFIED"),
+                    claim_status=("RETRACTED" if str(claim.get("evidence_id") or "") not in active_ids else "ACTIVE"),
+                    invalidated_evidence_refs=(
+                        [str(claim.get("evidence_id"))]
+                        if claim.get("evidence_id") and str(claim.get("evidence_id")) not in active_ids else []
+                    ),
+                    remaining_active_support=sorted(
+                        set(str(ref) for ref in (claim.get("evidence_refs") or [])) & active_ids
+                    ),
                     created_at=now,
                 )
                 session.add(binding)

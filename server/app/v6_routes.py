@@ -620,6 +620,18 @@ def internal_tool_acknowledge_intervention(payload: dict[str, Any], request: Req
     revision_before = payload.get("revision_before")
     if revision_before is not None and int(revision_before) != max(0, expected_after - 1):
         raise HTTPException(status_code=409, detail="INTERVENTION_REVISION_BEFORE_MISMATCH")
+    # The first tool call is the explicit intervention ACK. The terminal
+    # finish gate below requires durable read receipts from both canonical read
+    # tools, so this ACK cannot be used to bypass the re-read protocol.
+    receipts: set[str] = set()
+    if payload.get("runtime_generation") is not None:
+        generation = int(payload.get("runtime_generation") or 0)
+        for event in repo.list_case_events(case_id, tenant_id, limit=500) or []:
+            if event.get("event_type") != "intervention_read_receipt":
+                continue
+            event_payload = event.get("payload") or {}
+            if str(event_payload.get("intervention_id") or "") == intervention_id and int(event_payload.get("runtime_generation") or 0) == generation:
+                receipts.add(str(event_payload.get("tool_name") or ""))
     ack = {
         "intervention_id": intervention_id,
         "trust_state": trust_state,
@@ -636,6 +648,8 @@ def internal_tool_acknowledge_intervention(payload: dict[str, Any], request: Req
             for evidence_id in affected_ids
         },
         "actor_id": "mini-drop-pi-runtime",
+        "read_receipts": sorted(receipts) if payload.get("runtime_generation") is not None else [],
+        "read_receipts_required": ["get_case_snapshot", "list_case_evidence"],
     }
     repo.record_case_event(
         case_id,
@@ -714,6 +728,28 @@ def _intervention_audit_for_finish(
         ack = event.get("payload") or {}
         if str(ack.get("intervention_id") or "") != intervention_id:
             continue
+        affected_ids = ack.get("affected_evidence_ids") or []
+        validated_receipts = set()
+        generation = int(payload.get("runtime_generation") or 0)
+        if payload.get("runtime_generation") is not None:
+            for receipt_event in repo.list_case_events(case_id, tenant_id, limit=500) or []:
+                if receipt_event.get("event_type") != "intervention_read_receipt":
+                    continue
+                receipt = receipt_event.get("payload") or {}
+                if str(receipt.get("intervention_id") or "") == intervention_id and int(receipt.get("runtime_generation") or 0) == generation:
+                    validated_receipts.add(str(receipt.get("tool_name") or ""))
+        invalidated_claims: set[str] = set()
+        remaining_support: dict[str, list[str]] = {}
+        for review_event in repo.list_case_events(case_id, tenant_id, limit=500) or []:
+            if review_event.get("event_type") != "evidence_reviewed":
+                continue
+            review_payload = review_event.get("payload") or {}
+            if str(review_payload.get("evidence_id") or "") not in {str(item) for item in affected_ids}:
+                continue
+            propagation = review_payload.get("propagation") or {}
+            invalidated_claims.update(str(item) for item in propagation.get("invalidated_claims") or [])
+            for claim_id, refs in (propagation.get("remaining_active_support") or {}).items():
+                remaining_support[str(claim_id)] = [str(ref) for ref in refs or []]
         return {
             "intervention_ack": True,
             "intervention_id": intervention_id,
@@ -723,6 +759,10 @@ def _intervention_audit_for_finish(
             "revision_after": ack.get("revision_after"),
             "excluded_evidence_used": False,
             "invalidated_evidence_ids": ack.get("affected_evidence_ids") or [],
+            "invalidated_claims": sorted(invalidated_claims),
+            "remaining_active_support": remaining_support,
+            "read_receipts_validated": set(("get_case_snapshot", "list_case_evidence")).issubset(validated_receipts)
+            if payload.get("runtime_generation") is not None else True,
         }
     return {
         "intervention_ack": False,
@@ -856,6 +896,8 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
     case = repo.get_incident_case(case_id, tenant_id)
     if case is None:
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    intervention_id = str(payload.get("intervention_id") or "").strip()
+    runtime_generation = int(payload.get("runtime_generation") or 0)
     plan = investigation_plan_service.read_plan(case_id, tenant_id) or {"plan_id": None, "steps": []}
     attachments = evidence_attachment_service.list_attachments(case_id, tenant_id)
     investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
@@ -948,6 +990,28 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
                 "state": "RECHECK_REQUIRED",
                 "report_text": "结论引用的 Evidence 生命周期已变化，请重新读取 ACTIVE Evidence。",
             }
+    propagation = {
+        "invalidated_claims": list((conclusion_view or {}).get("invalidated_claims") or []) if isinstance(conclusion_view, dict) else [],
+        "invalidated_hypotheses": [
+            item.get("hypothesis_id") for item in hypothesis_view.get("hypotheses") or []
+            if item.get("invalidated_evidence_refs") and item.get("hypothesis_id")
+        ],
+        "invalidated_causal_edges": [
+            item.get("edge_id") for item in causal_view.get("edges") or []
+            if str(item.get("dependency_status") or "ACTIVE").upper() != "ACTIVE"
+        ],
+        "remaining_active_support": dict((conclusion_view or {}).get("remaining_active_support") or {}) if isinstance(conclusion_view, dict) else {},
+    }
+    if intervention_id:
+        repo.record_case_event(
+            case_id, tenant_id, event_type="intervention_read_receipt",
+            payload={
+                "intervention_id": intervention_id,
+                "tool_name": "get_case_snapshot",
+                "review_revision": max((int(item.get("review_revision") or 0) for item in excluded_evidence), default=0),
+                "runtime_generation": runtime_generation,
+            }, actor_id="mini-drop-pi-runtime",
+        )
     return APIResponse(data={
         "case_id": case_id,
         "goal": case.get("problem_description", "")[:500],
@@ -971,6 +1035,7 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
         "causal_graph": causal_view,
         "conclusion": conclusion_view,
         "recommendations": investigation_state["recommendations"],
+        "propagation": propagation,
         "query_operations": [
             item.get("operation_id")
             for item in QUERY_REGISTRY.list_operations()
@@ -988,6 +1053,8 @@ def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) 
     case = repo.get_incident_case(case_id, tenant_id)
     if case is None:
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    intervention_id = str(payload.get("intervention_id") or "").strip()
+    runtime_generation = int(payload.get("runtime_generation") or 0)
     filters = payload.get("filters") or {}
     status = filters.get("status")
     if str(status or "").upper() in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
@@ -1015,6 +1082,16 @@ def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) 
                 for p in by_evidence.get(item.get("evidence_id"), [])
             ],
         })
+    if intervention_id:
+        repo.record_case_event(
+            case_id, tenant_id, event_type="intervention_read_receipt",
+            payload={
+                "intervention_id": intervention_id,
+                "tool_name": "list_case_evidence",
+                "review_revision": max((int(item.get("review_revision") or 0) for item in result), default=0),
+                "runtime_generation": runtime_generation,
+            }, actor_id="mini-drop-pi-runtime",
+        )
     return APIResponse(data={
         "items": result,
         "total": len(result),
@@ -1733,6 +1810,12 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
     if fence_error:
         raise HTTPException(status_code=409, detail=fence_error)
     intervention_audit = _intervention_audit_for_finish(case_id, tenant_id, payload)
+    if (
+        payload.get("runtime_generation") is not None
+        and payload.get("intervention_id")
+        and not intervention_audit.get("read_receipts_validated")
+    ):
+        raise HTTPException(status_code=409, detail="INTERVENTION_READ_RECEIPTS_REQUIRED")
 
     # Real Pi tool calls always carry trigger_turn_id. Resolve it before the
     # first durable write so a bad application boundary cannot half-finish.

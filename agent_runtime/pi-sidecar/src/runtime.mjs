@@ -216,7 +216,7 @@ export function boundCaseContextPayload(payload, maxChars = contextMaxChars()) {
   ];
   const dropFields = [
     "causal_graph", "directive", "strategy_guidance", "runtime_options",
-    "runtime_policy", "budget", "skills", "collection_requests", "collection_proposals",
+    "runtime_policy", "budget", "skills", "collection_proposals",
     "evidence_analyses", "recommendations", "hypothesis_edges", "hypotheses",
     "information_goals", "running_task_ids",
   ];
@@ -355,14 +355,38 @@ export function boundCaseContextPayload(payload, maxChars = contextMaxChars()) {
   // over-budget object.
   if (jsonChars(result) > limit) {
     const omittedCount = Number(result?._context_meta?.omitted_evidence_count || evidenceSource.length);
-    const candidates = [
-      {
-        _context_meta: { bounded: true, max_chars: limit },
-        intervention: result.intervention && {
-          intervention_id: result.intervention.intervention_id,
-          required: Boolean(result.intervention.required),
-        },
+    const critical = {
+      _context_meta: {
+        bounded: true,
+        max_chars: limit,
+        original_chars: originalChars,
+        omitted_evidence_count: omittedCount,
       },
+      intervention: result.intervention && {
+        intervention_id: result.intervention.intervention_id,
+        kind: result.intervention.kind,
+        required: Boolean(result.intervention.required),
+        trust_state: result.intervention.trust_state,
+        evidence_state_rechecked: Boolean(result.intervention.evidence_state_rechecked),
+        revision_before: result.intervention.revision_before,
+        revision_after: result.intervention.revision_after,
+      },
+      runtime_generation: result.runtime_generation,
+      review_revision: result.review_revision,
+      evidence_summary: refs.slice(0, 2),
+      conclusion: result.conclusion && {
+        conclusion_id: result.conclusion.conclusion_id,
+        state: result.conclusion.state,
+        revision: result.conclusion.revision,
+        report_text: truncateText(result.conclusion.report_text || result.conclusion.summary || "", 120),
+      },
+      evidence_gaps: compactValue(result.evidence_gaps || [], { stringLimit: 72, listLimit: 2, maxDepth: 2 }),
+      target_scope: compactValue(result.target_scope || {}, { stringLimit: 72, listLimit: 2, maxDepth: 2 }),
+      current_support: compactValue(result.current_support || [], { stringLimit: 72, listLimit: 2, maxDepth: 2 }),
+      counterevidence: compactValue(result.counterevidence || [], { stringLimit: 72, listLimit: 2, maxDepth: 2 }),
+    };
+    const candidates = [
+      critical,
       {
         _context_meta: {
           bounded: true,
@@ -507,6 +531,7 @@ export class RuntimeManager {
     this.messageStarts = new Map(); // case_id -> message_start wall-clock ms
     this.recordedModelResponses = new Map(); // case_id -> response hashes already audited
     this.toolStarts = new Map(); // case_id:tool_call_id -> monotonic wall-clock audit timing
+    this.toolAttempts = new Map(); // case_id:name:arguments_hash -> retry count
     this.noSkills = noSkills;
     this.toolCatalog = null;
     this.eventSpool = eventSpool || new EventSpool(
@@ -570,6 +595,9 @@ export class RuntimeManager {
         this.lastUsage.delete(caseId);
         this.messageStarts.delete(caseId);
         this.recordedModelResponses.delete(caseId);
+        for (const key of this.toolAttempts.keys()) {
+          if (key.startsWith(`${caseId}:`)) this.toolAttempts.delete(key);
+        }
       } else {
         existing.context = caseContext;
         existing.concluded = existing.concluded || Boolean(caseContext?.conclusion?.conclusion_id);
@@ -686,8 +714,9 @@ export class RuntimeManager {
   }
 
   _toolEnvelope(context, triggerTurnId = null) {
+    const caseId = context?.case_id;
     return {
-      case_id: context?.case_id,
+      case_id: caseId,
       side_effect_policy: context?.side_effect_policy || "AUTO_READ_LOW",
       runtime_generation: Number(context?.runtime_generation) || 1,
       expected_control_revision: Number(context?.control_revision) || 1,
@@ -698,6 +727,12 @@ export class RuntimeManager {
       runtime_options: context?.runtime_options || {},
       intervention_id: context?.intervention?.intervention_id || undefined,
       trigger_turn_id: triggerTurnId || undefined,
+      __get_retry_count: (name, argumentsHash, toolCallId) => {
+        const key = `${caseId}:${name}:${argumentsHash}`;
+        const current = Number(this.toolAttempts.get(key) || 0);
+        this.toolAttempts.set(key, current + 1);
+        return current;
+      },
     };
   }
 
@@ -786,6 +821,9 @@ export class RuntimeManager {
         this.lastAnswers.delete(case_id);
         this.lastUsage.delete(case_id);
         this.messageStarts.delete(case_id);
+        for (const key of this.toolAttempts.keys()) {
+          if (key.startsWith(`${case_id}:`)) this.toolAttempts.delete(key);
+        }
       } catch (err) {
         // A reset is a bandwidth/scope optimization, not a reason to make the
         // turn unavailable.  Preserve the existing session if the SDK version
@@ -828,6 +866,7 @@ export class RuntimeManager {
         case_id,
         case_goal: context.case_goal || "",
         target_scope: context.target_scope || {},
+        runtime_generation: context.runtime_generation || entry.generation,
         case_command_revision: context.case_command_revision || 1,
         control_revision: context.control_revision || 1,
         plan_revision: context.plan_revision || 0,
@@ -835,6 +874,7 @@ export class RuntimeManager {
         side_effect_policy: policy,
         evidence_watermark: context.evidence_watermark || 0,
         evidence_summary: (context.evidence_summary || []).slice(0, 12),
+        propagation: context.propagation || {},
         hypotheses: (context.hypotheses || []).slice(0, 20),
         hypothesis_edges: (context.hypothesis_edges || []).slice(0, 40),
         evidence_gaps: (context.evidence_gaps || []).slice(0, 20),

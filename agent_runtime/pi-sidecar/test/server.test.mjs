@@ -538,6 +538,33 @@ test("internal tool calls send X-Internal-Token when configured", async () => {
   }
 });
 
+test("tool audit retry_count increments for repeated identical calls", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: {} }), {
+    status: 200, headers: { "Content-Type": "application/json" },
+  });
+  try {
+    const counts = new Map();
+    const tools = buildToolCatalog({
+      internalBase: "http://127.0.0.1:1",
+      getEnvelope: () => ({
+        __get_retry_count: (_name, hash) => {
+          const current = counts.get(hash) || 0;
+          counts.set(hash, current + 1);
+          return current;
+        },
+      }),
+    });
+    const tool = tools.find((item) => item.name === "get_case_snapshot");
+    const first = await tool.execute("call-1", { case_id: "case-retry" });
+    const second = await tool.execute("call-2", { case_id: "case-retry" });
+    assert.equal(first.details.retry_count, 0);
+    assert.equal(second.details.retry_count, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("canonical catalog metadata builds tools but cannot elevate runtime policy", () => {
   const catalog = {
     schema_version: "tool-catalog.v1",
