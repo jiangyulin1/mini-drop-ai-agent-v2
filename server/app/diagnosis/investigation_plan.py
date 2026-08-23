@@ -59,9 +59,13 @@ class PlanUpdateInput(StrictModel):
 
 class EvidenceReviewInput(StrictModel):
     evidence_id: str = Field(min_length=1, max_length=128)
-    decision: str = Field(min_length=1, max_length=20)
-    reason_code: Optional[str] = Field(default=None, max_length=64)
-    reason: Optional[str] = Field(default=None, max_length=1000)
+    decision: str = Field(min_length=1, max_length=32)
+    expected_review_revision: int = Field(ge=0)
+    impact_token: str = Field(min_length=10, max_length=256)
+    assessment: dict[str, str] = Field(default_factory=dict)
+    reason_code: str = Field(min_length=2, max_length=64)
+    reason: str = Field(min_length=3, max_length=1000)
+    override_reason: Optional[str] = Field(default=None, min_length=3, max_length=1000)
 
 
 class InvestigationPlanService:
@@ -273,49 +277,43 @@ class InvestigationPlanService:
         *,
         actor_id: str,
     ) -> dict[str, Any]:
-        if payload.decision not in {"TRUSTED", "LOW_TRUST", "EXCLUDED", "RESTORED"}:
-            raise ValueError(f"INVALID_REVIEW_DECISION:{payload.decision}")
-        review = self._repo.add_evidence_review(case_id, tenant_id, {
-            "review_id": f"review-{uuid4().hex[:16]}",
-            "evidence_id": payload.evidence_id,
-            "decision": payload.decision,
-            "reason_code": payload.reason_code,
-            "reason": payload.reason,
-            "actor_id": actor_id,
-        })
-        if hasattr(self._repo, "add_evidence_review_revision"):
-            self._repo.add_evidence_review_revision(
-                evidence_id=payload.evidence_id, case_id=case_id, tenant_id=tenant_id,
-                decision=payload.decision, reviewed_by=actor_id, reason=payload.reason,
-            )
-        if hasattr(self._repo, "invalidate_evidence_analysis_runs"):
-            self._repo.invalidate_evidence_analysis_runs(
-                payload.evidence_id, tenant_id,
-                input_state=("EXCLUDED_INPUT" if payload.decision == "EXCLUDED" else "STALE_INPUT"),
-            )
-        # 排除后的 Evidence 从后续 Attachment/Prompt 投影中剥离；恢复时回写 canonical store。
-        if payload.decision == "EXCLUDED":
-            self._apply_excluded_evidence(case_id, tenant_id, payload.evidence_id)
-        elif payload.decision == "RESTORED":
-            if hasattr(self._repo, "restore_case_evidence"):
-                self._repo.restore_case_evidence(case_id, tenant_id, payload.evidence_id)
-        return review
+        return self._repo.apply_evidence_review(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            evidence_id=payload.evidence_id,
+            decision=payload.decision,
+            assessment=payload.assessment,
+            reason_code=payload.reason_code,
+            reason=payload.reason,
+            override_reason=payload.override_reason,
+            expected_review_revision=payload.expected_review_revision,
+            impact_token=payload.impact_token,
+            actor_id=actor_id,
+        )
 
-    def _apply_excluded_evidence(self, case_id: str, tenant_id: str, evidence_id: str) -> None:
-        if hasattr(self._repo, "exclude_case_evidence"):
-            self._repo.exclude_case_evidence(case_id, tenant_id, evidence_id)
-        for attachment in self._repo.list_case_attachments(case_id, tenant_id):
-            evidence_ids = attachment.get("evidence_ids") or []
-            if evidence_id in evidence_ids:
-                remaining = [item for item in evidence_ids if item != evidence_id]
-                self._repo.update_case_attachment(
-                    attachment.get("attachment_id"),
-                    tenant_id,
-                    updates={"evidence_ids": remaining},
-                )
+    def preview_evidence_review(
+        self,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        *,
+        decision: str,
+        assessment: dict[str, str] | None = None,
+    ) -> dict[str, Any] | None:
+        return self._repo.preview_evidence_review(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            evidence_id=evidence_id,
+            decision=decision,
+            assessment=assessment or {},
+        )
 
     def list_reviews(self, case_id: str, tenant_id: str,
                      evidence_id: str | None = None) -> list[dict[str, Any]]:
+        if hasattr(self._repo, "list_evidence_review_revisions"):
+            return self._repo.list_evidence_review_revisions(
+                case_id, tenant_id, evidence_id=evidence_id,
+            )
         return self._repo.list_evidence_reviews(case_id, tenant_id, evidence_id=evidence_id)
 
     def _get_step(self, case_id: str, tenant_id: str, step_id: str) -> Optional[dict[str, Any]]:

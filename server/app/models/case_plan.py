@@ -648,6 +648,8 @@ class CaseRecoveryPlanModel(Base):
     execution_json = Column(JSON, default=dict)
     verification_json = Column(JSON, default=dict)
     rollback_json = Column(JSON, default=dict)
+    evidence_refs_json = Column(JSON, nullable=False, default=list)
+    evidence_hold_json = Column(JSON, nullable=False, default=dict)
     requires_approval = Column(Integer, nullable=False, default=1)
     approved_by = Column(String(128), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)

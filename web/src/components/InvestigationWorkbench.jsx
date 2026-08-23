@@ -12,6 +12,7 @@ import {
   removeCasePlanStep,
   reprioritizeCasePlanStep,
   retargetCasePlanStep,
+  previewCaseEvidenceReview,
   reviewCaseEvidence,
 } from "../api/client";
 import { EVIDENCE_TRUST, PLAN_STATUS, RISK_LEVEL } from "../utils/opsMappings";
@@ -215,11 +216,27 @@ export default function InvestigationWorkbench({ caseId, workspace }) {
 
   const reviewEvidence = (evidenceId, decision) => {
     if (!evidenceId) return;
-    runAction(() => reviewCaseEvidence(caseId, evidenceId, {
-      evidence_id: evidenceId, decision,
-      reason_code: decision === "EXCLUDED" ? "USER_EXCLUDED" : undefined,
-      reason: decision === "EXCLUDED" ? "用户从本调查中排除该证据" : "用户已复核该证据",
-    }), `证据 ${evidenceId} → ${decision}`);
+    const reasonCode = decision === "EXCLUDED"
+      ? "USER_EXCLUDED"
+      : decision === "LOW_TRUST" ? "QUALITY_CONCERN" : "USER_VERIFIED";
+    const reason = decision === "EXCLUDED"
+      ? "用户从本调查中排除该证据"
+      : decision === "LOW_TRUST" ? "用户在调查工作台将该证据标记为低可信" : "用户已复核该证据";
+    runAction(async () => {
+      const impact = await previewCaseEvidenceReview(caseId, evidenceId, {
+        decision,
+        assessment: {},
+      });
+      await reviewCaseEvidence(caseId, evidenceId, {
+        evidence_id: evidenceId,
+        decision,
+        assessment: {},
+        reason_code: reasonCode,
+        reason,
+        expected_review_revision: impact.current_review_revision,
+        impact_token: impact.impact_token,
+      });
+    }, `证据 ${evidenceId} → ${decision}`);
   };
 
   const StepCard = ({ step, index }) => (

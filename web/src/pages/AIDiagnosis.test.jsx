@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import AIDiagnosis from "./AIDiagnosis";
 import {
+  createIncidentCase,
   getCaseWorkspace,
   getCaseHypotheses,
   getCaseInvestigationPlan,
@@ -179,6 +180,152 @@ describe("AIDiagnosis workspace", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "长期目标" }));
     expect(await screen.findByText(/长期目标会积累信号/)).toBeInTheDocument();
     expect(screen.getByLabelText("服务标识")).toBeInTheDocument();
+  });
+
+  it("creates a diagnosis with multi-process scope, service edges, evidence and autonomy policy", async () => {
+    listAgents.mockResolvedValue([
+      {
+        id: "linux-worker-1",
+        hostname: "worker1",
+        ip_addr: "192.168.10.11",
+        status: "ONLINE",
+        capabilities: ["sys_metrics", "perf_cpu"],
+      },
+      {
+        id: "linux-worker-2",
+        hostname: "worker2",
+        ip_addr: "192.168.10.12",
+        status: "ONLINE",
+        capabilities: ["sys_metrics", "perf_cpu"],
+      },
+    ]);
+    listTasks.mockResolvedValue([{
+      id: "task-existing-1",
+      name: "service-x CPU 基线",
+      status: "DONE",
+      agent_id: "linux-worker-1",
+      target_pid: 1201,
+      visibility: "USER_VISIBLE",
+    }]);
+    createIncidentCase.mockResolvedValue({
+      ...CASE,
+      case_id: "case-created",
+      title: "service-x · CPU 持续升高",
+      target_scope: {
+        service_id: "service-x",
+        instances: [
+          { service_id: "service-x", agent_id: "linux-worker-1", pid: 1201 },
+          { service_id: "service-x", agent_id: "linux-worker-2", pid: 2202 },
+        ],
+        dependencies: [],
+      },
+    });
+
+    render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /新建诊断/ }));
+    fireEvent.change(screen.getByLabelText("发生了什么"), { target: { value: "service-x CPU 持续升高" } });
+    fireEvent.change(screen.getByLabelText("目标服务"), { target: { value: "service-x" } });
+
+    fireEvent.click(screen.getByText("按需配置目标机器、进程与服务关系"));
+    fireEvent.click(await screen.findByRole("button", { name: /添加机器 \/ 进程/ }));
+    fireEvent.click(screen.getByRole("button", { name: /添加机器 \/ 进程/ }));
+    const instanceServices = screen.getAllByLabelText("服务");
+    fireEvent.change(instanceServices[0], { target: { value: "service-x" } });
+    fireEvent.change(instanceServices[1], { target: { value: "service-x" } });
+    const workerFields = screen.getAllByLabelText("Worker");
+    fireEvent.mouseDown(workerFields[0]);
+    fireEvent.click(await screen.findByText("worker1 · 在线"));
+    fireEvent.mouseDown(workerFields[1]);
+    const worker2Options = await screen.findAllByText("worker2 · 在线");
+    fireEvent.click(worker2Options.at(-1));
+    const pidFields = screen.getAllByLabelText("PID");
+    fireEvent.change(pidFields[0], { target: { value: "1201" } });
+    fireEvent.change(pidFields[1], { target: { value: "2202" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /添加服务关系/ }));
+    fireEvent.change(screen.getByLabelText("上游服务"), { target: { value: "service-x" } });
+    fireEvent.change(screen.getByLabelText("下游服务"), { target: { value: "redis-y" } });
+
+    fireEvent.click(screen.getByText("按需配置事件时间与已有证据"));
+    fireEvent.change(screen.getByLabelText("事件开始时间"), { target: { value: "2026-08-21T18:00" } });
+    fireEvent.change(screen.getByLabelText("事件结束时间"), { target: { value: "2026-08-21T18:30" } });
+    fireEvent.mouseDown(screen.getByLabelText("关联已有采集任务"));
+    fireEvent.click(await screen.findByText(/service-x CPU 基线/));
+
+    fireEvent.click(screen.getByLabelText("持续接管"));
+    fireEvent.click(await screen.findByText("配置持续接管的预算、授权与恢复验证"));
+    fireEvent.change(screen.getByLabelText("最多调查轮次"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("最多自动处置次数"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Swarm 服务名"), { target: { value: "service-x-stack_service-x" } });
+    fireEvent.change(screen.getByLabelText("恢复检查 URL"), { target: { value: "https://service-x.example.com/health" } });
+    fireEvent.click(screen.getByLabelText("自动批准 CPU / I/O 深度采集"));
+    fireEvent.click(screen.getByLabelText("授权重启已登记的无状态 Swarm 服务"));
+    fireEvent.click(document.querySelector(".ant-modal-footer .ant-btn-primary"));
+
+    await waitFor(() => expect(createIncidentCase).toHaveBeenCalledTimes(1));
+    const payload = createIncidentCase.mock.calls[0][0];
+    expect(payload).toMatchObject({
+      problem_description: "service-x CPU 持续升高",
+      run_mode: "AUTHORIZED_AUTONOMY",
+      environment: "production",
+      initial_tasks: ["task-existing-1"],
+      time_range: {
+        start: new Date("2026-08-21T18:00").toISOString(),
+        end: new Date("2026-08-21T18:30").toISOString(),
+        source: "user_expression",
+      },
+      target_scope: {
+        service_id: "service-x",
+        service_ids: ["service-x"],
+        instances: [
+          expect.objectContaining({ service_id: "service-x", host_id: "worker1", agent_id: "linux-worker-1", pid: 1201 }),
+          expect.objectContaining({ service_id: "service-x", host_id: "worker2", agent_id: "linux-worker-2", pid: 2202 }),
+        ],
+        dependencies: [{
+          source_service: "service-x",
+          target_service: "redis-y",
+          relation: "CALLS",
+          confidence: "medium",
+          source: "user_confirmed",
+        }],
+        verification: {
+          http_checks: [expect.objectContaining({ url: "https://service-x.example.com/health" })],
+        },
+        orchestration: expect.objectContaining({ swarm_service: "service-x-stack_service-x" }),
+        autonomy_policy: expect.objectContaining({
+          max_iterations: 12,
+          max_actions: 4,
+          max_auto_impact: "I2",
+          allowed_action_ids: ["swarm.restart-stateless-service"],
+          auto_approve_probe_ids: ["process_cpu_profile", "process_io_latency"],
+        }),
+      },
+    });
+  }, 15_000);
+
+  it("inherits scope from a long-lived target instead of offering conflicting scope fields", async () => {
+    listTargetSessions.mockResolvedValue([{
+      target_session_id: "target-checkout",
+      display_name: "checkout 长期目标",
+      status: "ACTIVE",
+      environment: "staging",
+      target_scope: {
+        service_id: "checkout",
+        instances: [{ service_id: "checkout", agent_id: "linux-worker-1", pid: 8080 }],
+        dependencies: [],
+      },
+    }]);
+
+    render(<MemoryRouter><AIDiagnosis /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /新建诊断/ }));
+    fireEvent.mouseDown(screen.getByLabelText("关联长期目标"));
+    fireEvent.click(await screen.findByText("checkout 长期目标 · 监控中"));
+
+    expect(await screen.findByText(/将继承「checkout 长期目标」/)).toBeInTheDocument();
+    expect(screen.queryByText("按需配置目标机器、进程与服务关系")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("目标服务")).toBeDisabled();
+    expect(screen.getByLabelText("环境")).toBeDisabled();
+    expect(screen.getByText("按需配置事件时间与已有证据")).toBeInTheDocument();
   });
 
   it("keeps ordinary conversation read-only by default", async () => {

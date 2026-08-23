@@ -72,6 +72,40 @@ def _done_task_with_artifact() -> str:
     return task.id
 
 
+def _review_evidence(
+    client: TestClient,
+    case_id: str,
+    evidence_id: str,
+    decision: str,
+    *,
+    reason: str,
+    reason_code: str | None = None,
+    assessment: dict | None = None,
+):
+    preview = client.post(
+        f"/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/preview",
+        json={"decision": decision, "assessment": assessment or {}},
+    )
+    assert preview.status_code == 200, preview.text
+    impact = preview.json()["data"]
+    return client.post(
+        f"/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews",
+        json={
+            "evidence_id": evidence_id,
+            "decision": decision,
+            "expected_review_revision": impact["current_review_revision"],
+            "impact_token": impact["impact_token"],
+            "assessment": assessment or {},
+            "reason_code": reason_code or (
+                "USER_EXCLUDED" if decision == "EXCLUDED"
+                else "QUALITY_CONCERN" if decision == "LOW_TRUST"
+                else "USER_VERIFIED"
+            ),
+            "reason": reason,
+        },
+    )
+
+
 def test_attachment_materializes_task_artifacts_as_case_evidence(client: TestClient):
     task_id = _done_task_with_artifact()
     case = _create_case(client)
@@ -245,9 +279,8 @@ def test_evidence_review_excluded_updates_canonical_store(client: TestClient):
         json={"references": [{"type": "task", "id": task_id}]},
     ).json()["data"]["items"][0]
     evidence_id = attached["evidence_ids"][0]
-    review = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
-        json={"evidence_id": evidence_id, "decision": "EXCLUDED", "reason": "outlier"},
+    review = _review_evidence(
+        client, case["case_id"], evidence_id, "EXCLUDED", reason="outlier",
     )
     assert review.status_code == 200, review.text
     stored = repo.get_case_evidence(case["case_id"], "tenant-a", evidence_id)
@@ -281,9 +314,8 @@ def test_excluding_supporting_evidence_appends_downgraded_conclusion(client: Tes
     original = repo.get_conclusion(case["case_id"], "tenant-a")
     assert original["revision"] == 1
 
-    review = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
-        json={"evidence_id": evidence_id, "decision": "EXCLUDED", "reason": "outlier"},
+    review = _review_evidence(
+        client, case["case_id"], evidence_id, "EXCLUDED", reason="outlier",
     )
     assert review.status_code == 200, review.text
     downgraded = repo.get_conclusion(case["case_id"], "tenant-a")
@@ -389,9 +421,9 @@ def test_evidence_analysis_requires_valid_field_citation_and_review_marks_stale(
     assert completed.status_code == 200, completed.text
     assert completed.json()["data"]["status"] == "COMPLETED"
 
-    review = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
-        json={"evidence_id": evidence_id, "decision": "LOW_TRUST", "reason": "sample window too short"},
+    review = _review_evidence(
+        client, case["case_id"], evidence_id, "LOW_TRUST",
+        reason="sample window too short",
     )
     assert review.status_code == 200, review.text
     analyses = client.get(
@@ -437,9 +469,8 @@ def test_evidence_analysis_rejects_completion_after_review_revision(client: Test
     )
     projection = repo.list_evidence_projections(case["case_id"], "tenant-a", evidence_id)[-1]
 
-    review = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
-        json={"evidence_id": evidence_id, "decision": "TRUSTED", "reason": "human verified"},
+    review = _review_evidence(
+        client, case["case_id"], evidence_id, "TRUSTED", reason="human verified",
     )
     assert review.status_code == 200, review.text
 
@@ -522,9 +553,8 @@ def test_explicit_single_analysis_can_explain_excluded_evidence(client: TestClie
         f"/api/v1/cases/{case['case_id']}/attachments",
         json={"references": [{"type": "task", "id": task_id}]},
     ).json()["data"]["items"][0]["evidence_ids"][0]
-    review = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
-        json={"evidence_id": evidence_id, "decision": "EXCLUDED", "reason": "known outlier"},
+    review = _review_evidence(
+        client, case["case_id"], evidence_id, "EXCLUDED", reason="known outlier",
     )
     assert review.status_code == 200, review.text
     run = evidence_analysis_service.create_run(

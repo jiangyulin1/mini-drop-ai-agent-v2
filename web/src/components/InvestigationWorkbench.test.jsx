@@ -41,6 +41,10 @@ describe("InvestigationWorkbench", () => {
     vi.spyOn(api, "removeCasePlanStep").mockResolvedValue({});
     vi.spyOn(api, "reprioritizeCasePlanStep").mockResolvedValue({});
     vi.spyOn(api, "createCaseFanout").mockResolvedValue({});
+    vi.spyOn(api, "previewCaseEvidenceReview").mockResolvedValue({
+      current_review_revision: 0,
+      impact_token: "impact-token-1",
+    });
     vi.spyOn(api, "reviewCaseEvidence").mockResolvedValue({});
   });
 
@@ -139,8 +143,15 @@ describe("InvestigationWorkbench", () => {
     expect(screen.getByText("本 Case 未触发跨节点采集")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "信任" }));
+    await waitFor(() => expect(api.previewCaseEvidenceReview).toHaveBeenCalledWith(
+      "case-1", "ev-live-1", { decision: "TRUSTED", assessment: {} },
+    ));
     await waitFor(() => expect(api.reviewCaseEvidence).toHaveBeenCalledWith(
-      "case-1", "ev-live-1", expect.objectContaining({ decision: "TRUSTED" }),
+      "case-1", "ev-live-1", expect.objectContaining({
+        decision: "TRUSTED",
+        expected_review_revision: 0,
+        impact_token: "impact-token-1",
+      }),
     ));
   });
 

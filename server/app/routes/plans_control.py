@@ -21,6 +21,7 @@ from server.app.case_collaboration import (
     CaseMessageRequest,
     EvidenceReviewRequest,
     EvidenceChainConfidenceRequest,
+    EvidenceReviewPreviewRequest,
     PlanUpdateRequest,
     ReprioritizeStepRequest,
     RetargetStepRequest,
@@ -574,11 +575,24 @@ def review_case_evidence(
     principal_id = _request_principal(request)
     review_payload = payload.model_copy(update={"evidence_id": evidence_id})
     try:
+        preview = investigation_plan_service.preview_evidence_review(
+            case_id,
+            tenant_id,
+            evidence_id,
+            decision=payload.decision,
+            assessment=payload.assessment,
+        )
+        if preview is None:
+            raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+        if preview.get("requires_approval"):
+            _require_role(request, "authorization_admin")
         review = investigation_plan_service.review_evidence(
             case_id, tenant_id,
             EvidenceReviewInput(**review_payload.model_dump(mode="json")),
             actor_id=principal_id,
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     repo.record_case_event(
@@ -591,47 +605,6 @@ def review_case_evidence(
         },
         actor_id=principal_id,
     )
-    # A review changes the authority of existing Evidence without creating a
-    # collection outbox event. Persist an explicit durable wakeup so a Pi
-    # runtime is forced to rebuild its snapshot and re-read lifecycle state.
-    if hasattr(repo, "create_runtime_wakeup"):
-        runs = repo.list_investigation_runs(case_id, tenant_id) if hasattr(
-            repo, "list_investigation_runs",
-        ) else []
-        active_run = next(
-            (
-                item for item in runs
-                if item.get("status") not in {
-                    "RESOLVED", "STOPPED", "INSUFFICIENT_EVIDENCE", "FAILED",
-                }
-            ),
-            None,
-        )
-        if active_run is None and hasattr(repo, "create_investigation_run"):
-            active_run = repo.create_investigation_run(
-                case_id=case_id,
-                tenant_id=tenant_id,
-                created_from_turn_id=None,
-            )
-        if active_run is not None:
-            current_case = repo.get_incident_case(case_id, tenant_id) or {}
-            revision = int(review.get("review_revision") or 1)
-            repo.create_runtime_wakeup(
-                case_id=case_id,
-                tenant_id=tenant_id,
-                investigation_run_id=str(active_run["run_id"]),
-                reason=(
-                    f"Evidence review changed {evidence_id} to {review.get('decision')}; "
-                    "the Agent must rebuild its Evidence snapshot before continuing."
-                ),
-                source_refs=[f"evidence-review:{evidence_id}:r{revision}"],
-                control_revision=int(current_case.get("control_revision") or 1),
-                scope_revision=int(current_case.get("scope_revision") or 1),
-                reason_class="EVIDENCE_REVIEWED",
-                dedupe_key=(
-                    f"evidence-review-wakeup:{case_id}:{evidence_id}:{revision}"
-                ),
-            )
     reviewed_evidence = repo.get_case_evidence(case_id, tenant_id, evidence_id) if hasattr(repo, "get_case_evidence") else None
     impact = _evidence_review_impact(
         case_id,
@@ -641,6 +614,29 @@ def review_case_evidence(
         int(review.get("review_revision") or (reviewed_evidence or {}).get("review_revision") or 0),
     )
     return APIResponse(data={**review, "impact_report": impact})
+
+
+@router.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/preview")
+def preview_case_evidence_review(
+    case_id: str,
+    evidence_id: str,
+    payload: EvidenceReviewPreviewRequest,
+    request: Request,
+) -> APIResponse:
+    _require_role(request, "operator")
+    try:
+        result = investigation_plan_service.preview_evidence_review(
+            case_id,
+            _request_tenant(),
+            evidence_id,
+            decision=payload.decision,
+            assessment=payload.assessment,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+    return APIResponse(data=result)
 
 
 @router.get("/api/v1/cases/{case_id}/evidence-reviews")

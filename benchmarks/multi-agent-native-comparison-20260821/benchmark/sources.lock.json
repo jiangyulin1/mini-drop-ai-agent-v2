@@ -1,0 +1,185 @@
+{
+  "schema": "mini-drop.sources-lock.v2",
+  "generated_at": "2026-08-21T15:50:27.016690Z",
+  "converter": "build_replay_pack.py@v1",
+  "sources": [
+    {
+      "case_id": "case-01",
+      "legacy_case_id": "C1-envoy-micro-hotspot",
+      "url": "https://github.com/envoyproxy/envoy/pull/42752",
+      "patch_url": "https://github.com/envoyproxy/envoy/pull/42752.patch",
+      "license": "Apache-2.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "fef2badc3ac6676128a8fa96acccec20f4cce72f",
+      "patch_bytes": 1180,
+      "patch_sha256": "sha256:b2897048ec09d877f10e2896666baaf68db932d0d49454eb6598a95023f245a7",
+      "changed_files": [
+        "source/common/router/router.cc"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-02",
+      "legacy_case_id": "C2-kubernetes-lock-contention",
+      "url": "https://github.com/kubernetes/kubernetes/pull/139142",
+      "patch_url": "https://github.com/kubernetes/kubernetes/pull/139142.patch",
+      "license": "Apache-2.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "20f7c7f1da965c80923128dbdd0be7b0238d07c7",
+      "patch_bytes": 51424,
+      "patch_sha256": "sha256:e3c6c80efc83a0acda52902fa869490ac7f206037863b0945e543baaca63e2c5",
+      "changed_files": [
+        "pkg/controller/podautoscaler/horizontal.go",
+        "pkg/controller/podautoscaler/horizontal_test.go",
+        "pkg/controller/podautoscaler/hpa_selector_store.go",
+        "pkg/controller/podautoscaler/hpa_selector_store_test.go",
+        "pkg/features/kube_features.go",
+        "test/compatibility_lifecycle/reference/feature_list.md",
+        "test/compatibility_lifecycle/reference/versioned_feature_list.yaml"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-03",
+      "legacy_case_id": "C3-otel-python-retention",
+      "url": "https://github.com/open-telemetry/opentelemetry-python/pull/4224",
+      "patch_url": "https://github.com/open-telemetry/opentelemetry-python/pull/4224.patch",
+      "license": "Apache-2.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "c51244fcfabb4db2ca4a5c82eeead15334ac5c2d",
+      "patch_bytes": 22638,
+      "patch_sha256": "sha256:35b84c5ddd1c79e7b3a94e2da4499f704996437179c75e9058fc85d32ff51b71",
+      "changed_files": [
+        "CHANGELOG.md",
+        "opentelemetry-sdk/src/opentelemetry/sdk/metrics/_internal/__init__.py",
+        "opentelemetry-sdk/src/opentelemetry/sdk/metrics/_internal/export/__init__.py",
+        "opentelemetry-sdk/tests/metrics/integration_test/test_provider_shutdown.py",
+        "opentelemetry-sdk/tests/metrics/test_metrics.py"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-04",
+      "legacy_case_id": "C4-prometheus-retained-capacity",
+      "url": "https://github.com/prometheus/prometheus/pull/19412",
+      "patch_url": "https://github.com/prometheus/prometheus/pull/19412.patch",
+      "license": "Apache-2.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "7f2bbf712ad362242df3245d992c3cd4d1a53597",
+      "patch_bytes": 9090,
+      "patch_sha256": "sha256:9463ac6d863daa8f63c45a77e66f1389a25135a531ee0e02361665182230ecbd",
+      "changed_files": [
+        "tsdb/head_read.go",
+        "tsdb/head_read_test.go",
+        "tsdb/ooo_head_read.go"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-05",
+      "legacy_case_id": "C5-redis-expiry-starvation",
+      "url": "https://github.com/redis/redis/pull/15427",
+      "patch_url": "https://github.com/redis/redis/pull/15427.patch",
+      "license": "BSD-3-Clause",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "07d87c11ee0c7e9f9deac27f1b82e48a7292a2fc",
+      "patch_bytes": 6215,
+      "patch_sha256": "sha256:8aa9db4834f6bd0ddf338da96545b6a5bec69ad04c5317ea0322ca927a6f45df",
+      "changed_files": [
+        "src/expire.c"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-06",
+      "legacy_case_id": "C6-kubernetes-full-sync",
+      "url": "https://github.com/kubernetes/kubernetes/pull/138571",
+      "patch_url": "https://github.com/kubernetes/kubernetes/pull/138571.patch",
+      "license": "Apache-2.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "9daabbd6c73aac543ef8dfd5326098eb4accfa23",
+      "patch_bytes": 2821,
+      "patch_sha256": "sha256:7e854e9819f4fcef8190cfbe1d192e401c3571da7e0fb2a35af96d42eba35205",
+      "changed_files": [
+        "pkg/proxy/iptables/proxier.go",
+        "pkg/proxy/iptables/proxier_test.go"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-07",
+      "legacy_case_id": "C7-kubernetes-uncertain-revert",
+      "url": "https://github.com/kubernetes/kubernetes/pull/140886",
+      "patch_url": "https://github.com/kubernetes/kubernetes/pull/140886.patch",
+      "license": "Apache-2.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "cd1f19ca7e4303b9cc53d89699fdc39208795e30",
+      "patch_bytes": 5353,
+      "patch_sha256": "sha256:f5ea23f5b9c137dc81ea442d96a5ec1c6755a8e2411622b1062d0f4fb5c57df2",
+      "changed_files": [
+        "pkg/controller/resourceclaim/controller.go",
+        "pkg/controller/resourceclaim/controller_test.go"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-08",
+      "legacy_case_id": "C8-grafana-unverified-fix",
+      "url": "https://github.com/grafana/grafana/pull/124542",
+      "patch_url": "https://github.com/grafana/grafana/pull/124542.patch",
+      "license": "AGPL-3.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "08eecb650b24fd5fe6ce3c14a342d0b6241416ad",
+      "patch_bytes": 37987,
+      "patch_sha256": "sha256:548db3fb53489d838d159f99e91ec7eeb7484fbdabb6aab887325fbfa80cc1f7",
+      "changed_files": [
+        "public/app/features/canvas/runtime/element.tsx",
+        "public/app/features/canvas/runtime/frame.tsx",
+        "public/app/features/canvas/runtime/scene.test.tsx",
+        "public/app/features/canvas/runtime/sceneAbleManagement.ts",
+        "public/app/features/canvas/runtime/sceneElementManagement.ts",
+        "public/app/plugins/panel/canvas/editor/layer/TreeNavigationEditor.tsx",
+        "public/app/plugins/panel/canvas/editor/layer/TreeNodeTitle.tsx",
+        "public/app/plugins/panel/canvas/editor/layer/tree.test.ts",
+        "public/app/plugins/panel/canvas/editor/layer/tree.ts",
+        "public/app/plugins/panel/canvas/types.ts"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    },
+    {
+      "case_id": "case-09",
+      "legacy_case_id": "C9-grafana-workqueue-identity",
+      "url": "https://github.com/grafana/grafana/pull/123359",
+      "patch_url": "https://github.com/grafana/grafana/pull/123359.patch",
+      "license": "AGPL-3.0",
+      "source_class": "SOURCE_REAL",
+      "retrieval_status": "fetched",
+      "retrieved_at": "2026-08-21T15:50:27.016690Z",
+      "head_sha": "67bcdbaa9b758e35a1d3d3ebf8ec2833956c161f",
+      "patch_bytes": 20396,
+      "patch_sha256": "sha256:075d11e7b4877282e638269c4b2279738ffd612fddf44476b0836155a15c2068",
+      "changed_files": [
+        "pkg/registry/apis/provisioning/controller/repository.go",
+        "pkg/registry/apis/provisioning/controller/repository_test.go",
+        "pkg/registry/apis/provisioning/controller/shutdown_test.go"
+      ],
+      "converter": "build_replay_pack.py@v1"
+    }
+  ]
+}

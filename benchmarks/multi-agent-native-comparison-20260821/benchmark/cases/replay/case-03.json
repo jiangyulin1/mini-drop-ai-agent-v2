@@ -1,0 +1,48 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-03",
+  "evidence": [
+    {
+      "evidence_id": "ev-03-rss",
+      "kind": "rss_trend",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "rss_mb": [
+          182,
+          194,
+          211,
+          229
+        ],
+        "gc_cycles": [
+          0,
+          3,
+          6,
+          9
+        ],
+        "window": "T0/T1"
+      },
+      "integrity_hash": "sha256:1e1de39b3cb5d389f7183b43089f24b5c849b3722cceb5a076978535d0087eb8"
+    },
+    {
+      "evidence_id": "ev-03-refs",
+      "kind": "reference_retention",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "retained_objects": 1842,
+        "strong_edges": 3690,
+        "weak_edge_candidates": 0,
+        "after_gc": true
+      },
+      "integrity_hash": "sha256:6493ae7b7a2caefab018474b71ac705c6bf796821b58fae16bf0f29dd36eed57"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

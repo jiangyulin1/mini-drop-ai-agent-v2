@@ -563,7 +563,9 @@ def internal_tool_acknowledge_intervention(payload: dict[str, Any], request: Req
              if str(item.get("wakeup_id") or "") == wakeup_id),
             None,
         )
-    if wakeup is None or str(wakeup.get("reason_class") or "") != "EVIDENCE_REVIEWED":
+    if wakeup is None or str(wakeup.get("reason_class") or "") not in {
+        "EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED",
+    }:
         raise HTTPException(status_code=409, detail="INTERVENTION_NOT_CURRENT")
     affected_ids: list[str] = []
     expected_revisions: dict[str, int] = {}
@@ -577,6 +579,12 @@ def internal_tool_acknowledge_intervention(payload: dict[str, Any], request: Req
                 revision = int(raw.rsplit(":r", 1)[1])
             except (IndexError, ValueError):
                 revision = None
+        elif raw.startswith("evidence:"):
+            # Governance outbox events use the canonical evidence:<id> form;
+            # unlike the legacy wakeup reference it carries no revision, so
+            # the canonical row is checked below and the current revision is
+            # used for the ACK contract.
+            evidence_id = raw[len("evidence:"):].split(":", 1)[0]
         if evidence_id and evidence_id not in affected_ids:
             affected_ids.append(evidence_id)
         if revision is not None:

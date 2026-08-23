@@ -2,14 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
+  Checkbox,
+  Collapse,
+  Col,
   Dropdown,
   Form,
   Input,
+  InputNumber,
   Modal,
   Radio,
+  Row,
   Select,
   Space,
-  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -18,6 +22,7 @@ import {
   DatabaseOutlined,
   ExperimentOutlined,
   MessageOutlined,
+  MinusCircleOutlined,
   MoreOutlined,
   PlusOutlined,
   RightOutlined,
@@ -59,7 +64,7 @@ import {
 } from "../api/client";
 import { useSearchParams } from "react-router-dom";
 import styles from "./AIDiagnosis.module.css";
-import { isUserVisibleTask } from "../utils/taskNames";
+import { isUserVisibleTask, taskDisplayName } from "../utils/taskNames";
 import CaseConversation from "./ai-workspace/CaseConversation";
 import DiagnosisDataConsole from "./ai-workspace/DiagnosisDataConsole";
 import DiagnosisTechnicalDrawer from "./ai-workspace/DiagnosisTechnicalDrawer";
@@ -70,6 +75,7 @@ import KnowledgeMemoryDrawer from "./ai-workspace/KnowledgeMemoryDrawer";
 import InvestigationWorkbench from "../components/InvestigationWorkbench";
 import {
   CASE_STATE_META,
+  RELATION_OPTIONS,
   buildInstancesFromTasks,
   caseHasInstances,
   formatTime,
@@ -88,6 +94,94 @@ function statusClass(tone) {
 function createCaseTitle(problem, serviceId) {
   const summary = shortTitle(problem) || "新诊断";
   return serviceId ? `${serviceId} · ${summary}`.slice(0, 256) : summary;
+}
+
+function buildInitialTargetScope(values, agents) {
+  const primaryService = values.service_id?.trim() || "";
+  const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+  const instances = (values.instances || []).filter(
+    (item) => item?.agent_id && Number(item?.pid) > 0 && item?.service_id?.trim(),
+  ).map((item) => {
+    const agent = agentById.get(item.agent_id);
+    const serviceId = item.service_id.trim();
+    const pid = Number(item.pid);
+    return {
+      service_id: serviceId,
+      instance_id: `${serviceId}-${item.agent_id}-${pid}`
+        .replace(/[^a-zA-Z0-9_.:-]+/g, "-")
+        .slice(0, 128),
+      host_id: agent?.hostname || item.agent_id,
+      agent_id: item.agent_id,
+      pid,
+      environment: values.environment || "production",
+    };
+  });
+  const dependencies = (values.dependencies || []).filter(
+    (item) => item?.source_service?.trim() && item?.target_service?.trim(),
+  ).map((item) => ({
+    source_service: item.source_service.trim(),
+    target_service: item.target_service.trim(),
+    relation: item.relation || "CALLS",
+    confidence: item.confidence || "medium",
+    source: "user_confirmed",
+  }));
+  const verificationUrl = values.verification_url?.trim() || "";
+  const autonomous = values.run_mode === "AUTHORIZED_AUTONOMY";
+  const maxIterations = Number(values.max_iterations);
+  const maxActions = Number(values.max_actions);
+  return {
+    ...(primaryService ? { service_id: primaryService } : {}),
+    service_ids: Array.from(new Set([
+      primaryService,
+      ...instances.map((item) => item.service_id),
+    ].filter(Boolean))),
+    instances,
+    dependencies,
+    ...(verificationUrl ? {
+      verification: {
+        http_checks: [{
+          name: "恢复检查",
+          url: verificationUrl,
+          method: "GET",
+          expected_statuses: [200],
+          samples: 3,
+          timeout_sec: 5,
+        }],
+      },
+    } : {}),
+    ...(autonomous ? {
+      orchestration: {
+        swarm_service: values.swarm_service?.trim() || "",
+        manager_agent_id: values.manager_agent_id || "",
+        replicas: 1,
+      },
+      autonomy_policy: {
+        max_iterations: Number.isFinite(maxIterations) ? maxIterations : 8,
+        max_actions: Number.isFinite(maxActions) ? maxActions : 3,
+        stable_verification_count: 2,
+        max_auto_impact: values.authorize_restart ? "I2" : "I1",
+        allowed_action_ids: values.authorize_restart
+          ? ["swarm.restart-stateless-service"]
+          : [],
+        auto_approve_probe_ids: values.auto_approve_profilers
+          ? ["process_cpu_profile", "process_io_latency"]
+          : [],
+      },
+    } : {}),
+  };
+}
+
+function buildTimeRange(values) {
+  if (!values.event_start && !values.event_end) return undefined;
+  if (!values.event_start || !values.event_end) {
+    throw new Error("事件时间范围需要同时填写开始和结束时间");
+  }
+  const start = new Date(values.event_start);
+  const end = new Date(values.event_end);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    throw new Error("事件结束时间必须晚于开始时间");
+  }
+  return { start: start.toISOString(), end: end.toISOString(), source: "user_expression" };
 }
 
 export default function AIDiagnosisWorkspace() {
@@ -135,6 +229,7 @@ export default function AIDiagnosisWorkspace() {
   const [recoveryForm] = Form.useForm();
   const [targetForm] = Form.useForm();
   const newRunMode = Form.useWatch("run_mode", newForm);
+  const selectedNewTargetId = Form.useWatch("target_session_id", newForm);
   const [searchParams, setSearchParams] = useSearchParams();
   // Keep the view in the URL so a refresh, a bookmark, or a shared link all
   // land back on the same pane instead of silently reverting.
@@ -447,10 +542,14 @@ export default function AIDiagnosisWorkspace() {
     }
     setActionLoading(true);
     try {
-      const serviceId = values.service_id?.trim() || "";
       const selectedTarget = targetSessions.find(
         (item) => item.target_session_id === values.target_session_id,
       );
+      const serviceId = selectedTarget?.target_scope?.service_id
+        || selectedTarget?.target_scope?.service_ids?.[0]
+        || values.service_id?.trim()
+        || "";
+      const timeRange = buildTimeRange(values);
       const created = await createIncidentCase({
         title: createCaseTitle(values.problem_description, serviceId),
         problem_description: values.problem_description.trim(),
@@ -458,7 +557,9 @@ export default function AIDiagnosisWorkspace() {
         run_mode: values.run_mode || "COLLABORATE",
         environment: selectedTarget?.environment || values.environment || "production",
         target_scope: selectedTarget?.target_scope
-          || (serviceId ? { service_id: serviceId, instances: [], dependencies: [] } : {}),
+          || buildInitialTargetScope(values, agents),
+        ...(timeRange ? { time_range: timeRange } : {}),
+        initial_tasks: values.initial_tasks || [],
         target_session_id: selectedTarget?.target_session_id,
       });
       setNewOpen(false);
@@ -470,7 +571,7 @@ export default function AIDiagnosisWorkspace() {
       setDiagnosis(null);
       await refreshLists({ quiet: true });
       message.success("诊断会话已创建");
-      if (!caseHasInstances(created)) {
+      if (!selectedTarget && !caseHasInstances(created)) {
         openScopeEditor(created, { autoSearch: Boolean(serviceId) });
       }
     } catch (error) {
@@ -879,6 +980,22 @@ export default function AIDiagnosisWorkspace() {
     );
   }
 
+  const selectedNewTarget = targetSessions.find(
+    (item) => item.target_session_id === selectedNewTargetId,
+  );
+  const completedTaskOptions = tasks.filter((task) => (
+    ["DONE", "COMPLETED", "SUCCEEDED"].includes(String(task.status || "").toUpperCase())
+  )).map((task) => {
+    const taskId = task.id || task.task_id;
+    const target = [task.agent_id, Number(task.target_pid) > 0 ? `PID ${task.target_pid}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    return {
+      value: taskId,
+      label: target ? `${taskDisplayName(task)} · ${target}` : taskDisplayName(task),
+    };
+  }).filter((item) => item.value);
+
   return (
     <div className={styles.page}>
       <header className={styles.toolbar}>
@@ -1013,8 +1130,33 @@ export default function AIDiagnosisWorkspace() {
         onOpenEvidence={(evidenceId) => { setKnowledgeOpen(false); setFocusEvidenceId(evidenceId); }}
       />
 
-      <Modal title="新建诊断" open={newOpen} onCancel={() => setNewOpen(false)} onOk={createCase} okText="创建" confirmLoading={actionLoading} width={660} destroyOnHidden>
-        <Form form={newForm} layout="vertical" initialValues={{ environment: "production", recovery_goal: "确认原因并给出安全处置建议", run_mode: "COLLABORATE" }}>
+      <Modal
+        title="新建诊断"
+        open={newOpen}
+        onCancel={() => setNewOpen(false)}
+        onOk={createCase}
+        okText="创建"
+        confirmLoading={actionLoading}
+        width={900}
+        styles={{ body: { maxHeight: "72vh", overflowY: "auto" } }}
+        destroyOnHidden
+      >
+        <Form
+          form={newForm}
+          layout="vertical"
+          initialValues={{
+            environment: "production",
+            recovery_goal: "确认原因并给出安全处置建议",
+            run_mode: "COLLABORATE",
+            instances: [],
+            dependencies: [],
+            initial_tasks: [],
+            max_iterations: 8,
+            max_actions: 3,
+            authorize_restart: false,
+            auto_approve_profilers: false,
+          }}
+        >
           <Form.Item name="target_session_id" label="关联长期目标">
             <Select
               allowClear
@@ -1025,13 +1167,30 @@ export default function AIDiagnosisWorkspace() {
               }))}
             />
           </Form.Item>
+          {selectedNewTarget && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={`将继承「${selectedNewTarget.display_name || selectedNewTarget.target_scope?.service_id || "长期目标"}」的环境、机器进程范围、服务关系、接管授权和历史信号`}
+              description="为避免配置冲突，本次创建不再覆盖长期目标范围与授权策略；事件时间和已有任务证据仍可单独指定。"
+            />
+          )}
           <Form.Item name="problem_description" label="发生了什么" rules={[{ required: true, min: 3, message: "请描述问题" }]}>
             <Input.TextArea rows={4} maxLength={2000} showCount placeholder="例如：service-x 从半小时前开始 CPU 持续超过 90%" autoFocus />
           </Form.Item>
-          <Space size={12} align="start" style={{ width: "100%" }}>
-            <Form.Item name="service_id" label="目标服务" style={{ flex: 1 }}><Input placeholder="例如 service-x，可稍后填写" /></Form.Item>
-            <Form.Item name="environment" label="环境" style={{ width: 150 }}><Select options={[{ value: "production", label: "生产" }, { value: "staging", label: "预发布" }, { value: "development", label: "开发" }]} /></Form.Item>
-          </Space>
+          <Row gutter={12}>
+            <Col xs={24} sm={17}>
+              <Form.Item name="service_id" label="目标服务">
+                <Input disabled={Boolean(selectedNewTarget)} placeholder={selectedNewTarget ? "由长期目标继承" : "例如 service-x，可稍后填写"} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={7}>
+              <Form.Item name="environment" label="环境">
+                <Select disabled={Boolean(selectedNewTarget)} options={[{ value: "production", label: "生产" }, { value: "staging", label: "预发布" }, { value: "development", label: "开发" }]} />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="recovery_goal" label="完成条件"><Input placeholder="例如：确认原因并给出安全处置建议" /></Form.Item>
           <Form.Item name="run_mode" label="处理方式">
             <Radio.Group optionType="button" buttonStyle="solid" options={[
@@ -1039,13 +1198,193 @@ export default function AIDiagnosisWorkspace() {
               { value: "AUTHORIZED_AUTONOMY", label: "持续接管" },
             ]} />
           </Form.Item>
-          {newRunMode === "AUTHORIZED_AUTONOMY" && (
-            <Alert
-              type="warning"
-              showIcon
-              message="Agent 会持续诊断、执行已授权动作并验证；未登记的动作不会执行。"
-            />
-          )}
+
+          <Collapse
+            items={[
+              !selectedNewTarget && {
+                key: "scope",
+                label: "按需配置目标机器、进程与服务关系",
+                children: (
+                  <>
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="可一次登记多个 Worker / PID；不填写时，创建后仍可扫描和确认范围。"
+                    />
+                    <Form.List name="instances">
+                      {(fields, { add, remove }) => (
+                        <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                          {fields.map(({ key, ...field }) => (
+                            <Row gutter={8} align="middle" key={key}>
+                              <Col xs={24} md={7}>
+                                <Form.Item {...field} name={[field.name, "service_id"]} label="服务" rules={[{ required: true, message: "填写服务" }]}>
+                                  <Input placeholder="service-x" />
+                                </Form.Item>
+                              </Col>
+                              <Col xs={24} md={10}>
+                                <Form.Item {...field} name={[field.name, "agent_id"]} label="Worker" rules={[{ required: true, message: "选择 Worker" }]}>
+                                  <Select
+                                    showSearch
+                                    optionFilterProp="label"
+                                    placeholder="选择目标机器"
+                                    options={agents.map((agent) => ({
+                                      value: agent.id,
+                                      label: `${agent.hostname || agent.id} · ${agent.status === "ONLINE" ? "在线" : "离线"}`,
+                                      disabled: agent.status !== "ONLINE",
+                                    }))}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col xs={20} md={5}>
+                                <Form.Item {...field} name={[field.name, "pid"]} label="PID" rules={[{ required: true, message: "填写 PID" }]}>
+                                  <InputNumber min={1} precision={0} style={{ width: "100%" }} placeholder="1234" />
+                                </Form.Item>
+                              </Col>
+                              <Col xs={4} md={2}>
+                                <Button type="text" danger aria-label="删除目标进程" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
+                              </Col>
+                            </Row>
+                          ))}
+                          <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ service_id: newForm.getFieldValue("service_id") || "" })}>
+                            添加机器 / 进程
+                          </Button>
+                        </Space>
+                      )}
+                    </Form.List>
+
+                    <div style={{ marginTop: 20, marginBottom: 8, fontWeight: 600 }}>服务关系</div>
+                    <Form.List name="dependencies">
+                      {(fields, { add, remove }) => (
+                        <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                          {fields.map(({ key, ...field }) => (
+                            <Row gutter={8} align="middle" key={key}>
+                              <Col xs={24} md={8}>
+                                <Form.Item {...field} name={[field.name, "source_service"]} label="上游服务" rules={[{ required: true, message: "填写上游服务" }]}>
+                                  <Input placeholder="service-x" />
+                                </Form.Item>
+                              </Col>
+                              <Col xs={24} md={6}>
+                                <Form.Item {...field} name={[field.name, "relation"]} label="关系">
+                                  <Select options={RELATION_OPTIONS} />
+                                </Form.Item>
+                              </Col>
+                              <Col xs={20} md={8}>
+                                <Form.Item {...field} name={[field.name, "target_service"]} label="下游服务" rules={[{ required: true, message: "填写下游服务" }]}>
+                                  <Input placeholder="database-y" />
+                                </Form.Item>
+                              </Col>
+                              <Col xs={4} md={2}>
+                                <Button type="text" danger aria-label="删除服务关系" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
+                              </Col>
+                            </Row>
+                          ))}
+                          <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ source_service: newForm.getFieldValue("service_id") || "", relation: "CALLS" })}>
+                            添加服务关系
+                          </Button>
+                        </Space>
+                      )}
+                    </Form.List>
+                  </>
+                ),
+              },
+              {
+                key: "evidence",
+                label: "按需配置事件时间与已有证据",
+                children: (
+                  <>
+                    <Row gutter={12}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="event_start" label="事件开始时间"><Input type="datetime-local" /></Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="event_end" label="事件结束时间"><Input type="datetime-local" /></Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.Item
+                      name="initial_tasks"
+                      label="关联已有采集任务"
+                      extra="仅列出已完成、用户可见的任务；服务端还会校验任务与当前实例范围是否一致。"
+                    >
+                      <Select
+                        mode="multiple"
+                        maxCount={16}
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder={completedTaskOptions.length ? "选择最多 16 个任务作为初始证据" : "当前没有可复用的已完成任务"}
+                        options={completedTaskOptions}
+                      />
+                    </Form.Item>
+                  </>
+                ),
+              },
+              newRunMode === "AUTHORIZED_AUTONOMY" && !selectedNewTarget && {
+                key: "autonomy",
+                label: "配置持续接管的预算、授权与恢复验证",
+                children: (
+                  <>
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="Agent 会持续诊断、执行本次明确授权的动作并验证；未登记的动作不会执行。"
+                    />
+                    <Row gutter={12}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="max_iterations" label="最多调查轮次">
+                          <InputNumber min={1} max={30} precision={0} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="max_actions" label="最多自动处置次数">
+                          <InputNumber min={0} max={10} precision={0} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={12}>
+                      <Col xs={24} md={12}>
+                        <Form.Item
+                          name="swarm_service"
+                          label="Swarm 服务名"
+                          rules={[({ getFieldValue }) => ({
+                            validator(_, value) {
+                              if (getFieldValue("authorize_restart") && !value?.trim()) {
+                                return Promise.reject(new Error("授权重启时必须填写 Swarm 服务名"));
+                              }
+                              return Promise.resolve();
+                            },
+                          })]}
+                        >
+                          <Input placeholder="可选：允许恢复动作时填写" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="manager_agent_id" label="Manager Worker">
+                          <Select
+                            allowClear
+                            placeholder="可选"
+                            options={agents.map((agent) => ({ value: agent.id, label: agent.hostname || agent.id, disabled: agent.status !== "ONLINE" }))}
+                          />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.Item name="verification_url" label="恢复检查 URL" extra="自动处置后以 GET 连续采样验证是否恢复。">
+                      <Input type="url" placeholder="例如 https://service-x.example.com/health" />
+                    </Form.Item>
+                    <Space direction="vertical" size={4}>
+                      <Form.Item name="auto_approve_profilers" valuePropName="checked" noStyle>
+                        <Checkbox>自动批准 CPU / I/O 深度采集</Checkbox>
+                      </Form.Item>
+                      <Form.Item name="authorize_restart" valuePropName="checked" noStyle>
+                        <Checkbox>授权重启已登记的无状态 Swarm 服务</Checkbox>
+                      </Form.Item>
+                    </Space>
+                  </>
+                ),
+              },
+            ].filter(Boolean)}
+          />
         </Form>
       </Modal>
 

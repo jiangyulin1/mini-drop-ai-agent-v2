@@ -50,6 +50,7 @@ from server.app.ai_validation import AIValidationBusy, run_ai_validation_suite
 from server.app.capability_tokens import canonical_hash
 from server.app.database import init_db, new_session
 from server.app.event_bus import BUS
+from server.app.http.auth import valid_web_session
 from server.app.flamegraph_parser import extract_top_functions_from_svg
 from server.app.prometheus_metrics import (
     REGISTRY,
@@ -583,14 +584,12 @@ def _deliver_one_wakeup(
     wakeup_id = str(wakeup.get("wakeup_id") or "")
     if not wakeup_id or wakeup.get("status") != "PENDING":
         return False
+    reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
     # finish_investigation is terminal for the current run. Evidence that races
     # with an accepted conclusion stays durable, but must not enqueue another
     # autonomous model turn after the Agent has explicitly stopped.
-    reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
-    # A lifecycle review is specifically how an already-concluded case is
-    # reopened.  Do not let the terminal-conclusion fast path swallow it.
     if (
-        reason_class != "EVIDENCE_REVIEWED"
+        reason_class not in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"}
         and hasattr(repo, "get_conclusion")
         and repo.get_conclusion(case_id, tenant_id) is not None
     ):
@@ -606,7 +605,7 @@ def _deliver_one_wakeup(
         else None
     )
     intervention: dict[str, Any] = {}
-    if reason_class == "EVIDENCE_REVIEWED":
+    if reason_class in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"}:
         review_refs = [str(item) for item in (wakeup.get("source_refs") or [])]
         evidence_items = case_evidence_service.list_evidence(case_id, tenant_id)
         affected_ids: list[str] = []
@@ -618,6 +617,11 @@ def _deliver_one_wakeup(
             evidence_id = ref
             if ref.startswith("evidence-review:"):
                 evidence_id = ref[len("evidence-review:"):].split(":r", 1)[0]
+            elif ref.startswith("evidence:"):
+                # Evidence governance outbox events use evidence:<id>; keep
+                # source_refs intact for audit while projecting the canonical
+                # ID into the structured intervention.
+                evidence_id = ref[len("evidence:"):].split(":", 1)[0]
             if evidence_id and evidence_id not in affected_ids:
                 affected_ids.append(evidence_id)
             matching = next(
@@ -629,7 +633,7 @@ def _deliver_one_wakeup(
         revision_before = max(0, revision_after - 1)
         intervention = {
             "intervention_id": f"intervention-{wakeup_id}",
-            "kind": "EVIDENCE_REVIEWED",
+            "kind": reason_class,
             "source_refs": review_refs,
             "affected_evidence_ids": affected_ids,
             "required": True,
@@ -652,7 +656,7 @@ def _deliver_one_wakeup(
     # Evidence lifecycle changes invalidate every old Pi transcript. Rotate
     # the durable generation before creating the cycle so stale tool events
     # are rejected by the server as well as discarded by the Sidecar.
-    if reason_class == "EVIDENCE_REVIEWED" and cycle is None:
+    if reason_class in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"} and cycle is None:
         binding = repo.get_agent_runtime_binding(case_id, tenant_id) or {}
         new_generation = int(binding.get("runtime_generation") or 1) + 1
         context = context.model_copy(update={
@@ -759,15 +763,19 @@ def _deliver_one_wakeup(
                 "只有在仍缺少决定性事实时，才选择一个可执行的替代 Collector。"
             )
             follow_up_evidence_ids: list[str] = []
-        elif reason_class == "EVIDENCE_REVIEWED":
+        elif reason_class in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"}:
             source_refs = ", ".join(str(item) for item in (wakeup.get("source_refs") or []))
             note = (
-                f"专家已修改 Evidence 生命周期：{source_refs}。"
-                "必须先调用 get_case_snapshot 或 list_evidence，确认最新 status、"
-                "review_revision 和 projection_hash；排除证据不得继续作为支持依据。"
+                f"专家已修改 Evidence 推理准入：{source_refs}。"
+                "必须先调用 get_case_snapshot 或 list_evidence，确认最新 lifecycle_status、"
+                "review_trust_state、review_revision 和 projection_hash；排除证据不得继续作为支持依据。"
                 "随后重新评估假设、反证和缺失事实，并通过 finish_investigation 提交新结论。"
             )
-            follow_up_evidence_ids = []
+            follow_up_evidence_ids = [
+                item.get("evidence_id")
+                for item in case_evidence_service.list_evidence(case_id, tenant_id)
+                if item.get("lifecycle_status") == "ACTIVE" and not item.get("ui_archived")
+            ]
         else:
             queued_analyses = [
                 item for item in evidence_analysis_service.list_runs(case_id, tenant_id)
@@ -867,7 +875,9 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
     event_id = str(event.get("outbox_id") or "")
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
-    if event_type not in {"EVIDENCE_COMMITTED", "COLLECTION_TERMINAL"}:
+    if event_type not in {
+        "EVIDENCE_COMMITTED", "COLLECTION_TERMINAL", "EVIDENCE_ELIGIBILITY_CHANGED",
+    }:
         repo.record_outbox_consumer_effect(
             event_id=event_id,
             consumer_name="control-plane",
@@ -879,7 +889,17 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
     case_id = str(payload.get("case_id") or "")
     tenant_id = str(payload.get("tenant_id") or _request_tenant())
     run_id = str(payload.get("investigation_run_id") or "")
-    if not case_id or not run_id:
+    if not case_id:
+        raise ValueError(f"{event_type} requires case_id and investigation_run_id")
+    if not run_id and event_type == "EVIDENCE_ELIGIBILITY_CHANGED":
+        repo.record_outbox_consumer_effect(
+            event_id=event_id,
+            consumer_name="control-plane",
+            effect_key=f"review-without-runtime:{event_id}",
+            effect_payload={"case_id": case_id, "event_type": event_type},
+        )
+        return
+    if not run_id:
         raise ValueError(f"{event_type} requires case_id and investigation_run_id")
     case = repo.get_incident_case(case_id, tenant_id) or {}
     run = repo.get_investigation_run(case_id, tenant_id, run_id)
@@ -888,14 +908,16 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
 
     wakeup = repo.get_runtime_wakeup_by_outbox(event_id)
     if wakeup is None:
-        reason_class = (
-            "COLLECTION_TERMINAL" if event_type == "COLLECTION_TERMINAL"
-            else "EVIDENCE_COMMITTED"
-        )
+        reason_class = {
+            "COLLECTION_TERMINAL": "COLLECTION_TERMINAL",
+            "EVIDENCE_ELIGIBILITY_CHANGED": "EVIDENCE_ELIGIBILITY_CHANGED",
+        }.get(event_type, "EVIDENCE_COMMITTED")
         if reason_class == "COLLECTION_TERMINAL":
             dedupe_key = (
                 f"collection-terminal-wakeup:{payload.get('task_id')}:{payload.get('task_status')}"
             )
+        elif reason_class == "EVIDENCE_ELIGIBILITY_CHANGED":
+            dedupe_key = f"evidence-review-wakeup:{event_id}"
         else:
             dedupe_key = (
                 f"evidence-wakeup:{case_id}:{run_id}:"
@@ -1280,6 +1302,7 @@ async def _access_log(request: Request, call_next):
 
 async def _api_key_auth(request: Request, call_next):
     token = _extract_api_token(request)
+    web_session_valid = valid_web_session(request)
     if _requires_api_auth(request):
         expected = os.getenv("MINI_DROP_API_KEY", "")
         if not expected:
@@ -1287,9 +1310,9 @@ async def _api_key_auth(request: Request, call_next):
                 status_code=500,
                 content={"detail": "API auth enabled but MINI_DROP_API_KEY is empty"},
             )
-        if not token or not secrets.compare_digest(token, expected):
+        if not web_session_valid and (not token or not secrets.compare_digest(token, expected)):
             return JSONResponse(status_code=401, content={"detail": "无效 API Key"})
-    request.state.principal_id = _principal_for_request(token)
+    request.state.principal_id = _principal_for_request(token or ("web-session" if web_session_valid else None))
     request.state.principal_roles = _roles_for_request()
     return await call_next(request)
 
@@ -1306,7 +1329,7 @@ def _requires_api_auth(request: Request) -> bool:
     path = request.url.path
     return path.startswith("/api/") and path not in {
         "/api/healthz", "/api/livez", "/api/readyz", "/api/metrics",
-        "/api/auth/set-cookie", "/api/auth/clear-cookie",
+        "/api/auth/set-cookie", "/api/auth/bootstrap", "/api/auth/clear-cookie",
     }
 
 

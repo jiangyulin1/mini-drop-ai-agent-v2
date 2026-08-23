@@ -89,7 +89,18 @@ api.interceptors.response.use(
       detail: body?.detail,
     });
   },
-  (err) => {
+  async (err) => {
+    const original = err.config;
+    if (err.response?.status === 401 && original && !original._miniDropBootstrapAttempt) {
+      original._miniDropBootstrapAttempt = true;
+      try {
+        await bootstrapSession();
+        return api.request(original);
+      } catch {
+        // The experiment-mode endpoint is disabled or rejected. Keep the
+        // standard authentication error, without exposing a server key.
+      }
+    }
     throw normalizeAxiosError(err);
   },
 );
@@ -124,6 +135,19 @@ export async function setCookieApiKey(token) {
       withCredentials: true,
       timeout: 10000,
     });
+  } catch (error) {
+    throw normalizeAxiosError(error);
+  }
+}
+
+/** Request an opt-in server-side browser session without receiving its key. */
+export async function bootstrapSession() {
+  try {
+    await axios.post("/api/auth/bootstrap", {}, {
+      withCredentials: true,
+      timeout: 10000,
+    });
+    return true;
   } catch (error) {
     throw normalizeAxiosError(error);
   }
@@ -598,6 +622,11 @@ export function reviewCaseEvidence(caseId, evidenceId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/reviews`, payload);
 }
 
+/** 提交前计算 Evidence 审查对分析、结论和恢复方案的影响。 */
+export function previewCaseEvidenceReview(caseId, evidenceId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/reviews/preview`, payload);
+}
+
 /** 列出证据审查记录。 */
 export function listCaseEvidenceReviews(caseId, params = {}) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence-reviews`, { params });
@@ -786,7 +815,15 @@ export function createEventSource(since = "") {
  */
 export async function ensureEventSourceAuthCookie() {
   const token = getStoredApiKey();
-  if (!token) return;
+  if (!token) {
+    try {
+      await bootstrapSession();
+    } catch {
+      // Auto-session may be disabled. Opening the stream remains valid in
+      // auth-disabled development mode and preserves the legacy flow.
+    }
+    return;
+  }
   try {
     await setCookieApiKey(token);
     setStoredApiKey("");

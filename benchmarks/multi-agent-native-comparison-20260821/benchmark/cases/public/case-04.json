@@ -1,0 +1,47 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-04",
+  "incident": {
+    "symptom": "Memory remains high after a series shrinks. Decide whether the evidence proves a leak or retained backing capacity.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-04-capacity",
+      "kind": "retained_capacity",
+      "summary": "An oversized backing allocation remains after the active data set becomes small.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:46cc391fda9ff1f47cb04bd6c0206692cd80cbf0ba5b54999b560a04f59204a6",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_evidence_slice"
+      ]
+    },
+    {
+      "evidence_id": "ev-04-boundary",
+      "kind": "benchmark_boundary",
+      "summary": "A fresh reproduction does not reproduce the initial benchmark regression under the same small fixture.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:a7d745427dbf4e5b276b046eb25e8fb668dc0d15ae013e78ddcaac4ec2c8449b",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

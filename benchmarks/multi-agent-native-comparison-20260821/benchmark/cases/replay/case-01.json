@@ -1,0 +1,52 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-01",
+  "evidence": [
+    {
+      "evidence_id": "ev-01-profile",
+      "kind": "cpu_profile_topn",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "topn": [
+          {
+            "symbol": "request_path_step",
+            "self_pct": 7.4
+          },
+          {
+            "symbol": "chunk_processing",
+            "self_pct": 11.2
+          }
+        ],
+        "sample_count": 120000,
+        "window": "T0/T1"
+      },
+      "integrity_hash": "sha256:eed53a79ca021e0cba9cb78af2d76cd2f1ec06d79ca88892ce747469afc33311"
+    },
+    {
+      "evidence_id": "ev-01-latency",
+      "kind": "latency_context",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "projection": {
+        "p99_ms": {
+          "before": 12.1,
+          "after": 12.3
+        },
+        "throughput_rps": {
+          "before": 18400,
+          "after": 18370
+        },
+        "window": "T0/T1"
+      },
+      "integrity_hash": "sha256:85f227aa49bae9b9546d002c7a3e44e497bbc13af59873413253b9eec7a9e26c"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

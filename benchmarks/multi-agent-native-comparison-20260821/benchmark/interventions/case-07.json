@@ -1,0 +1,7 @@
+{
+  "schema": "mini-drop.intervention.v1",
+  "case_id": "case-07",
+  "trigger": {"event": "after_first_citation_of_ev-07-latency_or_confidence_above_0.60", "type": "state_based"},
+  "events": [{"event_id": "i-07-1", "type": "EVIDENCE_REVIEW", "evidence_id": "ev-07-latency", "lifecycle": "EXCLUDED", "trust": "LOW_TRUST", "reason": "target identity and time window do not match the active incident"}],
+  "expected_post_state": {"must_not_cite": ["ev-07-latency"], "must": "state evidence gap and abstain_or_qualify"}
+}

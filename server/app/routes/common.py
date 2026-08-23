@@ -14,7 +14,13 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from server.app.common_utils import env_bool
 from server.app.event_bus import BUS
-from server.app.http.auth import request_principal, request_tenant
+from server.app.http.auth import (
+    WEB_SESSION_COOKIE,
+    WEB_SESSION_TTL_SECONDS,
+    create_web_session_token,
+    request_principal,
+    request_tenant,
+)
 from server.app.prometheus_metrics import REGISTRY
 from server.app.schemas import APIResponse
 
@@ -139,11 +145,56 @@ def auth_set_cookie(request: Request, body: dict) -> APIResponse:
     return resp
 
 
+@router.post("/api/auth/bootstrap")
+def auth_bootstrap(request: Request) -> APIResponse:
+    """Create a browser HttpOnly session from the server-side API key.
+
+    This endpoint is deliberately opt-in for a shared experiment environment.
+    The configured key is never returned to the browser; only an HttpOnly
+    cookie is issued.
+    """
+    if not env_bool("MINI_DROP_WEB_AUTO_SESSION_ENABLED"):
+        raise HTTPException(status_code=404, detail="Web 自动会话未启用")
+    expected = os.getenv("MINI_DROP_API_KEY", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="API 认证配置不完整")
+
+    origin = request.headers.get("origin", "").strip()
+    if origin:
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+        scheme = forwarded_proto or request.url.scheme
+        forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+        expected_host = forwarded_host or request.headers.get("host", request.url.netloc)
+        expected_origin = f"{scheme}://{expected_host}"
+        if origin.rstrip("/") != expected_origin.rstrip("/"):
+            raise HTTPException(status_code=403, detail="请求来源不是当前站点")
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    secure_override = os.getenv("MINI_DROP_AUTH_COOKIE_SECURE", "").strip()
+    secure_cookie = (
+        secure_override.lower() in {"1", "true", "yes", "on", "enabled"}
+        if secure_override
+        else request.url.scheme == "https" or forwarded_proto == "https"
+    )
+    resp = JSONResponse(content={"code": 0, "message": "ok", "data": {"authenticated": True}})
+    resp.set_cookie(
+        key=WEB_SESSION_COOKIE,
+        value=create_web_session_token(),
+        httponly=True,
+        samesite="lax",
+        secure=secure_cookie,
+        max_age=WEB_SESSION_TTL_SECONDS,
+        path="/api",
+    )
+    return resp
+
+
 @router.post("/api/auth/clear-cookie")
 def auth_clear_cookie() -> APIResponse:
     """清除 HttpOnly cookie。"""
     resp = JSONResponse(content={"code": 0, "message": "ok", "data": None})
     resp.delete_cookie(key="mini_drop_api_key", path="/api")
+    resp.delete_cookie(key=WEB_SESSION_COOKIE, path="/api")
     return resp
 
 

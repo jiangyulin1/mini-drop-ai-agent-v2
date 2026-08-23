@@ -5,6 +5,7 @@ import {
   createCaseEvidenceAnalysis,
   downloadCaseEvidence,
   getCaseEvidence,
+  previewCaseEvidenceReview,
   previewCaseEvidence,
   reviewCaseEvidence,
 } from "../api/client";
@@ -41,11 +42,12 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
   const [analyses, setAnalyses] = useState([]);
   const [detail, setDetail] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [reviewImpact, setReviewImpact] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const item = useMemo(() => detail || evidence || {}, [detail, evidence]);
   const evidenceId = evidence?.evidence_id || evidence?.id;
-  const trustValue = item.trust_status || item.review_decision || item.status || "UNKNOWN";
+  const trustValue = item.review_trust_state || item.trust_status || item.review_decision || item.status || "UNKNOWN";
   const trust = evidenceTrust(trustValue);
   const raw = useMemo(() => preview?.content || preview?.text_preview || value(item, "raw_data", "content", "data", "summary", "projections"), [item, preview]);
   const citationProjection = useMemo(() => {
@@ -92,11 +94,52 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
     }).catch(setError).finally(() => setLoading(false));
   }, [caseId, evidenceId, open]);
 
-  function startReview(next) { setDecision(next); form.setFieldsValue({ reason_code: next === "EXCLUDED" ? "USER_EXCLUDED" : next === "LOW_TRUST" ? "QUALITY_CONCERN" : "USER_VERIFIED", reason: "" }); setReviewOpen(true); }
+  function defaultAssessment() {
+    return {
+      target_identity: "CONFIRMED",
+      time_alignment: "FULL_WINDOW",
+      data_integrity: String(item.completeness || "COMPLETE").toUpperCase() === "COMPLETE" ? "COMPLETE" : "TRUNCATED",
+      source_reliability: item.source_type === "task_artifact" ? "NATIVE_COLLECTOR" : item.source_type === "source_gateway" ? "EXTERNAL_SYSTEM" : "MANUAL_UPLOAD",
+      scope_fit: "CORRECT",
+      corroboration: "NONE",
+      freshness: String(item.freshness || "FRESH").toUpperCase() === "FRESH" ? "CURRENT_WINDOW" : "HISTORICAL",
+    };
+  }
+  async function loadReviewImpact(nextDecision, values) {
+    setLoading(true); setError(null); setReviewImpact(null);
+    try {
+      const impact = await previewCaseEvidenceReview(caseId, evidenceId, {
+        decision: nextDecision,
+        assessment: values.assessment || {},
+      });
+      setReviewImpact(impact);
+    } catch (nextError) { setError(nextError); } finally { setLoading(false); }
+  }
+  function startReview(next) {
+    const uiOnly = new Set(["HIDDEN", "VISIBLE", "ARCHIVED", "UNARCHIVED"]).has(next);
+    const values = {
+      assessment: uiOnly ? {} : defaultAssessment(),
+      reason_code: next === "EXCLUDED" ? "USER_EXCLUDED" : next.includes("RESTORE") ? "RESTORED" : next === "LOW_TRUST" ? "QUALITY_CONCERN" : next === "HIDDEN" || next === "VISIBLE" ? "UI_ORGANIZATION" : next.includes("ARCHIVED") ? "ARCHIVE_MANAGEMENT" : "USER_VERIFIED",
+      reason: "",
+      override_reason: "",
+    };
+    setDecision(next); form.setFieldsValue(values); setReviewImpact(null); setReviewOpen(true);
+    void loadReviewImpact(next, values);
+  }
   async function submitReview() {
     const values = await form.validateFields(); setLoading(true); setError(null);
     try {
-      await reviewCaseEvidence(caseId, evidenceId, { evidence_id: evidenceId, decision, ...values });
+      if (!reviewImpact?.impact_token) {
+        message.warning("请先重新预览影响");
+        return;
+      }
+      await reviewCaseEvidence(caseId, evidenceId, {
+        evidence_id: evidenceId,
+        decision,
+        ...values,
+        expected_review_revision: reviewImpact.current_review_revision,
+        impact_token: reviewImpact.impact_token,
+      });
       message.success(decision === "EXCLUDED" ? "证据已从后续调查中排除" : "Evidence Trust 审查已提交");
       setReviewOpen(false); onChanged?.();
       const nextDetail = await getCaseEvidence(caseId, evidenceId);
@@ -149,6 +192,8 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
             <Descriptions.Item label="采集时间">{value(item, "collected_at", "created_at", "observed_at") ? new Date(value(item, "collected_at", "created_at", "observed_at")).toLocaleString() : "—"}</Descriptions.Item>
             <Descriptions.Item label="Scope Revision">r{value(item, "scope_revision") ?? "—"}</Descriptions.Item>
             <Descriptions.Item label="Review Revision">r{value(item, "review_revision") ?? reviews.length}</Descriptions.Item>
+            <Descriptions.Item label="生命周期">{item.lifecycle_status || "ACTIVE"}</Descriptions.Item>
+            <Descriptions.Item label="人工信任">{item.review_trust_state || "UNREVIEWED"} · {item.derived_trust_score ?? 50}</Descriptions.Item>
             <Descriptions.Item label="Artifact 大小">{formatArtifactSize(value(item, "size_bytes", "artifact_size"))}</Descriptions.Item>
             <Descriptions.Item label="完整性">{value(item, "sha256", "content_hash", "integrity") ? <Tag color="success">已记录 Hash</Tag> : <Tag>未提供</Tag>}</Descriptions.Item>
             <Descriptions.Item label="是否被结论引用">{item.referenced_by_conclusion || item.claim_refs?.length ? <Tag color="purple">已引用</Tag> : <Tag>未引用</Tag>}</Descriptions.Item>
@@ -158,7 +203,9 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
             <Button icon={<CheckCircleOutlined />} onClick={() => startReview("TRUSTED")}>标记可信</Button>
             <Button icon={<WarningOutlined />} onClick={() => startReview("LOW_TRUST")}>标记低可信</Button>
             <Button danger icon={<CloseCircleOutlined />} onClick={() => startReview("EXCLUDED")}>排除</Button>
-            {String(trustValue).toUpperCase() === "EXCLUDED" && <Button icon={<CheckCircleOutlined />} onClick={() => startReview("RESTORED")}>恢复</Button>}
+            {String(item.lifecycle_status || item.status).toUpperCase() === "EXCLUDED" && <><Button icon={<CheckCircleOutlined />} onClick={() => startReview("RESTORE_AS_TRUSTED")}>恢复为可信</Button><Button onClick={() => startReview("RESTORE_AS_LOW_TRUST")}>恢复为低可信</Button></>}
+            <Button onClick={() => startReview(item.ui_hidden ? "VISIBLE" : "HIDDEN")}>{item.ui_hidden ? "取消隐藏" : "仅隐藏"}</Button>
+            <Button onClick={() => startReview(item.ui_archived ? "UNARCHIVED" : "ARCHIVED")}>{item.ui_archived ? "取消归档" : "归档"}</Button>
             <Button icon={<RobotOutlined />} loading={loading} onClick={analyze}>AI 分析</Button>
             <Button icon={<DownloadOutlined />} loading={loading} onClick={() => download("raw")}>下载原始证据</Button>
             <Button icon={<DownloadOutlined />} loading={loading} onClick={() => download("bundle")}>下载证据包</Button>
@@ -172,9 +219,25 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
           <List size="small" bordered dataSource={reviews} locale={{ emptyText: "还没有人工审查记录" }} renderItem={(review) => <List.Item><List.Item.Meta title={<Space><Tag color={evidenceTrust(review.decision).color}>{review.decision}</Tag><span>Revision {review.review_revision || "—"}</span></Space>} description={`${review.reason_code || "NO_REASON_CODE"} · ${review.reason || "未填写说明"}`} /><time>{review.created_at ? new Date(review.created_at).toLocaleString() : "—"}</time></List.Item>} />
         </Space>}
       </Drawer>
-      <Modal title={`审查 Evidence：${evidenceId || "—"}`} open={reviewOpen} onCancel={() => setReviewOpen(false)} onOk={submitReview} okText="等待服务端确认并提交" confirmLoading={loading} okButtonProps={{ danger: decision === "EXCLUDED" }}>
-        <Alert type={decision === "EXCLUDED" ? "warning" : "info"} showIcon message={decision === "EXCLUDED" ? "排除后将停止参与后续 Agent Prompt 与结论投影" : "关键 Trust 更新不会进行乐观更新"} style={{ marginBottom: 14 }} />
-        <Form form={form} layout="vertical"><Form.Item name="reason_code" label="Reason Code" rules={[{ required: true, message: "请选择原因代码" }]}><Select options={[{ value: "USER_VERIFIED", label: "USER_VERIFIED — 人工核验" },{ value: "QUALITY_CONCERN", label: "QUALITY_CONCERN — 质量存疑" },{ value: "STALE_DATA", label: "STALE_DATA — 数据过期" },{ value: "SCOPE_MISMATCH", label: "SCOPE_MISMATCH — 范围不匹配" },{ value: "USER_EXCLUDED", label: "USER_EXCLUDED — 人工排除" },{ value: "RESTORED", label: "RESTORED — 恢复参与调查" }]} /></Form.Item><Form.Item name="reason" label="审查说明" rules={[{ required: true, min: 3, message: "请填写至少 3 个字符的审查说明" }]}><Input.TextArea rows={4} maxLength={1000} showCount /></Form.Item></Form>
+      <Modal title={`人在环证据治理：${evidenceId || "—"}`} open={reviewOpen} onCancel={() => setReviewOpen(false)} onOk={submitReview} okText="确认审查" confirmLoading={loading} okButtonProps={{ danger: decision === "EXCLUDED", disabled: !reviewImpact?.impact_token }} width={760}>
+        <Alert type={decision === "EXCLUDED" ? "warning" : "info"} showIcon message={decision === "EXCLUDED" ? "排除会停止证据进入后续推理，并可能冻结恢复方案" : "人工只治理证据准入和可信状态，不能直接修改根因置信度"} style={{ marginBottom: 14 }} />
+        <Form form={form} layout="vertical" onValuesChange={() => setReviewImpact(null)}>
+          {!new Set(["HIDDEN", "VISIBLE", "ARCHIVED", "UNARCHIVED"]).has(decision) && <>
+            <Divider orientation="left">结构化审查</Divider>
+            <Form.Item name={["assessment", "target_identity"]} label="目标身份" rules={[{ required: true }]}><Select options={[{ value: "CONFIRMED", label: "已确认" }, { value: "POSSIBLE_PID_REUSE", label: "可能 PID 复用" }, { value: "INSTANCE_MISMATCH", label: "实例不匹配" }]} /></Form.Item>
+            <Form.Item name={["assessment", "time_alignment"]} label="时间对齐" rules={[{ required: true }]}><Select options={[{ value: "FULL_WINDOW", label: "完全覆盖故障窗口" }, { value: "PARTIAL_WINDOW", label: "部分覆盖" }, { value: "MISMATCH", label: "时间不匹配" }]} /></Form.Item>
+            <Form.Item name={["assessment", "data_integrity"]} label="数据完整性" rules={[{ required: true }]}><Select options={[{ value: "COMPLETE", label: "完整" }, { value: "TRUNCATED", label: "截断" }, { value: "FAILED", label: "采集失败" }]} /></Form.Item>
+            <Form.Item name={["assessment", "source_reliability"]} label="来源可靠性" rules={[{ required: true }]}><Select options={[{ value: "NATIVE_COLLECTOR", label: "原生采集" }, { value: "EXTERNAL_SYSTEM", label: "外部系统" }, { value: "MANUAL_UPLOAD", label: "人工上传" }]} /></Form.Item>
+            <Form.Item name={["assessment", "scope_fit"]} label="范围适配" rules={[{ required: true }]}><Select options={[{ value: "CORRECT", label: "正确服务和节点" }, { value: "PARTIAL", label: "部分匹配" }, { value: "WRONG_SCOPE", label: "错误范围" }]} /></Form.Item>
+            <Form.Item name={["assessment", "corroboration"]} label="交叉佐证" rules={[{ required: true }]}><Select options={[{ value: "INDEPENDENT_SUPPORT", label: "独立证据支持" }, { value: "NONE", label: "无佐证" }, { value: "CONFLICT", label: "存在冲突" }]} /></Form.Item>
+            <Form.Item name={["assessment", "freshness"]} label="新鲜度" rules={[{ required: true }]}><Select options={[{ value: "CURRENT_WINDOW", label: "当前故障窗口" }, { value: "HISTORICAL", label: "历史数据" }, { value: "EXPIRED", label: "已过期" }]} /></Form.Item>
+          </>}
+          <Form.Item name="reason_code" label="原因代码" rules={[{ required: true, message: "请选择原因代码" }]}><Select options={[{ value: "USER_VERIFIED", label: "USER_VERIFIED — 人工核验" },{ value: "QUALITY_CONCERN", label: "QUALITY_CONCERN — 质量存疑" },{ value: "STALE_DATA", label: "STALE_DATA — 数据过期" },{ value: "SCOPE_MISMATCH", label: "SCOPE_MISMATCH — 范围不匹配" },{ value: "USER_EXCLUDED", label: "USER_EXCLUDED — 人工排除" },{ value: "RESTORED", label: "RESTORED — 恢复参与调查" },{ value: "UI_ORGANIZATION", label: "UI_ORGANIZATION — 仅整理界面" },{ value: "ARCHIVE_MANAGEMENT", label: "ARCHIVE_MANAGEMENT — 归档管理" }]} /></Form.Item>
+          <Form.Item name="reason" label="审查说明" rules={[{ required: true, min: 3, message: "请填写至少 3 个字符的审查说明" }]}><Input.TextArea rows={3} maxLength={1000} showCount /></Form.Item>
+          {reviewImpact?.assessment_result?.recommended_decision && reviewImpact.assessment_result.recommended_decision !== decision.replace("RESTORE_AS_", "") && <Form.Item name="override_reason" label="覆盖系统建议的原因" rules={[{ required: true, min: 3 }]}><Input.TextArea rows={2} maxLength={1000} /></Form.Item>}
+          <Button loading={loading} onClick={() => form.validateFields().then((values) => loadReviewImpact(decision, values))}>预览影响</Button>
+        </Form>
+        {reviewImpact && <Alert style={{ marginTop: 14 }} type={reviewImpact.requires_approval ? "warning" : "success"} showIcon message={`建议：${reviewImpact.assessment_result?.recommended_decision || "保持当前"} · 治理分 ${reviewImpact.assessment_result?.derived_trust_score ?? 50}`} description={<div><div>{(reviewImpact.assessment_result?.reasons || []).join("；") || "没有发现结构化质量警告"}</div><div>影响：分析 {reviewImpact.affected?.analysis_runs || 0}，假设 {reviewImpact.affected?.hypotheses || 0}，结论 {reviewImpact.affected?.conclusions || 0}，恢复方案 {reviewImpact.affected?.recovery_plans || 0}</div><div>预测结论状态：{reviewImpact.predicted_conclusion_state || "不变"}{reviewImpact.requires_approval ? "；本次操作需要审批角色" : ""}</div></div>} />}
       </Modal>
     </>
   );

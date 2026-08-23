@@ -194,7 +194,15 @@ class CaseEvidenceModel(Base):
     resource_incarnation = Column(String(256), nullable=True)
     content_hash = Column(String(64), nullable=True)
     projection_hash = Column(String(64), nullable=True)
+    # ``status`` remains a compatibility projection while governance keeps
+    # lifecycle, human trust, and UI organization as independent dimensions.
     status = Column(String(24), nullable=False, default="ACTIVE", index=True)
+    lifecycle_status = Column(String(24), nullable=False, default="ACTIVE", server_default="ACTIVE", index=True)
+    review_trust_state = Column(String(24), nullable=False, default="UNREVIEWED", server_default="UNREVIEWED", index=True)
+    review_revision = Column(Integer, nullable=False, default=0, server_default="0")
+    derived_trust_score = Column(Integer, nullable=False, default=50, server_default="50")
+    ui_hidden = Column(Boolean, nullable=False, default=False, server_default="0")
+    ui_archived = Column(Boolean, nullable=False, default=False, server_default="0")
     quality = Column(String(20), nullable=False, default="UNKNOWN")
     freshness = Column(String(20), nullable=False, default="UNKNOWN")
     time_window_json = Column(JSON, nullable=False, default=dict)
@@ -248,6 +256,12 @@ class CaseEvidenceModel(Base):
             "content_hash": self.content_hash,
             "projection_hash": self.projection_hash,
             "status": self.status,
+            "lifecycle_status": self.lifecycle_status,
+            "review_trust_state": self.review_trust_state,
+            "review_revision": self.review_revision,
+            "derived_trust_score": self.derived_trust_score,
+            "ui_hidden": bool(self.ui_hidden),
+            "ui_archived": bool(self.ui_archived),
             "quality": self.quality,
             "freshness": self.freshness,
             "time_window": self.time_window_json or {},

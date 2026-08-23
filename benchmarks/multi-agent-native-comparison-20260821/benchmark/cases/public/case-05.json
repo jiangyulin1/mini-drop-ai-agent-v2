@@ -1,0 +1,60 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-05",
+  "incident": {
+    "symptom": "Expired items accumulate while CPU remains moderate. Find the background scheduling or cursor interaction that explains the backlog.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-05-backlog",
+      "kind": "expired_backlog",
+      "summary": "Expired backlog grows over three observation windows.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:22719ffafc4a22a4e8a7547d40e345e99a43ee08c0de72586a05de85d887a7c3",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-05-cpu",
+      "kind": "cpu_context",
+      "summary": "CPU is not saturated during backlog growth.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:05a742af834ab5c0e6691d263f65b666f93f63c22d393ab1758f7fb7035bdef9",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-05-cursor",
+      "kind": "cursor_overlap",
+      "summary": "Two local-window cursors advance together and make the estimate appear healthy.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:dd4df29f5df67a98d3a817403f02f07fedf942512d116f585767b7a493b6e9a5",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_evidence_slice"
+      ]
+    }
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

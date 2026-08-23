@@ -132,6 +132,7 @@ class CreateRecoveryPlanRequest(StrictModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     value_after_fix: str = Field(min_length=3, max_length=2000)
     verification_method: str = Field(min_length=3, max_length=2000)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=64)
     expected_case_version: Optional[int] = Field(default=None, ge=0)
 
 
@@ -249,9 +250,18 @@ class RetargetStepRequest(StrictModel):
 
 class EvidenceReviewRequest(StrictModel):
     evidence_id: str = Field(min_length=1, max_length=128)
-    decision: str = Field(min_length=1, max_length=20)
-    reason_code: Optional[str] = Field(default=None, max_length=64)
-    reason: Optional[str] = Field(default=None, max_length=1000)
+    decision: str = Field(min_length=1, max_length=32)
+    expected_review_revision: int = Field(ge=0)
+    impact_token: str = Field(min_length=10, max_length=256)
+    assessment: dict[str, str] = Field(default_factory=dict)
+    reason_code: str = Field(min_length=2, max_length=64)
+    reason: str = Field(min_length=3, max_length=1000)
+    override_reason: Optional[str] = Field(default=None, min_length=3, max_length=1000)
+
+
+class EvidenceReviewPreviewRequest(StrictModel):
+    decision: str = Field(min_length=1, max_length=32)
+    assessment: dict[str, str] = Field(default_factory=dict)
 
 
 class EvidenceChainConfidenceRequest(StrictModel):

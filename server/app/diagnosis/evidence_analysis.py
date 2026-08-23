@@ -40,8 +40,9 @@ class EvidenceAnalysisService:
             evidence = self._repo.get_case_evidence(case_id, tenant_id, evidence_id)
             if evidence is None:
                 raise ValueError(f"EVIDENCE_NOT_FOUND:{evidence_id}")
-            status = str(evidence.get("status") or "ACTIVE")
-            if status == "EXCLUDED":
+            lifecycle = str(evidence.get("lifecycle_status") or "ACTIVE")
+            trust_state = str(evidence.get("review_trust_state") or "UNREVIEWED")
+            if lifecycle == "EXCLUDED":
                 if not (explicit_single and mode == "SINGLE"):
                     raise ValueError(f"EVIDENCE_EXCLUDED:{evidence_id}")
                 excluded = True
@@ -49,11 +50,11 @@ class EvidenceAnalysisService:
             if not projections:
                 raise ValueError(f"EVIDENCE_PROJECTION_NOT_FOUND:{evidence_id}")
             latest = projections[-1]
-            reviews = self._repo.list_evidence_reviews(case_id, tenant_id, evidence_id=evidence_id)
             inputs.append({
                 "evidence_id": evidence_id,
-                "review_revision": len(reviews),
-                "review_state": status,
+                "review_revision": int(evidence.get("review_revision") or 0),
+                "review_state": trust_state,
+                "lifecycle_status": lifecycle,
                 "projection_id": latest["projection_id"],
                 "projection_hash": latest["projection_hash"],
             })
@@ -156,16 +157,13 @@ class EvidenceAnalysisService:
             if evidence is None:
                 reasons.append(f"EVIDENCE_NOT_FOUND:{evidence_id}")
                 continue
-            current_state = str(evidence.get("status") or "ACTIVE")
+            current_state = str(evidence.get("review_trust_state") or "UNREVIEWED")
             if current_state != str(pinned.get("review_state") or "ACTIVE"):
                 reasons.append(f"REVIEW_STATE_CHANGED:{evidence_id}")
-            reviews = self._repo.list_evidence_reviews(
-                case_id, tenant_id, evidence_id=evidence_id,
-            )
-            current_revision = max(
-                (int(item.get("review_revision") or 0) for item in reviews),
-                default=0,
-            )
+            current_lifecycle = str(evidence.get("lifecycle_status") or "ACTIVE")
+            if current_lifecycle != str(pinned.get("lifecycle_status") or "ACTIVE"):
+                reasons.append(f"LIFECYCLE_CHANGED:{evidence_id}")
+            current_revision = int(evidence.get("review_revision") or 0)
             if current_revision != int(pinned.get("review_revision") or 0):
                 reasons.append(f"REVIEW_REVISION_CHANGED:{evidence_id}")
             projections = self._repo.list_evidence_projections(

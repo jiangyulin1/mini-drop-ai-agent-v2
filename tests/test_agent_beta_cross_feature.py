@@ -92,6 +92,29 @@ def _done_task(collector: str = "sys_metrics", *, agent_id: str = "agent-x") -> 
     return task.id
 
 
+def _review_evidence(
+    client: TestClient, case_id: str, evidence_id: str, decision: str, *, reason: str,
+):
+    preview = client.post(
+        f"/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/preview",
+        json={"decision": decision, "assessment": {}},
+    )
+    assert preview.status_code == 200, preview.text
+    impact = preview.json()["data"]
+    return client.post(
+        f"/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews",
+        json={
+            "evidence_id": evidence_id,
+            "decision": decision,
+            "expected_review_revision": impact["current_review_revision"],
+            "impact_token": impact["impact_token"],
+            "assessment": {},
+            "reason_code": "USER_EXCLUDED" if decision == "EXCLUDED" else "RESTORED",
+            "reason": reason,
+        },
+    )
+
+
 # ── 1. 数据驱动入口 → Evidence → 解释不误采集 → 排除/恢复 → finish ──────
 
 def test_data_driven_evidence_lifecycle_answer_only_and_restore(client: TestClient):
@@ -136,9 +159,8 @@ def test_data_driven_evidence_lifecycle_answer_only_and_restore(client: TestClie
     assert dup.json()["data"]["items"][0]["result"] == "DUPLICATE_SKIPPED"
 
     # 排除后 finish 拒绝引用；RESTORED 后再次接受
-    excluded = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
-        json={"evidence_id": evidence_id, "decision": "EXCLUDED", "reason": "outlier"},
+    excluded = _review_evidence(
+        client, case["case_id"], evidence_id, "EXCLUDED", reason="outlier",
     )
     assert excluded.status_code == 200, excluded.text
     rejected = client.post(
@@ -147,9 +169,8 @@ def test_data_driven_evidence_lifecycle_answer_only_and_restore(client: TestClie
         headers={"X-Internal-Token": TOKEN},
     )
     assert rejected.status_code == 400
-    restored = client.post(
-        f"/api/v1/cases/{case['case_id']}/evidence/{evidence_id}/reviews",
-        json={"evidence_id": evidence_id, "decision": "RESTORED", "reason": "误排除"},
+    restored = _review_evidence(
+        client, case["case_id"], evidence_id, "RESTORE_AS_TRUSTED", reason="误排除",
     )
     assert restored.status_code == 200, restored.text
     accepted = client.post(

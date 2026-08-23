@@ -1,14 +1,20 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import EvidenceDrawer from "./EvidenceDrawer";
-import { getCaseEvidence, previewCaseEvidence } from "../api/client";
+import {
+  getCaseEvidence,
+  previewCaseEvidence,
+  previewCaseEvidenceReview,
+  reviewCaseEvidence,
+} from "../api/client";
 
 vi.mock("../api/client", () => ({
   createCaseEvidenceAnalysis: vi.fn(),
   downloadCaseEvidence: vi.fn(),
   getCaseEvidence: vi.fn(),
   previewCaseEvidence: vi.fn(),
+  previewCaseEvidenceReview: vi.fn(),
   reviewCaseEvidence: vi.fn(),
 }));
 
@@ -28,6 +34,19 @@ describe("EvidenceDrawer citation focus", () => {
       content: { summary: "CPU hot", signals: { cpu: 92.4 } },
       truncated: false,
     });
+    previewCaseEvidenceReview.mockResolvedValue({
+      current_review_revision: 0,
+      impact_token: "impact-token-1",
+      assessment_result: {
+        recommended_decision: "LOW_TRUST",
+        derived_trust_score: 65,
+        reasons: ["没有独立数据源交叉佐证"],
+      },
+      affected: { analysis_runs: 1, hypotheses: 2, conclusions: 1, recovery_plans: 1 },
+      predicted_conclusion_state: "INSUFFICIENT_EVIDENCE",
+      requires_approval: true,
+    });
+    reviewCaseEvidence.mockResolvedValue({ review_revision: 1 });
   });
 
   it("shows the exact cited field, projection and quoted value", async () => {
@@ -116,5 +135,26 @@ describe("EvidenceDrawer citation focus", () => {
     expect(focus).toHaveTextContent("投影不可用");
     expect(focus).toHaveTextContent("分析时固定的投影不可用");
     expect(focus).not.toHaveTextContent("92.4");
+  });
+
+  it("previews governance impact before allowing exclusion", async () => {
+    render(<EvidenceDrawer
+      open
+      caseId="case-1"
+      evidence={{ evidence_id: "ev-1", status: "ACTIVE" }}
+      onClose={vi.fn()}
+    />);
+
+    await screen.findByText("标记可信");
+    fireEvent.click(screen.getByRole("button", { name: /排除/ }));
+    await waitFor(() => expect(previewCaseEvidenceReview).toHaveBeenCalledWith(
+      "case-1",
+      "ev-1",
+      expect.objectContaining({ decision: "EXCLUDED" }),
+    ));
+    expect(await screen.findByText(/建议：LOW_TRUST · 治理分 65/)).toBeInTheDocument();
+    expect(screen.getByText(/影响：分析 1，假设 2，结论 1，恢复方案 1/)).toBeInTheDocument();
+    expect(screen.getByText(/本次操作需要审批角色/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认审查" })).toBeEnabled();
   });
 });
