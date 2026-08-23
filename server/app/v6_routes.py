@@ -1658,6 +1658,37 @@ def internal_tool_record_evidence_gaps(payload: dict[str, Any], request: Request
     return APIResponse(data={"items": items, "total": len(items)})
 
 
+@router.post("/internal/agent/tools/evidence-dependency")
+def internal_tool_propose_evidence_dependency(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id, tenant_id, case = _investigation_tool_case(payload, "propose_evidence_dependency")
+    source_kind = str(payload.get("source_kind") or "").upper()
+    target_kind = str(payload.get("target_kind") or "").upper()
+    relation = str(payload.get("relation") or "").upper()
+    source_id = str(payload.get("source_id") or "")
+    target_id = str(payload.get("target_id") or "")
+    if source_kind != "EVIDENCE" or target_kind not in {"HYPOTHESIS", "CLAIM", "CAUSAL_NODE", "CAUSAL_EDGE"}:
+        raise HTTPException(status_code=400, detail="INVALID_DEPENDENCY_KINDS")
+    if relation not in {"SUPPORTS", "CONTRADICTS"}:
+        raise HTTPException(status_code=400, detail="INVALID_DEPENDENCY_RELATION")
+    evidence = repo.get_case_evidence(case_id, tenant_id, source_id)
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+    lifecycle = str(evidence.get("lifecycle_status") or evidence.get("status") or "ACTIVE").upper()
+    if lifecycle in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
+        raise HTTPException(status_code=409, detail="EXCLUDED_EVIDENCE_CANNOT_BE_DEPENDENCY")
+    if not target_id:
+        raise HTTPException(status_code=400, detail="DEPENDENCY_TARGET_REQUIRED")
+    result = repo.propose_evidence_dependency(
+        case_id=case_id, tenant_id=tenant_id, source_kind=source_kind,
+        source_id=source_id, target_kind=target_kind, target_id=target_id,
+        relation=relation, support_weight=float(payload.get("support_weight", 1.0) or 0.0),
+        reason=str(payload.get("reason") or ""),
+    )
+    repo.record_case_event(case_id, tenant_id, event_type="evidence_dependency_proposed", payload=result, actor_id="mini-drop-pi-runtime")
+    return APIResponse(data={"dependency": result, "calculation_version": "evidence-weighted-v1"})
+
+
 @router.post("/internal/agent/tools/causal-graph")
 def internal_tool_propose_causal_graph(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
@@ -1878,8 +1909,31 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             "claims", "primary_root_causes", "contributing_factors", "amplifiers",
             "propagated_effects", "symptoms", "coincidental_anomalies", "ruled_out",
             "recommendations",
+            "root_location", "mechanism", "confidence_reason", "evidence_gaps",
+            "invalidated_claims", "remaining_active_support",
         )
     }
+    root_location = payload.get("root_location") or {}
+    mechanism = payload.get("mechanism") or {}
+    confidence_reason = str(payload.get("confidence_reason") or "").strip()
+    structured_mode = any(
+        key in payload for key in (
+            "root_location", "mechanism", "confidence_reason", "evidence_gaps",
+            "invalidated_claims", "remaining_active_support",
+        )
+    )
+    if structured_mode and requested_state != "INSUFFICIENT_EVIDENCE":
+        if not isinstance(root_location, dict) or not str(root_location.get("type") or "").strip():
+            raise HTTPException(status_code=400, detail="ROOT_LOCATION_REQUIRED")
+        if not isinstance(mechanism, dict) or not str(mechanism.get("statement") or "").strip():
+            raise HTTPException(status_code=400, detail="MECHANISM_REQUIRED")
+        if not confidence_reason:
+            raise HTTPException(status_code=400, detail="CONFIDENCE_REASON_REQUIRED")
+    for ref in list(root_location.get("evidence_refs") or []) + list(mechanism.get("supporting_evidence") or []) + list(mechanism.get("contradicting_evidence") or []):
+        if str(ref) not in known_evidence_ids:
+            raise HTTPException(status_code=400, detail=f"INVALID_STRUCTURED_EVIDENCE_REF:{ref}")
+    if any(str(ref) in excluded_evidence_ids for ref in list(root_location.get("evidence_refs") or []) + list(mechanism.get("supporting_evidence") or []) + list(mechanism.get("contradicting_evidence") or [])):
+        raise HTTPException(status_code=400, detail="EXCLUDED_EVIDENCE_IN_STRUCTURED_CONCLUSION")
     leaked_excluded = sorted(
         set(_nested_string_values(structured_conclusion)) & excluded_evidence_ids,
     )
@@ -2153,6 +2207,9 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             {key: value for key, value in recommendation.items() if key != "recommendation_id"}
             for recommendation in recommendations_payload
         ],
+        "root_location": root_location,
+        "mechanism": mechanism,
+        "confidence_reason": confidence_reason,
     }
     finish_key = hashlib.sha256(
         _json.dumps(signature_payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
@@ -2177,6 +2234,9 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             state=verified_state,
             causal_graph_revision_id=(graph or {}).get("graph_id"),
             claims=claims,
+            root_location=root_location,
+            mechanism=mechanism,
+            confidence_reason=confidence_reason,
             primary_root_causes=list(payload.get("primary_root_causes") or []),
             contributing_factors=list(payload.get("contributing_factors") or []),
             amplifiers=list(payload.get("amplifiers") or []),

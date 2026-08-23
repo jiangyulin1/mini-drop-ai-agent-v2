@@ -267,7 +267,7 @@ class EvidenceReviewPreviewRequest(StrictModel):
 class EvidenceChainConfidenceRequest(StrictModel):
     """Operator adjustment for an existing, evidence-backed chain node."""
 
-    chain_type: Literal["hypothesis", "causal_node"]
+    chain_type: Literal["hypothesis", "causal_node", "causal_edge", "claim", "conclusion"]
     chain_id: str = Field(min_length=1, max_length=128)
     confidence: float = Field(ge=0.0, le=1.0)
     expected_revision: int = Field(default=0, ge=0)

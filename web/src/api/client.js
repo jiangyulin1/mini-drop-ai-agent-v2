@@ -627,6 +627,16 @@ export function previewCaseEvidenceReview(caseId, evidenceId, payload) {
   return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/reviews/preview`, payload);
 }
 
+/** Explainable confidence impact across hypotheses, causal links, claims and conclusions. */
+export function getEvidenceChainImpact(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence-chain-impact`);
+}
+
+/** Operator increase-only confidence adjustment with optimistic revision. */
+export function adjustEvidenceChainConfidence(caseId, payload) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence-chain-confidence`, payload);
+}
+
 /** 列出证据审查记录。 */
 export function listCaseEvidenceReviews(caseId, params = {}) {
   return api.get(`/v1/cases/${encodeURIComponent(caseId)}/evidence-reviews`, { params });

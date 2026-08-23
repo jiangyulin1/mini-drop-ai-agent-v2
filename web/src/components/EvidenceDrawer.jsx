@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Descriptions, Divider, Drawer, Empty, Form, Input, List, Modal, Select, Space, Tag, Tooltip, Typography, message } from "antd";
+import { Alert, Button, Descriptions, Divider, Drawer, Empty, Form, Input, List, Modal, Select, Space, Tag, Tooltip, Typography, message, InputNumber } from "antd";
 import { CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined, FileSearchOutlined, HistoryOutlined, RobotOutlined, WarningOutlined } from "@ant-design/icons";
 import {
   createCaseEvidenceAnalysis,
@@ -8,6 +8,8 @@ import {
   previewCaseEvidenceReview,
   previewCaseEvidence,
   reviewCaseEvidence,
+  getEvidenceChainImpact,
+  adjustEvidenceChainConfidence,
 } from "../api/client";
 import { formatArtifactSize } from "../utils/evidence";
 import { evidenceTrust } from "../utils/opsMappings";
@@ -45,6 +47,9 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
   const [reviewImpact, setReviewImpact] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [chainImpact, setChainImpact] = useState(null);
+  const [adjustment, setAdjustment] = useState(null);
+  const [adjustmentForm] = Form.useForm();
   const item = useMemo(() => detail || evidence || {}, [detail, evidence]);
   const evidenceId = evidence?.evidence_id || evidence?.id;
   const trustValue = item.review_trust_state || item.trust_status || item.review_decision || item.status || "UNKNOWN";
@@ -86,11 +91,13 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
     Promise.all([
       getCaseEvidence(caseId, evidenceId),
       previewCaseEvidence(caseId, evidenceId),
-    ]).then(([nextDetail, nextPreview]) => {
+      typeof getEvidenceChainImpact === "function" ? getEvidenceChainImpact(caseId) : Promise.resolve(null),
+    ]).then(([nextDetail, nextPreview, nextImpact]) => {
       setDetail(nextDetail);
       setPreview(nextPreview);
       setReviews(nextDetail?.reviews || []);
       setAnalyses(nextDetail?.analyses || []);
+      setChainImpact(nextImpact);
     }).catch(setError).finally(() => setLoading(false));
   }, [caseId, evidenceId, open]);
 
@@ -163,6 +170,23 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
       onChanged?.();
     } catch (nextError) { setError(nextError); } finally { setLoading(false); }
   }
+  async function submitAdjustment() {
+    const values = await adjustmentForm.validateFields();
+    setLoading(true);
+    try {
+      await adjustEvidenceChainConfidence(caseId, {
+        chain_type: adjustment.chain_type,
+        chain_id: adjustment.chain_id,
+        confidence: values.confidence,
+        expected_revision: adjustment.revision || 0,
+        reason: values.reason,
+      });
+      message.success("链路置信度已记录，并保留人工调整审计");
+      setAdjustment(null);
+      const nextImpact = await getEvidenceChainImpact(caseId);
+      setChainImpact(nextImpact);
+    } catch (nextError) { setError(nextError); } finally { setLoading(false); }
+  }
   return (
     <>
       <Drawer title={<Space><FileSearchOutlined />Evidence 详情</Space>} open={open} onClose={onClose} width={720} destroyOnHidden extra={<Tag color={trust.color}>{trust.label}</Tag>}>
@@ -217,6 +241,8 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
           <List size="small" bordered dataSource={analyses} locale={{ emptyText: "还没有 AI 分析记录" }} renderItem={(analysis) => <List.Item><List.Item.Meta title={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : analysis.status === "FAILED" ? "red" : "processing"}>{analysis.status}</Tag><span>{analysis.mode}</span>{analysis.input_state !== "CURRENT" && <Tag color="warning">{analysis.input_state}</Tag>}</Space>} description={(analysis.facts || []).map((fact) => fact.claim).filter(Boolean).join("；") || (analysis.limitations || []).join("；") || analysis.analysis_run_id} /><time>{analysis.created_at ? new Date(analysis.created_at).toLocaleString() : "—"}</time></List.Item>} />
           <Divider orientation="left"><HistoryOutlined /> Review 历史</Divider>
           <List size="small" bordered dataSource={reviews} locale={{ emptyText: "还没有人工审查记录" }} renderItem={(review) => <List.Item><List.Item.Meta title={<Space><Tag color={evidenceTrust(review.decision).color}>{review.decision}</Tag><span>Revision {review.review_revision || "—"}</span></Space>} description={`${review.reason_code || "NO_REASON_CODE"} · ${review.reason || "未填写说明"}`} /><time>{review.created_at ? new Date(review.created_at).toLocaleString() : "—"}</time></List.Item>} />
+          <Divider orientation="left">证据链影响与可解释置信度</Divider>
+          <List size="small" bordered dataSource={(chainImpact?.chains || []).filter((chain) => (chain.ledger || []).some((item) => item.evidence_id === evidenceId))} locale={{ emptyText: "当前证据尚未进入可解释链路" }} renderItem={(chain) => <List.Item actions={[<Button key="adjust" size="small" onClick={() => { adjustmentForm.resetFields(); setAdjustment(chain); }}>提高置信度</Button>]}><List.Item.Meta title={<Space><Tag color={chain.status === "ACTIVE" ? "green" : chain.status === "INVALIDATED" ? "red" : "gold"}>{chain.status}</Tag><Typography.Text code>{chain.chain_type}:{chain.chain_id}</Typography.Text><span>{Number(chain.computed_confidence || 0).toFixed(2)} → {Number(chain.effective_confidence || 0).toFixed(2)}</span></Space>} description={<Space direction="vertical" size={0}><span>{chain.confidence_reason}</span><span>失效：{(chain.invalidated_evidence_refs || []).join(", ") || "无"}；剩余支持：{(chain.remaining_active_support || []).join(", ") || "无"}</span><Typography.Text type="secondary">模型 {chain.calculation_version} · Revision {chain.revision || 0}</Typography.Text></Space>} /></List.Item>} />
         </Space>}
       </Drawer>
       <Modal title={`人在环证据治理：${evidenceId || "—"}`} open={reviewOpen} onCancel={() => setReviewOpen(false)} onOk={submitReview} okText="确认审查" confirmLoading={loading} okButtonProps={{ danger: decision === "EXCLUDED", disabled: !reviewImpact?.impact_token }} width={760}>
@@ -238,6 +264,13 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
           <Button loading={loading} onClick={() => form.validateFields().then((values) => loadReviewImpact(decision, values))}>预览影响</Button>
         </Form>
         {reviewImpact && <Alert style={{ marginTop: 14 }} type={reviewImpact.requires_approval ? "warning" : "success"} showIcon message={`建议：${reviewImpact.assessment_result?.recommended_decision || "保持当前"} · 治理分 ${reviewImpact.assessment_result?.derived_trust_score ?? 50}`} description={<div><div>{(reviewImpact.assessment_result?.reasons || []).join("；") || "没有发现结构化质量警告"}</div><div>影响：分析 {reviewImpact.affected?.analysis_runs || 0}，假设 {reviewImpact.affected?.hypotheses || 0}，结论 {reviewImpact.affected?.conclusions || 0}，恢复方案 {reviewImpact.affected?.recovery_plans || 0}</div><div>预测结论状态：{reviewImpact.predicted_conclusion_state || "不变"}{reviewImpact.requires_approval ? "；本次操作需要审批角色" : ""}</div></div>} />}
+      </Modal>
+      <Modal title={`提高链路置信度：${adjustment?.chain_id || ""}`} open={Boolean(adjustment)} onCancel={() => setAdjustment(null)} onOk={submitAdjustment} confirmLoading={loading} okText="提交调整">
+        <Alert type="info" showIcon message={`自动值 ${Number(adjustment?.computed_confidence || 0).toFixed(2)}，上限 ${Number(adjustment?.confidence_cap || 0).toFixed(2)}`} description="调整只会记录人工意图；被排除证据不能恢复为支持，低可信证据仍受上限约束。" style={{ marginBottom: 14 }} />
+        <Form form={adjustmentForm} layout="vertical">
+          <Form.Item name="confidence" label="目标置信度" rules={[{ required: true, type: "number", min: Number(adjustment?.effective_confidence || 0), max: Number(adjustment?.confidence_cap || 1) }]}><InputNumber min={0} max={1} step={0.01} style={{ width: "100%" }} /></Form.Item>
+          <Form.Item name="reason" label="调整理由" rules={[{ required: true, min: 3 }]}><Input.TextArea rows={3} maxLength={1000} showCount /></Form.Item>
+        </Form>
       </Modal>
     </>
   );

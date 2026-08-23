@@ -512,8 +512,11 @@ export function buildEvidenceAgentSystemPrompt(promptVariant = "default") {
     "A PROPOSED discovery result is not execution; COLLECTING means end this run and await the durable Evidence wakeup. " +
     "COMPLETED or PARTIAL discovery is not an investigation conclusion: continue with get_dependency_graph and Evidence, preserve coverage limitations, and never treat dependency edges as causal claims. " +
     "If Evidence proves only communication/dependency and no causal mechanism, do not call propose_causal_graph; keep the causal graph empty and finish with no asserted root cause. " +
+    "When a hypothesis, claim or causal edge depends on Evidence, explicitly call propose_evidence_dependency with the Evidence ID, relation, weight and reason before finish. " +
     "For an investigative turn where finish_investigation is available, every terminal outcome, including insufficient evidence, " +
     "must be submitted through finish_investigation. Never substitute a plain-text final or stage conclusion. " +
+    "Every non-abstaining finish must include root_location (type, target_ref, evidence_refs), mechanism (statement, supporting_evidence, contradicting_evidence, confidence, confidence_reason), evidence_gaps, invalidated_claims, remaining_active_support and excluded_evidence_used=false. " +
+    "A finish after intervention must include intervention_ack=true, the exact intervention_id, evidence_state_rechecked=true, revision_before, revision_after and invalidated_claims/remaining_active_support. " +
     "Final claims must cite evidence_id, projection_hash and exact " +
     `field/span support. prompt_variant=${promptVariant}.`
   );

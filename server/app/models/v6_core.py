@@ -1142,6 +1142,101 @@ class EvidenceDependencyEdgeModel(Base):
         }
 
 
+class ConfidenceChainSnapshotModel(Base):
+    """Versioned, explainable confidence ledger for any Case chain."""
+
+    __tablename__ = "confidence_chain_snapshots"
+    __table_args__ = (
+        UniqueConstraint("case_id", "chain_type", "chain_id", "revision", name="uq_confidence_chain_snapshot"),
+        Index("ix_confidence_chain_case_current", "case_id", "chain_type", "chain_id", "revision"),
+    )
+
+    snapshot_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    chain_type = Column(String(32), nullable=False)
+    chain_id = Column(String(256), nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
+    status = Column(String(32), nullable=False, default="ACTIVE")
+    computed_confidence = Column(Float, nullable=False, default=0.0)
+    operator_requested_confidence = Column(Float, nullable=True)
+    effective_confidence = Column(Float, nullable=False, default=0.0)
+    confidence_cap = Column(Float, nullable=False, default=1.0)
+    calculation_version = Column(String(64), nullable=False)
+    confidence_reason = Column(Text, nullable=False, default="")
+    invalidated_evidence_refs = Column(JSON, nullable=False, default=list)
+    remaining_active_support = Column(JSON, nullable=False, default=list)
+    ledger_json = Column(JSON, nullable=False, default=list)
+    operator_adjustment_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "snapshot_id": self.snapshot_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "chain_type": self.chain_type,
+            "chain_id": self.chain_id,
+            "revision": self.revision,
+            "status": self.status,
+            "computed_confidence": self.computed_confidence,
+            "operator_requested_confidence": self.operator_requested_confidence,
+            "effective_confidence": self.effective_confidence,
+            "confidence_cap": self.confidence_cap,
+            "calculation_version": self.calculation_version,
+            "confidence_reason": self.confidence_reason,
+            "invalidated_evidence_refs": self.invalidated_evidence_refs or [],
+            "remaining_active_support": self.remaining_active_support or [],
+            "ledger": self.ledger_json or [],
+            "operator_adjustment": self.operator_adjustment_json or {},
+            "created_at": self.created_at,
+        }
+
+
+class ConfidenceAdjustmentModel(Base):
+    """Immutable operator confidence adjustment audit record."""
+
+    __tablename__ = "confidence_adjustments"
+    __table_args__ = (
+        Index("ix_confidence_adjustments_chain", "case_id", "chain_type", "chain_id", "created_at"),
+    )
+
+    adjustment_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    chain_type = Column(String(32), nullable=False)
+    chain_id = Column(String(256), nullable=False)
+    revision_before = Column(Integer, nullable=False)
+    revision_after = Column(Integer, nullable=False)
+    confidence_before = Column(Float, nullable=False)
+    requested_confidence = Column(Float, nullable=False)
+    effective_confidence = Column(Float, nullable=False)
+    reason = Column(Text, nullable=False)
+    evidence_refs = Column(JSON, nullable=False, default=list)
+    calculation_version = Column(String(64), nullable=False)
+    actor_id = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "adjustment_id": self.adjustment_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "chain_type": self.chain_type,
+            "chain_id": self.chain_id,
+            "revision_before": self.revision_before,
+            "revision_after": self.revision_after,
+            "confidence_before": self.confidence_before,
+            "requested_confidence": self.requested_confidence,
+            "effective_confidence": self.effective_confidence,
+            "reason": self.reason,
+            "evidence_refs": self.evidence_refs or [],
+            "calculation_version": self.calculation_version,
+            "actor_id": self.actor_id,
+            "created_at": self.created_at,
+        }
+
+
 class CausalGraphRevisionModel(Base):
     __tablename__ = "causal_graph_revisions"
     __table_args__ = (
@@ -1344,6 +1439,9 @@ class ConclusionRevisionModel(Base):
     ruled_out = Column(JSON, nullable=False, default=list)
     causal_graph_revision_id = Column(String(128), nullable=True)
     claims = Column(JSON, nullable=False, default=list)
+    root_location_json = Column(JSON, nullable=False, default=dict)
+    mechanism_json = Column(JSON, nullable=False, default=dict)
+    confidence_reason = Column(Text, nullable=False, default="")
     evidence_gap_ids = Column(JSON, nullable=False, default=list)
     recommendation_ids = Column(JSON, nullable=False, default=list)
     limitations = Column(JSON, nullable=False, default=list)
@@ -1374,6 +1472,9 @@ class ConclusionRevisionModel(Base):
             "ruled_out": self.ruled_out or [],
             "causal_graph_revision_id": self.causal_graph_revision_id,
             "claims": self.claims or [],
+            "root_location": self.root_location_json or {},
+            "mechanism": self.mechanism_json or {},
+            "confidence_reason": self.confidence_reason,
             "evidence_gap_ids": self.evidence_gap_ids or [],
             "recommendation_ids": self.recommendation_ids or [],
             "limitations": self.limitations or [],

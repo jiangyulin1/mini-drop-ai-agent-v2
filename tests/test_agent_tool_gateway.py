@@ -269,12 +269,12 @@ def test_internal_catalog_is_authenticated_and_canonical(client: TestClient):
     catalog = response.json()["data"]
     assert catalog["schema_version"] == "tool-catalog.v1"
     names = {item["name"] for item in catalog["tools"]}
-    assert len(names) == 21
+    assert len(names) == 22
     assert {
         "get_case_snapshot", "propose_collection", "propose_plan_revision",
         "get_dependency_graph", "discover_topology",
         "propose_hypothesis_revision", "record_evidence_gaps", "propose_causal_graph",
-        "submit_evidence_analysis", "finish_investigation",
+        "submit_evidence_analysis", "finish_investigation", "propose_evidence_dependency",
     } <= names
     assert {"evaluate_hypotheses", "rca_candidate_analysis", "request_operation"}.isdisjoint(names)
     by_name = {item["name"]: item for item in catalog["tools"]}
@@ -301,7 +301,7 @@ def test_public_runtime_config_exposes_safe_strategy_and_schema_summaries(client
     assert data["ai_ready"] is False
     assert data["ai_status"] == "NOT_CONFIGURED"
     assert {item["strategy_id"] for item in data["available_strategies"]} == {"hybrid"}
-    assert len(data["tool_catalog"]["tools"]) == 21
+    assert len(data["tool_catalog"]["tools"]) == 22
     assert all("internal_path" not in item for item in data["tool_catalog"]["tools"])
     assert data["runtime_policy_schema"]["title"] == "RuntimePolicy"
     assert data["runtime_options_schema"]["title"] == "RuntimeOptions"

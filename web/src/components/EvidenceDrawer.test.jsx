@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import EvidenceDrawer from "./EvidenceDrawer";
 import {
   getCaseEvidence,
+  getEvidenceChainImpact,
   previewCaseEvidence,
   previewCaseEvidenceReview,
   reviewCaseEvidence,
@@ -13,6 +14,7 @@ vi.mock("../api/client", () => ({
   createCaseEvidenceAnalysis: vi.fn(),
   downloadCaseEvidence: vi.fn(),
   getCaseEvidence: vi.fn(),
+  getEvidenceChainImpact: vi.fn(),
   previewCaseEvidence: vi.fn(),
   previewCaseEvidenceReview: vi.fn(),
   reviewCaseEvidence: vi.fn(),
@@ -28,6 +30,7 @@ describe("EvidenceDrawer citation focus", () => {
       reviews: [],
       analyses: [],
     });
+    getEvidenceChainImpact.mockResolvedValue({ chains: [] });
     previewCaseEvidence.mockResolvedValue({
       evidence_id: "ev-1",
       projection_hash: "projection-hash-1",

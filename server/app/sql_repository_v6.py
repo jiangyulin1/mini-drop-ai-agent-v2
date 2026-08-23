@@ -39,6 +39,8 @@ from server.app.models import (
     EvidenceGapModel,
     EvidenceAnalysisRunModel,
     EvidenceDependencyEdgeModel,
+    ConfidenceChainSnapshotModel,
+    ConfidenceAdjustmentModel,
     EvidenceProjectionModel,
     EvidenceReviewRevisionModel,
     EvidenceReviewModel,
@@ -60,6 +62,7 @@ from server.app.diagnosis.evidence_governance import (
     review_result,
     verify_impact_token,
 )
+from server.app.diagnosis.confidence_engine import calculate_chain_confidence, CALCULATION_VERSION
 from server.app.state_machine import now_utc
 
 
@@ -1238,6 +1241,184 @@ class SqlRepositoryV6Mixin:
             if target_kind:
                 query = query.filter(EvidenceDependencyEdgeModel.target_kind == target_kind)
             return [row.to_dict() for row in query.order_by(EvidenceDependencyEdgeModel.created_at.asc()).all()]
+
+    def propose_evidence_dependency(self, **payload: Any) -> dict[str, Any]:
+        """Persist an explicit Agent dependency proposal for deterministic review."""
+        now = now_utc()
+        key = (
+            payload["case_id"], payload["tenant_id"], payload["source_kind"],
+            payload["source_id"], payload["target_kind"], payload["target_id"],
+            payload.get("relation", "SUPPORTS"),
+        )
+        with self._write_session() as session:
+            existing = session.query(EvidenceDependencyEdgeModel).filter(
+                EvidenceDependencyEdgeModel.case_id == key[0],
+                EvidenceDependencyEdgeModel.tenant_id == key[1],
+                EvidenceDependencyEdgeModel.source_kind == key[2],
+                EvidenceDependencyEdgeModel.source_id == key[3],
+                EvidenceDependencyEdgeModel.target_kind == key[4],
+                EvidenceDependencyEdgeModel.target_id == key[5],
+                EvidenceDependencyEdgeModel.relation == key[6],
+            ).first()
+            if existing:
+                existing.support_weight = float(payload.get("support_weight", existing.support_weight) or 0.0)
+                existing.updated_at = now
+                return existing.to_dict()
+            row = EvidenceDependencyEdgeModel(
+                dependency_id=self._dependency_id(*key), case_id=key[0], tenant_id=key[1],
+                source_kind=key[2], source_id=key[3], target_kind=key[4], target_id=key[5],
+                relation=key[6], support_weight=float(payload.get("support_weight", 1.0) or 0.0),
+                status="PROPOSED", invalidated_reason=payload.get("reason"),
+                created_at=now, updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def save_confidence_snapshot(
+        self,
+        *,
+        case_id: str,
+        tenant_id: str,
+        chain_type: str,
+        chain_id: str,
+        result: dict[str, Any],
+        operator_adjustment: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist one immutable calculation revision and its complete ledger."""
+        now = now_utc()
+        with self._write_session() as session:
+            latest = session.query(ConfidenceChainSnapshotModel).filter(
+                ConfidenceChainSnapshotModel.case_id == case_id,
+                ConfidenceChainSnapshotModel.tenant_id == tenant_id,
+                ConfidenceChainSnapshotModel.chain_type == chain_type,
+                ConfidenceChainSnapshotModel.chain_id == chain_id,
+            ).order_by(ConfidenceChainSnapshotModel.revision.desc()).first()
+            revision = int(latest.revision or 0) + 1 if latest else 1
+            row = ConfidenceChainSnapshotModel(
+                snapshot_id=self._new_id("conf"), case_id=case_id, tenant_id=tenant_id,
+                chain_type=chain_type, chain_id=chain_id, revision=revision,
+                status=result.get("status", "ACTIVE"),
+                computed_confidence=float(result.get("computed_confidence", 0.0) or 0.0),
+                operator_requested_confidence=result.get("operator_requested_confidence"),
+                effective_confidence=float(result.get("effective_confidence", 0.0) or 0.0),
+                confidence_cap=float(result.get("confidence_cap", 1.0) or 0.0),
+                calculation_version=result.get("calculation_version") or CALCULATION_VERSION,
+                confidence_reason=result.get("confidence_reason") or "",
+                invalidated_evidence_refs=result.get("invalidated_evidence_refs") or [],
+                remaining_active_support=result.get("remaining_active_support") or [],
+                ledger_json=result.get("ledger") or [],
+                operator_adjustment_json=operator_adjustment or {},
+                created_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def list_confidence_snapshots(
+        self, case_id: str, tenant_id: str, *, chain_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(ConfidenceChainSnapshotModel).filter(
+                ConfidenceChainSnapshotModel.case_id == case_id,
+                ConfidenceChainSnapshotModel.tenant_id == tenant_id,
+            )
+            if chain_type:
+                query = query.filter(ConfidenceChainSnapshotModel.chain_type == chain_type)
+            rows = query.order_by(
+                ConfidenceChainSnapshotModel.chain_type.asc(),
+                ConfidenceChainSnapshotModel.chain_id.asc(),
+                ConfidenceChainSnapshotModel.revision.desc(),
+            ).all()
+            return [row.to_dict() for row in rows]
+
+    def list_confidence_adjustments(
+        self, case_id: str, tenant_id: str, *, chain_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(ConfidenceAdjustmentModel).filter(
+                ConfidenceAdjustmentModel.case_id == case_id,
+                ConfidenceAdjustmentModel.tenant_id == tenant_id,
+            )
+            if chain_type:
+                query = query.filter(ConfidenceAdjustmentModel.chain_type == chain_type)
+            return [row.to_dict() for row in query.order_by(ConfidenceAdjustmentModel.created_at.desc()).all()]
+
+    def record_confidence_adjustment(self, **payload: Any) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            row = ConfidenceAdjustmentModel(
+                adjustment_id=payload.get("adjustment_id") or self._new_id("cadj"),
+                case_id=payload["case_id"], tenant_id=payload["tenant_id"],
+                chain_type=payload["chain_type"], chain_id=payload["chain_id"],
+                revision_before=int(payload["revision_before"]),
+                revision_after=int(payload["revision_after"]),
+                confidence_before=float(payload["confidence_before"]),
+                requested_confidence=float(payload["requested_confidence"]),
+                effective_confidence=float(payload["effective_confidence"]),
+                reason=payload["reason"], evidence_refs=payload.get("evidence_refs") or [],
+                calculation_version=payload.get("calculation_version") or CALCULATION_VERSION,
+                actor_id=payload["actor_id"], created_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def build_confidence_chain_impact(
+        self, case_id: str, tenant_id: str, *, persist: bool = False,
+    ) -> dict[str, Any]:
+        """Recalculate every dependency target and return user-facing impact."""
+        evidence_rows = self.list_case_evidence(case_id, tenant_id, status=None)
+        evidence_by_id = {str(item.get("evidence_id")): item for item in evidence_rows if item.get("evidence_id")}
+        edges = self.list_evidence_dependency_edges(case_id, tenant_id)
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        proposed_dependencies = []
+        for edge in edges:
+            if edge.get("source_kind") != "EVIDENCE":
+                continue
+            # PROPOSED edges are visible as pending review but do not affect
+            # confidence. INVALIDATED/RECHECK_REQUIRED edges remain in the
+            # ledger so users can see exactly what an Evidence decision broke.
+            if str(edge.get("status") or "ACTIVE").upper() == "PROPOSED":
+                proposed_dependencies.append(edge)
+                continue
+            chain_type = str(edge.get("target_kind") or "").lower()
+            chain_id = str(edge.get("target_id") or "")
+            grouped.setdefault((chain_type, chain_id), []).append(edge)
+            if chain_type == "claim" and ":" in chain_id:
+                grouped.setdefault(("conclusion", chain_id.split(":", 1)[0]), []).append(edge)
+        latest_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
+        for snapshot in self.list_confidence_snapshots(case_id, tenant_id):
+            key = (snapshot["chain_type"], snapshot["chain_id"])
+            latest_snapshots.setdefault(key, snapshot)
+        chains = []
+        for (chain_type, chain_id), dependencies in grouped.items():
+            result = calculate_chain_confidence(evidence_by_id.values(), dependencies)
+            current = latest_snapshots.get((chain_type, chain_id))
+            if persist:
+                snapshot = self.save_confidence_snapshot(
+                    case_id=case_id, tenant_id=tenant_id, chain_type=chain_type,
+                    chain_id=chain_id, result=result,
+                )
+                if hasattr(snapshot.get("created_at"), "isoformat"):
+                    snapshot["created_at"] = snapshot["created_at"].isoformat()
+            else:
+                snapshot = {
+                    **result,
+                    "case_id": case_id,
+                    "tenant_id": tenant_id,
+                    "chain_type": chain_type,
+                    "chain_id": chain_id,
+                    "revision": int((current or {}).get("revision") or 0),
+                }
+            chains.append(snapshot)
+        return {
+            "case_id": case_id,
+            "calculation_version": CALCULATION_VERSION,
+            "chains": chains,
+            "proposed_dependencies": proposed_dependencies,
+            "generated_at": now_utc().isoformat(),
+        }
 
     def _evidence_review_impact_in_session(
         self,
@@ -2664,6 +2845,9 @@ class SqlRepositoryV6Mixin:
         self, *, case_id: str, tenant_id: str, investigation_run_id: str,
         state: str, causal_graph_revision_id: str | None = None,
         claims: list[dict[str, Any]] | None = None,
+        root_location: dict[str, Any] | None = None,
+        mechanism: dict[str, Any] | None = None,
+        confidence_reason: str | None = None,
         primary_root_causes: list[dict[str, Any]] | None = None,
         contributing_factors: list[dict[str, Any]] | None = None,
         amplifiers: list[dict[str, Any]] | None = None,
@@ -2737,6 +2921,9 @@ class SqlRepositoryV6Mixin:
                 ruled_out=ruled_out or [],
                 causal_graph_revision_id=causal_graph_revision_id,
                 claims=claims or [],
+                root_location_json=root_location or {},
+                mechanism_json=mechanism or {},
+                confidence_reason=confidence_reason or "",
                 evidence_gap_ids=evidence_gap_ids or [],
                 recommendation_ids=recommendation_ids or [],
                 limitations=limitations or [],
