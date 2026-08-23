@@ -39,6 +39,19 @@ def stable_hash(value):
     payload=json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()
 
+
+def normalize_root_location(value):
+    """Map Pi's structured location object to the benchmark contract enum."""
+    if isinstance(value, dict):
+        kind = str(value.get("type") or value.get("location") or "").strip().lower()
+        if kind in {"downstream", "same_host", "shared_resource", "unknown"}:
+            return kind
+        # Process/function/service/data-structure locations are local to the
+        # scoped target unless the model explicitly names a topology relation.
+        return "self" if kind else "unknown"
+    text = str(value or "unknown").strip().lower()
+    return text if text in {"self", "same_host", "downstream", "shared_resource", "unknown"} else text
+
 def req(path, method='GET', body=None, headers=None):
     data=json.dumps(body).encode() if body is not None else None
     h={'Content-Type':'application/json'}
@@ -116,7 +129,7 @@ def normalize_final(raw_text, case_id):
     return {
         "schema":"mini-drop.normalized-answer.v1",
         "conclusion":str(get_key("conclusion","结论") or ""),
-        "root_location":str(get_key("root_location","rootLocation","根因位置","根因") or "unknown"),
+        "root_location":normalize_root_location(get_key("root_location","rootLocation","根因位置","根因")),
         "mechanism":str(get_key("mechanism","机制","作用机制") or ""),
         "confidence":conf,
         "confidence_reason":str(get_key("confidence_reason","置信度理由") or ""),
