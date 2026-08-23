@@ -19,6 +19,14 @@ SOURCE_SHA = "651c450867c4d6db26cc78de5928bb14f7b3c3b9"
 BASE = os.getenv("MINI_DROP_BASE_URL", "http://127.0.0.1:8192").rstrip("/")
 EVAL_TOKEN = os.getenv("MINI_DROP_EVAL_IMPORT_TOKEN", "").strip()
 API_KEY = os.getenv("MINI_DROP_API_KEY", "").strip()
+REPLAY_RUNTIME_POLICY = {"side_effect_policy": "READ_ONLY"}
+RUN_ROOT_NAME = os.getenv("MINI_DROP_RUN_ROOT", "runs-native")
+PROGRESS_NAME = os.getenv("MINI_DROP_PROGRESS", "work/native_minidrop_pi_progress.jsonl")
+REPEATS = tuple(
+    int(item.strip())
+    for item in os.getenv("MINI_DROP_REPEATS", "1,2,3").split(",")
+    if item.strip()
+)
 URL_CONTEXT = (
     ssl._create_unverified_context()
     if os.getenv("MINI_DROP_TLS_INSECURE", "0").strip().lower() in {"1", "true", "yes"}
@@ -42,15 +50,24 @@ def stable_hash(value):
 
 def normalize_root_location(value):
     """Map Pi's structured location object to the benchmark contract enum."""
+    allowed = {"self", "same_host", "downstream", "shared_resource", "unknown"}
     if isinstance(value, dict):
         kind = str(value.get("type") or value.get("location") or "").strip().lower()
-        if kind in {"downstream", "same_host", "shared_resource", "unknown"}:
+        if kind in allowed:
             return kind
         # Process/function/service/data-structure locations are local to the
         # scoped target unless the model explicitly names a topology relation.
         return "self" if kind else "unknown"
     text = str(value or "unknown").strip().lower()
-    return text if text in {"self", "same_host", "downstream", "shared_resource", "unknown"} else text
+    if text in allowed:
+        return text
+    # Pi occasionally explains the location in prose. Preserve the topology
+    # relation when one is explicit, and otherwise treat a non-empty location
+    # description as the scoped target itself.
+    for relation in ("shared_resource", "same_host", "downstream"):
+        if relation in text or relation.replace("_", " ") in text:
+            return relation
+    return "self" if text else "unknown"
 
 def req(path, method='GET', body=None, headers=None):
     data=json.dumps(body).encode() if body is not None else None
@@ -116,8 +133,22 @@ def normalize_final(raw_text, case_id):
             if eid and eid not in out:
                 out.append(eid)
         return out
-    try: conf=float(get_key("confidence","置信度") or 0)
-    except: conf=0.0
+    confidence_value = get_key("confidence", "置信度")
+    if isinstance(confidence_value, str):
+        confidence_label = confidence_value.strip().upper()
+        confidence_levels = {"LOW": 0.3, "MEDIUM": 0.6, "HIGH": 0.85}
+        if confidence_label in confidence_levels:
+            conf = confidence_levels[confidence_label]
+        else:
+            try:
+                conf = float(confidence_value)
+            except ValueError:
+                conf = 0.0
+    else:
+        try:
+            conf = float(confidence_value or 0)
+        except (TypeError, ValueError):
+            conf = 0.0
     conf=max(0.0,min(1.0,conf))
     abstain_raw=get_key("abstain","弃权","is_abstain")
     abstain=bool(abstain_raw) or bool(get_key("abstention_reason","弃权原因"))
@@ -141,7 +172,17 @@ def normalize_final(raw_text, case_id):
     }
 
 def perform_turn(cid, msg, start_seq=0):
-    turn=req(f"/api/v1/cases/{cid}/agent/turn",'POST',{"message":msg,"max_tool_calls":16,"execute_safe_tools":True})
+    turn=req(
+        f"/api/v1/cases/{cid}/agent/turn",
+        'POST',
+        {
+            "message": msg,
+            "max_tool_calls": 16,
+            "execute_safe_tools": False,
+            "requested_disposition": "INVESTIGATE",
+            "runtime_policy": REPLAY_RUNTIME_POLICY,
+        },
+    )
     turn_id=None
     tdata=turn.get('data') or {}
     if isinstance(tdata,dict):
@@ -396,8 +437,8 @@ def run_case(case_id, repeat, seed, run_root):
     return {"run_id":run_id,"status":status,"case_id":case_id,"repeat":repeat,"run_dir":str(run_dir),"case_id_internal":cid}
 
 def main():
-    run_root=BENCHMARK/"runs-native"
-    progress=BENCHMARK/"work"/"native_minidrop_pi_progress.jsonl"
+    run_root=BENCHMARK/RUN_ROOT_NAME
+    progress=BENCHMARK/PROGRESS_NAME
     progress.parent.mkdir(parents=True, exist_ok=True)
     done=set()
     if progress.exists():
@@ -408,7 +449,7 @@ def main():
             except: pass
     for i in range(1,10):
         case_id=f"case-{i:02d}"
-        for rep in [1,2,3]:
+        for rep in REPEATS:
             if (case_id,rep) in done: continue
             seed=100+rep
             try:
