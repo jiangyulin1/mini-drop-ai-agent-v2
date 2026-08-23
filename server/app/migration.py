@@ -34,3 +34,34 @@ def upgrade_database(engine: Engine) -> None:
             # performs conditional additions needed by pre-v2 installations.
             command.stamp(config, BASELINE_REVISION)
         command.upgrade(config, "head")
+        # 0034 was already deployed by some installations before the
+        # branch-local reuse ledger was introduced.  Keep the compatibility
+        # revision stable while adding this purely additive table for those
+        # databases; fresh upgrades create it in the same migration.
+        from server.app.models import EvidenceReuseDecisionModel
+
+        EvidenceReuseDecisionModel.__table__.create(connection, checkfirst=True)
+        # Keep the compatibility revision stable while ensuring databases
+        # created before the hot-path optimization receive the same composite
+        # indexes as fresh metadata. ``checkfirst`` makes this safe across
+        # SQLite, PostgreSQL, and repeated startup runs.
+        from server.app.models import (
+            CaseEvidenceModel,
+            CollectionRequestModel,
+            EvidenceProjectionModel,
+        )
+
+        for model in (
+            CaseEvidenceModel,
+            CollectionRequestModel,
+            EvidenceProjectionModel,
+        ):
+            for index in model.__table__.indexes:
+                if index.name in {
+                    "ix_case_evidence_case_tenant_task",
+                    "ix_case_evidence_case_tenant_status_created",
+                    "ix_collection_requests_case_tenant_status_created",
+                    "ix_evidence_projections_case_tenant_evidence_created",
+                    "ix_evidence_projections_case_tenant_created",
+                }:
+                    index.create(connection, checkfirst=True)

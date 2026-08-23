@@ -12,6 +12,14 @@ from server.app.diagnosis.network_discovery import (
     aggregate_dependency_graph,
     case_dependency_graph_snapshot,
 )
+from server.app.diagnosis.collection_reuse import (
+    canonical_probe_identity,
+    evaluate_reuse_candidate,
+    probe_fingerprint,
+    probe_key_fingerprint,
+    result_fingerprint,
+    select_reuse_candidate,
+)
 from server.app.schemas import CreateTaskRequest
 
 
@@ -399,6 +407,66 @@ class CollectionSupervisor:
                 updated.append(item)
         return updated
 
+    def _input_evidence_review_revisions(
+        self,
+        *,
+        case_id: str,
+        tenant_id: str,
+        evidence_refs: list[str] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Pin the evidence state a collection proposal was based on.
+
+        Collection dispatch can be delayed by approval or an agent retry.  A
+        review revision is therefore part of the request contract, alongside
+        lifecycle/trust state and projection hash.  The nested shape mirrors
+        EvidenceAnalysisRun inputs and leaves enough information to explain a
+        stale replay without reading a mutable row from an old Task.
+        """
+        snapshots: dict[str, dict[str, Any]] = {}
+        for raw_id in evidence_refs or []:
+            evidence_id = str(raw_id).strip()
+            if not evidence_id:
+                continue
+            evidence = self._repo.get_case_evidence(case_id, tenant_id, evidence_id)
+            if evidence is None:
+                continue
+            projection_hash = str(evidence.get("projection_hash") or "")
+            if not projection_hash and hasattr(self._repo, "list_evidence_projections"):
+                projections = self._repo.list_evidence_projections(
+                    case_id, tenant_id, evidence_id,
+                )
+                if projections:
+                    projection_hash = str(projections[-1].get("projection_hash") or "")
+            snapshots[evidence_id] = {
+                "review_revision": int(evidence.get("review_revision") or 0),
+                "review_state": str(
+                    evidence.get("review_trust_state") or "UNREVIEWED"
+                ).upper(),
+                "lifecycle_status": str(
+                    evidence.get("lifecycle_status") or evidence.get("status") or "ACTIVE"
+                ).upper(),
+                "projection_hash": projection_hash,
+            }
+        return snapshots
+
+    @staticmethod
+    def _review_snapshot_changed(
+        expected: dict[str, Any], current: dict[str, Any],
+    ) -> bool:
+        """Compare only immutable/fencing fields, tolerating old snapshots."""
+        for key in (
+            "review_revision", "review_state", "lifecycle_status", "projection_hash",
+        ):
+            if key not in expected:
+                continue
+            if key == "review_revision":
+                if int(expected.get(key) or 0) != int(current.get(key) or 0):
+                    return True
+                continue
+            if str(expected.get(key) or "").upper() != str(current.get(key) or "").upper():
+                return True
+        return False
+
     def propose_and_dispatch(
         self,
         *,
@@ -424,9 +492,30 @@ class CollectionSupervisor:
         plan_revision: int | None = None,
         auto_dispatch: bool = True,
         existing_proposal_id: str | None = None,
+        reuse_existing_request_id: str | None = None,
+        reuse_existing_evidence_id: str | None = None,
+        reuse_existing_projection_id: str | None = None,
+        allow_low_trust_reuse: bool = False,
+        contract_digest: str | None = None,
+        obligation_id: str | None = None,
+        actor_id: str = "agent",
+        decision_source: str = "collection_supervisor",
         authorized_agent_ids: set[str] | frozenset[str] | None = None,
         dispatch_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # Internal callers and model tools can omit optional objects.  Treat
+        # them as empty payloads so malformed input reaches deterministic
+        # validation instead of raising an attribute error.
+        invalid_target_selector = target_selector is not None and not isinstance(
+            target_selector, dict,
+        )
+        invalid_time_window = time_window is not None and not isinstance(
+            time_window, dict,
+        )
+        target_selector = target_selector if isinstance(target_selector, dict) else {}
+        parameters = parameters or {}
+        time_window = time_window if isinstance(time_window, dict) else {}
+        input_evidence_refs = input_evidence_refs or []
         case = self._repo.get_incident_case(case_id, tenant_id)
         spec = get_collector_spec(collector_id)
         if existing_proposal_id:
@@ -445,14 +534,22 @@ class CollectionSupervisor:
                 cycle_id=cycle_id, collector_id=collector_id,
                 plan_step_id=plan_step_id, plan_revision=plan_revision,
                 collector_spec_version=spec.spec_version if spec else "unknown",
-                target_selector=target_selector or {}, parameters=parameters or {},
-                time_window=time_window or {}, information_goal=information_goal,
+                target_selector=target_selector, parameters=parameters,
+                time_window=time_window, information_goal=information_goal,
                 reason_summary=reason_summary, expected_cost=(spec.estimated_overhead if spec else {}),
                 expected_risk=(spec.risk_level if spec else "UNKNOWN"),
                 input_evidence_refs=input_evidence_refs or [],
             )
 
         errors: list[str] = []
+        if invalid_target_selector:
+            errors.append("INVALID_TARGET_SELECTOR")
+        if invalid_time_window:
+            errors.append("INVALID_TIME_WINDOW")
+        if (reuse_existing_evidence_id or reuse_existing_projection_id) and not reuse_existing_request_id:
+            errors.append("REUSE_REQUEST_ID_REQUIRED")
+        if self._target_pid_alias_conflict(target_selector):
+            errors.append("TARGET_PID_ALIAS_CONFLICT")
         if case is None:
             errors.append("CASE_NOT_FOUND")
         if spec is None or not spec.enabled:
@@ -483,8 +580,13 @@ class CollectionSupervisor:
             if spec.risk_level not in allowed:
                 errors.append("COLLECTOR_RISK_NOT_ALLOWED")
 
+        target_selector_for_resolution = self._selector_with_dispatch_context(
+            target_selector or {}, dispatch_context,
+        )
+        if target_selector_for_resolution.get("_incarnation_context_conflict"):
+            errors.append("TARGET_INCARNATION_MISMATCH")
         target = self._resolve_target(
-            case or {}, target_selector or {},
+            case or {}, target_selector_for_resolution,
             authorized_agent_ids=authorized_agent_ids,
         )
         if target is None:
@@ -492,12 +594,80 @@ class CollectionSupervisor:
         elif spec is not None and spec.collector_id not in target["capabilities"]:
             errors.append("AGENT_CAPABILITY_MISSING")
 
+        # This identity describes the physical observation, not the branch
+        # asking for it.  It is persisted with the request so a later branch
+        # can query an exact completed candidate without receiving it
+        # implicitly in its context.
+        probe_fingerprint_value = ""
+        probe_key_value = ""
+        probe_identity: dict[str, Any] = {}
+        # Do not normalize malformed parameters into a fingerprint: the
+        # request is already rejected and normalization could itself throw on
+        # values such as ``duration_sec="unparseable"``.
+        if spec is not None and target is not None and not errors:
+            fingerprint_parameters = self._effective_parameters(
+                spec, parameters or {}, target,
+            )
+            probe_identity = canonical_probe_identity(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                collector_id=spec.collector_id,
+                collector_spec_version=spec.spec_version,
+                collector_implementation_version=spec.implementation_version,
+                target=target,
+                parameters=fingerprint_parameters,
+                time_window=time_window or {},
+                scope_revision=int((case or {}).get("scope_revision") or 1),
+                parameter_schema=spec.parameter_schema,
+            )
+            probe_fingerprint_value = probe_fingerprint(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                collector_id=spec.collector_id,
+                collector_spec_version=spec.spec_version,
+                collector_implementation_version=spec.implementation_version,
+                target=target,
+                parameters=fingerprint_parameters,
+                time_window=time_window or {},
+                scope_revision=int((case or {}).get("scope_revision") or 1),
+                parameter_schema=spec.parameter_schema,
+            )
+            probe_key_value = probe_key_fingerprint(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                collector_id=spec.collector_id,
+                collector_spec_version=spec.spec_version,
+                collector_implementation_version=spec.implementation_version,
+                target=target,
+                parameters=fingerprint_parameters,
+                parameter_schema=spec.parameter_schema,
+            )
+
+        input_evidence_review_revisions = self._input_evidence_review_revisions(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            evidence_refs=input_evidence_refs,
+        )
+        pinned_input_evidence_review_revisions = {}
+        if existing_proposal_id:
+            pinned_input_evidence_review_revisions = (
+                (proposal.get("validation_result") or {}).get(
+                    "input_evidence_review_revisions"
+                ) or {}
+            )
         for evidence_id in input_evidence_refs or []:
             evidence = self._repo.get_case_evidence(case_id, tenant_id, evidence_id)
             if evidence is None:
                 errors.append(f"INPUT_EVIDENCE_NOT_FOUND:{evidence_id}")
-            elif evidence.get("status") == "EXCLUDED":
+            elif str(
+                evidence.get("lifecycle_status") or evidence.get("status") or "ACTIVE"
+            ).upper() == "EXCLUDED":
                 errors.append(f"INPUT_EVIDENCE_EXCLUDED:{evidence_id}")
+            elif existing_proposal_id:
+                expected = pinned_input_evidence_review_revisions.get(str(evidence_id))
+                current = input_evidence_review_revisions.get(str(evidence_id))
+                if expected and current and self._review_snapshot_changed(expected, current):
+                    errors.append(f"INPUT_EVIDENCE_REVIEW_CHANGED:{evidence_id}")
 
         validation = {
             "accepted": not errors,
@@ -508,12 +678,180 @@ class CollectionSupervisor:
             "discovery_scope_expansion": bool(
                 target is not None and target.get("scope_source") == "discovery_frontier"
             ),
+            "probe_fingerprint": probe_fingerprint_value,
+            "probe_key": probe_key_value,
+            "probe_identity": probe_identity,
+            "input_evidence_review_revisions": input_evidence_review_revisions,
+            "reuse_policy": {
+                "schema_version": "collection-reuse.v2",
+                "mode": "EXACT_PROBE_AND_RESULT",
+                "implicit_context_share": False,
+                "candidate_key": "probe_key",
+            },
         }
         if errors:
             rejected = self._repo.decide_collection_proposal(
                 proposal["proposal_id"], "REJECTED", validation,
             )
             return {"proposal": rejected, "collection_request": None, "task": None}
+
+        if reuse_existing_request_id:
+            reuse = self.find_reusable_collection_candidates(
+                case_id=case_id,
+                tenant_id=tenant_id,
+                collector_id=collector_id,
+                target_selector=target_selector_for_resolution,
+                parameters=parameters or {},
+                time_window=time_window or {},
+                expected_request_id=reuse_existing_request_id,
+                expected_evidence_id=reuse_existing_evidence_id,
+                expected_projection_id=reuse_existing_projection_id,
+                allow_low_trust=allow_low_trust_reuse,
+                authorized_agent_ids=authorized_agent_ids,
+                dispatch_context=dispatch_context,
+                investigation_run_id=agent_run_id,
+                cycle_id=cycle_id,
+                contract_digest=contract_digest,
+                obligation_id=obligation_id,
+                actor_id=actor_id,
+                decision_source=decision_source,
+            )
+            if not reuse.get("items"):
+                if hasattr(self._repo, "create_evidence_reuse_decision"):
+                    self._repo.create_evidence_reuse_decision(
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        investigation_run_id=agent_run_id,
+                        cycle_id=cycle_id,
+                        obligation_id=obligation_id,
+                        contract_digest=contract_digest,
+                        collector_id=collector_id,
+                        collector_spec_version=(spec.spec_version if spec else "unknown"),
+                        probe_fingerprint=reuse.get("probe_fingerprint") or probe_fingerprint_value,
+                        collection_request_id=reuse_existing_request_id,
+                        decision="RECOLLECT_REQUIRED",
+                        reason_codes=(
+                            sorted({
+                                str(code) for item in (reuse.get("rejected") or [])
+                                for code in (item.get("reason_codes") or [])
+                            })
+                            or ["REUSE_CANDIDATE_NOT_ELIGIBLE"]
+                        ),
+                        target_identity=self._reuse_target_identity(target),
+                        requested_time_window=time_window or {},
+                        effective_time_window=time_window or {},
+                        control_revision=int((case or {}).get("control_revision") or 1),
+                        scope_revision=int((case or {}).get("scope_revision") or 1),
+                        runtime_generation=runtime_generation,
+                        actor_id=actor_id,
+                        source=decision_source,
+                    )
+                rejected = self._repo.decide_collection_proposal(
+                    proposal["proposal_id"], "REJECTED", {
+                        **validation,
+                        "accepted": False,
+                        "errors": ["REUSE_CANDIDATE_NOT_ELIGIBLE"],
+                        "reuse": reuse,
+                    },
+                )
+                return {"proposal": rejected, "collection_request": None, "task": None, "reuse": reuse}
+            if len(reuse["items"]) > 1 and not (
+                reuse_existing_evidence_id or reuse_existing_projection_id
+            ):
+                selection_errors = ["REUSE_EVIDENCE_SELECTION_REQUIRED"]
+                if hasattr(self._repo, "create_evidence_reuse_decision"):
+                    self._repo.create_evidence_reuse_decision(
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        investigation_run_id=agent_run_id,
+                        cycle_id=cycle_id,
+                        obligation_id=obligation_id,
+                        contract_digest=contract_digest,
+                        collector_id=collector_id,
+                        collector_spec_version=(spec.spec_version if spec else "unknown"),
+                        probe_fingerprint=probe_fingerprint_value,
+                        collection_request_id=reuse_existing_request_id,
+                        decision="RECOLLECT_REQUIRED",
+                        reason_codes=selection_errors,
+                        target_identity=self._reuse_target_identity(target),
+                        requested_time_window=time_window or {},
+                        effective_time_window=time_window or {},
+                        control_revision=int((case or {}).get("control_revision") or 1),
+                        scope_revision=int((case or {}).get("scope_revision") or 1),
+                        runtime_generation=runtime_generation,
+                        actor_id=actor_id,
+                        source=decision_source,
+                    )
+                rejected = self._repo.decide_collection_proposal(
+                    proposal["proposal_id"], "REJECTED", {
+                        **validation,
+                        "accepted": False,
+                        "errors": selection_errors,
+                        "reuse": reuse,
+                    },
+                )
+                return {
+                    "proposal": rejected, "collection_request": None,
+                    "task": None, "reuse": reuse,
+                }
+            candidate = reuse["items"][0]
+            if hasattr(self._repo, "create_evidence_reuse_decision"):
+                self._repo.create_evidence_reuse_decision(
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    investigation_run_id=agent_run_id,
+                    cycle_id=cycle_id,
+                    obligation_id=obligation_id,
+                    contract_digest=contract_digest,
+                    collector_id=collector_id,
+                    collector_spec_version=(spec.spec_version if spec else "unknown"),
+                    probe_fingerprint=candidate.get("probe_fingerprint") or probe_fingerprint_value,
+                    result_fingerprint=candidate.get("result_fingerprint"),
+                    collection_request_id=candidate.get("collection_request_id"),
+                    task_id=candidate.get("task_id"),
+                    evidence_id=candidate.get("evidence_id"),
+                    projection_id=candidate.get("projection_id"),
+                    projection_hash=candidate.get("projection_hash"),
+                    target_identity=self._reuse_target_identity(
+                        candidate.get("target_identity") or target,
+                    ),
+                    requested_time_window=time_window or {},
+                    effective_time_window=candidate.get("time_window") or time_window or {},
+                    control_revision=int((case or {}).get("control_revision") or 1),
+                    scope_revision=int((case or {}).get("scope_revision") or 1),
+                    runtime_generation=runtime_generation,
+                    evidence_review_revision=candidate.get("review_revision"),
+                    lifecycle_status=candidate.get("lifecycle_status"),
+                    trust_state=candidate.get("trust_state"),
+                    decision="REUSED",
+                    reason_codes=["EXACT_PROBE_AND_ACTIVE_RESULT"],
+                    actor_id=actor_id,
+                    source=decision_source,
+                )
+            accepted_validation = {
+                **validation,
+                "accepted": True,
+                "reused": True,
+                "reuse_mode": "EXACT_PROBE_AND_RESULT",
+                "allow_low_trust_reuse": bool(allow_low_trust_reuse),
+                "reuse": reuse,
+            }
+            accepted = self._repo.decide_collection_proposal(
+                proposal["proposal_id"], "ACCEPTED", accepted_validation,
+            )
+            request = next(
+                (
+                    item for item in self._repo.list_collection_requests(case_id, tenant_id)
+                    if item.get("collection_request_id") == candidate.get("collection_request_id")
+                ),
+                None,
+            )
+            return {
+                "proposal": accepted,
+                "collection_request": request,
+                "task": None,
+                "reuse": reuse,
+            }
 
         if not auto_dispatch:
             pending = self._repo.decide_collection_proposal(
@@ -529,6 +867,11 @@ class CollectionSupervisor:
                         "allowed_risk_levels": sorted(allowed_risk_levels or {"R0", "R1"}),
                         "max_collection_requests": max_collection_requests,
                         "max_collection_duration_sec": max_collection_duration_sec,
+                        "contract_digest": contract_digest,
+                        "obligation_id": obligation_id,
+                        "actor_id": actor_id,
+                        "decision_source": decision_source,
+                        "input_evidence_review_revisions": input_evidence_review_revisions,
                         # Approval is a delayed dispatch replay. Pin the safe
                         # topology lineage now so it cannot disappear or be
                         # replaced between proposal and human approval.
@@ -542,10 +885,7 @@ class CollectionSupervisor:
         request_key = (
             self._scoped_idempotency_key(case_id, tenant_id, idempotency_key)
             if idempotency_key
-            else self._idempotency_key(
-                case_id, spec.collector_id, target, effective,
-                int(case.get("scope_revision") or 1),
-            )
+            else f"probe:{probe_fingerprint_value}"
         )
         existing_requests = self._repo.list_collection_requests(case_id, tenant_id)
         duplicate = next(
@@ -553,12 +893,34 @@ class CollectionSupervisor:
             None,
         )
         if duplicate is not None:
+            # A completed request is a stored result, not an implicit context
+            # grant.  It may only be selected through the explicit reuse path
+            # above, where Evidence lifecycle, trust and result integrity are
+            # rechecked.
+            if str(duplicate.get("status") or "").upper() == "COMPLETED":
+                rejected = self._repo.decide_collection_proposal(
+                    proposal["proposal_id"], "REJECTED", {
+                        **validation,
+                        "accepted": False,
+                        "errors": [
+                            "COMPLETED_RESULT_REUSE_REQUIRES_EXPLICIT_SELECTION",
+                        ],
+                        "duplicate_of_request": duplicate["collection_request_id"],
+                    },
+                )
+                return {
+                    "proposal": rejected,
+                    "collection_request": None,
+                    "task": None,
+                }
             duplicate_validation = {
                 **validation,
                 "duplicate": True,
                 "duplicate_of_request": duplicate["collection_request_id"],
                 "duplicate_of_proposal": duplicate["proposal_id"],
                 "budget_consumed": False,
+                "probe_fingerprint": probe_fingerprint_value,
+                "reuse_mode": "EXACT_PROBE_RETRY",
             }
             task_id = duplicate.get("task_id")
             if task_id:
@@ -577,6 +939,9 @@ class CollectionSupervisor:
                     case=case, case_id=case_id, tenant_id=tenant_id,
                     information_goal=information_goal,
                     dispatch_context=dispatch_context,
+                    probe_fingerprint_value=probe_fingerprint_value,
+                    probe_key_value=probe_key_value,
+                    input_evidence_review_revisions=input_evidence_review_revisions,
                 )
             except Exception as exc:
                 self._mark_dispatch_failed(proposal, duplicate, validation)
@@ -636,7 +1001,15 @@ class CollectionSupervisor:
                 collector_id=spec.collector_id, collector_spec_version=spec.spec_version,
                 resolved_target_identity={
                     "agent_id": target["agent_id"], "target_pid": target["target_pid"],
-                    "hostname": target.get("hostname"), "resource_incarnation": target.get("resource_incarnation"),
+                    "hostname": target.get("hostname"),
+                    **{
+                        key: target.get(key)
+                        for key in (
+                            "resource_incarnation", "boot_id", "process_start_time",
+                            "entity_id", "container_id", "namespace", "target_ref",
+                        )
+                        if target.get(key) is not None
+                    },
                 },
                 effective_parameters=effective, runtime_generation=max(1, int(runtime_generation or 1)),
                 control_revision=int(case.get("control_revision") or 1),
@@ -650,6 +1023,12 @@ class CollectionSupervisor:
                     "max_duration_sec": spec.max_duration,
                     "reserved_duration_sec": reserved_duration,
                     "estimated_overhead": spec.estimated_overhead,
+                    "probe_fingerprint": probe_fingerprint_value,
+                    "probe_key": probe_key_value,
+                    "probe_identity": probe_identity,
+                    "reuse_policy": "EXACT_PROBE_AND_RESULT",
+                    "reuse_schema_version": "collection-reuse.v2",
+                    "input_evidence_review_revisions": input_evidence_review_revisions,
                 },
             )
         except ValueError as exc:
@@ -685,6 +1064,9 @@ class CollectionSupervisor:
                 case=case, case_id=case_id, tenant_id=tenant_id,
                 information_goal=information_goal,
                 dispatch_context=dispatch_context,
+                probe_fingerprint_value=probe_fingerprint_value,
+                probe_key_value=probe_key_value,
+                input_evidence_review_revisions=input_evidence_review_revisions,
             )
         except Exception as exc:
             self._mark_dispatch_failed(proposal, collection_request, validation)
@@ -789,6 +1171,10 @@ class CollectionSupervisor:
             max_collection_requests=int(context.get("max_collection_requests") or self.MAX_COLLECTION_REQUESTS),
             max_collection_duration_sec=int(context.get("max_collection_duration_sec") or self.MAX_COLLECTION_DURATION_SEC),
             agent_run_id=proposal.get("agent_run_id"), cycle_id=proposal.get("cycle_id"),
+            contract_digest=context.get("contract_digest"),
+            obligation_id=context.get("obligation_id"),
+            actor_id=str(context.get("actor_id") or "agent"),
+            decision_source=str(context.get("decision_source") or "collection_supervisor"),
             auto_dispatch=True, existing_proposal_id=proposal_id,
             authorized_agent_ids=authorized_agent_ids,
             dispatch_context=dispatch_context or None,
@@ -807,11 +1193,324 @@ class CollectionSupervisor:
         )
         return result
 
+    def find_reusable_collection_candidates(
+        self,
+        *,
+        case_id: str,
+        tenant_id: str,
+        collector_id: str,
+        target_selector: dict[str, Any],
+        parameters: dict[str, Any],
+        time_window: dict[str, Any],
+        expected_request_id: str | None = None,
+        expected_evidence_id: str | None = None,
+        expected_projection_id: str | None = None,
+        allow_low_trust: bool = False,
+        authorized_agent_ids: set[str] | frozenset[str] | None = None,
+        dispatch_context: dict[str, Any] | None = None,
+        investigation_run_id: str | None = None,
+        cycle_id: str | None = None,
+        contract_digest: str | None = None,
+        obligation_id: str | None = None,
+        actor_id: str = "agent",
+        decision_source: str = "collection_supervisor",
+    ) -> dict[str, Any]:
+        """Find completed, active results for an exact physical probe.
+
+        This is a query, not an implicit visibility grant.  The caller must
+        explicitly select one candidate and record the resulting reuse in its
+        branch/contract context.
+        """
+        case = self._repo.get_incident_case(case_id, tenant_id)
+        spec = get_collector_spec(collector_id)
+        target_selector_for_resolution = self._selector_with_dispatch_context(
+            target_selector or {}, dispatch_context,
+        )
+        if target_selector_for_resolution.get("_incarnation_context_conflict"):
+            return {
+                "probe_fingerprint": "", "items": [],
+                "reason": "TARGET_INCARNATION_MISMATCH",
+            }
+        if self._target_pid_alias_conflict(target_selector_for_resolution):
+            return {
+                "probe_fingerprint": "", "items": [],
+                "reason": "TARGET_PID_ALIAS_CONFLICT",
+            }
+        target = self._resolve_target(
+            case or {}, target_selector_for_resolution,
+            authorized_agent_ids=authorized_agent_ids,
+        )
+        if case is None or spec is None or target is None:
+            return {"probe_fingerprint": "", "items": [], "reason": "PROBE_NOT_RESOLVABLE"}
+        effective = self._effective_parameters(spec, parameters or {}, target)
+        probe_identity = canonical_probe_identity(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            collector_id=spec.collector_id,
+            collector_spec_version=spec.spec_version,
+            collector_implementation_version=spec.implementation_version,
+            target=target,
+            parameters=effective,
+            time_window=time_window or {},
+            scope_revision=int(case.get("scope_revision") or 1),
+            parameter_schema=spec.parameter_schema,
+        )
+        fingerprint = probe_fingerprint(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            collector_id=spec.collector_id,
+            collector_spec_version=spec.spec_version,
+            collector_implementation_version=spec.implementation_version,
+            target=target,
+            parameters=effective,
+            time_window=time_window or {},
+            scope_revision=int(case.get("scope_revision") or 1),
+            parameter_schema=spec.parameter_schema,
+        )
+        probe_key_value = probe_key_fingerprint(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            collector_id=spec.collector_id,
+            collector_spec_version=spec.spec_version,
+            collector_implementation_version=spec.implementation_version,
+            target=target,
+            parameters=effective,
+            parameter_schema=spec.parameter_schema,
+        )
+        items: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        # Materialize the Case-wide rows once.  The previous nested lookup
+        # scanned every Evidence for every candidate request and opened one
+        # Projection query per Evidence, turning reuse into O(requests *
+        # evidence) database work.  Grouping keeps the same fail-closed
+        # checks while making the hot path linear in the Case inventory.
+        all_evidence = self._repo.list_case_evidence(case_id, tenant_id)
+        evidence_by_task: dict[str, list[dict[str, Any]]] = {}
+        for evidence in all_evidence:
+            task_key = str(evidence.get("task_id") or "")
+            if task_key:
+                evidence_by_task.setdefault(task_key, []).append(evidence)
+        all_projections = (
+            self._repo.list_evidence_projections(case_id, tenant_id)
+            if hasattr(self._repo, "list_evidence_projections") else []
+        )
+        projections_by_evidence: dict[str, list[dict[str, Any]]] = {}
+        for projection in all_projections:
+            evidence_key = str(projection.get("evidence_id") or "")
+            if evidence_key:
+                projections_by_evidence.setdefault(evidence_key, []).append(projection)
+        for request in self._repo.list_collection_requests(case_id, tenant_id):
+            if expected_request_id and request.get("collection_request_id") != expected_request_id:
+                continue
+            reservation = request.get("budget_reservation") or {}
+            candidate_probe_key = str(reservation.get("probe_key") or "")
+            candidate_probe = str(reservation.get("probe_fingerprint") or "")
+            if candidate_probe_key and candidate_probe_key != probe_key_value:
+                if expected_request_id:
+                    rejected.append({
+                        "collection_request_id": request.get("collection_request_id"),
+                        "reason_codes": [
+                            "PROBE_KEY_MISMATCH", "PROBE_FINGERPRINT_MISMATCH",
+                        ],
+                    })
+                continue
+            if candidate_probe != fingerprint:
+                if expected_request_id or candidate_probe_key == probe_key_value:
+                    rejected.append({
+                        "collection_request_id": request.get("collection_request_id"),
+                        "reason_codes": ["PROBE_FINGERPRINT_MISMATCH"],
+                        "probe_key_match": candidate_probe_key == probe_key_value,
+                    })
+                continue
+            if str(request.get("status") or "").upper() != "COMPLETED":
+                if expected_request_id:
+                    rejected.append({
+                        "collection_request_id": request.get("collection_request_id"),
+                        "reason_codes": ["REQUEST_NOT_COMPLETED"],
+                    })
+                continue
+            task_id = str(request.get("task_id") or "")
+            if not task_id:
+                if expected_request_id:
+                    rejected.append({
+                        "collection_request_id": request.get("collection_request_id"),
+                        "reason_codes": ["TASK_NOT_ATTACHED"],
+                    })
+                continue
+            task_evidence_seen = False
+            for evidence in evidence_by_task.get(task_id, []):
+                task_evidence_seen = True
+                if expected_evidence_id and str(evidence.get("evidence_id") or "") != str(
+                    expected_evidence_id
+                ):
+                    if expected_request_id:
+                        rejected.append({
+                            "collection_request_id": request.get("collection_request_id"),
+                            "evidence_id": evidence.get("evidence_id"),
+                            "reason_codes": ["EVIDENCE_ID_MISMATCH"],
+                        })
+                    continue
+                lineage = evidence.get("lineage") or {}
+                if str(lineage.get("probe_fingerprint") or "") != fingerprint:
+                    continue
+                projection_hash = str(evidence.get("projection_hash") or "")
+                projections = projections_by_evidence.get(
+                    str(evidence.get("evidence_id") or ""), [],
+                )
+                matching_projection = next(
+                    (
+                        item for item in projections
+                        if str(item.get("projection_hash") or "") == projection_hash
+                        and (
+                            not expected_projection_id
+                            or str(item.get("projection_id") or "")
+                            == str(expected_projection_id)
+                        )
+                    ),
+                    None,
+                )
+                if matching_projection is None or not projection_hash:
+                    rejected.append({
+                        "collection_request_id": request.get("collection_request_id"),
+                        "task_id": task_id,
+                        "evidence_id": evidence.get("evidence_id"),
+                        "reason_codes": ["RESULT_PROJECTION_NOT_VERIFIABLE"],
+                    })
+                    continue
+                expected_result_fingerprint = result_fingerprint(
+                    probe_fingerprint_value=fingerprint,
+                    projection_hash=projection_hash,
+                    content_hash=str(
+                        evidence.get("content_hash")
+                        or evidence.get("sha256")
+                        or ""
+                    ),
+                    artifact_schema=str(
+                        evidence.get("artifact_schema")
+                        or evidence.get("artifact_type")
+                        or ""
+                    ),
+                    parser_version=str(
+                        matching_projection.get("parser_version")
+                        or "deterministic.v1"
+                    ),
+                    completeness=str(evidence.get("completeness") or "COMPLETE"),
+                )
+                lifecycle = str(
+                    evidence.get("lifecycle_status")
+                    or evidence.get("status")
+                    or "ACTIVE"
+                ).upper()
+                trust_state = str(
+                    evidence.get("review_trust_state") or "UNREVIEWED"
+                ).upper()
+                decision = evaluate_reuse_candidate(
+                    {
+                        "collection_request_id": request.get("collection_request_id"),
+                        "task_id": task_id,
+                        "status": request.get("status"),
+                        "reuse_metadata": {
+                            "probe_fingerprint": lineage.get("probe_fingerprint"),
+                            "probe_key": lineage.get("probe_key") or candidate_probe_key,
+                            "result_fingerprint": lineage.get("result_fingerprint"),
+                            "evidence_status": evidence.get("status"),
+                            "evidence_lifecycle_status": lifecycle,
+                            "review_trust_state": trust_state,
+                            "stale_for_current_revision": bool(
+                                evidence.get("stale_for_current_revision")
+                            ),
+                        },
+                    },
+                    requested_probe_fingerprint=fingerprint,
+                    requested_result_fingerprint=expected_result_fingerprint,
+                    allow_low_trust=allow_low_trust,
+                )
+                if not decision["reusable"]:
+                    rejected.append({
+                        **decision,
+                        "evidence_id": evidence.get("evidence_id"),
+                    })
+                    continue
+                items.append({
+                    "collection_request_id": request.get("collection_request_id"),
+                    "task_id": task_id,
+                    "evidence_id": evidence.get("evidence_id"),
+                    "projection_hash": projection_hash,
+                    "result_fingerprint": lineage.get("result_fingerprint"),
+                    "probe_fingerprint": fingerprint,
+                    "probe_key": probe_key_value,
+                    "trust_state": trust_state,
+                    "lifecycle_status": lifecycle,
+                    "review_revision": int(evidence.get("review_revision") or 0),
+                    "projection_id": matching_projection.get("projection_id"),
+                    "target_identity": request.get("resolved_target_identity") or {},
+                    "time_window": evidence.get("time_window") or time_window or {},
+                    "collector_spec_version": request.get("collector_spec_version") or spec.spec_version,
+                    "reuse_eligibility": "EXACT_PROBE_AND_ACTIVE_RESULT",
+                })
+            if expected_request_id and not task_evidence_seen:
+                rejected.append({
+                    "collection_request_id": request.get("collection_request_id"),
+                    "task_id": task_id,
+                    "reason_codes": ["EVIDENCE_NOT_FOUND"],
+                })
+        selection_request = {
+            "probe_fingerprint": fingerprint,
+            "probe_key": probe_key_value,
+        }
+        selection_candidates = [
+            {
+                **item,
+                "status": "COMPLETED",
+                "reuse_metadata": {
+                    "probe_fingerprint": item.get("probe_fingerprint"),
+                    "probe_key": item.get("probe_key"),
+                    "result_fingerprint": item.get("result_fingerprint"),
+                    "evidence_status": item.get("evidence_status", "ACTIVE"),
+                    "evidence_lifecycle_status": item.get(
+                        "lifecycle_status", "ACTIVE",
+                    ),
+                    "review_trust_state": item.get("trust_state", "UNREVIEWED"),
+                    "freshness": item.get("freshness", "UNKNOWN"),
+                    "completeness": item.get("completeness", "UNKNOWN"),
+                },
+            }
+            for item in items
+        ]
+        selection = select_reuse_candidate(
+            selection_request, selection_candidates, tie_delta=0.0,
+        )
+        selection_summary = {
+            "decision": selection["decision"],
+            "reason_codes": selection["reason_codes"],
+            "candidates": [
+                {
+                    key: item.get(key)
+                    for key in (
+                        "score", "score_features", "hard_gate", "reason_codes",
+                        "candidate_request_id", "candidate_evidence_id",
+                    )
+                }
+                for item in selection["candidates"]
+            ],
+        }
+        return {
+            "probe_fingerprint": fingerprint,
+            "probe_key": probe_key_value,
+            "probe_identity": probe_identity,
+            "items": items[:8],
+            "rejected": rejected[:16],
+            "selection": selection_summary,
+        }
+
     def _create_task(
         self, *, proposal: dict[str, Any], collection_request: dict[str, Any],
         spec: Any, target: dict[str, Any], effective: dict[str, Any], request_key: str,
         case: dict[str, Any], case_id: str, tenant_id: str, information_goal: str,
         dispatch_context: dict[str, Any] | None = None,
+        probe_fingerprint_value: str = "",
+        probe_key_value: str = "",
+        input_evidence_review_revisions: dict[str, dict[str, Any]] | None = None,
     ) -> Any:
         collector_options = {
             key: value for key, value in effective.items()
@@ -832,6 +1531,15 @@ class CollectionSupervisor:
                     "collection_request_id": collection_request["collection_request_id"],
                     "collector_spec_version": spec.spec_version,
                     "information_goal": information_goal,
+                    "probe_fingerprint": probe_fingerprint_value,
+                    "probe_key": probe_key_value,
+                    "reuse_policy": "EXACT_PROBE_AND_RESULT",
+                    "input_evidence_review_revisions": (
+                        input_evidence_review_revisions or {}
+                    ),
+                    "runtime_generation": int(
+                        collection_request.get("runtime_generation") or 1
+                    ),
                     "scope_revision": int(case.get("scope_revision") or 1),
                     "control_revision": int(case.get("control_revision") or 1),
                     "diagnosis_step_id": proposal.get("plan_step_id"),
@@ -940,8 +1648,17 @@ class CollectionSupervisor:
         *,
         authorized_agent_ids: set[str] | frozenset[str] | None = None,
     ) -> dict[str, Any] | None:
+        if self._target_pid_alias_conflict(selector):
+            return None
         requested_agent = str(selector.get("agent_id") or "")
-        requested_pid = int(selector.get("target_pid") or selector.get("pid") or 0)
+        requested_pid = self._coerce_pid(
+            selector.get("target_pid") or selector.get("pid")
+        )
+        if (
+            (selector.get("target_pid") is not None or selector.get("pid") is not None)
+            and requested_pid <= 0
+        ):
+            return None
         instances = list((case.get("target_scope") or {}).get("instances") or [])
         allowed_targets = self.case_scoped_process_targets(case)
         allowed_agent_level = self.case_scoped_agent_level_ids(case)
@@ -1000,23 +1717,57 @@ class CollectionSupervisor:
                 and agent_id not in discovery_agents
             ):
                 continue
-            instance = next((item for item in instances if str(item.get("agent_id") or "") == agent_id), {})
             if requested_pid > 0:
                 pid = requested_pid
             elif len(scoped_pids) == 1:
                 pid = scoped_pids[0]
             else:
                 continue
+            matching_instances = [
+                item for item in instances
+                if str(item.get("agent_id") or "") == agent_id
+                and self._coerce_pid(
+                    item.get("pid") or item.get("target_pid")
+                ) == pid
+            ]
+            # A target selector is allowed to resolve one process instance,
+            # never whichever first row happens to share the Agent ID.
+            if len(matching_instances) > 1:
+                return None
+            instance = matching_instances[0] if matching_instances else {}
+            selector_identity = {
+                key: selector.get(key)
+                for key in (
+                    "resource_incarnation", "boot_id", "process_start_time",
+                    "entity_id", "container_id", "namespace", "target_ref",
+                )
+                if selector.get(key) is not None and str(selector.get(key)) != ""
+            }
+            instance_identity = {
+                key: instance.get(key)
+                for key in (
+                    "resource_incarnation", "boot_id", "process_start_time",
+                    "entity_id", "container_id", "namespace", "target_ref",
+                )
+                if instance.get(key) is not None and str(instance.get(key)) != ""
+            }
+            for key, value in selector_identity.items():
+                if key in instance_identity and str(instance_identity[key]) != str(value):
+                    return None
             in_case_scope = (
                 (agent_id, pid) in allowed_targets
                 or (not allowed_targets and agent_id in allowed_agent_level)
                 or (not allowed_targets and not allowed_agent_level)
             )
+            # Carry the target incarnation into the probe identity.  A PID or
+            # agent name without boot/start/entity lineage is not enough to
+            # prove that two observations describe the same process.
+            target_identity = {**selector_identity, **instance_identity}
             return {
                 "agent_id": agent_id, "target_pid": pid,
                 "hostname": getattr(agent, "hostname", None),
                 "capabilities": set(getattr(agent, "capabilities", None) or []),
-                "resource_incarnation": instance.get("resource_incarnation"),
+                **target_identity,
                 "scope_source": (
                     "case_scope" if in_case_scope else "discovery_frontier"
                 ),
@@ -1024,13 +1775,51 @@ class CollectionSupervisor:
         return None
 
     @staticmethod
+    def _coerce_pid(value: Any) -> int:
+        """Parse a positive PID without truncating malformed numerics."""
+        if value is None or isinstance(value, bool):
+            return 0
+        if isinstance(value, float) and not value.is_integer():
+            return 0
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        return parsed if parsed > 0 else 0
+
+    @classmethod
+    def _target_pid_alias_conflict(cls, selector: dict[str, Any]) -> bool:
+        """Reject contradictory ``pid``/``target_pid`` selector aliases."""
+        if "target_pid" not in selector or "pid" not in selector:
+            return False
+        target_pid = cls._coerce_pid(selector.get("target_pid"))
+        pid = cls._coerce_pid(selector.get("pid"))
+        return target_pid <= 0 or pid <= 0 or target_pid != pid
+
+    @staticmethod
     def _effective_parameters(spec: Any, values: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
-        return {
-            **values,
-            "target_pid": int(values.get("target_pid") or target["target_pid"]),
-            "duration_sec": min(int(values.get("duration_sec") or spec.default_duration), spec.max_duration),
-            "sample_rate": int(values.get("sample_rate") or spec.default_sample_rate),
-        }
+        effective = dict(values or {})
+        properties = getattr(spec, "parameter_schema", {}).get("properties") or {}
+        for name, rule in properties.items():
+            if name not in effective and isinstance(rule, dict) and "default" in rule:
+                # Collector defaults are part of physical probe identity.  A
+                # request omitting an optional field must match one that wrote
+                # the same declared default explicitly.
+                effective[name] = rule["default"]
+        effective["target_pid"] = int(
+            effective.get("target_pid")
+            or effective.get("pid")
+            or target["target_pid"]
+        )
+        effective.pop("pid", None)
+        effective["duration_sec"] = min(
+            int(effective.get("duration_sec") or spec.default_duration),
+            spec.max_duration,
+        )
+        effective["sample_rate"] = int(
+            effective.get("sample_rate") or spec.default_sample_rate
+        )
+        return effective
 
     @classmethod
     def _safe_dispatch_context(cls, value: dict[str, Any] | None) -> dict[str, Any]:
@@ -1052,12 +1841,67 @@ class CollectionSupervisor:
         return safe
 
     @staticmethod
+    def _selector_with_dispatch_context(
+        selector: dict[str, Any], dispatch_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Make proposal-scoped discovery incarnation part of resolution."""
+        result = dict(selector or {})
+        context = dispatch_context or {}
+        aliases = {
+            "expected_boot_id": "boot_id",
+            "expected_process_start_time": "process_start_time",
+            "expected_entity_id": "entity_id",
+        }
+        for source, destination in aliases.items():
+            value = context.get(source)
+            if value is None or str(value) == "":
+                continue
+            if destination in result and str(result[destination]) != str(value):
+                result["_incarnation_context_conflict"] = True
+                continue
+            result[destination] = value
+        target_entity_id = result.get("target_entity_id")
+        entity_id = result.get("entity_id")
+        if target_entity_id and entity_id:
+            if str(target_entity_id) != str(entity_id):
+                result["_incarnation_context_conflict"] = True
+        elif target_entity_id:
+            result["entity_id"] = target_entity_id
+        return result
+
+    @staticmethod
+    def _reuse_target_identity(target: dict[str, Any] | None) -> dict[str, Any]:
+        """Strip runtime-only values before writing JSON reuse decisions."""
+        target = target or {}
+        return {
+            key: target.get(key)
+            for key in (
+                "agent_id", "target_pid", "pid", "resource_incarnation",
+                "boot_id", "process_start_time", "entity_id", "container_id",
+                "namespace", "target_ref", "hostname",
+            )
+            if target.get(key) is not None and str(target.get(key)) != ""
+        }
+
+    @staticmethod
     def _idempotency_key(
         case_id: str, collector_id: str, target: dict[str, Any], parameters: dict[str, Any], scope_revision: int,
+        *, time_window: dict[str, Any] | None = None,
+        collector_spec_version: str = "",
     ) -> str:
         canonical = json.dumps({
             "case_id": case_id, "collector_id": collector_id,
-            "agent_id": target["agent_id"], "parameters": parameters,
+            "collector_spec_version": collector_spec_version,
+            "target": {
+                key: target.get(key)
+                for key in (
+                    "agent_id", "target_pid", "pid", "resource_incarnation",
+                    "boot_id", "process_start_time", "entity_id", "container_id",
+                )
+                if target.get(key) is not None
+            },
+            "parameters": parameters,
+            "time_window": time_window or {},
             "scope_revision": scope_revision,
         }, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

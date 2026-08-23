@@ -64,6 +64,125 @@ class InvestigationRunModel(Base):
         }
 
 
+class InvestigationTreeNodeModel(Base):
+    """Durable branch-local node in the evidence-driven investigation tree."""
+
+    __tablename__ = "investigation_tree_nodes"
+    __table_args__ = (
+        UniqueConstraint("case_id", "tenant_id", "node_id", name="uq_investigation_tree_node"),
+        Index("ix_investigation_tree_nodes_run_status", "case_id", "tenant_id", "run_id", "status"),
+        Index("ix_investigation_tree_nodes_parent", "case_id", "tenant_id", "parent_node_id"),
+    )
+
+    node_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    run_id = Column(String(128), nullable=False, index=True)
+    parent_node_id = Column(String(128), nullable=True, index=True)
+    branch_id = Column(String(128), nullable=False, index=True)
+    node_type = Column(String(32), nullable=False)
+    status = Column(String(32), nullable=False, default="OPEN", index=True)
+    statement = Column(Text, nullable=False, default="")
+    hypothesis_id = Column(String(128), nullable=True, index=True)
+    obligation_json = Column(JSON, nullable=False, default=dict)
+    evidence_refs_json = Column(JSON, nullable=False, default=list)
+    invalidated_evidence_refs_json = Column(JSON, nullable=False, default=list)
+    metadata_json = Column(JSON, nullable=False, default=dict)
+    depth = Column(Integer, nullable=False, default=0)
+    revision = Column(Integer, nullable=False, default=1)
+    replay_of_node_id = Column(String(128), nullable=True)
+    invalidated_reason = Column(String(128), nullable=True)
+    created_by = Column(String(128), nullable=False, default="agent")
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "node_id": self.node_id, "case_id": self.case_id,
+            "tenant_id": self.tenant_id, "run_id": self.run_id,
+            "parent_node_id": self.parent_node_id, "branch_id": self.branch_id,
+            "node_type": self.node_type, "status": self.status,
+            "statement": self.statement, "hypothesis_id": self.hypothesis_id,
+            "obligation": self.obligation_json or {},
+            "evidence_refs": self.evidence_refs_json or [],
+            "invalidated_evidence_refs": self.invalidated_evidence_refs_json or [],
+            "metadata": self.metadata_json or {}, "depth": self.depth,
+            "revision": self.revision, "replay_of_node_id": self.replay_of_node_id,
+            "invalidated_reason": self.invalidated_reason,
+            "created_by": self.created_by, "created_at": self.created_at,
+            "updated_at": self.updated_at, "closed_at": self.closed_at,
+        }
+
+
+class InvestigationTreeDependencyModel(Base):
+    """Explicit node dependency used for invalidation propagation."""
+
+    __tablename__ = "investigation_tree_dependencies"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "node_id", "target_kind", "target_id", "relation",
+            name="uq_investigation_tree_dependency",
+        ),
+        Index("ix_investigation_tree_dependencies_target", "case_id", "tenant_id", "target_kind", "target_id"),
+    )
+
+    dependency_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    node_id = Column(String(128), nullable=False, index=True)
+    target_kind = Column(String(32), nullable=False)
+    target_id = Column(String(256), nullable=False)
+    relation = Column(String(32), nullable=False, default="REQUIRES")
+    status = Column(String(24), nullable=False, default="ACTIVE", index=True)
+    invalidated_reason = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "dependency_id": self.dependency_id, "case_id": self.case_id,
+            "tenant_id": self.tenant_id, "node_id": self.node_id,
+            "target_kind": self.target_kind, "target_id": self.target_id,
+            "relation": self.relation, "status": self.status,
+            "invalidated_reason": self.invalidated_reason,
+            "created_at": self.created_at, "updated_at": self.updated_at,
+        }
+
+
+class InvestigationTreeEventModel(Base):
+    """Append-only state transition log for replay and operator audit."""
+
+    __tablename__ = "investigation_tree_events"
+    __table_args__ = (
+        Index("ix_investigation_tree_events_node_created", "node_id", "created_at"),
+        Index("ix_investigation_tree_events_run_created", "case_id", "tenant_id", "run_id", "created_at"),
+    )
+
+    event_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    run_id = Column(String(128), nullable=False, index=True)
+    node_id = Column(String(128), nullable=False, index=True)
+    event_type = Column(String(32), nullable=False)
+    from_status = Column(String(32), nullable=True)
+    to_status = Column(String(32), nullable=False)
+    reason = Column(String(256), nullable=True)
+    payload_json = Column(JSON, nullable=False, default=dict)
+    actor_id = Column(String(128), nullable=False, default="agent")
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "event_id": self.event_id, "case_id": self.case_id,
+            "tenant_id": self.tenant_id, "run_id": self.run_id,
+            "node_id": self.node_id, "event_type": self.event_type,
+            "from_status": self.from_status, "to_status": self.to_status,
+            "reason": self.reason, "payload": self.payload_json or {},
+            "actor_id": self.actor_id, "created_at": self.created_at,
+        }
+
+
 class CaseContextSnapshotModel(Base):
     __tablename__ = "case_context_snapshots"
     __table_args__ = (
@@ -460,6 +579,10 @@ class CollectionRequestModel(Base):
         UniqueConstraint("proposal_id", name="uq_collection_request_proposal"),
         UniqueConstraint("idempotency_key", name="uq_collection_request_idempotency"),
         Index("ix_collection_requests_case_status", "case_id", "status"),
+        Index(
+            "ix_collection_requests_case_tenant_status_created",
+            "case_id", "tenant_id", "status", "created_at",
+        ),
     )
 
     collection_request_id = Column(String(128), primary_key=True)
@@ -499,6 +622,120 @@ class CollectionRequestModel(Base):
             "task_id": self.task_id, "attempt_ids": self.attempt_ids or [],
             "created_at": self.created_at, "updated_at": self.updated_at,
         }
+
+
+class EvidenceReuseDecisionModel(Base):
+    """Branch-local audit of an explicit collection-result reuse decision.
+
+    ``CaseEvidenceModel`` and ``EvidenceProjectionModel`` remain the shared
+    fact stores.  This table records only the decision made by one run/cycle;
+    its presence must never make an Evidence item implicitly visible to a
+    different branch.  The identity and revision snapshots are retained so a
+    later review/scope change can explain why the decision is no longer valid.
+    """
+
+    __tablename__ = "evidence_reuse_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "tenant_id", "investigation_run_id", "contract_digest",
+            "probe_fingerprint", "evidence_id", "projection_hash",
+            name="uq_evidence_reuse_decision_idempotency",
+        ),
+        Index(
+            "ix_evidence_reuse_decisions_probe",
+            "case_id", "tenant_id", "probe_fingerprint", "created_at",
+        ),
+        Index(
+            "ix_evidence_reuse_decisions_run",
+            "case_id", "tenant_id", "investigation_run_id", "created_at",
+        ),
+        Index(
+            "ix_evidence_reuse_decisions_evidence",
+            "case_id", "tenant_id", "evidence_id", "projection_hash",
+        ),
+    )
+
+    decision_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    investigation_run_id = Column(String(128), nullable=True, index=True)
+    cycle_id = Column(String(128), nullable=True, index=True)
+    obligation_id = Column(String(256), nullable=True)
+    contract_digest = Column(String(128), nullable=False, default="", server_default="")
+    collector_id = Column(String(128), nullable=False)
+    collector_spec_version = Column(String(32), nullable=False, default="unknown", server_default="unknown")
+    probe_fingerprint = Column(String(128), nullable=False, index=True)
+    result_fingerprint = Column(String(128), nullable=True)
+    collection_request_id = Column(String(128), nullable=True, index=True)
+    task_id = Column(String(128), nullable=True, index=True)
+    evidence_id = Column(String(128), nullable=True, index=True)
+    projection_id = Column(String(128), nullable=True)
+    projection_hash = Column(String(128), nullable=True)
+    target_identity_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    requested_time_window_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    effective_time_window_json = Column(JSON, nullable=False, default=dict, server_default="{}")
+    control_revision = Column(Integer, nullable=False, default=1, server_default="1")
+    scope_revision = Column(Integer, nullable=False, default=1, server_default="1")
+    runtime_generation = Column(Integer, nullable=False, default=1, server_default="1")
+    evidence_review_revision = Column(Integer, nullable=True)
+    lifecycle_status = Column(String(24), nullable=True)
+    trust_state = Column(String(24), nullable=True)
+    decision = Column(String(32), nullable=False)
+    reason_codes_json = Column(JSON, nullable=False, default=list, server_default="[]")
+    actor_id = Column(String(128), nullable=False, default="agent", server_default="agent")
+    source = Column(String(64), nullable=False, default="collection_supervisor", server_default="collection_supervisor")
+    invalidated_at = Column(DateTime(timezone=True), nullable=True)
+    invalidated_reason = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "decision_id": self.decision_id,
+            "usage_id": self.decision_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "investigation_run_id": self.investigation_run_id,
+            "cycle_id": self.cycle_id,
+            "obligation_id": self.obligation_id,
+            "contract_digest": self.contract_digest or "",
+            "collector_id": self.collector_id,
+            "collector_spec_version": self.collector_spec_version,
+            "probe_fingerprint": self.probe_fingerprint,
+            "result_fingerprint": self.result_fingerprint,
+            "collection_request_id": self.collection_request_id,
+            "task_id": self.task_id,
+            "evidence_id": self.evidence_id,
+            "projection_id": self.projection_id,
+            "projection_hash": self.projection_hash,
+            "target_identity": self.target_identity_json or {},
+            "requested_time_window": self.requested_time_window_json or {},
+            "effective_time_window": self.effective_time_window_json or {},
+            "control_revision": int(self.control_revision or 0),
+            "scope_revision": int(self.scope_revision or 0),
+            "runtime_generation": int(self.runtime_generation or 0),
+            "evidence_review_revision": self.evidence_review_revision,
+            "review_revision": self.evidence_review_revision,
+            "lifecycle_status": self.lifecycle_status,
+            "trust_state": self.trust_state,
+            "decision": self.decision,
+            "reason_codes": self.reason_codes_json or [],
+            "actor_id": self.actor_id,
+            "source": self.source,
+            "invalidated_at": self.invalidated_at,
+            "invalidated_reason": self.invalidated_reason,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @property
+    def usage_id(self) -> str:
+        """Compatibility name used by branch-ledger consumers."""
+        return self.decision_id
+
+    @property
+    def review_revision(self) -> int | None:
+        return self.evidence_review_revision
 
 
 class AgentDecisionRecordModel(Base):
@@ -553,6 +790,14 @@ class EvidenceProjectionModel(Base):
     __table_args__ = (
         UniqueConstraint("evidence_id", "projection_kind", "projection_version", name="uq_evidence_projection"),
         Index("ix_evidence_projections_evidence", "evidence_id"),
+        Index(
+            "ix_evidence_projections_case_tenant_evidence_created",
+            "case_id", "tenant_id", "evidence_id", "created_at",
+        ),
+        Index(
+            "ix_evidence_projections_case_tenant_created",
+            "case_id", "tenant_id", "created_at",
+        ),
     )
 
     projection_id = Column(String(128), primary_key=True)
@@ -616,15 +861,6 @@ class EvidenceReviewRevisionModel(Base):
     impact_json = Column(JSON, nullable=False, default=dict, server_default="{}")
     overridden_recommendation = Column(Boolean, nullable=False, default=False, server_default="0")
     reviewed_by = Column(String(128), nullable=False)
-    lifecycle_status = Column(String(24), nullable=False, default="ACTIVE", server_default="ACTIVE")
-    trust_state = Column(String(24), nullable=False, default="UNREVIEWED", server_default="UNREVIEWED")
-    derived_trust_score = Column(Integer, nullable=False, default=50, server_default="50")
-    projection_hash = Column(String(64), nullable=True)
-    reason_code = Column(String(64), nullable=True)
-    assessment_json = Column(JSON, nullable=False, default=dict, server_default="{}")
-    recommendation_json = Column(JSON, nullable=False, default=dict, server_default="{}")
-    impact_json = Column(JSON, nullable=False, default=dict, server_default="{}")
-    overridden_recommendation = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     def to_dict(self) -> dict:
@@ -646,15 +882,6 @@ class EvidenceReviewRevisionModel(Base):
             "impact": self.impact_json or {},
             "overridden_recommendation": bool(self.overridden_recommendation),
             "reviewed_by": self.reviewed_by,
-            "lifecycle_status": self.lifecycle_status,
-            "trust_state": self.trust_state,
-            "derived_trust_score": self.derived_trust_score,
-            "projection_hash": self.projection_hash,
-            "reason_code": self.reason_code,
-            "assessment": self.assessment_json or {},
-            "recommendation": self.recommendation_json or {},
-            "impact": self.impact_json or {},
-            "overridden_recommendation": bool(self.overridden_recommendation),
             "created_at": self.created_at,
         }
 

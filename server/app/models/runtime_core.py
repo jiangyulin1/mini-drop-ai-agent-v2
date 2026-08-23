@@ -172,6 +172,14 @@ class CaseEvidenceModel(Base):
         ),
         Index("ix_case_evidence_lifecycle_status", "lifecycle_status"),
         Index("ix_case_evidence_review_trust_state", "review_trust_state"),
+        Index(
+            "ix_case_evidence_case_tenant_task",
+            "case_id", "tenant_id", "task_id",
+        ),
+        Index(
+            "ix_case_evidence_case_tenant_status_created",
+            "case_id", "tenant_id", "status", "created_at",
+        ),
     )
 
     evidence_id = Column(String(128), primary_key=True)
@@ -281,12 +289,6 @@ class CaseEvidenceModel(Base):
             "trust_level": self.trust_level,
             "lineage": self.lineage_json or {},
             "trace_id": self.trace_id,
-            "lifecycle_status": self.lifecycle_status,
-            "review_trust_state": self.review_trust_state,
-            "review_revision": self.review_revision,
-            "derived_trust_score": self.derived_trust_score,
-            "ui_hidden": bool(self.ui_hidden),
-            "ui_archived": bool(self.ui_archived),
             "late_after_cancel": bool(self.late_after_cancel),
             "stale_for_current_revision": bool(self.stale_for_current_revision),
             "created_at": self.created_at,

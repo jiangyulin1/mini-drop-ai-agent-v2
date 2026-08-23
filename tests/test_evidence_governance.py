@@ -98,7 +98,10 @@ def test_review_rejects_stale_revision_and_tampered_impact_token(client: TestCli
     case, evidence_id = _case_and_evidence(client)
     impact = _preview(client, case["case_id"], evidence_id, "LOW_TRUST")
     tampered = dict(impact)
-    tampered["impact_token"] = impact["impact_token"][:-1] + "0"
+    original_last = impact["impact_token"][-1]
+    tampered["impact_token"] = impact["impact_token"][:-1] + (
+        "1" if original_last == "0" else "0"
+    )
     response = _submit(
         client, case["case_id"], evidence_id, "LOW_TRUST", preview=tampered,
     )

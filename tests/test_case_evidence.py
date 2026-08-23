@@ -527,9 +527,17 @@ def test_evidence_analysis_rejects_changed_projection_and_accepts_array_paths(cl
         case_id=case["case_id"], tenant_id="tenant-a", evidence_ids=[evidence_id],
         mode="SINGLE", prompt_version="evidence-analysis.v2", explicit_single=True,
     )
+    with pytest.raises(ValueError, match="EVIDENCE_PROJECTION_MUTATION"):
+        repo.upsert_evidence_projection(
+            evidence_id=evidence_id, case_id=case["case_id"], tenant_id="tenant-a",
+            projection_kind="ARRAY_TEST", projection_version=2,
+            content={"items": [{"value": "io-hot"}]},
+        )
+    # A changed projection is a new immutable version.  Creating it fences
+    # the pending analysis run without rewriting the version cited above.
     repo.upsert_evidence_projection(
         evidence_id=evidence_id, case_id=case["case_id"], tenant_id="tenant-a",
-        projection_kind="ARRAY_TEST", projection_version=2,
+        projection_kind="ARRAY_TEST", projection_version=3,
         content={"items": [{"value": "io-hot"}]},
     )
     with pytest.raises(ValueError, match="ANALYSIS_INPUT_STALE"):
@@ -575,3 +583,112 @@ def test_explicit_single_analysis_can_explain_excluded_evidence(client: TestClie
     )
     assert run["input_state"] == "EXCLUDED_INPUT"
     assert result["status"] == "COMPLETED"
+
+
+def test_case_evidence_replay_rejects_provenance_mutation_but_allows_status_update(
+    client: TestClient,
+):
+    case = _create_case(client)
+    base = {
+        "case_id": case["case_id"],
+        "tenant_id": "tenant-a",
+        "evidence_id": "ev-immutable-provenance",
+        "attachment_id": None,
+        "task_id": "task-provenance",
+        "artifact_id": 7,
+        "artifact_type": "sys_metrics",
+        "collector_id": "sys_metrics",
+        "source_type": "task_artifact",
+        "source_id": "task-provenance",
+        "target_ref": "task:task-provenance",
+        "content_hash": "content-hash-a",
+        "projection_hash": "projection-hash-a",
+        "source_channel": "COLLECTOR",
+        "data_origin": "LIVE",
+        "time_window": {"start": "2026-08-23T12:00:00+00:00"},
+        "event_time_start": "2026-08-23T12:00:00+00:00",
+        "artifact_schema": "sys-metrics.v1",
+        "schema_version": "1",
+        "producer_version": "collector-1",
+        "raw_locator": "artifact://task-provenance/7",
+        "size_bytes": 128,
+        "sha256": "sha256-a",
+        "completeness": "COMPLETE",
+        "trust_level": "INTERNAL",
+        "lineage": {"task_id": "task-provenance", "artifact_id": 7},
+        "trace_id": "trace-a",
+    }
+    first = repo.upsert_case_evidence(**base)
+    replay = repo.upsert_case_evidence(
+        **base, quality="PARTIAL", freshness="HISTORICAL",
+        stale_for_current_revision=True,
+    )
+    assert replay["evidence_id"] == first["evidence_id"]
+    assert replay["quality"] == "PARTIAL"
+    assert replay["freshness"] == "HISTORICAL"
+    assert replay["stale_for_current_revision"] is True
+
+    mutations = {
+        "content_hash": "content-hash-b",
+        "projection_hash": "projection-hash-b",
+        "artifact_id": 8,
+        "artifact_schema": "sys-metrics.v2",
+        "lineage": {"task_id": "task-provenance", "artifact_id": 99},
+    }
+    for field, value in mutations.items():
+        with pytest.raises(ValueError, match=r"EVIDENCE_PROVENANCE_MUTATION:" + field):
+            repo.upsert_case_evidence(**{**base, field: value})
+
+    stored = repo.get_case_evidence(case["case_id"], "tenant-a", base["evidence_id"])
+    assert stored["content_hash"] == "content-hash-a"
+    assert stored["projection_hash"] == "projection-hash-a"
+    assert stored["artifact_id"] == 7
+    assert stored["artifact_schema"] == "sys-metrics.v1"
+    assert stored["lineage"] == base["lineage"]
+    assert stored["stale_for_current_revision"] is True
+
+
+def test_evidence_projection_version_is_immutable_and_new_version_is_append_only(
+    client: TestClient,
+):
+    case = _create_case(client)
+    repo.upsert_case_evidence(
+        case_id=case["case_id"], tenant_id="tenant-a",
+        evidence_id="ev-immutable-projection", attachment_id=None,
+        task_id=None, artifact_id=None, artifact_type="summary",
+        collector_id=None, source_type="source_gateway", target_ref="source:x",
+        content_hash="content-hash", projection_hash="projection-hash",
+    )
+    first = repo.upsert_evidence_projection(
+        evidence_id="ev-immutable-projection", case_id=case["case_id"],
+        tenant_id="tenant-a", projection_kind="SUMMARY", projection_version=1,
+        content={"value": "original"}, projection_schema="summary.v1",
+        parser_version="parser.v1",
+    )
+    replay = repo.upsert_evidence_projection(
+        evidence_id="ev-immutable-projection", case_id=case["case_id"],
+        tenant_id="tenant-a", projection_kind="SUMMARY", projection_version=1,
+        content={"value": "original"}, projection_schema="summary.v1",
+        parser_version="parser.v1",
+    )
+    assert replay["projection_id"] == first["projection_id"]
+    with pytest.raises(ValueError, match="EVIDENCE_PROJECTION_MUTATION"):
+        repo.upsert_evidence_projection(
+            evidence_id="ev-immutable-projection", case_id=case["case_id"],
+            tenant_id="tenant-a", projection_kind="SUMMARY", projection_version=1,
+            content={"value": "rewritten"}, projection_schema="summary.v1",
+            parser_version="parser.v1",
+        )
+
+    appended = repo.upsert_evidence_projection(
+        evidence_id="ev-immutable-projection", case_id=case["case_id"],
+        tenant_id="tenant-a", projection_kind="SUMMARY", projection_version=2,
+        content={"value": "rewritten"}, projection_schema="summary.v2",
+        parser_version="parser.v2",
+    )
+    assert appended["projection_id"] != first["projection_id"]
+    projections = repo.list_evidence_projections(
+        case["case_id"], "tenant-a", "ev-immutable-projection",
+    )
+    assert [item["projection_version"] for item in projections] == [1, 2]
+    assert projections[0]["content"] == {"value": "original"}

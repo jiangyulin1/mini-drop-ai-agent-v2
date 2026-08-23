@@ -585,6 +585,35 @@ def _deliver_one_wakeup(
     if not wakeup_id or wakeup.get("status") != "PENDING":
         return False
     reason_class = str(wakeup.get("reason_class") or "EVIDENCE_COMMITTED")
+    # Runtime wakeups carry evidence references in their durable source
+    # ledger.  Use only those references for this cycle; a Case-wide query here
+    # would silently turn every sibling investigation into a shared context.
+    wakeup_evidence_ids: set[str] = {
+        str(item).strip() for item in (wakeup.get("evidence_ids") or [])
+        if str(item).strip()
+    }
+    task_refs: set[str] = set()
+    for ref in wakeup.get("source_refs") or []:
+        raw_ref = str(ref or "")
+        if raw_ref.startswith("evidence-review:"):
+            wakeup_evidence_ids.add(raw_ref[len("evidence-review:"):].split(":r", 1)[0])
+        elif raw_ref.startswith("evidence:"):
+            wakeup_evidence_ids.add(raw_ref[len("evidence:"):].split(":", 1)[0])
+        elif raw_ref.startswith("task:"):
+            task_id = raw_ref[len("task:"):].split(":", 1)[0].strip()
+            if task_id:
+                task_refs.add(task_id)
+    # Older EVIDENCE_COMMITTED wakeups carried only task:<id>. Resolve those
+    # references narrowly against the named task so the branch does not fall
+    # back to a Case-wide Evidence query. Newer wakeups should carry explicit
+    # evidence:<id> refs, but this keeps durable rows written before that
+    # contract change deliverable.
+    if task_refs:
+        for item in case_evidence_service.list_evidence(case_id, tenant_id):
+            if str(item.get("task_id") or "") in task_refs:
+                evidence_id = str(item.get("evidence_id") or "").strip()
+                if evidence_id:
+                    wakeup_evidence_ids.add(evidence_id)
     # finish_investigation is terminal for the current run. Evidence that races
     # with an accepted conclusion stays durable, but must not enqueue another
     # autonomous model turn after the Agent has explicitly stopped.
@@ -652,6 +681,7 @@ def _deliver_one_wakeup(
         runtime_options=inherited_options,
         strategy_id=inherited_strategy_id,
         intervention=intervention,
+        evidence_ids=sorted(wakeup_evidence_ids),
     )
     # Evidence lifecycle changes invalidate every old Pi transcript. Rotate
     # the durable generation before creating the cycle so stale tool events
@@ -719,7 +749,12 @@ def _deliver_one_wakeup(
             generation=generation,
         ) if hasattr(repo, "create_agent_cycle") else None
         if cycle and hasattr(repo, "create_model_request"):
-            projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
+            projections = []
+            if hasattr(repo, "list_evidence_projections"):
+                for evidence_id in sorted(wakeup_evidence_ids):
+                    projections.extend(repo.list_evidence_projections(
+                        case_id, tenant_id, evidence_id=evidence_id,
+                    ))
             model_request = repo.create_model_request(
                 case_id=case_id,
                 tenant_id=tenant_id,
@@ -771,11 +806,7 @@ def _deliver_one_wakeup(
                 "review_trust_state、review_revision 和 projection_hash；排除证据不得继续作为支持依据。"
                 "随后重新评估假设、反证和缺失事实，并通过 finish_investigation 提交新结论。"
             )
-            follow_up_evidence_ids = [
-                item.get("evidence_id")
-                for item in case_evidence_service.list_evidence(case_id, tenant_id)
-                if item.get("lifecycle_status") == "ACTIVE" and not item.get("ui_archived")
-            ]
+            follow_up_evidence_ids = sorted(wakeup_evidence_ids)
         else:
             queued_analyses = [
                 item for item in evidence_analysis_service.list_runs(case_id, tenant_id)
@@ -806,10 +837,7 @@ def _deliver_one_wakeup(
                     "然后使用 finish_investigation 提交带 evidence_id、projection_hash、field_path 引用的结构化结论；"
                     "如果证据不足，使用 INSUFFICIENT_EVIDENCE，并明确缺失事实。"
                 )
-            follow_up_evidence_ids = [
-                item.get("evidence_id")
-                for item in case_evidence_service.list_evidence(case_id, tenant_id)
-            ]
+            follow_up_evidence_ids = sorted(wakeup_evidence_ids)
         runtime.follow_up(
             case_id,
             RuntimeFollowUp(
@@ -1014,17 +1042,46 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
     tenant_id = str(options.get("tenant_id") or _request_tenant())
     if not case_id:
         return
+    current_case = repo.get_incident_case(case_id, tenant_id) or {}
+    stale_reasons: list[str] = []
+    pinned_scope = options.get("scope_revision")
+    pinned_control = options.get("control_revision")
+    if pinned_scope is not None and int(pinned_scope or 0) != int(current_case.get("scope_revision") or 1):
+        stale_reasons.append("SCOPE_REVISION_CHANGED")
+    if pinned_control is not None and int(pinned_control or 0) != int(current_case.get("control_revision") or 1):
+        stale_reasons.append("CONTROL_REVISION_CHANGED")
+    pinned_reviews = options.get("input_evidence_review_revisions") or {}
+    if isinstance(pinned_reviews, dict):
+        for evidence_id, pinned_revision in pinned_reviews.items():
+            current_evidence = repo.get_case_evidence(case_id, tenant_id, str(evidence_id))
+            if current_evidence is None:
+                stale_reasons.append(f"INPUT_EVIDENCE_MISSING:{evidence_id}")
+                continue
+            pinned_review_revision = (
+                pinned_revision.get("review_revision")
+                if isinstance(pinned_revision, dict) else pinned_revision
+            )
+            if int(current_evidence.get("review_revision") or 0) != int(pinned_review_revision or 0):
+                stale_reasons.append(f"INPUT_EVIDENCE_REVIEW_CHANGED:{evidence_id}")
+    pinned_generation = options.get("runtime_generation")
+    if pinned_generation is not None and hasattr(repo, "get_agent_runtime_binding"):
+        binding = repo.get_agent_runtime_binding(case_id, tenant_id) or {}
+        if int(binding.get("runtime_generation") or 1) != int(pinned_generation or 1):
+            stale_reasons.append("RUNTIME_GENERATION_CHANGED")
+    stale_for_current_revision = bool(stale_reasons)
     terminal_requests = collection_supervisor.mark_task_terminal(
         case_id, tenant_id, task_id, to_status,
     )
     outcome = PLAN_DRIVER.on_task_done(case_id, tenant_id, task_id, status=to_status)
     evidence_ids: list[str] = []
+    current_evidence_rows: list[dict[str, Any]] | None = None
     if to_status == "DONE" and getattr(task, "collector_type", ""):
         evidence_ids = case_evidence_service.materialize_task_artifacts(
             case_id,
             tenant_id,
             task_id=task_id,
             actor_id="mini-drop-task-wake",
+            stale_for_current_revision=stale_for_current_revision,
         )
         log_event(
             "info",
@@ -1033,19 +1090,30 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
             case_id=case_id,
             evidence_count=len(evidence_ids),
         )
-        if evidence_ids:
-            active_evidence_ids = [
+        if evidence_ids and not stale_for_current_revision:
+            # A task wakeup must not turn the entire Case Evidence store into
+            # a shared live context for every investigation chain.  The
+            # current cycle receives only the Evidence materialized by this
+            # task; older results can be loaded later through an explicit,
+            # fingerprint-checked reuse decision.
+            evidence_id_set = {str(item) for item in evidence_ids if str(item)}
+            current_evidence_rows = case_evidence_service.list_evidence(
+                case_id, tenant_id,
+            )
+            task_evidence_ids = [
                 str(item.get("evidence_id") or "")
-                for item in case_evidence_service.list_evidence(case_id, tenant_id)
-                if item.get("status") == "ACTIVE" and item.get("evidence_id")
+                for item in current_evidence_rows
+                if str(item.get("evidence_id") or "") in evidence_id_set
+                and item.get("status") == "ACTIVE"
+                and not bool(item.get("stale_for_current_revision"))
             ]
-            if active_evidence_ids:
+            if task_evidence_ids:
                 try:
                     analysis = evidence_analysis_service.create_run(
                         case_id=case_id,
                         tenant_id=tenant_id,
-                        evidence_ids=active_evidence_ids,
-                        mode="SINGLE" if len(active_evidence_ids) == 1 else "MULTI",
+                        evidence_ids=task_evidence_ids,
+                        mode="SINGLE" if len(task_evidence_ids) == 1 else "MULTI",
                         prompt_version="evidence-analysis.v1",
                     )
                     log_event(
@@ -1067,12 +1135,19 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
     terminal_without_evidence = bool(terminal_requests) and (
         to_status in {"FAILED", "CANCELLED"} or (to_status == "DONE" and not evidence_ids)
     )
-    if evidence_ids or terminal_without_evidence:
-        case = repo.get_incident_case(case_id, tenant_id) or {}
+    if (evidence_ids and not stale_for_current_revision) or terminal_without_evidence:
+        case = repo.get_incident_case(case_id, tenant_id) or current_case
         if case.get("state") not in {"PAUSED", "STOPPED", "RESOLVED", "INSUFFICIENT_EVIDENCE"}:
             run = _ensure_active_investigation_run(case_id, tenant_id)
             if run is not None and runtime_mode() in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
-                watermark = len(case_evidence_service.list_evidence(case_id, tenant_id))
+                # Reuse the snapshot already loaded for the task-scoped
+                # analysis when possible; this avoids a second Case-wide
+                # Evidence query during every terminal wakeup.
+                watermark = len(
+                    current_evidence_rows
+                    if current_evidence_rows is not None
+                    else case_evidence_service.list_evidence(case_id, tenant_id)
+                )
                 if hasattr(repo, "enqueue_domain_outbox"):
                     if evidence_ids:
                         repo.enqueue_domain_outbox(
@@ -1085,6 +1160,10 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
                                 "tenant_id": tenant_id,
                                 "investigation_run_id": run["run_id"],
                                 "evidence_ids": evidence_ids,
+                                # Keep the durable source-ref contract
+                                # task-scoped for compatibility.  The wakeup
+                                # delivery path resolves this task to its own
+                                # Evidence rows, never to the whole Case.
                                 "source_refs": [f"task:{task_id}"],
                                 "control_revision": int(case.get("control_revision") or 1),
                                 "scope_revision": int(case.get("scope_revision") or 1),
@@ -1133,6 +1212,29 @@ def _wake_case_from_task(task_id: str, to_status: str) -> None:
                     # Keep the synchronous helper contract for API/tests;
                     # production also runs the same relay continuously.
                     _run_outbox_relay_pass()
+    elif evidence_ids and stale_for_current_revision:
+        # Keep the late result in the immutable Case store for audit and
+        # explicit reuse, but do not wake the current investigation cycle.
+        repo.record_case_event(
+            case_id,
+            tenant_id,
+            event_type="evidence_committed_stale",
+            payload={
+                "task_id": task_id,
+                "evidence_ids": evidence_ids,
+                "stale_reasons": stale_reasons,
+                "control_revision": current_case.get("control_revision"),
+                "scope_revision": current_case.get("scope_revision"),
+            },
+            actor_id="mini-drop-task-wake",
+        )
+        log_event(
+            "info",
+            "task_wake_evidence_fenced",
+            task_id=task_id,
+            case_id=case_id,
+            reasons=stale_reasons,
+        )
     return outcome
 
 

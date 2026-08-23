@@ -185,25 +185,43 @@ def _build_runtime_case_context(
     runtime_options: RuntimeOptions | dict[str, Any] | None = None,
     strategy_id: str | None = None,
     intervention: dict[str, Any] | None = None,
+    evidence_ids: list[str] | set[str] | tuple[str, ...] | None = None,
 ) -> CaseContextSnapshot:
     """Build the L0/L1 Case projection handed to an AgentRuntimePort before a Turn."""
     case_id = str(case.get("case_id") or "")
     plan = investigation_plan_service.read_plan(case_id, tenant_id) or {}
+    # Evidence is Case-scoped storage, not automatically branch-scoped
+    # context.  Callers that are opening a cycle must provide the exact
+    # evidence IDs that this cycle is allowed to inspect (newly committed
+    # results, or an explicit review/reuse selection).  ``None`` preserves the
+    # legacy interactive turn behaviour; autonomous wakeups always pass a
+    # concrete list and therefore cannot leak the whole Case store.
+    visible_evidence_ids = (
+        {str(item) for item in evidence_ids if str(item)}
+        if evidence_ids is not None else None
+    )
     evidence_summary: list[dict[str, Any]] = []
     all_projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(
         repo, "list_evidence_projections",
     ) else []
+    projections_by_evidence: dict[str, list[dict[str, Any]]] = {}
+    for projection in all_projections:
+        evidence_key = str(projection.get("evidence_id") or "")
+        if evidence_key:
+            projections_by_evidence.setdefault(evidence_key, []).append(projection)
     canonical_evidence = case_evidence_service.list_evidence(case_id, tenant_id, status=None)
     for item in canonical_evidence:
+        if visible_evidence_ids is not None and str(item.get("evidence_id") or "") not in visible_evidence_ids:
+            continue
         if str(item.get("status") or item.get("lifecycle_status") or "ACTIVE").upper() in {
             "EXCLUDED", "SUPERSEDED", "INVALID",
         } or str(item.get("lifecycle_status") or "").upper() in {
             "EXCLUDED", "SUPERSEDED", "INVALID",
         }:
             continue
-        projections = repo.list_evidence_projections(
-            case_id, tenant_id, evidence_id=item.get("evidence_id"),
-        ) if hasattr(repo, "list_evidence_projections") else []
+        projections = projections_by_evidence.get(
+            str(item.get("evidence_id") or ""), [],
+        )
         # Projection rows are persisted oldest-first. A runtime snapshot must
         # expose the newest row for each kind, otherwise post-review turns can
         # receive stale hashes and lifecycle state.
@@ -237,6 +255,14 @@ def _build_runtime_case_context(
     for attachment in evidence_attachment_service.list_attachments(case_id, tenant_id):
         if attachment.get("status") in {"EXCLUDED_BY_USER", "SUPERSEDED"}:
             continue
+        attachment_evidence_ids = {
+            str(item) for item in (attachment.get("evidence_ids") or []) if str(item)
+        }
+        if (
+            visible_evidence_ids is not None
+            and not visible_evidence_ids.intersection(attachment_evidence_ids)
+        ):
+            continue
         evidence_summary.append({
             "attachment_id": attachment.get("attachment_id"),
             "resource_ref": attachment.get("resource_ref"),
@@ -249,6 +275,13 @@ def _build_runtime_case_context(
     collection_proposals = repo.list_collection_proposals(case_id, tenant_id)
     collection_requests = repo.list_collection_requests(case_id, tenant_id)
     evidence_analyses = repo.list_evidence_analysis_runs(case_id, tenant_id)
+    if visible_evidence_ids is not None:
+        evidence_analyses = [
+            item for item in evidence_analyses
+            if visible_evidence_ids.intersection({
+                str(ref) for ref in (item.get("evidence_inputs") or [])
+            })
+        ]
     investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
     hypothesis_graph = investigation_state["hypothesis_graph"]
     active_evidence_ids = {
@@ -1246,7 +1279,21 @@ def internal_tool_propose_collection(payload: dict[str, Any], request: Request) 
             max_collection_duration_sec=runtime_policy.max_collection_duration_sec,
             agent_run_id=str(payload.get("agent_run_id") or "") or None,
             cycle_id=str(payload.get("cycle_id") or "") or None,
+            contract_digest=str(payload.get("contract_digest") or "") or None,
+            obligation_id=str(payload.get("obligation_id") or "") or None,
+            actor_id=str(payload.get("actor_id") or "mini-drop-agent-runtime"),
+            decision_source=str(payload.get("decision_source") or "agent_tool"),
             auto_dispatch=runtime_policy.side_effect_policy == "AUTO_READ_LOW",
+            reuse_existing_request_id=(
+                str(payload.get("reuse_existing_request_id") or "").strip() or None
+            ),
+            reuse_existing_evidence_id=(
+                str(payload.get("reuse_existing_evidence_id") or "").strip() or None
+            ),
+            reuse_existing_projection_id=(
+                str(payload.get("reuse_existing_projection_id") or "").strip() or None
+            ),
+            allow_low_trust_reuse=payload.get("allow_low_trust_reuse") is True,
             authorized_agent_ids=authorized_agent_ids,
             dispatch_context=dispatch_context,
         )
@@ -1288,6 +1335,7 @@ def internal_tool_propose_collection(payload: dict[str, Any], request: Request) 
         "proposal": proposal,
         "collection_request": collection_request,
         "task": _task_view(task) if task is not None else None,
+        "reuse": result.get("reuse") or None,
     })
 
 
@@ -1613,6 +1661,101 @@ def internal_tool_get_evidence_gaps(payload: dict[str, Any], request: Request) -
     return APIResponse(data={"items": items})
 
 
+def _validate_tree_evidence_refs(case_id: str, tenant_id: str, refs: list[str]) -> None:
+    """Reject stale or excluded Evidence before it enters a branch node."""
+    for evidence_id in dict.fromkeys(str(item) for item in refs if str(item)):
+        evidence = repo.get_case_evidence(case_id, tenant_id, evidence_id)
+        if evidence is None:
+            raise HTTPException(status_code=404, detail=f"EVIDENCE_NOT_FOUND:{evidence_id}")
+        lifecycle = str(
+            evidence.get("lifecycle_status") or evidence.get("status") or "ACTIVE"
+        ).upper()
+        if lifecycle in {"EXCLUDED", "SUPERSEDED", "INVALID", "STALE"}:
+            raise HTTPException(status_code=409, detail=f"EVIDENCE_NOT_ELIGIBLE:{evidence_id}")
+
+
+@router.post("/internal/agent/tools/investigation-tree")
+def internal_tool_get_investigation_tree(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id = str(payload.get("case_id") or "")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    fence_error = _tool_fence(case, tenant_id, payload, "get_investigation_tree")
+    if fence_error:
+        raise HTTPException(status_code=409, detail=fence_error)
+    tree = repo.list_investigation_tree(
+        case_id, tenant_id,
+        run_id=str(payload.get("run_id") or "") or None,
+        include_terminal=bool(payload.get("include_terminal", True)),
+    )
+    return APIResponse(data={"tree": tree, "events": repo.list_investigation_tree_events(
+        case_id, tenant_id, run_id=str(payload.get("run_id") or "") or None,
+    )})
+
+
+@router.post("/internal/agent/tools/investigation-tree/node")
+def internal_tool_propose_investigation_tree_node(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id, tenant_id, _ = _investigation_tool_case(payload, "propose_investigation_tree_node")
+    if not str(payload.get("run_id") or "").strip():
+        raise HTTPException(status_code=400, detail="RUN_ID_REQUIRED")
+    if not str(payload.get("statement") or "").strip():
+        raise HTTPException(status_code=400, detail="TREE_STATEMENT_REQUIRED")
+    evidence_refs = [str(item) for item in payload.get("evidence_refs") or [] if str(item)]
+    _validate_tree_evidence_refs(case_id, tenant_id, evidence_refs)
+    try:
+        node = repo.create_investigation_tree_node(
+            case_id=case_id, tenant_id=tenant_id,
+            run_id=str(payload.get("run_id") or ""),
+            node_type=str(payload.get("node_type") or "HYPOTHESIS"),
+            statement=str(payload.get("statement") or ""),
+            parent_node_id=str(payload.get("parent_node_id") or "") or None,
+            branch_id=str(payload.get("branch_id") or "") or None,
+            hypothesis_id=str(payload.get("hypothesis_id") or "") or None,
+            obligation=payload.get("obligation") or {}, evidence_refs=evidence_refs,
+            metadata=payload.get("metadata") or {},
+            replay_of_node_id=str(payload.get("replay_of_node_id") or "") or None,
+            created_by="mini-drop-pi-runtime",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    for evidence_id in evidence_refs:
+        repo.add_investigation_tree_dependency(
+            case_id=case_id, tenant_id=tenant_id, node_id=node["node_id"],
+            target_kind="EVIDENCE", target_id=evidence_id,
+            relation="REQUIRES", actor_id="mini-drop-pi-runtime",
+        )
+    return APIResponse(data={"node": node})
+
+
+@router.post("/internal/agent/tools/investigation-tree/dependency")
+def internal_tool_propose_investigation_tree_dependency(payload: dict[str, Any], request: Request) -> APIResponse:
+    _require_internal_token(request)
+    case_id, tenant_id, _ = _investigation_tool_case(payload, "propose_investigation_tree_dependency")
+    target_kind = str(payload.get("target_kind") or "").upper()
+    target_id = str(payload.get("target_id") or "")
+    if not target_id or not str(payload.get("node_id") or ""):
+        raise HTTPException(status_code=400, detail="TREE_DEPENDENCY_FIELDS_REQUIRED")
+    if target_kind == "EVIDENCE":
+        _validate_tree_evidence_refs(case_id, tenant_id, [target_id])
+    elif target_kind == "PROJECTION":
+        projections = repo.list_evidence_projections(case_id, tenant_id)
+        if not any(str(item.get("projection_id") or "") == target_id for item in projections):
+            raise HTTPException(status_code=404, detail="PROJECTION_NOT_FOUND")
+    try:
+        dependency = repo.add_investigation_tree_dependency(
+            case_id=case_id, tenant_id=tenant_id,
+            node_id=str(payload.get("node_id") or ""), target_kind=target_kind,
+            target_id=target_id, relation=str(payload.get("relation") or "REQUIRES"),
+            actor_id="mini-drop-pi-runtime",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data={"dependency": dependency})
+
+
 def _investigation_tool_case(payload: dict[str, Any], tool_name: str) -> tuple[str, str, dict[str, Any]]:
     case_id = str(payload.get("case_id") or "")
     tenant_id = _request_tenant()
@@ -1715,9 +1858,16 @@ def internal_tool_reusable_evidence(payload: dict[str, Any], request: Request) -
     task_ids = evidence_attachment_service.active_task_ids(case_id, tenant_id)
     evidence_rows = case_evidence_service.list_evidence(case_id, tenant_id, status="ACTIVE")
     projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
+    projections_by_evidence: dict[str, list[dict[str, Any]]] = {}
+    for projection in projections:
+        evidence_key = str(projection.get("evidence_id") or "")
+        if evidence_key:
+            projections_by_evidence.setdefault(evidence_key, []).append(projection)
     reusable_evidence = []
     for item in evidence_rows:
-        item_projections = [p for p in projections if p.get("evidence_id") == item.get("evidence_id")]
+        item_projections = projections_by_evidence.get(
+            str(item.get("evidence_id") or ""), [],
+        )
         reusable_evidence.append({
             "evidence_id": item.get("evidence_id"),
             "artifact_type": item.get("artifact_type"),
@@ -2527,6 +2677,59 @@ async def run_case_shadow_plan(case_id: str, request: Request) -> APIResponse:
     comparison = compare_plans(deterministic, shadow)
     comparison["shadow_status"] = shadow_status
     return APIResponse(data=comparison)
+
+
+@router.get("/api/v1/cases/{case_id}/investigation-tree")
+def get_case_investigation_tree(case_id: str, request: Request, run_id: str | None = None) -> APIResponse:
+    """Operator-facing read of the branch tree and append-only transitions."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    return APIResponse(data={
+        "tree": repo.list_investigation_tree(case_id, tenant_id, run_id=run_id),
+        "events": repo.list_investigation_tree_events(case_id, tenant_id, run_id=run_id),
+    })
+
+
+@router.post("/api/v1/cases/{case_id}/investigation-tree/transition")
+async def transition_case_investigation_tree(case_id: str, request: Request) -> APIResponse:
+    """Apply an explicit operator branch transition; no implicit Evidence writes."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    payload = await request.json()
+    try:
+        node = repo.transition_investigation_tree_node(
+            case_id=case_id, tenant_id=tenant_id,
+            node_id=str(payload.get("node_id") or ""),
+            to_status=str(payload.get("to_status") or ""),
+            reason=str(payload.get("reason") or "OPERATOR_TRANSITION"),
+            actor_id="operator",
+            payload={"operator_action": True},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return APIResponse(data={"node": node})
+
+
+@router.post("/api/v1/cases/{case_id}/investigation-tree/invalidate-evidence")
+async def invalidate_case_tree_for_evidence(case_id: str, request: Request) -> APIResponse:
+    """Revoke a branch proof after an operator excludes one Evidence item."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    payload = await request.json()
+    evidence_id = str(payload.get("evidence_id") or "")
+    if not evidence_id:
+        raise HTTPException(status_code=400, detail="EVIDENCE_ID_REQUIRED")
+    result = repo.invalidate_investigation_tree_for_evidence(
+        case_id=case_id, tenant_id=tenant_id, evidence_id=evidence_id,
+        reason=str(payload.get("reason") or "EVIDENCE_INVALIDATED"), actor_id="operator",
+    )
+    return APIResponse(data=result)
 
 
 

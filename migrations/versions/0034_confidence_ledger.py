@@ -80,8 +80,114 @@ def upgrade() -> None:
         op.create_index("ix_confidence_adjustments_tenant_id", "confidence_adjustments", ["tenant_id"])
         op.create_index("ix_confidence_adjustments_chain", "confidence_adjustments", ["case_id", "chain_type", "chain_id", "created_at"])
 
+    # Keep explicit branch-local reuse decisions separate from shared
+    # Evidence.  This is intentionally added to the current compatibility
+    # revision: older deployments may already be stamped at 0034, and
+    # ``server.app.migration.upgrade_database`` creates the table check-first
+    # for those databases as well.
+    if "evidence_reuse_decisions" not in tables:
+        op.create_table(
+            "evidence_reuse_decisions",
+            sa.Column("decision_id", sa.String(128), primary_key=True),
+            sa.Column("case_id", sa.String(128), nullable=False),
+            sa.Column("tenant_id", sa.String(128), nullable=False),
+            sa.Column("investigation_run_id", sa.String(128), nullable=True),
+            sa.Column("cycle_id", sa.String(128), nullable=True),
+            sa.Column("obligation_id", sa.String(256), nullable=True),
+            sa.Column("contract_digest", sa.String(128), nullable=False, server_default=""),
+            sa.Column("collector_id", sa.String(128), nullable=False),
+            sa.Column("collector_spec_version", sa.String(32), nullable=False, server_default="unknown"),
+            sa.Column("probe_fingerprint", sa.String(128), nullable=False),
+            sa.Column("result_fingerprint", sa.String(128), nullable=True),
+            sa.Column("collection_request_id", sa.String(128), nullable=True),
+            sa.Column("task_id", sa.String(128), nullable=True),
+            sa.Column("evidence_id", sa.String(128), nullable=True),
+            sa.Column("projection_id", sa.String(128), nullable=True),
+            sa.Column("projection_hash", sa.String(128), nullable=True),
+            sa.Column("target_identity_json", sa.JSON(), nullable=False, server_default="{}"),
+            sa.Column("requested_time_window_json", sa.JSON(), nullable=False, server_default="{}"),
+            sa.Column("effective_time_window_json", sa.JSON(), nullable=False, server_default="{}"),
+            sa.Column("control_revision", sa.Integer(), nullable=False, server_default="1"),
+            sa.Column("scope_revision", sa.Integer(), nullable=False, server_default="1"),
+            sa.Column("runtime_generation", sa.Integer(), nullable=False, server_default="1"),
+            sa.Column("evidence_review_revision", sa.Integer(), nullable=True),
+            sa.Column("lifecycle_status", sa.String(24), nullable=True),
+            sa.Column("trust_state", sa.String(24), nullable=True),
+            sa.Column("decision", sa.String(32), nullable=False),
+            sa.Column("reason_codes_json", sa.JSON(), nullable=False, server_default="[]"),
+            sa.Column("actor_id", sa.String(128), nullable=False, server_default="agent"),
+            sa.Column("source", sa.String(64), nullable=False, server_default="collection_supervisor"),
+            sa.Column("invalidated_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("invalidated_reason", sa.String(128), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+            sa.UniqueConstraint(
+                "case_id", "tenant_id", "investigation_run_id", "contract_digest",
+                "probe_fingerprint", "evidence_id", "projection_hash",
+                name="uq_evidence_reuse_decision_idempotency",
+            ),
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_case_id", "evidence_reuse_decisions", ["case_id"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_tenant_id", "evidence_reuse_decisions", ["tenant_id"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_investigation_run_id",
+            "evidence_reuse_decisions", ["investigation_run_id"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_cycle_id", "evidence_reuse_decisions", ["cycle_id"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_collection_request_id",
+            "evidence_reuse_decisions", ["collection_request_id"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_task_id", "evidence_reuse_decisions", ["task_id"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_evidence_id",
+            "evidence_reuse_decisions", ["evidence_id"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_probe_fingerprint",
+            "evidence_reuse_decisions", ["probe_fingerprint"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_probe", "evidence_reuse_decisions",
+            ["case_id", "tenant_id", "probe_fingerprint", "created_at"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_run", "evidence_reuse_decisions",
+            ["case_id", "tenant_id", "investigation_run_id", "created_at"],
+        )
+        op.create_index(
+            "ix_evidence_reuse_decisions_evidence", "evidence_reuse_decisions",
+            ["case_id", "tenant_id", "evidence_id", "projection_hash"],
+        )
+
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "evidence_reuse_decisions" in set(inspector.get_table_names()):
+        for index_name in (
+            "ix_evidence_reuse_decisions_evidence",
+            "ix_evidence_reuse_decisions_run",
+            "ix_evidence_reuse_decisions_probe",
+            "ix_evidence_reuse_decisions_probe_fingerprint",
+            "ix_evidence_reuse_decisions_evidence_id",
+            "ix_evidence_reuse_decisions_task_id",
+            "ix_evidence_reuse_decisions_collection_request_id",
+            "ix_evidence_reuse_decisions_cycle_id",
+            "ix_evidence_reuse_decisions_investigation_run_id",
+            "ix_evidence_reuse_decisions_tenant_id",
+            "ix_evidence_reuse_decisions_case_id",
+        ):
+            op.drop_index(index_name, table_name="evidence_reuse_decisions")
+        op.drop_table("evidence_reuse_decisions")
     with op.batch_alter_table("conclusion_revisions") as batch:
         batch.drop_column("confidence_reason")
         batch.drop_column("mechanism_json")

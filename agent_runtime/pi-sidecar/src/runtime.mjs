@@ -513,6 +513,8 @@ export function buildEvidenceAgentSystemPrompt(promptVariant = "default") {
     "COMPLETED or PARTIAL discovery is not an investigation conclusion: continue with get_dependency_graph and Evidence, preserve coverage limitations, and never treat dependency edges as causal claims. " +
     "If Evidence proves only communication/dependency and no causal mechanism, do not call propose_causal_graph; keep the causal graph empty and finish with no asserted root cause. " +
     "When a hypothesis, claim or causal edge depends on Evidence, explicitly call propose_evidence_dependency with the Evidence ID, relation, weight and reason before finish. " +
+    "Maintain the durable investigation tree explicitly: call get_investigation_tree before extending a branch, create one node with propose_investigation_tree_node for each new hypothesis/obligation/claim/decision, and bind only the exact selected Evidence or Projection with propose_investigation_tree_dependency. " +
+    "If an Evidence review invalidates the current branch, abandon its descendants and replay from a valid ancestor; never silently continue on an invalidated node. " +
     "For an investigative turn where finish_investigation is available, every terminal outcome, including insufficient evidence, " +
     "must be submitted through finish_investigation. Never substitute a plain-text final or stage conclusion. " +
     "Every non-abstaining finish must include root_location (type, target_ref, evidence_refs), mechanism (statement, supporting_evidence, contradicting_evidence, confidence, confidence_reason), evidence_gaps, invalidated_claims, remaining_active_support and excluded_evidence_used=false. " +

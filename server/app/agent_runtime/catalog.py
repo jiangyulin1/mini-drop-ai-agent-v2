@@ -124,6 +124,16 @@ TOOL_CATALOG: tuple[ToolSpec, ...] = (
         _object(_CASE, ["case_id"]), "/internal/agent/tools/get-evidence-gaps", "READ_ONLY",
     ),
     ToolSpec(
+        "get_investigation_tree",
+        "Read the durable branch-local investigation tree and transition events.",
+        _object({
+            **_CASE,
+            "run_id": {"type": "string"},
+            "include_terminal": {"type": "boolean", "default": True},
+        }, ["case_id"]),
+        "/internal/agent/tools/investigation-tree", "READ_ONLY",
+    ),
+    ToolSpec(
         "find_reusable_evidence", "Find scope- and window-compatible reusable Evidence.",
         _object({
             **_CASE,
@@ -165,6 +175,34 @@ TOOL_CATALOG: tuple[ToolSpec, ...] = (
                 ),
             },
             "idempotency_key": {"type": "string", "maxLength": 256},
+            "reuse_existing_request_id": {
+                "type": "string", "minLength": 1,
+                "description": (
+                    "Explicitly reuse a completed CollectionRequest only when its "
+                    "probe/result fingerprints and active Evidence state match"
+                ),
+            },
+            "reuse_existing_evidence_id": {
+                "type": "string", "minLength": 1,
+                "description": (
+                    "Select one Evidence when a completed request produced multiple "
+                    "artifacts; omission is allowed only for a single eligible result"
+                ),
+            },
+            "reuse_existing_projection_id": {
+                "type": "string", "minLength": 1,
+                "description": (
+                    "Select one immutable Projection when one Evidence has multiple "
+                    "eligible projections"
+                ),
+            },
+            "allow_low_trust_reuse": {
+                "type": "boolean",
+                "description": (
+                    "Explicit expert opt-in for a LOW_TRUST result; omitted/false "
+                    "always rejects LOW_TRUST reuse"
+                ),
+            },
             "runtime_generation": {"type": "integer", "minimum": 1},
             "expected_control_revision": {"type": "integer", "minimum": 1},
             "expected_scope_revision": {"type": "integer", "minimum": 1},
@@ -245,6 +283,35 @@ TOOL_CATALOG: tuple[ToolSpec, ...] = (
             "expected_scope_revision": {"type": "integer", "minimum": 1},
         }, ["case_id", "hypotheses", "expected_scope_revision"]),
         "/internal/agent/tools/hypotheses", "PROPOSE_ONLY",
+    ),
+    ToolSpec(
+        "propose_investigation_tree_node",
+        "Add one branch-local hypothesis/obligation node. Evidence visibility remains explicit and branch-scoped.",
+        _object({
+            **_CASE,
+            "run_id": {"type": "string", "minLength": 1},
+            "node_type": {"type": "string", "enum": ["HYPOTHESIS", "OBLIGATION", "CLAIM", "DECISION"]},
+            "statement": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "parent_node_id": {"type": ["string", "null"]},
+            "branch_id": {"type": "string"},
+            "hypothesis_id": {"type": "string"},
+            "obligation": {"type": "object"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "replay_of_node_id": {"type": "string"},
+        }, ["case_id", "run_id", "node_type", "statement"]),
+        "/internal/agent/tools/investigation-tree/node", "PROPOSE_ONLY",
+    ),
+    ToolSpec(
+        "propose_investigation_tree_dependency",
+        "Bind a tree node to an explicitly selected Evidence, Projection, hypothesis, or collection request.",
+        _object({
+            **_CASE,
+            "node_id": {"type": "string", "minLength": 1},
+            "target_kind": {"type": "string", "enum": ["EVIDENCE", "PROJECTION", "HYPOTHESIS", "COLLECTION_REQUEST"]},
+            "target_id": {"type": "string", "minLength": 1},
+            "relation": {"type": "string", "enum": ["REQUIRES", "SUPPORTS", "CONTRADICTS"]},
+        }, ["case_id", "node_id", "target_kind", "target_id"]),
+        "/internal/agent/tools/investigation-tree/dependency", "PROPOSE_ONLY",
     ),
     ToolSpec(
         "record_evidence_gaps", "Persist concrete missing facts. Use required_fact for the missing observation and next_best_action for its resolution.",

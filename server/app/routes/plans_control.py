@@ -550,25 +550,15 @@ def review_case_evidence(
         raise
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    repo.record_case_event(
-        case_id, tenant_id, event_type="evidence_reviewed",
-        payload={
-            "evidence_id": evidence_id,
-            "decision": review["decision"],
-            "review_revision": review.get("review_revision"),
-            "actor_id": principal_id,
-        },
-        actor_id=principal_id,
-    )
-    reviewed_evidence = repo.get_case_evidence(case_id, tenant_id, evidence_id) if hasattr(repo, "get_case_evidence") else None
-    impact = _evidence_review_impact(
-        case_id,
-        tenant_id,
-        evidence_id,
-        str(review.get("decision") or payload.decision),
-        int(review.get("review_revision") or (reviewed_evidence or {}).get("review_revision") or 0),
-    )
-    return APIResponse(data={**review, "impact_report": impact})
+    # ``review_evidence`` commits lifecycle propagation atomically inside the
+    # repository.  Do not run the legacy route-level graph mutation again: it
+    # used to decrement confidence twice and could leave a second event after
+    # the transaction had already committed.  Keep the response shape with
+    # the repository's immutable propagation report for clients.
+    return APIResponse(data={
+        **review,
+        "impact_report": review.get("propagation") or {},
+    })
 
 
 @router.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/preview")

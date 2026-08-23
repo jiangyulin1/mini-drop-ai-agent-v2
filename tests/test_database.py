@@ -51,7 +51,7 @@ def test_init_db_adds_v2_columns_to_legacy_database(monkeypatch, tmp_path):
     }
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0034_confidence_ledger"
+            "0035_investigation_tree"
         )
     reset_engine()
 
@@ -80,7 +80,7 @@ def test_init_db_creates_fresh_schema_at_head(monkeypatch, tmp_path):
     )
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0034_confidence_ledger"
+            "0035_investigation_tree"
         )
     reset_engine()
 

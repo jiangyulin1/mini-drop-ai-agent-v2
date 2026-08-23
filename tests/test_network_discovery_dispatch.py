@@ -8,7 +8,9 @@ from agent.mini_drop_agent.config import AgentConfig
 from agent.mini_drop_agent.main import _heartbeat
 from mini_drop_contracts import get_collector_spec
 from server.app.database import init_db, reset_engine
+from server.app.diagnosis.case_evidence import stable_projection_hash
 from server.app.diagnosis.collection_supervisor import CollectionSupervisor
+from server.app.diagnosis.collection_reuse import result_fingerprint
 from server.app.grpc_services.healthcheck_service import HealthCheckService
 from server.app.main import repo
 from server.app.models import Base
@@ -231,8 +233,364 @@ def test_collection_supervisor_rejects_unknown_network_discovery_scope():
     assert result["task"] is None
 
 
+def test_collection_supervisor_rejects_malformed_target_without_raising():
+    case, supervisor = _case_and_supervisor()
+    result = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(
+            case,
+            target_selector={"agent_id": AGENT_ID, "target_pid": "not-a-pid"},
+        ),
+    )
+    assert result["proposal"]["status"] == "REJECTED"
+    assert "INVALID_PARAMETER_TYPE:target_pid" in result["proposal"][
+        "validation_result"
+    ]["errors"]
+    assert result["task"] is None
+
+
+def test_collection_supervisor_rejects_conflicting_pid_selector_aliases():
+    case, supervisor = _case_and_supervisor()
+    result = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(
+            case,
+            target_selector={
+                "agent_id": AGENT_ID,
+                "target_pid": SEED_PID,
+                "pid": SEED_PID + 1,
+            },
+        ),
+    )
+    assert result["proposal"]["status"] == "REJECTED"
+    assert "TARGET_PID_ALIAS_CONFLICT" in result["proposal"][
+        "validation_result"
+    ]["errors"]
+    assert result["task"] is None
+
+
+def test_discovery_incarnation_context_conflict_is_explicitly_rejected():
+    case, supervisor = _case_and_supervisor()
+    kwargs = _proposal_kwargs(
+        case,
+        dispatch_context={"expected_boot_id": "boot-new"},
+        target_selector={
+            "agent_id": AGENT_ID,
+            "target_pid": SEED_PID,
+            "boot_id": "boot-old",
+        },
+    )
+    result = supervisor.propose_and_dispatch(
+        **kwargs,
+    )
+    assert result["proposal"]["status"] == "REJECTED"
+    assert "TARGET_INCARNATION_MISMATCH" in result["proposal"][
+        "validation_result"
+    ]["errors"]
+    assert result["task"] is None
+
+
+def test_discovery_target_entity_alias_conflict_is_explicitly_rejected():
+    case, supervisor = _case_and_supervisor()
+    kwargs = _proposal_kwargs(
+        case,
+        dispatch_context={"expected_entity_id": "entity-new"},
+        target_selector={
+            "agent_id": AGENT_ID,
+            "target_pid": SEED_PID,
+            "target_entity_id": "entity-old",
+        },
+    )
+    result = supervisor.propose_and_dispatch(**kwargs)
+    assert result["proposal"]["status"] == "REJECTED"
+    assert "TARGET_INCARNATION_MISMATCH" in result["proposal"][
+        "validation_result"
+    ]["errors"]
+
+
 def test_topology_frontier_treats_same_agent_new_pid_as_run_scoped_target():
     case, _supervisor = _case_and_supervisor()
 
     assert _target_is_in_case_scope(case, AGENT_ID, SEED_PID) is True
     assert _target_is_in_case_scope(case, AGENT_ID, SEED_PID + 1) is False
+
+
+def _completed_reuse_candidate(
+    case: dict, supervisor: CollectionSupervisor,
+) -> tuple[dict, dict]:
+    first = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case),
+        idempotency_key="reuse-seed-request",
+    )
+    assert first["proposal"]["status"] == "ACCEPTED"
+    task = first["task"]
+    request = first["collection_request"]
+    supervisor.mark_task_terminal(case["case_id"], TENANT_ID, task.id, "DONE")
+    probe = task.request_params["options"]["probe_fingerprint"]
+    projection_content = {"summary": "reuse candidate"}
+    projection_hash = stable_projection_hash(projection_content)
+    result = result_fingerprint(
+        probe_fingerprint_value=probe,
+        projection_hash=projection_hash,
+        content_hash="content-reuse-network",
+        artifact_schema="network_discovery",
+        parser_version="deterministic.v1",
+        completeness="COMPLETE",
+    )
+    repo.upsert_case_evidence(
+        case_id=case["case_id"], tenant_id=TENANT_ID,
+        evidence_id="ev-reuse-network", attachment_id=None,
+        task_id=task.id, artifact_id=1,
+        artifact_type="network_discovery", collector_id="network_discovery",
+        source_type="task_artifact", target_ref=f"task:{task.id}",
+        content_hash="content-reuse-network", projection_hash=projection_hash,
+        lineage={
+            "task_id": task.id,
+            "probe_fingerprint": probe,
+            "result_fingerprint": result,
+        },
+    )
+    repo.upsert_evidence_projection(
+        evidence_id="ev-reuse-network", case_id=case["case_id"], tenant_id=TENANT_ID,
+        projection_kind="SUMMARY", projection_version=1, content=projection_content,
+        parser_version="deterministic.v1",
+    )
+    return request, first
+
+
+def test_exact_collection_reuse_returns_existing_request_without_new_task():
+    case, supervisor = _case_and_supervisor()
+    request, first = _completed_reuse_candidate(case, supervisor)
+    task_count = len(repo.tasks)
+    request_count = len(repo.list_collection_requests(case["case_id"], TENANT_ID))
+
+    reused = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case),
+        reuse_existing_request_id=request["collection_request_id"],
+    )
+
+    assert reused["proposal"]["status"] == "ACCEPTED"
+    assert reused["proposal"]["validation_result"]["reused"] is True
+    assert reused["collection_request"]["collection_request_id"] == request["collection_request_id"]
+    assert reused["task"] is None
+    assert len(repo.tasks) == task_count
+    assert len(repo.list_collection_requests(case["case_id"], TENANT_ID)) == request_count
+    assert reused["reuse"]["items"][0]["evidence_id"] == "ev-reuse-network"
+    assert first["task"].id == reused["collection_request"]["task_id"]
+
+
+def test_multiple_evidence_results_require_explicit_selection():
+    case, supervisor = _case_and_supervisor()
+    request, first = _completed_reuse_candidate(case, supervisor)
+    task = first["task"]
+    projection_content = {"summary": "second projection"}
+    projection_hash = stable_projection_hash(projection_content)
+    probe = task.request_params["options"]["probe_fingerprint"]
+    result = result_fingerprint(
+        probe_fingerprint_value=probe,
+        projection_hash=projection_hash,
+        content_hash="content-reuse-network-2",
+        artifact_schema="network_discovery",
+        parser_version="deterministic.v1",
+        completeness="COMPLETE",
+    )
+    repo.upsert_case_evidence(
+        case_id=case["case_id"], tenant_id=TENANT_ID,
+        evidence_id="ev-reuse-network-2", attachment_id=None,
+        task_id=task.id, artifact_id=2, artifact_type="network_discovery",
+        collector_id="network_discovery", source_type="task_artifact",
+        target_ref=f"task:{task.id}", content_hash="content-reuse-network-2",
+        projection_hash=projection_hash,
+        lineage={
+            "task_id": task.id,
+            "probe_fingerprint": probe,
+            "probe_key": task.request_params["options"].get("probe_key"),
+            "result_fingerprint": result,
+        },
+    )
+    repo.upsert_evidence_projection(
+        evidence_id="ev-reuse-network-2", case_id=case["case_id"],
+        tenant_id=TENANT_ID, projection_kind="SUMMARY", projection_version=1,
+        content=projection_content, parser_version="deterministic.v1",
+    )
+
+    ambiguous = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case),
+        reuse_existing_request_id=request["collection_request_id"],
+    )
+    assert ambiguous["proposal"]["status"] == "REJECTED"
+    assert ambiguous["proposal"]["validation_result"]["errors"] == [
+        "REUSE_EVIDENCE_SELECTION_REQUIRED"
+    ]
+
+    selected = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case),
+        reuse_existing_request_id=request["collection_request_id"],
+        reuse_existing_evidence_id="ev-reuse-network-2",
+    )
+    assert selected["proposal"]["status"] == "ACCEPTED"
+    assert selected["reuse"]["items"][0]["evidence_id"] == "ev-reuse-network-2"
+    assert selected["task"] is None
+
+
+def test_explicit_reuse_preserves_discovery_target_authority_context():
+    """A discovered Agent remains resolvable during the reuse query.
+
+    The Case scope contains only the seed Agent.  The remote target is legal
+    solely because the caller supplies the discovery authority grant.  The
+    reuse lookup must receive that same grant; otherwise it would silently
+    report ``PROBE_NOT_RESOLVABLE`` and trigger an unnecessary recollection.
+    """
+    case, supervisor = _case_and_supervisor()
+    remote_id = "discovered-agent"
+    remote_pid = 7777
+    repo.register_agent(
+        remote_id,
+        "discovered-host",
+        "10.0.0.77",
+        version="0.4.0",
+        capabilities=["network_discovery"],
+    )
+    kwargs = _proposal_kwargs(
+        case,
+        target_selector={"agent_id": remote_id, "target_pid": remote_pid},
+        authorized_agent_ids={remote_id},
+        dispatch_context={
+            "expected_boot_id": "boot-discovered",
+            "expected_process_start_time": "1777000",
+            "expected_entity_id": "entity-discovered",
+        },
+        idempotency_key="reuse-discovered-target",
+    )
+    first = supervisor.propose_and_dispatch(**kwargs)
+    assert first["proposal"]["status"] == "ACCEPTED"
+    task = first["task"]
+    request = first["collection_request"]
+    supervisor.mark_task_terminal(case["case_id"], TENANT_ID, task.id, "DONE")
+
+    # A completed Evidence with a verifiable projection is the explicit reuse
+    # material, matching the helper used by the ordinary seed-path test.
+    probe = task.request_params["options"]["probe_fingerprint"]
+    projection_content = {"summary": "discovered reuse candidate"}
+    projection_hash = stable_projection_hash(projection_content)
+    result = result_fingerprint(
+        probe_fingerprint_value=probe,
+        projection_hash=projection_hash,
+        content_hash="content-reuse-discovered",
+        artifact_schema="network_discovery",
+        parser_version="deterministic.v1",
+        completeness="COMPLETE",
+    )
+    repo.upsert_case_evidence(
+        case_id=case["case_id"], tenant_id=TENANT_ID,
+        evidence_id="ev-reuse-discovered", attachment_id=None,
+        task_id=task.id, artifact_id=2,
+        artifact_type="network_discovery", collector_id="network_discovery",
+        source_type="task_artifact", target_ref=f"task:{task.id}",
+        content_hash="content-reuse-discovered", projection_hash=projection_hash,
+        lineage={"task_id": task.id, "probe_fingerprint": probe,
+                 "result_fingerprint": result},
+    )
+    repo.upsert_evidence_projection(
+        evidence_id="ev-reuse-discovered", case_id=case["case_id"],
+        tenant_id=TENANT_ID, projection_kind="SUMMARY", projection_version=1,
+        content=projection_content, parser_version="deterministic.v1",
+    )
+
+    reused = supervisor.propose_and_dispatch(
+        **{**kwargs, "reuse_existing_request_id": request["collection_request_id"]},
+    )
+    assert reused["proposal"]["status"] == "ACCEPTED"
+    assert reused["task"] is None
+    assert reused["reuse"]["items"][0]["evidence_id"] == "ev-reuse-discovered"
+
+
+def test_collection_reuse_rejects_probe_fingerprint_mismatch_without_dispatch():
+    case, supervisor = _case_and_supervisor()
+    request, _first = _completed_reuse_candidate(case, supervisor)
+    task_count = len(repo.tasks)
+
+    changed = _parameters()
+    changed["max_sockets"] += 1
+    rejected = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case, parameters=changed),
+        reuse_existing_request_id=request["collection_request_id"],
+    )
+
+    assert rejected["proposal"]["status"] == "REJECTED"
+    assert rejected["proposal"]["validation_result"]["errors"] == [
+        "REUSE_CANDIDATE_NOT_ELIGIBLE"
+    ]
+    assert any(
+        "PROBE_FINGERPRINT_MISMATCH" in item["reason_codes"]
+        for item in rejected["reuse"]["rejected"]
+    )
+    assert len(repo.tasks) == task_count
+    assert len(repo.list_collection_requests(case["case_id"], TENANT_ID)) == 1
+
+
+def test_low_trust_collection_reuse_requires_explicit_opt_in():
+    case, supervisor = _case_and_supervisor()
+    request, _first = _completed_reuse_candidate(case, supervisor)
+    repo.add_evidence_review_revision(
+        evidence_id="ev-reuse-network", case_id=case["case_id"],
+        tenant_id=TENANT_ID, decision="LOW_TRUST", reviewed_by="operator",
+        reason="short observation window",
+    )
+    task_count = len(repo.tasks)
+
+    rejected = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case),
+        reuse_existing_request_id=request["collection_request_id"],
+    )
+
+    assert rejected["proposal"]["status"] == "REJECTED"
+    assert any(
+        "EVIDENCE_LOW_TRUST_REQUIRES_EXPLICIT_REVIEW" in item["reason_codes"]
+        for item in rejected["reuse"]["rejected"]
+    )
+    assert len(repo.tasks) == task_count
+
+    explicitly_allowed = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case),
+        reuse_existing_request_id=request["collection_request_id"],
+        allow_low_trust_reuse=True,
+    )
+    assert explicitly_allowed["proposal"]["status"] == "ACCEPTED"
+    assert explicitly_allowed["proposal"]["validation_result"]["allow_low_trust_reuse"] is True
+    assert len(repo.tasks) == task_count
+
+
+def test_pending_collection_is_fenced_when_input_evidence_review_changes():
+    case, supervisor = _case_and_supervisor()
+    repo.upsert_case_evidence(
+        case_id=case["case_id"], tenant_id=TENANT_ID,
+        evidence_id="ev-input-fence", attachment_id=None, task_id="task-input",
+        artifact_id=1, artifact_type="summary", collector_id="sys_metrics",
+        source_type="task_artifact", target_ref="task:task-input",
+        content_hash="content-input", projection_hash="projection-input",
+    )
+    proposed = supervisor.propose_and_dispatch(
+        **_proposal_kwargs(case),
+        input_evidence_refs=["ev-input-fence"],
+        auto_dispatch=False,
+    )
+    proposal = proposed["proposal"]
+    pinned = proposal["validation_result"]["input_evidence_review_revisions"]
+    assert pinned["ev-input-fence"]["review_revision"] == 0
+    assert proposal["validation_result"]["approval_context"][
+        "input_evidence_review_revisions"
+    ] == pinned
+
+    repo.add_evidence_review_revision(
+        evidence_id="ev-input-fence", case_id=case["case_id"],
+        tenant_id=TENANT_ID, decision="LOW_TRUST", reviewed_by="operator",
+        reason="new review arrived while approval was pending",
+    )
+    with pytest.raises(ValueError, match="COLLECTION_PROPOSAL_FENCED:INPUT_EVIDENCE_REVIEW_CHANGED:ev-input-fence"):
+        supervisor.decide_pending_proposal(
+            proposal_id=proposal["proposal_id"], case_id=case["case_id"],
+            tenant_id=TENANT_ID, decision="APPROVE", decided_by="operator",
+            expected_control_revision=case["control_revision"],
+            expected_scope_revision=case["scope_revision"],
+        )
+    assert not repo.list_collection_requests(case["case_id"], TENANT_ID)
+    assert not repo.tasks

@@ -147,6 +147,40 @@ def _parse_aware_datetime(value: Any) -> datetime | None:
         return None
 
 
+def _canonical_provenance_value(value: Any) -> str:
+    """Normalize provenance values before comparing an idempotent replay.
+
+    Evidence provenance is often assembled from JSON and ISO timestamps at
+    different boundaries.  Comparing a canonical representation avoids
+    treating dictionary ordering or equivalent timezone spellings as a new
+    observation while still rejecting any actual source mutation.
+    """
+    if isinstance(value, datetime):
+        return _as_utc(value).isoformat()
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _provenance_conflict(current: Any, incoming: Any) -> bool:
+    """Return True only when both values are present and differ.
+
+    Several compatibility callers omit optional metadata on a retry.  An
+    omission must not erase or conflict with an already persisted value; a
+    previously empty value may be completed once.  Once both sides carry
+    provenance, however, equality is exact after canonicalization.
+    """
+    if incoming is None or incoming == "" or incoming == {}:
+        return False
+    if current is None or current == "" or current == {}:
+        return False
+    return _canonical_provenance_value(current) != _canonical_provenance_value(incoming)
+
+
 def _optional_positive_int(value: Any) -> int | None:
     if value is None:
         return None
@@ -1761,46 +1795,151 @@ class SqlRepository(SqlRepositoryV6Mixin):
             if existing is not None:
                 if existing.case_id != case_id or existing.tenant_id != tenant_id:
                     raise ValueError("EVIDENCE_OWNERSHIP_CONFLICT")
-                existing.attachment_id = attachment_id or existing.attachment_id
-                existing.task_id = task_id or existing.task_id
-                existing.artifact_id = artifact_id if artifact_id is not None else existing.artifact_id
-                existing.artifact_type = artifact_type or existing.artifact_type
-                existing.collector_id = collector_id or existing.collector_id
-                existing.source_type = source_type
-                existing.source_id = source_id or existing.source_id
-                existing.source_channel = source_channel
-                existing.data_origin = data_origin
-                existing.investigation_run_id = investigation_run_id or existing.investigation_run_id
-                existing.execution_unit_id = execution_unit_id or existing.execution_unit_id
-                existing.source_call_id = source_call_id or existing.source_call_id
-                existing.membership_snapshot_id = membership_snapshot_id or existing.membership_snapshot_id
-                existing.target_ref = target_ref or existing.target_ref
-                existing.resource_incarnation = resource_incarnation or existing.resource_incarnation
-                existing.content_hash = content_hash or existing.content_hash
-                existing.projection_hash = projection_hash or existing.projection_hash
+                incoming_event_time_start = _parse_aware_datetime(event_time_start)
+                incoming_event_time_end = _parse_aware_datetime(event_time_end)
+                incoming_time_window = time_window or None
+                incoming_lineage = _json_safe(lineage) if lineage else None
+                incoming_size_bytes = int(size_bytes) if size_bytes else None
+                provenance_values = {
+                    "task_id": task_id,
+                    "artifact_id": artifact_id,
+                    "artifact_type": artifact_type,
+                    "collector_id": collector_id,
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "source_channel": source_channel,
+                    "data_origin": data_origin,
+                    "investigation_run_id": investigation_run_id,
+                    "execution_unit_id": execution_unit_id,
+                    "source_call_id": source_call_id,
+                    "membership_snapshot_id": membership_snapshot_id,
+                    "target_ref": target_ref,
+                    "resource_incarnation": resource_incarnation,
+                    "content_hash": content_hash,
+                    "projection_hash": projection_hash,
+                    "time_window": incoming_time_window,
+                    "event_time_start": incoming_event_time_start,
+                    "event_time_end": incoming_event_time_end,
+                    "clock_id": clock_id,
+                    "clock_offset_ms": clock_offset_ms,
+                    "clock_uncertainty_ms": clock_uncertainty_ms,
+                    "artifact_schema": artifact_schema,
+                    "schema_version": schema_version,
+                    "producer_version": producer_version,
+                    "raw_locator": raw_locator,
+                    "size_bytes": incoming_size_bytes,
+                    "sha256": sha256,
+                    "completeness": completeness,
+                    "trust_level": trust_level,
+                    "lineage": incoming_lineage,
+                    "trace_id": trace_id,
+                }
+                existing_provenance = {
+                    "task_id": existing.task_id,
+                    "artifact_id": existing.artifact_id,
+                    "artifact_type": existing.artifact_type,
+                    "collector_id": existing.collector_id,
+                    "source_type": existing.source_type,
+                    "source_id": existing.source_id,
+                    "source_channel": existing.source_channel,
+                    "data_origin": existing.data_origin,
+                    "investigation_run_id": existing.investigation_run_id,
+                    "execution_unit_id": existing.execution_unit_id,
+                    "source_call_id": existing.source_call_id,
+                    "membership_snapshot_id": existing.membership_snapshot_id,
+                    "target_ref": existing.target_ref,
+                    "resource_incarnation": existing.resource_incarnation,
+                    "content_hash": existing.content_hash,
+                    "projection_hash": existing.projection_hash,
+                    "time_window": existing.time_window_json,
+                    "event_time_start": existing.event_time_start,
+                    "event_time_end": existing.event_time_end,
+                    "clock_id": existing.clock_id,
+                    "clock_offset_ms": existing.clock_offset_ms,
+                    "clock_uncertainty_ms": existing.clock_uncertainty_ms,
+                    "artifact_schema": existing.artifact_schema,
+                    "schema_version": existing.schema_version,
+                    "producer_version": existing.producer_version,
+                    "raw_locator": existing.raw_locator,
+                    "size_bytes": existing.size_bytes,
+                    "sha256": existing.sha256,
+                    "completeness": existing.completeness,
+                    "trust_level": existing.trust_level,
+                    "lineage": existing.lineage_json,
+                    "trace_id": existing.trace_id,
+                }
+                provenance_conflicts = [
+                    name for name, incoming in provenance_values.items()
+                    if _provenance_conflict(existing_provenance[name], incoming)
+                ]
+                if provenance_conflicts:
+                    raise ValueError(
+                        "EVIDENCE_PROVENANCE_MUTATION:"
+                        + ",".join(provenance_conflicts)
+                    )
+
+                # Attachments and review/status flags are mutable associations,
+                # not evidence provenance.  Preserve the first attachment and
+                # only fill missing provenance fields on an idempotent replay.
+                if existing.attachment_id is None and attachment_id:
+                    existing.attachment_id = attachment_id
+
+                def fill_missing(attribute: str, value: Any) -> None:
+                    current = getattr(existing, attribute)
+                    if current is None or current == "" or current == {}:
+                        if value is not None and value != "" and value != {}:
+                            setattr(existing, attribute, value)
+
+                for attribute, value in (
+                    ("task_id", task_id),
+                    ("artifact_id", artifact_id),
+                    ("artifact_type", artifact_type),
+                    ("collector_id", collector_id),
+                    ("source_type", source_type),
+                    ("source_id", source_id),
+                    ("source_channel", source_channel),
+                    ("data_origin", data_origin),
+                    ("investigation_run_id", investigation_run_id),
+                    ("execution_unit_id", execution_unit_id),
+                    ("source_call_id", source_call_id),
+                    ("membership_snapshot_id", membership_snapshot_id),
+                    ("target_ref", target_ref),
+                    ("resource_incarnation", resource_incarnation),
+                    ("content_hash", content_hash),
+                    ("projection_hash", projection_hash),
+                    ("clock_id", clock_id),
+                    ("clock_offset_ms", clock_offset_ms),
+                    ("clock_uncertainty_ms", clock_uncertainty_ms),
+                    ("artifact_schema", artifact_schema),
+                    ("schema_version", schema_version),
+                    ("producer_version", producer_version),
+                    ("raw_locator", raw_locator),
+                    ("sha256", sha256),
+                    ("trace_id", trace_id),
+                ):
+                    fill_missing(attribute, value)
+                if not existing.time_window_json and incoming_time_window:
+                    existing.time_window_json = incoming_time_window
+                if existing.event_time_start is None and incoming_event_time_start is not None:
+                    existing.event_time_start = incoming_event_time_start
+                if existing.event_time_end is None and incoming_event_time_end is not None:
+                    existing.event_time_end = incoming_event_time_end
+                if (not existing.size_bytes) and incoming_size_bytes is not None:
+                    existing.size_bytes = incoming_size_bytes
+                if (not existing.lineage_json) and incoming_lineage:
+                    existing.lineage_json = incoming_lineage
+
+                # Quality/freshness and cancellation/revision markers are
+                # mutable state.  Tombstone flags are monotonic so a retry
+                # cannot accidentally revive a stale or late result.
                 existing.quality = quality
                 existing.freshness = freshness
-                if time_window:
-                    existing.time_window_json = time_window
-                existing.event_time_start = _parse_aware_datetime(event_time_start)
-                existing.event_time_end = _parse_aware_datetime(event_time_end)
-                existing.ingested_at = now
-                existing.clock_id = clock_id or existing.clock_id
-                existing.clock_offset_ms = clock_offset_ms if clock_offset_ms is not None else existing.clock_offset_ms
-                existing.clock_uncertainty_ms = clock_uncertainty_ms if clock_uncertainty_ms is not None else existing.clock_uncertainty_ms
-                existing.artifact_schema = artifact_schema or existing.artifact_schema
-                existing.schema_version = schema_version or existing.schema_version
-                existing.producer_version = producer_version or existing.producer_version
-                existing.raw_locator = raw_locator or existing.raw_locator
-                existing.size_bytes = int(size_bytes or existing.size_bytes or 0)
-                existing.sha256 = sha256 or existing.sha256
-                existing.completeness = completeness
-                existing.trust_level = trust_level
-                if lineage:
-                    existing.lineage_json = _json_safe(lineage)
-                existing.trace_id = trace_id or existing.trace_id
-                existing.late_after_cancel = bool(late_after_cancel)
-                existing.stale_for_current_revision = bool(stale_for_current_revision)
+                existing.late_after_cancel = bool(
+                    existing.late_after_cancel or late_after_cancel
+                )
+                existing.stale_for_current_revision = bool(
+                    existing.stale_for_current_revision or stale_for_current_revision
+                )
                 existing.updated_at = now
                 session.flush()
                 return existing.to_dict()
@@ -2239,6 +2378,12 @@ class SqlRepository(SqlRepositoryV6Mixin):
             case.scope_revision += 1
             case.control_revision += 1
             case.case_command_revision += 1
+            self._invalidate_reuse_decisions_for_scope_in_session(
+                session,
+                case_id=case.id,
+                tenant_id=tenant_id,
+                scope_revision=int(case.scope_revision),
+            )
             case.row_version += 1
             case.updated_at = now
             event = CaseEventModel(

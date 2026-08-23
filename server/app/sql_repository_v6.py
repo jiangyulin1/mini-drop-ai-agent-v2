@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
 from server.app.models import (
@@ -42,10 +43,14 @@ from server.app.models import (
     ConfidenceChainSnapshotModel,
     ConfidenceAdjustmentModel,
     EvidenceProjectionModel,
+    EvidenceReuseDecisionModel,
     EvidenceReviewRevisionModel,
     EvidenceReviewModel,
     ExecutionUnitModel,
     InvestigationRunModel,
+    InvestigationTreeNodeModel,
+    InvestigationTreeDependencyModel,
+    InvestigationTreeEventModel,
     IncidentCaseModel,
     ModelRequestModel,
     ModelResponseModel,
@@ -80,6 +85,33 @@ def _parse_aware_datetime(value: Any) -> datetime | None:
         return parsed.astimezone(timezone.utc)
     except ValueError:
         return None
+
+
+def _canonical_json(value: Any) -> str:
+    """Canonical JSON representation for immutable projection comparison."""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert transport values (notably capability sets) to JSON values."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (set, frozenset)):
+        values = [_json_safe(item) for item in value]
+        return sorted(values, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (datetime,)):
+        return value.isoformat()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
 
 
 class SqlRepositoryV6Mixin:
@@ -151,6 +183,271 @@ class SqlRepositoryV6Mixin:
                 InvestigationRunModel.tenant_id == tenant_id,
             ).order_by(InvestigationRunModel.created_at.desc()).all()
             return [row.to_dict() for row in rows]
+
+    # Durable evidence-driven investigation tree
+    # ------------------------------------------------------------------
+
+    _TREE_TRANSITIONS = {
+        "OPEN": {"WAITING_EVIDENCE", "SUPPORTED", "RULED_OUT", "PAUSED", "INVALIDATED", "ABANDONED", "CLOSED"},
+        "WAITING_EVIDENCE": {"OPEN", "SUPPORTED", "RULED_OUT", "PAUSED", "INVALIDATED", "ABANDONED"},
+        "SUPPORTED": {"INVALIDATED", "ABANDONED", "CLOSED"},
+        "RULED_OUT": {"INVALIDATED", "ABANDONED", "CLOSED"},
+        "PAUSED": {"OPEN", "ABANDONED", "INVALIDATED"},
+        "CLOSED": set(), "INVALIDATED": set(), "ABANDONED": set(),
+    }
+
+    def create_investigation_tree_node(
+        self, *, case_id: str, tenant_id: str, run_id: str,
+        node_type: str, statement: str = "", parent_node_id: str | None = None,
+        branch_id: str | None = None, hypothesis_id: str | None = None,
+        obligation: dict[str, Any] | None = None,
+        evidence_refs: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        replay_of_node_id: str | None = None,
+        created_by: str = "agent", node_id: str | None = None,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            run = session.query(InvestigationRunModel).filter(
+                InvestigationRunModel.run_id == str(run_id),
+                InvestigationRunModel.case_id == case_id,
+                InvestigationRunModel.tenant_id == tenant_id,
+            ).first()
+            if run is None:
+                raise ValueError("TREE_RUN_NOT_FOUND")
+            parent = None
+            if parent_node_id:
+                parent = session.query(InvestigationTreeNodeModel).filter(
+                    InvestigationTreeNodeModel.node_id == parent_node_id,
+                    InvestigationTreeNodeModel.case_id == case_id,
+                    InvestigationTreeNodeModel.tenant_id == tenant_id,
+                ).first()
+                if parent is None:
+                    raise ValueError("TREE_PARENT_NOT_FOUND")
+                if parent.run_id != str(run_id):
+                    raise ValueError("TREE_PARENT_RUN_MISMATCH")
+                if parent.status in {"INVALIDATED", "ABANDONED", "CLOSED"}:
+                    raise ValueError("TREE_PARENT_NOT_ACTIVE")
+            node = InvestigationTreeNodeModel(
+                node_id=node_id or self._new_id("tnode"), case_id=case_id,
+                tenant_id=tenant_id, run_id=run_id,
+                parent_node_id=parent_node_id,
+                branch_id=branch_id or (parent.branch_id if parent else self._new_id("branch")),
+                node_type=str(node_type or "HYPOTHESIS").upper(), status="OPEN",
+                statement=str(statement or ""), hypothesis_id=hypothesis_id,
+                obligation_json=_json_safe(obligation or {}),
+                evidence_refs_json=list(dict.fromkeys(str(item) for item in (evidence_refs or []) if str(item))),
+                metadata_json=_json_safe(metadata or {}), depth=(int(parent.depth) + 1 if parent else 0),
+                replay_of_node_id=replay_of_node_id, created_by=created_by,
+                created_at=now, updated_at=now,
+            )
+            session.add(node)
+            session.flush()
+            session.add(InvestigationTreeEventModel(
+                event_id=self._new_id("tevent"), case_id=case_id, tenant_id=tenant_id,
+                run_id=run_id, node_id=node.node_id, event_type="NODE_CREATED",
+                from_status=None, to_status="OPEN", payload_json={
+                    "parent_node_id": parent_node_id, "branch_id": node.branch_id,
+                }, actor_id=created_by, created_at=now,
+            ))
+            session.flush()
+            return node.to_dict()
+
+    def get_investigation_tree_node(self, case_id: str, tenant_id: str, node_id: str) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(InvestigationTreeNodeModel).filter(
+                InvestigationTreeNodeModel.case_id == case_id,
+                InvestigationTreeNodeModel.tenant_id == tenant_id,
+                InvestigationTreeNodeModel.node_id == node_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def list_investigation_tree(
+        self, case_id: str, tenant_id: str, *, run_id: str | None = None,
+        include_terminal: bool = True,
+    ) -> dict[str, Any]:
+        with self._read_session() as session:
+            query = session.query(InvestigationTreeNodeModel).filter(
+                InvestigationTreeNodeModel.case_id == case_id,
+                InvestigationTreeNodeModel.tenant_id == tenant_id,
+            )
+            if run_id:
+                query = query.filter(InvestigationTreeNodeModel.run_id == run_id)
+            rows = query.order_by(InvestigationTreeNodeModel.depth.asc(), InvestigationTreeNodeModel.created_at.asc()).all()
+            nodes = [row.to_dict() for row in rows if include_terminal or row.status not in {"CLOSED", "INVALIDATED", "ABANDONED"}]
+            node_ids = {item["node_id"] for item in nodes}
+            deps = session.query(InvestigationTreeDependencyModel).filter(
+                InvestigationTreeDependencyModel.case_id == case_id,
+                InvestigationTreeDependencyModel.tenant_id == tenant_id,
+            ).all()
+            dependencies = [row.to_dict() for row in deps if row.node_id in node_ids]
+            return {"nodes": nodes, "dependencies": dependencies}
+
+    def add_investigation_tree_dependency(
+        self, *, case_id: str, tenant_id: str, node_id: str,
+        target_kind: str, target_id: str, relation: str = "REQUIRES",
+        actor_id: str = "agent",
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            node = session.query(InvestigationTreeNodeModel).filter(
+                InvestigationTreeNodeModel.case_id == case_id,
+                InvestigationTreeNodeModel.tenant_id == tenant_id,
+                InvestigationTreeNodeModel.node_id == node_id,
+            ).with_for_update().first()
+            if node is None:
+                raise ValueError("TREE_NODE_NOT_FOUND")
+            target_kind = str(target_kind or "").upper()
+            if target_kind not in {"EVIDENCE", "HYPOTHESIS", "COLLECTION_REQUEST", "PROJECTION"}:
+                raise ValueError("TREE_DEPENDENCY_TARGET_INVALID")
+            existing = session.query(InvestigationTreeDependencyModel).filter(
+                InvestigationTreeDependencyModel.case_id == case_id,
+                InvestigationTreeDependencyModel.tenant_id == tenant_id,
+                InvestigationTreeDependencyModel.node_id == node_id,
+                InvestigationTreeDependencyModel.target_kind == target_kind,
+                InvestigationTreeDependencyModel.target_id == str(target_id),
+                InvestigationTreeDependencyModel.relation == str(relation or "REQUIRES").upper(),
+            ).first()
+            if existing:
+                return existing.to_dict()
+            row = InvestigationTreeDependencyModel(
+                dependency_id=self._new_id("tdep"), case_id=case_id, tenant_id=tenant_id,
+                node_id=node_id, target_kind=target_kind, target_id=str(target_id),
+                relation=str(relation or "REQUIRES").upper(), status="ACTIVE",
+                created_at=now, updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    def transition_investigation_tree_node(
+        self, *, case_id: str, tenant_id: str, node_id: str, to_status: str,
+        reason: str | None = None, actor_id: str = "agent",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        to_status = str(to_status or "").upper()
+        with self._write_session() as session:
+            node = session.query(InvestigationTreeNodeModel).filter(
+                InvestigationTreeNodeModel.case_id == case_id,
+                InvestigationTreeNodeModel.tenant_id == tenant_id,
+                InvestigationTreeNodeModel.node_id == node_id,
+            ).with_for_update().first()
+            if node is None:
+                raise ValueError("TREE_NODE_NOT_FOUND")
+            if to_status == node.status:
+                return node.to_dict()
+            if to_status not in self._TREE_TRANSITIONS.get(node.status, set()):
+                raise ValueError("TREE_NODE_INVALID_TRANSITION")
+            old = node.status
+            node.status = to_status
+            node.revision = int(node.revision or 1) + 1
+            node.invalidated_reason = reason if to_status in {"INVALIDATED", "ABANDONED"} else node.invalidated_reason
+            node.updated_at = now
+            if to_status in {"CLOSED", "INVALIDATED", "ABANDONED"}:
+                node.closed_at = now
+            session.add(InvestigationTreeEventModel(
+                event_id=self._new_id("tevent"), case_id=case_id, tenant_id=tenant_id,
+                run_id=node.run_id, node_id=node.node_id, event_type="NODE_STATUS_CHANGED",
+                from_status=old, to_status=to_status, reason=reason,
+                payload_json=_json_safe(payload or {}), actor_id=actor_id, created_at=now,
+            ))
+            session.flush()
+            return node.to_dict()
+
+    def _invalidate_investigation_tree_for_evidence_in_session(
+        self, session: OrmSession, *, case_id: str, tenant_id: str, evidence_id: str,
+        reason: str = "EVIDENCE_INVALIDATED", actor_id: str = "evidence-governance",
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        now = now or now_utc()
+        invalidated: list[str] = []
+        abandoned: list[str] = []
+        deps = session.query(InvestigationTreeDependencyModel).filter(
+            InvestigationTreeDependencyModel.case_id == case_id,
+            InvestigationTreeDependencyModel.tenant_id == tenant_id,
+            InvestigationTreeDependencyModel.target_kind == "EVIDENCE",
+            InvestigationTreeDependencyModel.target_id == str(evidence_id),
+            InvestigationTreeDependencyModel.status == "ACTIVE",
+        ).with_for_update().all()
+        # The evidence-dependent nodes are invalidated. Their descendants are
+        # abandoned recursively, while the original rows remain replayable.
+        queue: list[tuple[str, bool, str | None]] = []
+        for dep in deps:
+            dep.status = "INVALIDATED"
+            dep.invalidated_reason = reason
+            dep.updated_at = now
+            queue.append((dep.node_id, False, None))
+        seen: set[str] = set()
+        while queue:
+            current_id, inherited, parent_id = queue.pop(0)
+            if current_id in seen:
+                continue
+            seen.add(current_id)
+            node = session.query(InvestigationTreeNodeModel).filter(
+                InvestigationTreeNodeModel.node_id == current_id,
+                InvestigationTreeNodeModel.case_id == case_id,
+                InvestigationTreeNodeModel.tenant_id == tenant_id,
+            ).with_for_update().first()
+            if node is None or node.status in {"INVALIDATED", "ABANDONED", "CLOSED"}:
+                continue
+            old = node.status
+            node.invalidated_evidence_refs_json = list(dict.fromkeys([
+                *(node.invalidated_evidence_refs_json or []), str(evidence_id),
+            ]))
+            node.status = "ABANDONED" if inherited else "INVALIDATED"
+            node.invalidated_reason = f"PARENT_INVALIDATED:{reason}" if inherited else reason
+            node.revision = int(node.revision or 1) + 1
+            node.updated_at = now
+            node.closed_at = now
+            (abandoned if inherited else invalidated).append(node.node_id)
+            session.add(InvestigationTreeEventModel(
+                event_id=self._new_id("tevent"), case_id=case_id, tenant_id=tenant_id,
+                run_id=node.run_id, node_id=node.node_id,
+                event_type="PARENT_INVALIDATED" if inherited else "EVIDENCE_INVALIDATED",
+                from_status=old, to_status=node.status, reason=reason,
+                payload_json={"evidence_id": str(evidence_id), "parent_node_id": parent_id},
+                actor_id=actor_id, created_at=now,
+            ))
+            children = session.query(InvestigationTreeNodeModel).filter(
+                InvestigationTreeNodeModel.case_id == case_id,
+                InvestigationTreeNodeModel.tenant_id == tenant_id,
+                InvestigationTreeNodeModel.parent_node_id == node.node_id,
+                InvestigationTreeNodeModel.status.notin_(["INVALIDATED", "ABANDONED", "CLOSED"]),
+            ).with_for_update().all()
+            for child in children:
+                queue.append((child.node_id, True, node.node_id))
+        return {"evidence_id": str(evidence_id), "invalidated_nodes": invalidated, "abandoned_nodes": abandoned, "reason": reason}
+
+    def invalidate_investigation_tree_for_evidence(
+        self, *, case_id: str, tenant_id: str, evidence_id: str,
+        reason: str = "EVIDENCE_INVALIDATED", actor_id: str = "evidence-governance",
+    ) -> dict[str, Any]:
+        with self._write_session() as session:
+            result = self._invalidate_investigation_tree_for_evidence_in_session(
+                session, case_id=case_id, tenant_id=tenant_id, evidence_id=evidence_id,
+                reason=reason, actor_id=actor_id,
+            )
+            session.flush()
+            return result
+
+    def list_investigation_tree_events(
+        self, case_id: str, tenant_id: str, *, run_id: str | None = None,
+        node_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(InvestigationTreeEventModel).filter(
+                InvestigationTreeEventModel.case_id == case_id,
+                InvestigationTreeEventModel.tenant_id == tenant_id,
+            )
+            if run_id:
+                query = query.filter(InvestigationTreeEventModel.run_id == run_id)
+            if node_id:
+                query = query.filter(InvestigationTreeEventModel.node_id == node_id)
+            return [row.to_dict() for row in query.order_by(InvestigationTreeEventModel.created_at.asc()).all()]
 
     def transition_investigation_run(
         self, run_id: str, to_status: str,
@@ -236,7 +533,43 @@ class SqlRepositoryV6Mixin:
             )
             session.add(row)
             session.flush()
-            return row.to_dict()
+            # Every durable AgentCycle gets a branch root. This is an audit
+            # projection; canonical Evidence remains the authority.
+            root_node_id = f"tnode_cycle_{row.cycle_id}"
+            root = InvestigationTreeNodeModel(
+                node_id=root_node_id,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                run_id=run_id,
+                parent_node_id=None,
+                branch_id=self._new_id("branch"),
+                node_type="CYCLE",
+                status="OPEN",
+                statement=f"Agent cycle {row.cycle_id}: {trigger_type}",
+                obligation_json={"trigger_type": trigger_type, "trigger_ref": trigger_ref},
+                metadata_json={
+                    "cycle_id": row.cycle_id,
+                    "recovery_of_cycle_id": recovery_of_cycle_id,
+                },
+                replay_of_node_id=(
+                    f"tnode_cycle_{recovery_of_cycle_id}" if recovery_of_cycle_id else None
+                ),
+                created_by="agent-runtime",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(root)
+            session.add(InvestigationTreeEventModel(
+                event_id=self._new_id("tevent"), case_id=case_id, tenant_id=tenant_id,
+                run_id=run_id, node_id=root_node_id, event_type="CYCLE_ROOT_CREATED",
+                from_status=None, to_status="OPEN",
+                payload_json={"cycle_id": row.cycle_id, "trigger_type": trigger_type},
+                actor_id="agent-runtime", created_at=now,
+            ))
+            session.flush()
+            result = row.to_dict()
+            result["tree_root_node_id"] = root_node_id
+            return result
 
     def get_agent_cycle(self, cycle_id: str) -> dict[str, Any] | None:
         with self._read_session() as session:
@@ -692,6 +1025,220 @@ class SqlRepositoryV6Mixin:
             session.flush()
             return row.to_dict()
 
+    # Explicit Evidence reuse ledger
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _reuse_decision_key_filters(model: Any, payload: dict[str, Any]) -> list[Any]:
+        """Build equality filters for the idempotency projection.
+
+        SQL ``NULL`` never compares equal with ``=``, so nullable branch
+        identifiers need an explicit ``IS NULL`` predicate.  Keeping this in
+        one helper makes replay behavior identical across SQLite/PostgreSQL.
+        """
+        fields = (
+            "case_id", "tenant_id", "investigation_run_id", "contract_digest",
+            "probe_fingerprint", "evidence_id", "projection_hash",
+        )
+        filters: list[Any] = []
+        for field in fields:
+            value = payload.get(field)
+            column = getattr(model, field)
+            filters.append(column.is_(None) if value is None else column == value)
+        return filters
+
+    def create_evidence_reuse_decision(self, **payload: Any) -> dict[str, Any]:
+        """Persist one explicit branch-local reuse/recollect decision.
+
+        Replays of the same branch/contract/probe/result return the existing
+        row.  A later review or scope fence may update the *current* decision
+        to ``RECOLLECT_REQUIRED`` while retaining the row and its original
+        evidence/revision snapshots.
+        """
+        now = now_utc()
+        normalized = {
+            "case_id": payload["case_id"],
+            "tenant_id": payload["tenant_id"],
+            "investigation_run_id": payload.get("investigation_run_id"),
+            "contract_digest": str(payload.get("contract_digest") or ""),
+            "probe_fingerprint": str(payload.get("probe_fingerprint") or ""),
+            "evidence_id": payload.get("evidence_id"),
+            "projection_hash": payload.get("projection_hash"),
+        }
+        if not normalized["probe_fingerprint"]:
+            raise ValueError("EVIDENCE_REUSE_PROBE_FINGERPRINT_REQUIRED")
+        normalized_decision = str(payload.get("decision") or "REJECTED").upper()
+        if normalized_decision not in {"REUSED", "RECOLLECT_REQUIRED", "REJECTED"}:
+            raise ValueError("EVIDENCE_REUSE_DECISION_INVALID")
+        with self._write_session() as session:
+            existing = session.query(EvidenceReuseDecisionModel).filter(
+                *self._reuse_decision_key_filters(EvidenceReuseDecisionModel, normalized),
+            ).first()
+            if existing is not None:
+                return existing.to_dict()
+            row = EvidenceReuseDecisionModel(
+                decision_id=payload.get("decision_id") or self._new_id("reuse"),
+                case_id=normalized["case_id"],
+                tenant_id=normalized["tenant_id"],
+                investigation_run_id=normalized["investigation_run_id"],
+                cycle_id=payload.get("cycle_id"),
+                obligation_id=payload.get("obligation_id"),
+                contract_digest=normalized["contract_digest"],
+                collector_id=str(payload.get("collector_id") or "unknown"),
+                collector_spec_version=str(payload.get("collector_spec_version") or "unknown"),
+                probe_fingerprint=normalized["probe_fingerprint"],
+                result_fingerprint=payload.get("result_fingerprint"),
+                collection_request_id=payload.get("collection_request_id"),
+                task_id=payload.get("task_id"),
+                evidence_id=normalized["evidence_id"],
+                projection_id=payload.get("projection_id"),
+                projection_hash=normalized["projection_hash"],
+                target_identity_json=_json_safe(payload.get("target_identity") or {}),
+                requested_time_window_json=_json_safe(payload.get("requested_time_window") or {}),
+                effective_time_window_json=_json_safe(payload.get("effective_time_window") or {}),
+                control_revision=max(1, int(payload.get("control_revision") or 1)),
+                scope_revision=max(1, int(payload.get("scope_revision") or 1)),
+                runtime_generation=max(1, int(payload.get("runtime_generation") or 1)),
+                evidence_review_revision=(
+                    int(payload["evidence_review_revision"])
+                    if payload.get("evidence_review_revision") is not None else None
+                ),
+                lifecycle_status=payload.get("lifecycle_status"),
+                trust_state=payload.get("trust_state"),
+                decision=normalized_decision,
+                reason_codes_json=list(dict.fromkeys(
+                    str(item) for item in (payload.get("reason_codes") or []) if str(item)
+                )),
+                actor_id=str(payload.get("actor_id") or "agent"),
+                source=str(payload.get("source") or "collection_supervisor"),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            try:
+                session.flush()
+            except IntegrityError:
+                # Another worker may have recorded the exact same decision
+                # between our read and flush.  Return its durable row rather
+                # than making a replay fail with a raw database error.
+                session.rollback()
+                with self._read_session() as read_session:
+                    raced = read_session.query(EvidenceReuseDecisionModel).filter(
+                        *self._reuse_decision_key_filters(EvidenceReuseDecisionModel, normalized),
+                    ).first()
+                    if raced is not None:
+                        return raced.to_dict()
+                raise
+            return row.to_dict()
+
+    def record_evidence_reuse_decision(self, **payload: Any) -> dict[str, Any]:
+        """Alias for callers that treat the ledger as an append operation."""
+        return self.create_evidence_reuse_decision(**payload)
+
+    def get_evidence_reuse_decision(
+        self, decision_id: str, case_id: str, tenant_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(EvidenceReuseDecisionModel).filter(
+                EvidenceReuseDecisionModel.decision_id == decision_id,
+                EvidenceReuseDecisionModel.case_id == case_id,
+                EvidenceReuseDecisionModel.tenant_id == tenant_id,
+            ).first()
+            return row.to_dict() if row else None
+
+    def list_evidence_reuse_decisions(
+        self, case_id: str, tenant_id: str, *,
+        investigation_run_id: str | None = None,
+        cycle_id: str | None = None,
+        evidence_id: str | None = None,
+        probe_fingerprint: str | None = None,
+        decision: str | None = None,
+        include_invalidated: bool = True,
+    ) -> list[dict[str, Any]]:
+        with self._read_session() as session:
+            query = session.query(EvidenceReuseDecisionModel).filter(
+                EvidenceReuseDecisionModel.case_id == case_id,
+                EvidenceReuseDecisionModel.tenant_id == tenant_id,
+            )
+            if investigation_run_id is not None:
+                query = query.filter(
+                    EvidenceReuseDecisionModel.investigation_run_id == investigation_run_id,
+                )
+            if cycle_id is not None:
+                query = query.filter(EvidenceReuseDecisionModel.cycle_id == cycle_id)
+            if evidence_id is not None:
+                query = query.filter(EvidenceReuseDecisionModel.evidence_id == evidence_id)
+            if probe_fingerprint is not None:
+                query = query.filter(
+                    EvidenceReuseDecisionModel.probe_fingerprint == probe_fingerprint,
+                )
+            if decision is not None:
+                query = query.filter(EvidenceReuseDecisionModel.decision == str(decision).upper())
+            if not include_invalidated:
+                query = query.filter(EvidenceReuseDecisionModel.invalidated_at.is_(None))
+            rows = query.order_by(EvidenceReuseDecisionModel.created_at.asc()).all()
+            return [row.to_dict() for row in rows]
+
+    def invalidate_evidence_reuse_decisions(
+        self, *, case_id: str, tenant_id: str, evidence_id: str,
+        reason: str = "EVIDENCE_REVIEW_CHANGED",
+    ) -> int:
+        """Fence active reuse choices without deleting their audit rows."""
+        with self._write_session() as session:
+            return self._invalidate_reuse_decisions_for_evidence_in_session(
+                session,
+                case_id=case_id,
+                tenant_id=tenant_id,
+                evidence_id=evidence_id,
+                reason=reason,
+            )
+
+    @staticmethod
+    def _invalidate_reuse_decisions_for_evidence_in_session(
+        session: OrmSession, *, case_id: str, tenant_id: str,
+        evidence_id: str, reason: str,
+    ) -> int:
+        now = now_utc()
+        rows = session.query(EvidenceReuseDecisionModel).filter(
+            EvidenceReuseDecisionModel.case_id == case_id,
+            EvidenceReuseDecisionModel.tenant_id == tenant_id,
+            EvidenceReuseDecisionModel.evidence_id == evidence_id,
+            EvidenceReuseDecisionModel.decision == "REUSED",
+            EvidenceReuseDecisionModel.invalidated_at.is_(None),
+        ).with_for_update().all()
+        for row in rows:
+            row.decision = "RECOLLECT_REQUIRED"
+            row.reason_codes_json = list(dict.fromkeys([
+                *(row.reason_codes_json or []), reason,
+            ]))
+            row.invalidated_at = now
+            row.invalidated_reason = reason
+            row.updated_at = now
+        return len(rows)
+
+    @staticmethod
+    def _invalidate_reuse_decisions_for_scope_in_session(
+        session: OrmSession, *, case_id: str, tenant_id: str,
+        scope_revision: int, reason: str = "SCOPE_REVISION_CHANGED",
+    ) -> int:
+        now = now_utc()
+        rows = session.query(EvidenceReuseDecisionModel).filter(
+            EvidenceReuseDecisionModel.case_id == case_id,
+            EvidenceReuseDecisionModel.tenant_id == tenant_id,
+            EvidenceReuseDecisionModel.decision == "REUSED",
+            EvidenceReuseDecisionModel.scope_revision < int(scope_revision),
+            EvidenceReuseDecisionModel.invalidated_at.is_(None),
+        ).with_for_update().all()
+        for row in rows:
+            row.decision = "RECOLLECT_REQUIRED"
+            row.reason_codes_json = list(dict.fromkeys([
+                *(row.reason_codes_json or []), reason,
+            ]))
+            row.invalidated_at = now
+            row.invalidated_reason = reason
+            row.updated_at = now
+        return len(rows)
+
     def update_collection_request(
         self, collection_request_id: str, *, status: str, task_id: str | None = None,
     ) -> dict[str, Any] | None:
@@ -759,16 +1306,31 @@ class SqlRepositoryV6Mixin:
                 EvidenceProjectionModel.projection_version == int(projection_version),
             ).first()
             if existing is not None:
-                changed = existing.projection_hash != projection_hash
-                existing.content_json = content
-                existing.projection_hash = projection_hash
-                existing.truncated = bool(truncated)
-                existing.source_bytes = int(source_bytes or 0)
-                existing.projected_bytes = projected_bytes
-                existing.parser_version = parser_version
-                if changed:
-                    self._invalidate_analysis_rows(
-                        session, evidence_id, tenant_id, input_state="STALE_INPUT",
+                if existing.case_id != case_id or existing.tenant_id != tenant_id:
+                    raise ValueError("EVIDENCE_PROJECTION_OWNERSHIP_CONFLICT")
+                # A projection version is an immutable, citation-addressable
+                # snapshot.  Updating content in place would silently change
+                # the meaning of every citation carrying this hash.  New
+                # parser output must use a new projection_version instead.
+                immutable_conflicts: list[str] = []
+                if existing.projection_hash != projection_hash:
+                    immutable_conflicts.append("projection_hash")
+                if _canonical_json(existing.content_json or {}) != _canonical_json(content):
+                    immutable_conflicts.append("content")
+                for field, incoming in (
+                    ("projection_schema", projection_schema),
+                    ("projection_version", int(projection_version)),
+                    ("truncated", bool(truncated)),
+                    ("source_bytes", int(source_bytes or 0)),
+                    ("projected_bytes", projected_bytes),
+                    ("parser_version", parser_version),
+                ):
+                    if getattr(existing, field) != incoming:
+                        immutable_conflicts.append(field)
+                if immutable_conflicts:
+                    raise ValueError(
+                        "EVIDENCE_PROJECTION_MUTATION:"
+                        + ",".join(immutable_conflicts)
                     )
                 return existing.to_dict()
             row = EvidenceProjectionModel(
@@ -1105,9 +1667,12 @@ class SqlRepositoryV6Mixin:
             if str(row.lifecycle_status or "ACTIVE").upper() == "ACTIVE"
             and str(row.status or "ACTIVE").upper() in {"ACTIVE", "LOW_TRUST"}
         }
+        evidence_by_id = {row.evidence_id: row for row in active_rows}
         # The causal-edge projection above needs the active set; update it now
         # after the set is materialized for databases that evaluate the loop
-        # before this point.
+        # before this point. Recompute the fields from current lifecycle state
+        # instead of appending to an old invalidation list, so restore really
+        # restores the prior proof edge.
         for edge in source_edges:
             if edge.target_kind != "CAUSAL_EDGE":
                 continue
@@ -1120,16 +1685,20 @@ class SqlRepositoryV6Mixin:
                 CausalEdgeModel.edge_id == causal_edge_id,
             ).first()
             if causal is not None:
-                causal.dependency_status = edge_status
-                invalidated_refs = set(causal.invalidated_evidence_refs or [])
-                if edge_status != "ACTIVE":
-                    invalidated_refs.add(evidence.evidence_id)
-                causal.invalidated_evidence_refs = sorted(invalidated_refs)
+                support_refs = [str(ref) for ref in causal.supporting_evidence_refs or []]
+                invalidated_refs = sorted(ref for ref in support_refs if ref not in active_ids)
+                causal.invalidated_evidence_refs = invalidated_refs
                 causal.remaining_active_support = sorted(
-                    ref for ref in (causal.supporting_evidence_refs or []) if ref in active_ids
+                    ref for ref in support_refs if ref in active_ids
+                )
+                causal.dependency_status = (
+                    "INVALIDATED" if support_refs and not causal.remaining_active_support
+                    else "RECHECK_REQUIRED" if invalidated_refs
+                    else "ACTIVE"
                 )
         invalidated_hypotheses: list[str] = []
         affected_hypotheses: list[str] = []
+        hypotheses_needing_recheck: set[str] = set()
         for row in session.query(CaseHypothesisNodeModel).filter(
             CaseHypothesisNodeModel.case_id == case_id,
             CaseHypothesisNodeModel.tenant_id == tenant_id,
@@ -1139,15 +1708,24 @@ class SqlRepositoryV6Mixin:
             if evidence.evidence_id not in refs and evidence.evidence_id not in contradicting:
                 continue
             affected_hypotheses.append(row.hypothesis_id)
-            remaining = sorted({ref for ref in refs if ref in active_ids and ref != evidence.evidence_id})
-            invalidated = sorted(set(row.invalidated_evidence_refs_json or []) | ({evidence.evidence_id} if edge_status != "ACTIVE" else set()))
+            remaining = sorted({ref for ref in refs if ref in active_ids})
+            invalidated = sorted({ref for ref in (refs + contradicting) if ref not in active_ids})
             row.invalidated_evidence_refs_json = invalidated
             row.remaining_active_support_json = remaining
-            if edge_status == "INVALIDATED" and not remaining:
+            low_trust_support = any(
+                str(evidence_by_id.get(ref).review_trust_state or "").upper() == "LOW_TRUST"
+                for ref in remaining if evidence_by_id.get(ref) is not None
+            )
+            support_missing = bool(refs) and not remaining
+            # A missing counter-signal is not a missing prerequisite. It may
+            # change confidence, but it must never retract or recheck the
+            # hypothesis by itself.
+            requires_recheck = support_missing or low_trust_support
+            if requires_recheck:
                 row.status = "RECHECK_REQUIRED"
-                invalidated_hypotheses.append(row.hypothesis_id)
-            elif edge_status != "ACTIVE":
-                row.status = "RECHECK_REQUIRED"
+                hypotheses_needing_recheck.add(row.hypothesis_id)
+                if support_missing:
+                    invalidated_hypotheses.append(row.hypothesis_id)
             elif row.status == "RECHECK_REQUIRED" and remaining:
                 row.status = "ACTIVE"
             row.revision = int(row.revision or 0) + 1
@@ -1165,10 +1743,17 @@ class SqlRepositoryV6Mixin:
         for edge in hypothesis_claim_edges:
             if edge.source_id not in affected_hypothesis_set:
                 continue
-            edge.status = "RECHECK_REQUIRED" if edge_status != "ACTIVE" else "ACTIVE"
-            edge.invalidated_by_evidence_id = evidence.evidence_id if edge_status != "ACTIVE" else None
-            edge.invalidated_review_revision = review_revision if edge_status != "ACTIVE" else None
-            edge.invalidated_reason = reason if edge_status != "ACTIVE" else None
+            edge.status = (
+                "RECHECK_REQUIRED"
+                if edge.source_id in hypotheses_needing_recheck else "ACTIVE"
+            )
+            edge.invalidated_by_evidence_id = (
+                evidence.evidence_id if edge.status != "ACTIVE" else None
+            )
+            edge.invalidated_review_revision = (
+                review_revision if edge.status != "ACTIVE" else None
+            )
+            edge.invalidated_reason = reason if edge.status != "ACTIVE" else None
             edge.updated_at = now_utc()
 
         invalidated_claims: list[str] = []
@@ -1184,24 +1769,46 @@ class SqlRepositoryV6Mixin:
         ).all()
         for binding in bindings:
             claim_key = f"{binding.conclusion_id}:{binding.claim_id}"
-            affected_claims.append(claim_key)
             supports = session.query(ClaimEvidenceBindingModel).filter(
                 ClaimEvidenceBindingModel.conclusion_id == binding.conclusion_id,
                 ClaimEvidenceBindingModel.claim_id == binding.claim_id,
                 ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
             ).all()
-            remaining = sorted({item.evidence_id for item in supports if item.evidence_id in active_ids and item.evidence_id != evidence.evidence_id})
+            support_refs = sorted({str(item.evidence_id) for item in supports})
+            remaining = sorted({ref for ref in support_refs if ref in active_ids})
+            trusted_remaining = [
+                ref for ref in remaining
+                if evidence_by_id.get(ref) is not None
+                and str(evidence_by_id[ref].review_trust_state or "").upper() != "LOW_TRUST"
+            ]
+            if str(binding.support_kind or "SUPPORTS").upper() != "SUPPORTS":
+                # Losing counter-evidence is not a support failure. Keep the
+                # binding as an audit fact while making its current availability
+                # explicit; it must not change conclusion state.
+                binding.invalidated_evidence_refs = (
+                    [binding.evidence_id] if binding.evidence_id not in active_ids else []
+                )
+                binding.remaining_active_support = []
+                binding.claim_status = "ACTIVE"
+                binding.verifier_result = (
+                    "CONTRADICTION_UNAVAILABLE"
+                    if binding.evidence_id not in active_ids else "VALIDATED"
+                )
+                continue
+            affected_claims.append(claim_key)
             remaining_support[claim_key] = remaining
-            binding.invalidated_evidence_refs = sorted(set(binding.invalidated_evidence_refs or []) | ({evidence.evidence_id} if edge_status != "ACTIVE" else set()))
+            binding.invalidated_evidence_refs = sorted(
+                ref for ref in support_refs if ref not in active_ids
+            )
             binding.remaining_active_support = remaining
-            if edge_status == "INVALIDATED" and not remaining:
+            if not remaining:
                 binding.claim_status = "RETRACTED"
                 # Keep the historical verifier code for compatibility; the
                 # structured claim_status carries the stronger propagation
                 # state without losing the original lifecycle reason.
                 binding.verifier_result = f"EVIDENCE_{lifecycle}"
                 invalidated_claims.append(claim_key)
-            elif edge_status != "ACTIVE":
+            elif not trusted_remaining:
                 binding.claim_status = "RECHECK_REQUIRED"
                 binding.verifier_result = "RECHECK_REQUIRED"
             else:
@@ -1214,11 +1821,26 @@ class SqlRepositoryV6Mixin:
             ).first()
             if conclusion is None:
                 continue
-            conclusion.invalidated_claims = sorted(
-                set(conclusion.invalidated_claims or []) | set(invalidated_claims),
-            )
-            current_support = dict(conclusion.remaining_active_support or {})
-            current_support.update(remaining_support)
+            # Rebuild the current claim ledger from all bindings.  This is
+            # deliberately non-append-only: restoring an Evidence item must
+            # remove its old invalidation marker rather than leaving a stale
+            # tombstone that permanently poisons the conclusion.
+            current_support: dict[str, list[str]] = {}
+            current_invalidated: list[str] = []
+            all_support_bindings = session.query(ClaimEvidenceBindingModel).filter(
+                ClaimEvidenceBindingModel.conclusion_id == conclusion_id,
+                ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
+            ).all()
+            grouped: dict[str, list[ClaimEvidenceBindingModel]] = {}
+            for item in all_support_bindings:
+                grouped.setdefault(f"{item.conclusion_id}:{item.claim_id}", []).append(item)
+            for claim_key, claim_bindings in grouped.items():
+                refs = sorted({item.evidence_id for item in claim_bindings})
+                active_support = sorted(ref for ref in refs if ref in active_ids)
+                current_support[claim_key] = active_support
+                if not active_support:
+                    current_invalidated.append(claim_key)
+            conclusion.invalidated_claims = sorted(set(current_invalidated))
             conclusion.remaining_active_support = current_support
 
         return {
@@ -1464,7 +2086,11 @@ class SqlRepositoryV6Mixin:
         bindings = session.query(ClaimEvidenceBindingModel).filter(
             ClaimEvidenceBindingModel.evidence_id == evidence.evidence_id,
         ).all()
-        conclusion_ids = sorted({row.conclusion_id for row in bindings})
+        supporting_bindings = [
+            row for row in bindings
+            if str(row.support_kind or "SUPPORTS").upper() == "SUPPORTS"
+        ]
+        conclusion_ids = sorted({row.conclusion_id for row in supporting_bindings})
         plans = [
             row for row in session.query(CaseRecoveryPlanModel).filter(
                 CaseRecoveryPlanModel.case_id == case_id,
@@ -1480,14 +2106,14 @@ class SqlRepositoryV6Mixin:
             ConclusionRevisionModel.tenant_id == tenant_id,
         ).order_by(ConclusionRevisionModel.revision.desc()).first()
         predicted = latest.state if latest else None
-        if outcome["inference_changed"] and outcome["lifecycle_status"] != "ACTIVE":
+        if supporting_bindings and outcome["inference_changed"] and outcome["lifecycle_status"] != "ACTIVE":
             supporting = session.query(ClaimEvidenceBindingModel).filter(
                 ClaimEvidenceBindingModel.conclusion_id == latest.conclusion_id,
                 ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
             ).all() if latest else []
             remaining = [item for item in supporting if item.evidence_id != evidence.evidence_id]
             predicted = "PARTIALLY_CONFIRMED" if remaining else "INSUFFICIENT_EVIDENCE"
-        elif outcome["inference_changed"] and outcome["trust_state"] == "LOW_TRUST":
+        elif supporting_bindings and outcome["inference_changed"] and outcome["trust_state"] == "LOW_TRUST":
             predicted = "PARTIALLY_CONFIRMED" if latest else None
         recollection = []
         if decision in {"EXCLUDED", "LOW_TRUST"} and evidence.collector_id:
@@ -1777,6 +2403,18 @@ class SqlRepositoryV6Mixin:
             evidence.ui_archived = bool(outcome["ui_archived"])
             evidence.status = outcome["status"]
             evidence.updated_at = now
+            if outcome["lifecycle_status"] != "ACTIVE" or outcome["trust_state"] == "LOW_TRUST":
+                self._invalidate_reuse_decisions_for_evidence_in_session(
+                    session,
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    evidence_id=evidence_id,
+                    reason=(
+                        "EVIDENCE_REVIEW_EXCLUDED"
+                        if outcome["lifecycle_status"] != "ACTIVE"
+                        else "EVIDENCE_REVIEW_LOW_TRUST"
+                    ),
+                )
             invalidated = 0
             held_plans: list[str] = []
             resumed_plans: list[str] = []
@@ -1786,6 +2424,11 @@ class SqlRepositoryV6Mixin:
                 "invalidated_claims": [],
                 "affected_claims": [],
                 "remaining_active_support": {},
+            }
+            tree_propagation = {
+                "evidence_id": evidence_id,
+                "invalidated_nodes": [],
+                "abandoned_nodes": [],
             }
             if decision in INFERENCE_DECISIONS:
                 invalidated = self._invalidate_analysis_rows(
@@ -1805,6 +2448,20 @@ class SqlRepositoryV6Mixin:
                     decision=decision,
                     review_revision=revision,
                 )
+                if outcome["lifecycle_status"] != "ACTIVE" or outcome["trust_state"] == "LOW_TRUST":
+                    tree_propagation = self._invalidate_investigation_tree_for_evidence_in_session(
+                        session,
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        evidence_id=evidence_id,
+                        reason=(
+                            "EVIDENCE_REVIEW_EXCLUDED"
+                            if outcome["lifecycle_status"] != "ACTIVE"
+                            else "EVIDENCE_REVIEW_LOW_TRUST"
+                        ),
+                        actor_id=actor_id,
+                        now=now,
+                    )
                 if outcome["lifecycle_status"] == "EXCLUDED" or outcome["trust_state"] == "LOW_TRUST":
                     held_plans = self._hold_recovery_plans_for_evidence(
                         session,
@@ -1834,6 +2491,7 @@ class SqlRepositoryV6Mixin:
                 "held_recovery_plan_ids": held_plans,
                 "resumed_recovery_plan_ids": resumed_plans,
                 "propagation": propagation,
+                "tree_propagation": tree_propagation,
             }
             session.add(CaseEventModel(
                 case_id=case_id,
@@ -1885,6 +2543,7 @@ class SqlRepositoryV6Mixin:
                 "held_recovery_plan_ids": held_plans,
                 "resumed_recovery_plan_ids": resumed_plans,
                 "propagation": propagation,
+                "tree_propagation": tree_propagation,
             }
 
     def add_evidence_review_revision(
@@ -1950,6 +2609,18 @@ class SqlRepositoryV6Mixin:
                     else "ACTIVE"
                 )
                 evidence.updated_at = now
+                if evidence.lifecycle_status != "ACTIVE" or evidence.review_trust_state == "LOW_TRUST":
+                    self._invalidate_reuse_decisions_for_evidence_in_session(
+                        session,
+                        case_id=case_id,
+                        tenant_id=tenant_id,
+                        evidence_id=evidence_id,
+                        reason=(
+                            "EVIDENCE_REVIEW_EXCLUDED"
+                            if evidence.lifecycle_status != "ACTIVE"
+                            else "EVIDENCE_REVIEW_LOW_TRUST"
+                        ),
+                    )
             self._invalidate_analysis_rows(
                 session,
                 evidence_id,
@@ -1985,6 +2656,9 @@ class SqlRepositoryV6Mixin:
         """Append a machine-downgraded Conclusion revision after invalidation."""
         affected = session.query(ClaimEvidenceBindingModel).filter(
             ClaimEvidenceBindingModel.evidence_id == evidence.evidence_id,
+            # A CONTRADICTS binding is a counter-signal, not a prerequisite
+            # for the claim.  Removing it must not retract the conclusion.
+            ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
         ).all()
         if not affected:
             return

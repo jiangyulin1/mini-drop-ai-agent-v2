@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from server.app.state_machine import now_utc
+from server.app.diagnosis.collection_reuse import result_fingerprint
 from server.app.diagnosis.evidence_projection import project_artifact
 
 
@@ -45,6 +46,7 @@ class CaseEvidenceService:
         task_id: str,
         attachment_id: str | None = None,
         actor_id: str = "mini-drop-evidence-service",
+        stale_for_current_revision: bool = False,
     ) -> list[str]:
         """Materialize all structured Task artifacts as canonical Case Evidence."""
         artifacts = self._repo.artifacts.get(task_id, []) if getattr(self._repo, "artifacts", None) else []
@@ -52,6 +54,8 @@ class CaseEvidenceService:
         collector_id = str(getattr(task, "collector_type", "") or "")
         request_options = ((getattr(task, "request_params", None) or {}).get("options") or {})
         target_ref = f"task:{task_id}"
+        probe_fingerprint_value = str(request_options.get("probe_fingerprint") or "")
+        probe_key_value = str(request_options.get("probe_key") or "")
         membership_snapshot_id = str(
             request_options.get("membership_snapshot_id") or ""
         ) or None
@@ -92,6 +96,20 @@ class CaseEvidenceService:
                     case_id, tenant_id, task_id, artifact, actor_id, exc,
                 )
                 continue
+            concrete_result_fingerprint = ""
+            if probe_fingerprint_value and projection.get("projection_hash"):
+                concrete_result_fingerprint = result_fingerprint(
+                    probe_fingerprint_value=probe_fingerprint_value,
+                    projection_hash=str(projection["projection_hash"]),
+                    content_hash=str(artifact.get("sha256") or ""),
+                    artifact_schema=str(artifact.get("artifact_type") or ""),
+                    parser_version=(
+                        "deterministic-network-discovery.v1"
+                        if projection["projection_kind"] in {"DEPENDENCY_GRAPH", "TOPOLOGY_GRAPH"}
+                        else "deterministic.v1"
+                    ),
+                    completeness=str(metadata.get("completeness") or "COMPLETE"),
+                )
             self._repo.upsert_case_evidence(
                 case_id=case_id,
                 tenant_id=tenant_id,
@@ -130,11 +148,16 @@ class CaseEvidenceService:
                     "artifact_id": artifact.get("id"),
                     "attachment_id": attachment_id,
                     "collector_id": collector_id,
+                    "probe_fingerprint": probe_fingerprint_value,
+                    "probe_key": probe_key_value,
+                    "result_fingerprint": concrete_result_fingerprint,
+                    "reuse_policy": "EXACT_PROBE_AND_RESULT",
                     "discovery_run_id": request_options.get("discovery_run_id"),
                     "discovery_seed_ref": request_options.get("discovery_seed_ref"),
                     "discovery_parent_task_id": request_options.get("discovery_parent_task_id"),
                 },
                 trace_id=str(getattr(task, "traceparent", "") or "") or None,
+                stale_for_current_revision=stale_for_current_revision,
                 actor_id=actor_id,
             )
             if hasattr(self._repo, "upsert_evidence_projection"):

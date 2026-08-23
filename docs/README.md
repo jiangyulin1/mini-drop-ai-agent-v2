@@ -6,6 +6,8 @@
 
 | 文档 | 用途 | 状态 |
 |---|---|---|
+| [`asset-map.md`](asset-map.md) | 当前代码、运行链路、上下游拓扑、Evidence、Agent Runtime、Pi、Web、恢复和测试资产的事实盘点 | 当前资产地图；随重大代码变更维护 |
+| [`open-source-components.md`](open-source-components.md) | LangGraph、Temporal、NetworkX 等开源组件的选型、许可证和 Mini-Drop 边界 | 当前开源组件决策 |
 | [`ai_current_design_interview_handbook.md`](ai_current_design_interview_handbook.md) | AI 功能当前设计、Pi Agent 接入、结构化证据、执行链、分层门禁、可信度与面试追问核实 | 当前设计与面试答辩入口 |
 | [`environment-setup.md`](environment-setup.md) | Python/Node/Pi/DeepSeek、SQLite 与本机轻量启动 | 当前环境入口 |
 | [`deployment-profiles.md`](deployment-profiles.md) | Native、Local Compose、Linux 全栈、Control/Worker、Pi 与低带宽评测模式 | 当前部署入口 |
