@@ -3,6 +3,7 @@ import { Empty, Skeleton, Space, Tag } from "antd";
 import { getTaskArtifactContent } from "../api/client";
 import echarts from "../lib/echarts";
 import { prepareAsyncProfilerHtml } from "../utils/artifacts";
+import { formatBeijingTime } from "../utils/time";
 import EBPFHistogram from "./EBPFHistogram";
 import SandboxedArtifactFrame from "./SandboxedArtifactFrame";
 
@@ -145,7 +146,7 @@ export function SysMetricsView({ taskId, artifact }) {
 }
 
 const memoryOptions = (data) => {
-  const times = data.samples.map((sample) => new Date(sample.ts * 1000).toLocaleTimeString());
+  const times = data.samples.map((sample) => formatBeijingTime(new Date(sample.ts * 1000)));
   const series = [{ name: "RSS", type: "line", data: data.samples.map((sample) => sample.rss_mb ?? 0), smooth: true, areaStyle: { opacity: 0.15 } }];
   if (data.samples.some((sample) => sample.pss_mb != null)) series.push({ name: "PSS", type: "line", data: data.samples.map((sample) => sample.pss_mb ?? 0), smooth: true });
   if (data.samples.some((sample) => sample.swap_mb > 0)) series.push({ name: "Swap", type: "line", data: data.samples.map((sample) => sample.swap_mb ?? 0), smooth: true, lineStyle: { type: "dashed" } });
