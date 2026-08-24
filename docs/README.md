@@ -14,6 +14,7 @@
 | [`repository-maintenance.md`](repository-maintenance.md) | 文档归档、生成物清理、凭据、依赖和提交门禁 | 当前维护规范 |
 | [`../reports/evaluation/verified-20260821.md`](../reports/evaluation/verified-20260821.md) | DeepSeek 真实 PR 单轮与未知拓扑 Pi 链路人工核验 | 带日期的验证证据 |
 | [`evidence-native-live-eval-2026-08-25.md`](evidence-native-live-eval-2026-08-25.md) | JYL + Pi + DeepSeek `deepseek-v4-flash` 的 Evidence-native 9×3 实测、结构门禁和非双盲人工粗评 | 当前 9×3 评测结果与能力边界 |
+| [`../benchmarks/evidence-native-public-6/README.md`](../benchmarks/evidence-native-public-6/README.md) | 低流量扩展测试集：6 个公开真实 PR、本地抓取、SHA pin、compact projection 与 oracle | 当前公开案例扩展与本地预检入口 |
 | [`progress-checkpoint-2026-08-24.md`](progress-checkpoint-2026-08-24.md) | 分支推理状态改造、测试结果和当前未完成语义的检查点 | 本轮检查记录；发生后续代码变更时以资产地图为准 |
 | [`showcase-convergence-plan-2026-08-24.md`](showcase-convergence-plan-2026-08-24.md) | 当前展示主路径、冻结边界、进度记录和验收命令 | 展示收敛执行记录 |
 | [`legacy-module-retirement-2026-08-24.md`](legacy-module-retirement-2026-08-24.md) | 旧模块下线、可复用元素分类、删除门禁和数据库清理边界 | 维护清理记录 |

@@ -1,0 +1,195 @@
+{
+  "schema": "mini-drop.github-pr.case-set.v1",
+  "dataset_id": "evidence-native-public-6",
+  "version": "2026-08-25",
+  "source_policy": "pinned_public_github_pr_projection",
+  "transport_policy": {
+    "fetch_location": "local_only",
+    "raw_pack_upload": false,
+    "projection_import": "optional_one_time_compact_only",
+    "recommended_rounds": 1,
+    "formal_rounds": 3
+  },
+  "quality_dimensions": [
+    "mechanism_attribution",
+    "evidence_citation",
+    "counterevidence_and_uncertainty",
+    "impact_boundary"
+  ],
+  "cases": [
+    {
+      "case_id": "kubernetes-140407",
+      "repo": "kubernetes/kubernetes",
+      "number": 140407,
+      "related_issues": [140393],
+      "expected_state": "closed",
+      "expected_refs": {
+        "base": "21bb34663ad6b731ebd4b9ca4b7afa404e5b112b",
+        "head": "4070b12de449e533b1dbba2f4c0f7508bde68e04",
+        "merge": null
+      },
+      "oracle": {
+        "expected_verdict": "candidate_concurrency_backpressure_fix",
+        "expected_location": "self",
+        "expected_domain": "memory",
+        "expected_mechanism": "EventBroadcaster recordToSink creates one goroutine per event write/retry without a concurrency ceiling; a semaphore and queue backpressure bound goroutine and memory growth.",
+        "required_evidence_kinds": ["pr_core", "external_evidence", "simulated_runtime"],
+        "counterevidence": "The PR is closed but unmerged; public synthetic signals cannot prove the production event rate or the exact memory ceiling.",
+        "abstention_required": true
+      },
+      "runtime": {
+        "signals": [
+          {"name": "event_write_inflight", "unit": "goroutines", "samples": [100, 100, 100]},
+          {"name": "event_queue_dropped", "unit": "events", "samples": [0, 120, 900]},
+          {"name": "rss_bytes", "unit": "bytes", "samples": [314572800, 319815680, 325058560]}
+        ],
+        "evaluation_focus": "Connect unbounded per-event goroutines to the semaphore/backpressure fix, while distinguishing a proposed unmerged patch from a deployed production fix."
+      }
+    },
+    {
+      "case_id": "kubernetes-139850",
+      "repo": "kubernetes/kubernetes",
+      "number": 139850,
+      "related_issues": [139823],
+      "expected_state": "merged",
+      "expected_refs": {
+        "base": "da63bae2fba2b0ecc84859698c44b85b51d65daa",
+        "head": "83c796592b2eb4a1f7a038d54bb8339274272ce1",
+        "merge": "f5e2b0fa42891720f845860c8c9a92bf09e00d22"
+      },
+      "oracle": {
+        "expected_verdict": "confirmed_context_cancellation_leak",
+        "expected_location": "self",
+        "expected_domain": "memory",
+        "expected_mechanism": "startPodSync replaces status.cancelFn without cancelling the previous context, retaining one leaked context per Pod sync; the fix cancels the previous context before replacement.",
+        "required_evidence_kinds": ["pr_core", "external_evidence", "simulated_runtime"],
+        "counterevidence": "The PR and tests establish code intent, but the projection has no independent long-running kubelet heap profile.",
+        "abstention_required": false
+      },
+      "runtime": {
+        "signals": [
+          {"name": "active_pod_sync_contexts", "unit": "contexts", "samples": [100, 1200, 12000]},
+          {"name": "kubelet_rss_bytes", "unit": "bytes", "samples": [268435456, 402653184, 805306368]},
+          {"name": "pod_sync_rate", "unit": "syncs_per_second", "samples": [40, 40, 41]}
+        ],
+        "evaluation_focus": "Name the replaced cancel function and context lifecycle, and do not generalize the fix to every kubelet memory issue."
+      }
+    },
+    {
+      "case_id": "prometheus-17895",
+      "repo": "prometheus/prometheus",
+      "number": 17895,
+      "related_issues": [17879],
+      "expected_state": "merged",
+      "expected_refs": {
+        "base": "c669470f079bed927cc58ecbc38a4d8bd6ebef27",
+        "head": "6b08742df5ac023daea9e6313539a8e56cfdf155",
+        "merge": "fc1c60d9eb4367d74cf18adb658475560adae306"
+      },
+      "oracle": {
+        "expected_verdict": "confirmed_pool_reference_retention",
+        "expected_location": "self",
+        "expected_domain": "memory",
+        "expected_mechanism": "WAL replay objects returned to sync.Pool retain Labels, histogram pointers, intervals, or metadata strings; clearing those reference fields before Put releases the retained graph.",
+        "required_evidence_kinds": ["pr_core", "external_evidence", "simulated_runtime"],
+        "counterevidence": "This is a preventive retention fix and does not by itself prove an unbounded production leak or a specific RSS slope.",
+        "abstention_required": false
+      },
+      "runtime": {
+        "signals": [
+          {"name": "pooled_references_retained", "unit": "objects", "samples": [500, 4200, 18000]},
+          {"name": "heap_after_wal_replay_bytes", "unit": "bytes", "samples": [471859200, 681574400, 1090519040]},
+          {"name": "wal_replay_rate", "unit": "segments_per_second", "samples": [12, 12, 12]}
+        ],
+        "evaluation_focus": "Distinguish retained object graphs in pooled buffers from a classic allocator leak and identify the fields cleared before Put."
+      }
+    },
+    {
+      "case_id": "opentelemetry-python-5027",
+      "repo": "open-telemetry/opentelemetry-python",
+      "number": 5027,
+      "related_issues": [5016],
+      "expected_state": "closed",
+      "expected_refs": {
+        "base": "9c270dafdf26fb8ff6aed678544050383759d24a",
+        "head": "af4f223d03a04d0ae063041b1aa33d8fbf73fc68",
+        "merge": null
+      },
+      "oracle": {
+        "expected_verdict": "candidate_tracer_metrics_cache_fix",
+        "expected_location": "self",
+        "expected_domain": "memory",
+        "expected_mechanism": "TracerProvider.get_tracer creates a new TracerMetrics on every call, causing ProxyMeterProvider to accumulate proxy meters when no SDK MeterProvider exists; the patch caches one TracerMetrics per provider.",
+        "required_evidence_kinds": ["pr_core", "external_evidence", "simulated_runtime"],
+        "counterevidence": "The PR is closed but unmerged in the pinned state; code evidence supports the retention mechanism, not a shipped fix or independent heap experiment.",
+        "abstention_required": true
+      },
+      "runtime": {
+        "signals": [
+          {"name": "proxy_meters", "unit": "objects", "samples": [100, 5000, 20000]},
+          {"name": "rss_bytes", "unit": "bytes", "samples": [230686720, 524288000, 1048576000]},
+          {"name": "get_tracer_calls", "unit": "calls", "samples": [1000, 1000, 1000]}
+        ],
+        "evaluation_focus": "Trace the TracerMetrics/ProxyMeterProvider retention path and preserve the unmerged-status boundary."
+      }
+    },
+    {
+      "case_id": "envoy-44448",
+      "repo": "envoyproxy/envoy",
+      "number": 44448,
+      "related_issues": [],
+      "expected_state": "merged",
+      "expected_refs": {
+        "base": "b234fcc7971e1bf63836f6161cea83b3dd20adce",
+        "head": "2cea57828fa93e9dcb8268e98c59aac3ebd8f74c",
+        "merge": "099a9d71ebfd8aa9f823e1738b34138cb634a07b"
+      },
+      "oracle": {
+        "expected_verdict": "confirmed_statname_hot_path_optimization",
+        "expected_location": "self",
+        "expected_domain": "cpu",
+        "expected_mechanism": "StatName map and comparison hot paths repeat varint decoding, memcmp, function setup, and loop work; pointer/size fast paths and inlining reduce bounded CPU cost.",
+        "required_evidence_kinds": ["pr_core", "external_evidence", "simulated_runtime"],
+        "counterevidence": "The PR reports microbenchmarks, but flat sort benchmarks and synthetic signals limit end-to-end latency claims.",
+        "abstention_required": false
+      },
+      "runtime": {
+        "signals": [
+          {"name": "statname_map_lookup_ns", "unit": "ns", "samples": [22.4, 11.8, 8.52]},
+          {"name": "stats_hot_path_us", "unit": "us", "samples": [5697, 5453, 5077]},
+          {"name": "end_to_end_request_p99_ms", "unit": "ms", "samples": [4.1, 4.1, 4.2]}
+        ],
+        "evaluation_focus": "Locate the map-key and StatName fast paths and keep microbenchmark improvements separate from end-to-end service latency."
+      }
+    },
+    {
+      "case_id": "redis-15677",
+      "repo": "redis/redis",
+      "number": 15677,
+      "related_issues": [15610],
+      "expected_state": "closed",
+      "expected_refs": {
+        "base": "d22066d0989bca050f0450d221b8d9933960fd13",
+        "head": "8678f56b017c2770980eec236b9a10edba4db37f",
+        "merge": null
+      },
+      "oracle": {
+        "expected_verdict": "candidate_parser_bounds_fix",
+        "expected_location": "self",
+        "expected_domain": "security",
+        "expected_mechanism": "jsonSkipString advances two bytes after a trailing backslash without checking end, enabling an out-of-bounds pointer advance; the fix rejects an unterminated escape before incrementing.",
+        "required_evidence_kinds": ["pr_core", "external_evidence", "simulated_runtime"],
+        "counterevidence": "The pinned PR is closed but unmerged and the projection contains no sanitizer or exploit reproduction; do not claim a shipped vulnerability fix.",
+        "abstention_required": true
+      },
+      "runtime": {
+        "signals": [
+          {"name": "trailing_backslash_inputs", "unit": "cases", "samples": [10, 100, 1000]},
+          {"name": "asan_oob_reports", "unit": "reports", "samples": [0, 0, 0]},
+          {"name": "parser_rejected_unterminated_escape", "unit": "boolean", "samples": [true, true, true]}
+        ],
+        "evaluation_focus": "Identify the exact bounds check and avoid turning a code-level safety patch into a verified exploit or release claim."
+      }
+    }
+  ]
+}

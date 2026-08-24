@@ -766,11 +766,44 @@ CASE_SPECS: tuple[dict[str, Any], ...] = (
 )
 
 
-def selected_specs(selection: Optional[str]) -> list[dict[str, Any]]:
-    if not selection:
+def load_case_specs(path: Optional[str]) -> list[dict[str, Any]]:
+    """Load an optional local extension manifest without accepting raw packs."""
+    if not path:
         return [dict(item) for item in CASE_SPECS]
+    source = Path(path).expanduser()
+    try:
+        value = read_json(source)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"cannot read --case-spec-file: {type(exc).__name__}") from exc
+    if isinstance(value, Mapping):
+        value = value.get("cases")
+    if not isinstance(value, list):
+        raise SystemExit("--case-spec-file must contain a JSON array or an object with a cases array")
+    result = [dict(item) for item in CASE_SPECS]
+    known = {str(item.get("case_id") or "") for item in result}
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise SystemExit("--case-spec-file cases must be JSON objects")
+        spec = dict(item)
+        case_id = str(spec.get("case_id") or "").strip()
+        repo = str(spec.get("repo") or "").strip()
+        number = spec.get("number")
+        if not case_id or not repo or not isinstance(number, int):
+            raise SystemExit("each external case needs case_id, repo, and integer number")
+        if case_id in known:
+            raise SystemExit(f"duplicate case id in --case-spec-file: {case_id}")
+        if not isinstance(spec.get("oracle"), Mapping) or not isinstance(spec.get("runtime"), Mapping):
+            raise SystemExit(f"external case {case_id} needs oracle and runtime objects")
+        result.append(spec)
+        known.add(case_id)
+    return result
+
+
+def selected_specs(selection: Optional[str], specs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    if not selection:
+        return [dict(item) for item in specs]
     wanted = {part.strip() for part in selection.split(",") if part.strip()}
-    result = [dict(item) for item in CASE_SPECS if item["case_id"] in wanted or str(item["number"]) in wanted]
+    result = [dict(item) for item in specs if item["case_id"] in wanted or str(item["number"]) in wanted]
     unknown = wanted - {item["case_id"] for item in result} - {str(item["number"]) for item in result}
     if unknown:
         raise SystemExit(f"unknown case id(s): {', '.join(sorted(unknown))}")
@@ -2112,7 +2145,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--output-dir",
         help="Report directory; defaults to reports/eval/github-pr-attribution-<timestamp>.",
     )
-    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers (default: all nine).")
+    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers (default: all built-in and extension cases).")
+    parser.add_argument(
+        "--case-spec-file",
+        help="Optional local JSON manifest whose cases are appended to the built-in suite; only compact projections are eligible for import.",
+    )
     parser.add_argument("--offline", action="store_true", help="Use only cached responses; never access GitHub or control URLs.")
     parser.add_argument("--refresh", action="store_true", help="Ignore cached response bodies and refetch GitHub data.")
     parser.add_argument("--timeout", type=float, default=30.0, help="Per-request GitHub timeout in seconds.")
@@ -2175,7 +2212,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.import_evidence:
         # Importing a projection is the low-bandwidth path by definition.
         args.low_bandwidth = True
-    cases = selected_specs(args.cases)
+    cases = selected_specs(args.cases, load_case_specs(args.case_spec_file))
     case_map = load_case_map(args.case_map)
     workspace = ROOT
     if args.output_dir:
