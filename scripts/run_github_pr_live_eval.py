@@ -38,9 +38,9 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 try:
-    from run_github_pr_attribution_eval import CASE_SPECS, read_json, slug
+    from run_github_pr_attribution_eval import CASE_SPECS, load_case_specs, read_json, slug
 except ImportError:  # pragma: no cover - supports importing from the repository root
-    from scripts.run_github_pr_attribution_eval import CASE_SPECS, read_json, slug
+    from scripts.run_github_pr_attribution_eval import CASE_SPECS, load_case_specs, read_json, slug
 
 
 PACK_KINDS = ("pr_core", "external_evidence", "simulated_runtime")
@@ -897,7 +897,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", required=True, help="Preparation report containing packs/.")
     parser.add_argument("--output-dir", help="Live report directory; defaults to <input-dir>/live.")
-    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers; default all nine.")
+    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers; default all built-in and extension cases.")
+    parser.add_argument(
+        "--case-spec-file",
+        help="Optional local JSON manifest whose cases are appended to the built-in suite.",
+    )
     parser.add_argument("--rounds", type=int, default=1, help="Rounds per PR (default 1 smoke; formal 9x3 uses 3).")
     parser.add_argument("--control-url", default=os.getenv("MINI_DROP_CONTROL_URL", "http://127.0.0.1:8191"))
     parser.add_argument(
@@ -922,11 +926,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def selected_specs(raw: Optional[str]) -> list[dict[str, Any]]:
+def selected_specs(raw: Optional[str], specs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     if not raw:
-        return [dict(item) for item in CASE_SPECS]
+        return [dict(item) for item in specs]
     wanted = {part.strip().lower() for part in raw.split(",") if part.strip()}
-    selected = [dict(item) for item in CASE_SPECS if str(item.get("case_id", "")).lower() in wanted or str(item.get("number", "")).lower() in wanted]
+    selected = [dict(item) for item in specs if str(item.get("case_id", "")).lower() in wanted or str(item.get("number", "")).lower() in wanted]
     unknown = wanted - {str(item.get("case_id", "")).lower() for item in selected} - {str(item.get("number", "")).lower() for item in selected}
     if unknown:
         raise ValueError(f"unknown cases: {', '.join(sorted(unknown))}")
@@ -940,7 +944,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     input_dir = Path(args.input_dir).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else input_dir / "live"
     output_dir.mkdir(parents=True, exist_ok=True)
-    specs = selected_specs(args.cases)
+    specs = selected_specs(args.cases, load_case_specs(args.case_spec_file))
     if args.max_cases:
         specs = specs[: max(1, args.max_cases)]
 
