@@ -62,6 +62,20 @@ Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分�
 - `simulated_runtime` 是合成、低规模的 wiring probe，不是真实故障日志、指标、拓扑或修复后回归验证；动态 RCA、拓扑发现、故障恢复、自动修复和生产自治仍未被本轮证明。
 - 评测完成后已将 JYL `MINI_DROP_EVAL_IMPORT_ENABLED` 恢复为 `0`，并清空临时 import token。
 
+## 公开 PR 扩展评测（evidence-native-public-6）
+
+为降低上传流量并增加跨语言/跨机制覆盖，使用 6 个 pinned public GitHub PR 做了一轮真实 JYL 评测：Kubernetes 2 例、Prometheus、OpenTelemetry Python、Envoy、Redis 各 1 例。
+
+- 数据集契约：`benchmarks/evidence-native-public-6/manifest.json`；完整本地抓取与 oracle 在 `reports/eval/github-pr-public-6-v1/`。
+- JYL live 报告：`reports/eval/github-pr-public-6-jyl-live-v1/`；`6/6 completed`，每 Case 三份 projection 只导入一次，raw pack、仓库 clone、Worker/Analyzer artifact 均未发送。
+- 传输统计：请求约 `339,697` bytes、响应约 `484,565` bytes；18 次 projection import、6 次 Agent turn，远低于完整仓库上传。
+- 非双盲人工粗评分：`56.0/60`，约 `9.3/10`。这是公开 PR、单轮、已知 oracle 条件下的能力估计，不是生产 RCA 准确率。
+- 低规模 `simulated_runtime` 只验证 Evidence 接线和方向性趋势；真实生产内存、CPU、安全触发条件和修复后回归仍未被证明。
+
+初次使用离线 cache miss 生成的输入会得到空 projection，模型正确 abstain；随后使用完整 pinned pack 新建 Case 重跑。该失败输入和修复过程保留在本地报告中，说明评测不会把数据缺失误报为模型成功。
+
+评测入口有两个边界：公网 `https://<control-address>:80` 适合 Web/API；JYL 内部评测应使用 server 容器的内网 `8191` 地址，否则 `/internal/runtime/...` 可能被 Web 返回 HTML。内网复跑 `reports/eval/github-pr-public-6-jyl-runtime-audit-k139850/` 捕获到 37 条 runtime event、3 次 DeepSeek attempt 和 `tool_execution_start/end`。评测结束后 import 开关为 `0`，临时 token 为空，`readyz` 为 200。
+
 ## 操作注意
 
 Candidate archive 不包含受保护的 Compose `.env` 和 TLS 证书。部署到 `/jyl` 时必须从当前 active release 复制 `.env`，并将 `deploy/certs/{ca.crt,server.crt,server.key}` 复制到新 release；否则 Server/Worker 会因证书缺失无法启动。API Key 和 DeepSeek Key 只由受保护 env 注入，不写入报告或仓库。
