@@ -101,6 +101,24 @@ docker compose --env-file <protected-env-file> \
   -f deploy/compose/jyl-secure.control.yml up -d --build
 ```
 
+JYL 实际三节点发布使用 `/jyl` 作为 release 根目录，active 链接为
+`/jyl/mini-drop-active`，而不是旧 Native systemd 脚本默认的 `/home/<user>`。Candidate
+archive 不携带受保护的 `.env` 和 TLS 证书；切换前必须从当前 active release 复制
+`.env` 以及 `deploy/certs/{ca.crt,server.crt,server.key}`，然后在 control 和两个 worker
+节点分别执行 Compose build/up。JYL Web 的评测入口是 `https://<control-address>:80`；宿主
+443 可能由另一套 cloud Compose 占用。
+
+可使用路径感知发布器部署 Candidate：
+
+```bash
+uv run --locked python scripts/deploy_jyl_compose.py \
+  --archive reports/implementation/candidates/<release-id>.tar.gz \
+  --remote-root /jyl
+```
+
+旧的 `scripts/deploy_candidate_vm.py` 保留给 systemd `/home/<user>` 集群，不应直接用于
+JYL Compose。
+
 Sidecar 端口只在 Compose 网络内暴露；Provider Key 由 Sidecar 环境读取。公网演示前还
 需核对证书、绑定地址和反向代理，不应因文件名含 `secure` 就跳过这些检查。
 

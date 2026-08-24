@@ -1,7 +1,7 @@
 # Mini-Drop 开发检查点
 
 日期：2026-08-24
-状态：本检查点已完成，后续可从产品增强项继续
+状态：主线已完成 JYL 真实 Pi/DeepSeek 闭环验收；后续进入产品增强和部署工具收敛
 
 ## 当前结论
 
@@ -35,6 +35,7 @@
 - 完整后端测试：`1243 passed, 6 skipped`。
 - 前端测试：`104 passed`；`npm run build` 成功。
 - Ruff、Python compileall、git diff check 已通过。
+- JYL 三节点真实验收通过：`run-20260824T170157Z.json` 与 `run-pi-20260824T170449Z.json`。Pi Provider completion、工具事件审计、`finish_investigation` 和 Evidence-bound branch Conclusion 均通过。
 
 ## 已清理的测试问题
 
@@ -70,4 +71,6 @@ npm run build
 
 当前可宣称：Evidence、Task Artifact 采集、Projection、审核、Evidence 排除失效传播和 `RECHECK_REQUIRED` revalidation、generation fencing、分支 Evidence 和分支推理状态持久化、Evidence promote、旧链默认冻结。
 
-不要宣称：通用 ATMS/ECRD、完整多支持集真值维护、完整自动冲突回溯、任意生产自动修复、完整实时拓扑平台。
+不要宣称：通用 ATMS/ECRD、完整多支持集真值维护、完整自动冲突回溯、任意生产自动修复、完整实时拓扑平台或模型根因准确率。真实 Pi 的 `INSUFFICIENT_EVIDENCE` 是正确拒答，不能包装成根因已确认。
+
+真实评测和 JYL 部署资产注意事项见 [`evidence-native-live-eval-2026-08-25.md`](evidence-native-live-eval-2026-08-25.md)。
