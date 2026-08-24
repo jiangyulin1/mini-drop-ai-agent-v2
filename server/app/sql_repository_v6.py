@@ -1534,6 +1534,32 @@ class SqlRepositoryV6Mixin:
         return False
 
     @staticmethod
+    def _evidence_branch_id(evidence: CaseEvidenceModel) -> str | None:
+        """Return the durable branch owner recorded in Evidence lineage."""
+        lineage = evidence.lineage_json if isinstance(evidence.lineage_json, dict) else {}
+        branch_id = str(lineage.get("branch_id") or "").strip()
+        return branch_id or None
+
+    @classmethod
+    def _evidence_visible_in_branch(
+        cls, evidence: CaseEvidenceModel, branch_id: str | None,
+    ) -> bool:
+        if not branch_id:
+            return True
+        lineage = evidence.lineage_json if isinstance(evidence.lineage_json, dict) else {}
+        owner = str(lineage.get("branch_id") or "").strip()
+        scope = str(lineage.get("visibility_scope") or "").upper()
+        promoted_to = str(lineage.get("promoted_to_branch_id") or "").strip()
+        return not owner or scope == "PUBLIC_SEED" or owner == branch_id or promoted_to == branch_id
+
+    @staticmethod
+    def _branch_query(query, model: Any, branch_id: str | None):
+        """Apply the NULL-vs-branch compatibility boundary to a query."""
+        if branch_id is None:
+            return query.filter(model.branch_id.is_(None))
+        return query.filter(model.branch_id == branch_id)
+
+    @staticmethod
     def _dependency_id(*parts: Any) -> str:
         digest = hashlib.sha256("|".join(str(item) for item in parts).encode("utf-8")).hexdigest()[:24]
         return f"dep_{digest}"
@@ -2080,24 +2106,37 @@ class SqlRepositoryV6Mixin:
             hidden=bool(evidence.ui_hidden),
             archived=bool(evidence.ui_archived),
         )
+        evidence_branch_id = self._evidence_branch_id(evidence)
+        analyses_query = session.query(EvidenceAnalysisRunModel).filter(
+            EvidenceAnalysisRunModel.case_id == case_id,
+            EvidenceAnalysisRunModel.tenant_id == tenant_id,
+        )
         analyses = [
-            row for row in session.query(EvidenceAnalysisRunModel).filter(
-                EvidenceAnalysisRunModel.case_id == case_id,
-                EvidenceAnalysisRunModel.tenant_id == tenant_id,
-            ).all()
+            row for row in analyses_query.all()
             if self._evidence_ref_contains(row.evidence_inputs or [], evidence.evidence_id)
         ]
+        hypotheses_query = session.query(CaseHypothesisNodeModel).filter(
+            CaseHypothesisNodeModel.case_id == case_id,
+            CaseHypothesisNodeModel.tenant_id == tenant_id,
+        )
+        if evidence_branch_id:
+            hypotheses_query = hypotheses_query.filter(CaseHypothesisNodeModel.branch_id == evidence_branch_id)
         hypotheses = [
-            row for row in session.query(CaseHypothesisNodeModel).filter(
-                CaseHypothesisNodeModel.case_id == case_id,
-                CaseHypothesisNodeModel.tenant_id == tenant_id,
-            ).all()
+            row for row in hypotheses_query.all()
             if self._evidence_ref_contains(row.supporting_evidence_refs_json or [], evidence.evidence_id)
             or self._evidence_ref_contains(row.contradicting_evidence_refs_json or [], evidence.evidence_id)
         ]
-        bindings = session.query(ClaimEvidenceBindingModel).filter(
+        bindings_query = session.query(ClaimEvidenceBindingModel).join(
+            ConclusionRevisionModel,
+            ClaimEvidenceBindingModel.conclusion_id == ConclusionRevisionModel.conclusion_id,
+        ).filter(
             ClaimEvidenceBindingModel.evidence_id == evidence.evidence_id,
-        ).all()
+            ConclusionRevisionModel.case_id == case_id,
+            ConclusionRevisionModel.tenant_id == tenant_id,
+        )
+        if evidence_branch_id:
+            bindings_query = bindings_query.filter(ConclusionRevisionModel.branch_id == evidence_branch_id)
+        bindings = bindings_query.all()
         supporting_bindings = [
             row for row in bindings
             if str(row.support_kind or "SUPPORTS").upper() == "SUPPORTS"
@@ -2113,10 +2152,15 @@ class SqlRepositoryV6Mixin:
             ).all()
             if evidence.evidence_id in (row.evidence_refs_json or [])
         ]
-        latest = session.query(ConclusionRevisionModel).filter(
+        latest_query = session.query(ConclusionRevisionModel).filter(
             ConclusionRevisionModel.case_id == case_id,
             ConclusionRevisionModel.tenant_id == tenant_id,
-        ).order_by(ConclusionRevisionModel.revision.desc()).first()
+        )
+        if evidence_branch_id:
+            latest_query = latest_query.filter(ConclusionRevisionModel.branch_id == evidence_branch_id)
+        else:
+            latest_query = latest_query.filter(ConclusionRevisionModel.branch_id.is_(None))
+        latest = latest_query.order_by(ConclusionRevisionModel.revision.desc()).first()
         predicted = latest.state if latest else None
         if supporting_bindings and outcome["inference_changed"] and outcome["lifecycle_status"] != "ACTIVE":
             supporting = session.query(ClaimEvidenceBindingModel).filter(
@@ -2150,6 +2194,7 @@ class SqlRepositoryV6Mixin:
                 CaseEvidenceModel.tenant_id == tenant_id,
             ).all()
             if row.evidence_id != evidence.evidence_id
+            and self._evidence_visible_in_branch(row, evidence_branch_id)
             and str(row.lifecycle_status or "ACTIVE").upper() == "ACTIVE"
             and str(row.status or "ACTIVE").upper() in {"ACTIVE", "LOW_TRUST"}
         }
@@ -2673,124 +2718,147 @@ class SqlRepositoryV6Mixin:
         for binding in affected:
             binding.verifier_result = f"EVIDENCE_{status}"
         affected_ids = {binding.conclusion_id for binding in affected}
-        latest = session.query(ConclusionRevisionModel).filter(
+        affected_rows = session.query(ConclusionRevisionModel).filter(
             ConclusionRevisionModel.case_id == evidence.case_id,
             ConclusionRevisionModel.tenant_id == evidence.tenant_id,
-        ).order_by(ConclusionRevisionModel.revision.desc()).first()
-        if latest is None or latest.conclusion_id not in affected_ids:
-            return
-        previous_bindings = session.query(ClaimEvidenceBindingModel).filter(
-            ClaimEvidenceBindingModel.conclusion_id == latest.conclusion_id,
+            ConclusionRevisionModel.conclusion_id.in_(affected_ids),
         ).all()
-        evidence_rows = {
-            row.evidence_id: row
-            for row in session.query(CaseEvidenceModel).filter(
-                CaseEvidenceModel.evidence_id.in_([
-                    binding.evidence_id for binding in previous_bindings
-                ]),
-            ).all()
-        }
-        directional_support = [
-            binding for binding in previous_bindings
-            if (evidence_rows.get(binding.evidence_id) is not None)
-            and evidence_rows[binding.evidence_id].lifecycle_status == "ACTIVE"
-            and evidence_rows[binding.evidence_id].status in {"ACTIVE", "LOW_TRUST"}
-            and binding.support_kind == "SUPPORTS"
-        ]
-        strong_support = [
-            binding for binding in directional_support
-            if evidence_rows[binding.evidence_id].review_trust_state != "LOW_TRUST"
-        ]
-        new_state = (
-            (
-                "PARTIALLY_CONFIRMED"
-                if latest.state in {"INSUFFICIENT_EVIDENCE", "RECHECK_REQUIRED"}
-                else latest.state
-            )
-            if strong_support
-            else "RECHECK_REQUIRED"
-        )
-        if new_state == latest.state:
+        if not affected_rows:
             return
-        limitation = (
-            f"evidence_restored_requires_reinvestigation:{evidence.evidence_id}:{status}"
-            if evidence.lifecycle_status == "ACTIVE" and evidence.review_trust_state == "TRUSTED"
-            else f"evidence_invalidated:{evidence.evidence_id}:{status}"
-        )
-        downgraded = ConclusionRevisionModel(
-            conclusion_id=self._new_id("concl"),
-            case_id=latest.case_id,
-            tenant_id=latest.tenant_id,
-            investigation_run_id=latest.investigation_run_id,
-            revision=int(latest.revision or 0) + 1,
-            state=new_state,
-            # Do not carry values derived from an invalidated Evidence item
-            # into the new effective conclusion. The prior revision remains in
-            # history for audit, while this revision requires fresh evidence.
-            primary_root_causes=[],
-            ranked_primary_candidates=[],
-            contributing_factors=[],
-            amplifiers=[],
-            propagated_effects=[],
-            symptoms=[],
-            coincidental_anomalies=[],
-            ruled_out=latest.ruled_out or [],
-            causal_graph_revision_id=latest.causal_graph_revision_id,
-            claims=[],
-            evidence_gap_ids=latest.evidence_gap_ids or [],
-            recommendation_ids=[],
-            limitations=list(dict.fromkeys([*(latest.limitations or []), limitation])),
-            abstention_reason=latest.abstention_reason,
-            report_text=(
-                "结论已因 Evidence 生命周期变更而需要重新验证；不得继续使用原结论中的数值或机制，"
-                "请先重新读取 Evidence lifecycle 和 review_revision。"
-            ),
-            created_from_cycle_id=latest.created_from_cycle_id,
-            model_request_id=latest.model_request_id,
-            verifier_version="causal-report-verifier.v2-revalidation",
-            created_at=now,
-        )
-        session.add(downgraded)
-        session.flush()
-        for old in previous_bindings:
-            current_evidence = evidence_rows.get(old.evidence_id)
-            result = (
+
+        # A Case may have several branch-local conclusions at the same
+        # revision number. Select the latest conclusion independently for each
+        # branch, otherwise an unrelated branch can hide the affected one.
+        branch_keys = {row.branch_id for row in affected_rows}
+        latest_by_branch: dict[str | None, ConclusionRevisionModel] = {}
+        for branch_id in branch_keys:
+            query = session.query(ConclusionRevisionModel).filter(
+                ConclusionRevisionModel.case_id == evidence.case_id,
+                ConclusionRevisionModel.tenant_id == evidence.tenant_id,
+                ConclusionRevisionModel.branch_id.is_(None)
+                if branch_id is None else ConclusionRevisionModel.branch_id == branch_id,
+            ).order_by(ConclusionRevisionModel.revision.desc())
+            latest = query.first()
+            if latest is not None:
+                latest_by_branch[branch_id] = latest
+
+        for latest in latest_by_branch.values():
+            if latest.conclusion_id not in affected_ids:
+                continue
+            previous_bindings = session.query(ClaimEvidenceBindingModel).filter(
+                ClaimEvidenceBindingModel.conclusion_id == latest.conclusion_id,
+            ).all()
+            evidence_ids = [binding.evidence_id for binding in previous_bindings]
+            if not evidence_ids:
+                continue
+            evidence_rows = {
+                row.evidence_id: row
+                for row in session.query(CaseEvidenceModel).filter(
+                    CaseEvidenceModel.evidence_id.in_(evidence_ids),
+                ).all()
+            }
+            directional_support = [
+                binding for binding in previous_bindings
+                if (evidence_rows.get(binding.evidence_id) is not None)
+                and evidence_rows[binding.evidence_id].lifecycle_status == "ACTIVE"
+                and evidence_rows[binding.evidence_id].status in {"ACTIVE", "LOW_TRUST"}
+                and binding.support_kind == "SUPPORTS"
+            ]
+            strong_support = [
+                binding for binding in directional_support
+                if evidence_rows[binding.evidence_id].review_trust_state != "LOW_TRUST"
+            ]
+            new_state = (
                 (
-                    "VALIDATED"
-                    if str(old.verifier_result or "").startswith("EVIDENCE_")
-                    else old.verifier_result
+                    "PARTIALLY_CONFIRMED"
+                    if latest.state in {"INSUFFICIENT_EVIDENCE", "RECHECK_REQUIRED"}
+                    else latest.state
                 )
-                if (
-                    current_evidence is not None
-                    and current_evidence.lifecycle_status == "ACTIVE"
-                    and current_evidence.review_trust_state != "LOW_TRUST"
-                )
-                else (
-                    "EVIDENCE_LOW_TRUST"
-                    if current_evidence is not None
-                    and current_evidence.lifecycle_status == "ACTIVE"
-                    and current_evidence.review_trust_state == "LOW_TRUST"
-                    else f"EVIDENCE_{getattr(current_evidence, 'lifecycle_status', 'MISSING')}"
-                )
+                if strong_support
+                else "RECHECK_REQUIRED"
             )
-            session.add(ClaimEvidenceBindingModel(
-                claim_id=self._new_id("claim"),
-                conclusion_id=downgraded.conclusion_id,
-                evidence_id=old.evidence_id,
-                projection_hash=old.projection_hash,
-                field_path=old.field_path,
-                extractor_id=old.extractor_id,
-                extractor_version=old.extractor_version,
-                extractor_hash=old.extractor_hash,
-                target_ref=old.target_ref,
-                resource_incarnation=old.resource_incarnation,
-                event_window=old.event_window or {},
-                predicate=old.predicate or {},
-                observed_value=old.observed_value or {},
-                support_kind=old.support_kind,
-                verifier_result=result,
+            if new_state == latest.state:
+                continue
+            limitation = (
+                f"evidence_restored_requires_reinvestigation:{evidence.evidence_id}:{status}"
+                if evidence.lifecycle_status == "ACTIVE" and evidence.review_trust_state == "TRUSTED"
+                else f"evidence_invalidated:{evidence.evidence_id}:{status}"
+            )
+            downgraded = ConclusionRevisionModel(
+                conclusion_id=self._new_id("concl"),
+                case_id=latest.case_id,
+                tenant_id=latest.tenant_id,
+                branch_id=latest.branch_id,
+                investigation_run_id=latest.investigation_run_id,
+                revision=int(latest.revision or 0) + 1,
+                state=new_state,
+                # Do not carry values derived from an invalidated Evidence item
+                # into the new effective conclusion. The prior revision remains in
+                # history for audit, while this revision requires fresh evidence.
+                primary_root_causes=[],
+                ranked_primary_candidates=[],
+                contributing_factors=[],
+                amplifiers=[],
+                propagated_effects=[],
+                symptoms=[],
+                coincidental_anomalies=[],
+                ruled_out=latest.ruled_out or [],
+                causal_graph_revision_id=latest.causal_graph_revision_id,
+                claims=[],
+                evidence_gap_ids=latest.evidence_gap_ids or [],
+                recommendation_ids=[],
+                limitations=list(dict.fromkeys([*(latest.limitations or []), limitation])),
+                abstention_reason=latest.abstention_reason,
+                report_text=(
+                    "结论已因 Evidence 生命周期变更而需要重新验证；不得继续使用原结论中的数值或机制，"
+                    "请先重新读取 Evidence lifecycle 和 review_revision。"
+                ),
+                created_from_cycle_id=latest.created_from_cycle_id,
+                model_request_id=latest.model_request_id,
+                verifier_version="causal-report-verifier.v2-revalidation",
                 created_at=now,
-            ))
+            )
+            session.add(downgraded)
+            session.flush()
+            for old in previous_bindings:
+                current_evidence = evidence_rows.get(old.evidence_id)
+                result = (
+                    (
+                        "VALIDATED"
+                        if str(old.verifier_result or "").startswith("EVIDENCE_")
+                        else old.verifier_result
+                    )
+                    if (
+                        current_evidence is not None
+                        and current_evidence.lifecycle_status == "ACTIVE"
+                        and current_evidence.review_trust_state != "LOW_TRUST"
+                    )
+                    else (
+                        "EVIDENCE_LOW_TRUST"
+                        if current_evidence is not None
+                        and current_evidence.lifecycle_status == "ACTIVE"
+                        and current_evidence.review_trust_state == "LOW_TRUST"
+                        else f"EVIDENCE_{getattr(current_evidence, 'lifecycle_status', 'MISSING')}"
+                    )
+                )
+                session.add(ClaimEvidenceBindingModel(
+                    claim_id=self._new_id("claim"),
+                    conclusion_id=downgraded.conclusion_id,
+                    evidence_id=old.evidence_id,
+                    projection_hash=old.projection_hash,
+                    field_path=old.field_path,
+                    extractor_id=old.extractor_id,
+                    extractor_version=old.extractor_version,
+                    extractor_hash=old.extractor_hash,
+                    target_ref=old.target_ref,
+                    resource_incarnation=old.resource_incarnation,
+                    event_window=old.event_window or {},
+                    predicate=old.predicate or {},
+                    observed_value=old.observed_value or {},
+                    support_kind=old.support_kind,
+                    verifier_result=result,
+                    created_at=now,
+                ))
 
     def enqueue_domain_outbox(
         self, *, aggregate_type: str, aggregate_id: str, event_type: str,
@@ -3739,6 +3807,8 @@ class SqlRepositoryV6Mixin:
             latest_revision = session.query(ConclusionRevisionModel.revision).filter(
                 ConclusionRevisionModel.case_id == case_id,
                 ConclusionRevisionModel.tenant_id == tenant_id,
+                ConclusionRevisionModel.branch_id.is_(None)
+                if branch_id is None else ConclusionRevisionModel.branch_id == branch_id,
             ).order_by(ConclusionRevisionModel.revision.desc()).first()
             latest_revision_value = int(latest_revision[0]) if latest_revision else int(conclusion.revision or 0)
             result["is_current"] = int(conclusion.revision or 0) == latest_revision_value

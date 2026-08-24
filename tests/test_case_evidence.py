@@ -330,6 +330,59 @@ def test_excluding_supporting_evidence_requires_recheck_revision(client: TestCli
     )["revision"] == 1
 
 
+def test_branch_review_revalidates_only_affected_branch(client: TestClient):
+    case = _create_case(client)
+    evidence_by_branch = {}
+    for branch_id in ("branch-a", "branch-b"):
+        evidence_id = f"ev-{branch_id}"
+        repo.upsert_case_evidence(
+            case_id=case["case_id"], tenant_id="tenant-a", evidence_id=evidence_id,
+            attachment_id=None, task_id=f"task-{branch_id}", artifact_id=None,
+            artifact_type="sys_metrics", collector_id="sys_metrics",
+            source_type="task_artifact", target_ref=f"service:checkout/{branch_id}",
+            content_hash=f"content-{branch_id}", projection_hash=f"projection-{branch_id}",
+            lineage={"branch_id": branch_id, "visibility_scope": "BRANCH_LOCAL"},
+        )
+        evidence_by_branch[branch_id] = evidence_id
+        repo.submit_conclusion_revision(
+            case_id=case["case_id"], tenant_id="tenant-a", branch_id=branch_id,
+            investigation_run_id=f"run-{branch_id}", state="CONFIRMED",
+            claims=[{
+                "claim_id": f"claim-{branch_id}", "evidence_id": evidence_id,
+                "projection_hash": f"projection-{branch_id}",
+            }], report_text=branch_id,
+        )
+
+    original_a = repo.get_conclusion(case["case_id"], "tenant-a", branch_id="branch-a")
+    original_b = repo.get_conclusion(case["case_id"], "tenant-a", branch_id="branch-b")
+    assert original_a["revision"] == original_b["revision"] == 1
+
+    evidence_a = evidence_by_branch["branch-a"]
+    preview = repo.preview_evidence_review(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_id=evidence_a,
+        decision="EXCLUDED", assessment={},
+    )
+    repo.apply_evidence_review(
+        case_id=case["case_id"], tenant_id="tenant-a", evidence_id=evidence_a,
+        decision="EXCLUDED", assessment={}, reason_code="BRANCH_TEST",
+        reason="branch-local review", override_reason=None,
+        expected_review_revision=preview["current_review_revision"],
+        impact_token=preview["impact_token"], actor_id="operator-test",
+    )
+
+    current_a = repo.get_conclusion(case["case_id"], "tenant-a", branch_id="branch-a")
+    current_b = repo.get_conclusion(case["case_id"], "tenant-a", branch_id="branch-b")
+    assert current_a["revision"] == 2
+    assert current_a["state"] == "RECHECK_REQUIRED"
+    assert current_b["revision"] == 1
+    assert current_b["state"] == "CONFIRMED"
+    assert repo.get_conclusion(
+        case["case_id"], "tenant-a", original_a["conclusion_id"], branch_id="branch-a",
+    )["revision"] == 1
+    assert len(repo.list_conclusion_revisions(case["case_id"], "tenant-a", branch_id="branch-a")) == 2
+    assert len(repo.list_conclusion_revisions(case["case_id"], "tenant-a", branch_id="branch-b")) == 1
+
+
 def test_case_evidence_detail_preview_and_download_contract(client: TestClient):
     task_id = _done_task_with_artifact()
     case = _create_case(client)
