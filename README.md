@@ -131,15 +131,15 @@ uv sync --locked --extra dev
 uv run --locked python scripts/compile_proto.py
 cp deploy/env/local-native.env.example .env
 
-# 分别在不同终端启动
-uv run --locked python dev.py server
-uv run --locked python dev.py analyzer-worker
-uv run --locked python dev.py agent
 npm --prefix web ci
-npm --prefix web run dev
+
+# 默认启动完整工作台（Server、Pi sidecar、Analyzer、Agent、Web）
+uv run --locked python dev.py start
 ```
 
 浏览器打开 `http://127.0.0.1:5173`。
+
+`dev.py start` 默认启用 Pi Runtime 和本地 sidecar；如果只需要无模型离线兼容运行，显式设置 `MINI_DROP_AGENT_RUNTIME=deterministic` 后再启动。
 
 ### Linux Compose 模式
 

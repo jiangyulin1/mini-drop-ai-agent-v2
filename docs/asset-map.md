@@ -106,6 +106,8 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 
 ## 5. 服务端控制面
 
+本地默认启动入口是 `python dev.py start`：它会在同一进程组拉起 Server、Pi sidecar、Analyzer、Agent 和 Web，默认使用 `MINI_DROP_AGENT_RUNTIME=pi`。需要离线兼容模式时必须显式设置 `MINI_DROP_AGENT_RUNTIME=deterministic`；单独运行 `dev.py server` 仍只启动控制面。
+
 ### 5.1 应用入口和运行进程
 
 | 入口 | 文件 | 作用 |

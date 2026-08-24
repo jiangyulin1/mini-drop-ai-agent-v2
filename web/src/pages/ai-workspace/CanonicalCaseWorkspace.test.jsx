@@ -120,6 +120,7 @@ const WORKSPACE = {
     facts: [],
   }],
   conclusion: { state: "INSUFFICIENT_EVIDENCE", revision: 1 },
+  conclusion_history: [{ conclusion_id: "conclusion-current", state: "INSUFFICIENT_EVIDENCE", revision: 1, revision_status: "CURRENT" }],
   recommendations: [{ recommendation_id: "rec-1", concrete_action: "继续只读采集" }],
 };
 
@@ -140,6 +141,43 @@ describe("CanonicalCaseWorkspace", () => {
     expect(screen.getByRole("tab", { name: "恢复建议，可查看，1 项" })).toBeInTheDocument();
     expect(screen.getAllByRole("tab")).toHaveLength(7);
     expect(container.querySelector(".ccw-stagebar .is-done")).toBeNull();
+  });
+
+  it("shows superseded conclusion revisions without hiding their Evidence links", async () => {
+    const workspace = {
+      ...WORKSPACE,
+      conclusion: {
+        conclusion_id: "conclusion-current",
+        state: "PARTIALLY_CONFIRMED",
+        revision: 2,
+        report_text: "新 Evidence 到达后重新探索",
+        claim_evidence_bindings: [],
+      },
+      conclusion_history: [
+        {
+          conclusion_id: "conclusion-current",
+          state: "PARTIALLY_CONFIRMED",
+          revision: 2,
+          revision_status: "CURRENT",
+          report_text: "新 Evidence 到达后重新探索",
+          claim_evidence_bindings: [],
+        },
+        {
+          conclusion_id: "conclusion-old",
+          state: "CONFIRMED",
+          revision: 1,
+          revision_status: "SUPERSEDED",
+          report_text: "旧结论已被新 Evidence 重新检查",
+          claim_evidence_bindings: [{ claim_id: "claim-old", evidence_id: "ev-current-123456789" }],
+        },
+      ],
+    };
+    render(<CanonicalCaseWorkspace workspace={workspace} caseId="case-1" connected onRefresh={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /结论修订/ }));
+    expect(await screen.findByText("历史修订")).toBeInTheDocument();
+    expect(screen.getByText("SUPERSEDED")).toBeInTheDocument();
+    expect(screen.getByText("旧结论已被新 Evidence 重新检查")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ev-current/ })).toBeInTheDocument();
   });
 
   it("shows the observed dependency direction, partial coverage and opens supporting Evidence", async () => {
