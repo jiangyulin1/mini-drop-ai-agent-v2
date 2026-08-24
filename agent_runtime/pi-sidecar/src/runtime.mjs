@@ -733,6 +733,10 @@ export class RuntimeManager {
     const caseId = context?.case_id;
     return {
       case_id: caseId,
+      // Tool Gateway writes must remain branch-local. The model receives a
+      // branch-filtered context, so every proxied tool call needs the same
+      // immutable branch binding for server-side validation and persistence.
+      branch_id: context?.branch_id || undefined,
       side_effect_policy: context?.side_effect_policy || "AUTO_READ_LOW",
       runtime_generation: Number(context?.runtime_generation) || 1,
       expected_control_revision: Number(context?.control_revision) || 1,

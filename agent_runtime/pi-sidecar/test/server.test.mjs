@@ -226,6 +226,17 @@ test("fresh evaluation turns reset Pi conversation history without resetting eve
   assert.equal(calls.at(-1)[0], "prompt");
 });
 
+test("tool envelope preserves the active investigation branch", () => {
+  const manager = new RuntimeManager({ modelRuntime: {}, eventSpool: new EventSpool(null) });
+  const envelope = manager._toolEnvelope({
+    case_id: "case-branch",
+    branch_id: "branch-a",
+    runtime_generation: 4,
+  });
+  assert.equal(envelope.case_id, "case-branch");
+  assert.equal(envelope.branch_id, "branch-a");
+});
+
 test("models path is opt-in and PI_OFFLINE does not disable provider turns", () => {
   const originalPath = process.env.MINI_DROP_PI_MODELS_PATH;
   const originalOffline = process.env.PI_OFFLINE;

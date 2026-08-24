@@ -221,18 +221,24 @@ def main() -> int:
         report["tasks"] = {"a": task_a, "b": task_b}
         report["evidence"] = {"a": evidence_a, "b": evidence_b}
 
-        visible_a = data(server.api(
+        visible_a_result = data(server.api(
             "/internal/agent/tools/list-case-evidence",
             method="POST",
             internal=True,
             payload={"case_id": case_id, "branch_id": branch_a},
-        )).get("items") or []
-        visible_b = data(server.api(
+        ))
+        visible_a = visible_a_result.get("items") or []
+        visible_b_result = data(server.api(
             "/internal/agent/tools/list-case-evidence",
             method="POST",
             internal=True,
             payload={"case_id": case_id, "branch_id": branch_b},
-        )).get("items") or []
+        ))
+        visible_b = visible_b_result.get("items") or []
+        evidence_watermark = max(
+            int(visible_a_result.get("evidence_watermark") or 0),
+            int(visible_b_result.get("evidence_watermark") or 0),
+        )
         ids_a = {str(item.get("evidence_id")) for item in visible_a}
         ids_b = {str(item.get("evidence_id")) for item in visible_b}
         isolation_pass = ids_a == {evidence_a} and ids_b == {evidence_b}
@@ -267,7 +273,7 @@ def main() -> int:
             internal=True,
             payload={
                 **envelope,
-                "expected_evidence_watermark": 1,
+                "expected_evidence_watermark": evidence_watermark,
                 "nodes": [
                     {"node_id": "cpu", "entity_ref": "service:checkout", "mechanism": "CPU saturation", "role": "PRIMARY_ROOT_CAUSE", "supporting_evidence_refs": [evidence_a]},
                     {"node_id": "latency", "entity_ref": "service:checkout", "mechanism": "request latency", "role": "SYMPTOM", "supporting_evidence_refs": [evidence_a]},
@@ -307,6 +313,25 @@ def main() -> int:
             "branch_id": workspace.get("branch_id"),
             "conclusion_state": (workspace.get("conclusion") or {}).get("state"),
         }
+
+        # Materialize a separate conclusion before reviewing A.  The review
+        # assertion must prove B remains current, not merely that it has no
+        # conclusion to invalidate.
+        server.api(
+            "/internal/agent/tools/finish",
+            method="POST",
+            internal=True,
+            payload={
+                "case_id": case_id,
+                "branch_id": branch_b,
+                "expected_scope_revision": case["scope_revision"],
+                "expected_control_revision": case["control_revision"],
+                "summary": "Independent branch remains supported",
+                "state": "CONFIRMED",
+                "evidence_ids": [evidence_b],
+                "primary_root_causes": [{"summary": "Independent hypothesis"}],
+            },
+        )
 
         preview = data(server.api(
             f"/api/v1/cases/{quote(case_id, safe='')}/evidence/{quote(evidence_a, safe='')}/reviews/preview",
