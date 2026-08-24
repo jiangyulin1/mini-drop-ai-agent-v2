@@ -343,7 +343,7 @@ Pi 没有内置 Mini-Drop 级的子 Agent Supervisor、Evidence invalidation、�
 
 RuntimeOptions 当前真正影响 Pi 请求的是 `model`、`reasoning_effort`、`prompt_variant` 和会话选项；`temperature`、`max_tokens`、`seed` 仅作为实验元数据记录，不能宣称已改变 SDK 调用。Server 侧 NLP/旧 RCA 仍有独立的 OpenAI-compatible Provider 和无 Key 的关键词 fallback，它们与 Pi Case 调查不是同一条能力链。
 
-截至本次盘点，`reports/evaluation/verified-20260821.md` 记录了 8 个真实 GitHub PR 的单轮 DeepSeek 运行（人工 75/80）以及一次未知拓扑真实 Pi 运行（覆盖不足时拒答）。这些结果证明链路和边界在指定样本上工作，不构成通用准确率或多轮稳定性结论。
+历史报告 `reports/evaluation/verified-20260821.md` 记录了 8 个真实 GitHub PR 的单轮 DeepSeek 运行（人工 75/80）以及一次未知拓扑真实 Pi 运行。更新的 9×3 结果见 `docs/evidence-native-live-eval-2026-08-25.md`：9 个 PR、每个 3 轮共 27 轮，第二轮结构门禁和完整 Evidence ID/hash 绑定均为 27/27；按非双盲 oracle 粗评约 9.2–9.6/10。两者都只证明指定 PR Projection 下的链路、引用和边界能力，不构成通用准确率或生产自治结论。
 
 ### 10.5 线上展示环境实测边界（2026-08-24）
 

@@ -56,3 +56,38 @@ The matrix produces two classes of results:
 
 Passing the first class proves the Evidence-native chain is wired for repeated
 turns. It does not prove general RCA accuracy or production autonomy.
+
+## Landed result (2026-08-25)
+
+The first live run completed `27/27` rounds and passed the structural gates, but
+only `8/27` answers copied all three canonical Evidence IDs. The answer contract
+was tightened to require the complete IDs and projection hashes, then a fresh
+second run was executed with new Cases and live state.
+
+The final second-run artifacts are:
+
+- `reports/eval/github-pr-attribution-9x3/live-v2/round-results.jsonl`
+- `reports/eval/github-pr-attribution-9x3/live-v2/structural-score.json`
+
+The second run completed `27/27` rounds, passed the structural gates, and bound
+all three canonical Evidence IDs and full projection hashes in `27/27` answers.
+The provider, runtime audit, read-only tool pairing, `deny_write` policy, and
+`ANSWER_ONLY` disposition also passed for every round.
+
+The structural scorer deliberately leaves `quality_score` unset. A direct,
+non-blind human/oracle review using the contract's 10-point rubric estimates
+the investigation quality at **9.2–9.6/10 (about 9.3/10)**:
+
+| Dimension | Manual estimate |
+|---|---:|
+| Mechanism attribution | 3.7–3.9 / 4 |
+| Evidence citation | 3.0 / 3 |
+| Counterevidence and uncertainty | 1.7–1.9 / 2 |
+| Impact boundary | 0.8–0.95 / 1 |
+
+This is a PR-replay result, not a blind holdout or a production RCA accuracy
+claim. `simulated_runtime` is synthetic wiring data only. The run demonstrates
+strong mechanism attribution, Evidence binding, calibrated abstention, and
+scope control under the supplied projections; it does not establish dynamic
+telemetry RCA, topology discovery, recovery, automatic remediation, or
+production autonomy.

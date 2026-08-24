@@ -858,7 +858,7 @@ RuntimeOptions 与权限分离，包含：
 当前真实 Token 台账：
 
 - 真实未知拓扑 Pi 调查共 19 个 ModelAttempt，累计 input 28,834、output 29,583、cache-read 610,816 Token，累计模型等待约 195 秒；报告中的 cost 为 0，表示该次 Provider/SDK 没有返回可用成本值，不能解释成免费。
-- 8 个真实 GitHub PR 单轮评测共 76 个 ModelAttempt，累计 input 101,143、output 8,059、cache-read 111,744 Token，累计模型等待约 295 秒，记录成本约 0.016729。由于这是 8 个只读 Case 的总计且使用 fresh_session，它不能直接外推长期自主调查成本。
+- 历史基线：8 个真实 GitHub PR 单轮评测共 76 个 ModelAttempt，累计 input 101,143、output 8,059、cache-read 111,744 Token，累计模型等待约 295 秒，记录成本约 0.016729。该数据属于旧的 8-PR 只读 Case 总计，不能外推长期自主调查成本；新版 9×3 结果以 `docs/evidence-native-live-eval-2026-08-25.md` 和 `live-v2` 报告为准。
 
 当前限制必须说明：24,000 是字符预算，不是 tokenizer 精确 Token 硬预算；RuntimeOptions.max_tokens 在当前 Pi 集成中只是实验元数据。系统已记录每次 ModelAttempt 的 Token、缓存、时延和成本，但还没有在在线 Gateway 中实现“累计 Token 达阈值就强制停止”的确定性 Case 级硬门禁。
 
@@ -1061,7 +1061,7 @@ false certainty 的典型定义：模型输出 HIGH，但 Claim 不是全部可�
 
 当前已有两类真实模型证据，但都不是“假设策略优越性”的正式消融结论：
 
-- 8 个真实 GitHub PR 各运行一次 DeepSeek，8/8 completion，人工对 private oracle 评分 75/80（93.75%）。分项为机制归因 32/32、Evidence 引用 19/24、反证与不确定性 16/16、影响边界 8/8。它证明小样本下能做机制归因、处理反证和限制外推；它是单轮人工评分，不能证明多轮稳定性、产品准确率或假设链优于其他链。
+- 更新结果：9 个真实 GitHub PR、每个 3 轮，共 27 轮真实 `deepseek-v4-flash` Provider completion。第二轮结构门禁 `27/27 PASS`，完整 canonical Evidence ID/hash 绑定 `27/27`；按机制归因、Evidence 引用、反证/不确定性、影响边界四项标准做非双盲人工粗评约 9.2–9.6/10（约 9.3/10）。它证明在给定 PR Projection 下的机制归因、证据绑定、校准拒答和范围控制能力较强且重复较稳定；不是双盲 holdout，也不能证明通用 RCA 准确率、动态 telemetry RCA 或生产自治。
 - 1 条真实 Pi 未知拓扑调查得到 PASS：从一个 client PID 发现 server，形成 2 个节点、1 条依赖边，双端复核，最终因覆盖不足提交 PARTIALLY_CONFIRMED/abstention，没有把通信关系冒充因果根因。它证明异步采集、Evidence 绑定、边界控制和拒绝错误闭环能工作；它不构成策略间统计对比。
 
 仓库已经具备两套对比基础设施，但当前没有可用于宣称优势的正式多臂报告：
@@ -1253,8 +1253,8 @@ Case、Task、Evidence 在 Server 数据库中；Wakeup 可重排队，Session �
 ### Q-002：假设驱动是有效设计还是额外负担？是否已有数据和多链路对比？
 
 - 日期：2026-08-22
-- 结论：假设在当前系统中是受约束的可证伪调查状态，不是事实或根因权威。已有 8 个真实 PR 单轮评测和 1 条真实 Pi 未知拓扑闭环，证明链路可完成、可引用反证并能在证据不足时拒绝因果确认；它们没有构成假设策略相对其他策略的正式消融。
-- 已有数据：真实 PR 为 8/8 completed、人工评分 75/80；未知拓扑为 PASS，并以 PARTIALLY_CONFIRMED 和明确 abstention 收尾。
+- 结论：假设在当前系统中是受约束的可证伪调查状态，不是事实或根因权威。新版 9×3 PR 矩阵和 1 条真实 Pi 未知拓扑闭环证明链路可完成、可引用反证并能在证据不足时拒绝因果确认；它们没有构成假设策略相对其他策略的正式消融。
+- 已有数据：新版真实 PR 矩阵为 27/27 completed，第二轮完整 Evidence 引用为 27/27，非双盲人工粗评约 9.2–9.6/10；未知拓扑链路仍以 PASS、PARTIALLY_CONFIRMED 和明确 abstention 收尾。旧的 8 PR/75/80 结果保留为历史基线。
 - 多链路能力：代码定义六种策略矩阵以及 B0-B5/M1-M2/H1/S1 对照臂，但当前没有至少 30 个独立场景、同预算、多次重复的持久化多臂报告。离线策略矩阵明确不应用被选策略，不能冒充策略准确率。
 - 证据：reports/evaluation/verified-20260821.md、scripts/run_agent_strategy_matrix.py、benchmarks/agent_experiments/matrix.json、benchmarks/collector_agent_v1/manifest.json、scripts/run_collector_agent_eval.py、server/app/diagnosis/investigation_state.py、server/app/v6_routes.py。
 - 当前实现/目标设计/兼容路径：生产只公开 hybrid；其他策略是 experiment-only。目标是完成固定模型/Prompt/目录/预算的配对重复实验；旧 rules-first 只作为控制组。
@@ -1265,7 +1265,7 @@ Case、Task、Evidence 在 Server 数据库中；Wakeup 可重排队，Session �
 - 日期：2026-08-22
 - 结论：没有正式多链路对比，削弱的是“某种 Agent 策略更准确/更省成本”的产品效果结论，不等于项目没有工程价值。当前项目价值主要在于把不受控的 LLM 诊断问题，收敛为可执行、可审计、可恢复、可拒答的 Evidence-native 服务；真实运行已经验证了这条基础设施和治理闭环。
 - 已被真实链路支持的价值：Pi Sidecar 与业务真源解耦；模型不能越权执行；采集经过 Supervisor/Worker 双重校验；长任务用 Artifact、Evidence、Outbox/Wakeup 恢复；Claim 按 projection_hash、field_path 和 predicate 验证；依赖关系与因果关系分离；证据不足时提交 PARTIALLY_CONFIRMED/INSUFFICIENT_EVIDENCE，而不是伪造根因。
-- 已有真实证据：8 个真实 GitHub PR 单轮 DeepSeek 运行全部完成，人工评分 75/80；真实未知拓扑 Pi 链路从一个 client PID 发现 server 并双端复核，因平台覆盖不足主动降级，未把通信依赖冒充因果根因。
+- 已有真实证据：9 个真实 GitHub PR 各 3 轮的 DeepSeek 运行全部完成，第二轮 27/27 轮通过结构和引用门禁，人工粗评约 9.2–9.6/10；真实未知拓扑 Pi 链路从一个 client PID 发现 server 并双端复核，因平台覆盖不足主动降级，未把通信依赖冒充因果根因。
 - 尚未被证明的价值：假设驱动相对 rule_tree、evidence_first、one_shot 或其他 Agent 框架的准确率、成本、时延优势；这部分必须通过固定模型/工具/预算、多场景、多次重复的配对实验回答。
 - 面试回答口径：如果问题是“这个架构有没有价值”，回答有，价值在可信执行和证据治理；如果问题是“假设策略是否优于基线”，回答尚无统计结论，不能越界宣称。把两种命题分开，是比编造准确率更可靠的工程判断。
 - 下一步产品化实验：先以同一 Evidence/Collector/Verifier 做策略消融，报告质量、错误确认、工具成本和安全硬门禁；若假设链没有显著净收益，就保留 Hypothesis/Gap 作为可选审计状态，收缩在线编排，不让它成为无证明的复杂度。

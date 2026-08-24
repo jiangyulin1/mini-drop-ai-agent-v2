@@ -18,12 +18,27 @@
 新版 9x3 PR Evidence-native 稳定性矩阵已在同一 JYL active release 上完成：
 
 - 公开数据与 oracle：`reports/eval/github-pr-attribution-9x3/`
-- 27 轮 live 结果：`reports/eval/github-pr-attribution-9x3/live/round-results.jsonl`
-- 结构门禁：`reports/eval/github-pr-attribution-9x3/live/structural-score.json`
+- 第一轮 live 结果：`reports/eval/github-pr-attribution-9x3/live/round-results.jsonl`
+- 第一轮结构门禁：`reports/eval/github-pr-attribution-9x3/live/structural-score.json`
 - 结果：9 个真实 GitHub PR、每个 3 轮，`27/27 completed`，结构门禁 `PASS`。
 - 每轮均使用真实 `deepseek-v4-flash` Provider completion；三份 Projection 每 Case 只导入一次，后续轮次复用 canonical Evidence ID/hash。
 - 该矩阵的 `simulated_runtime` 明确标记为 synthetic wiring probe，不代表真实生产 telemetry；模型机制、反证和影响边界仍需要人工/Oracle 质量评分。
 - 首轮还发现答案层引用缺口：只有 `8/27` 轮完整写出三份 canonical Evidence ID；收紧 prompt 后第二轮结果在 `reports/eval/github-pr-attribution-9x3/live-v2/`，完整 ID/hash 引用达到 `27/27`，结构门禁仍为 `PASS`。
+- 第二轮最终结果：`reports/eval/github-pr-attribution-9x3/live-v2/round-results.jsonl`；结构结果：`reports/eval/github-pr-attribution-9x3/live-v2/structural-score.json`。
+
+### 9x3 人工质量粗评（非双盲）
+
+结构 scorer 的 `quality_score` 保持为空，因为它只验证链路和策略门禁，不从关键词推断 RCA 质量。基于第二轮全部 9 案例、27 轮答案与本地 private oracle 的直接人工判断，按每轮 10 分标准给出以下粗评：
+
+| 质量维度 | 粗评 | 判断 |
+|---|---:|---|
+| 机制归因 | 3.7–3.9 / 4 | 能定位具体文件、函数、数据结构和机制链；少数地方依赖 PR 作者自述，未被独立运行时证据闭环。 |
+| Evidence 引用 | 3.0 / 3 | 第二轮 `27/27` 轮完整绑定三份 canonical `evidence_id` 和 `projection_hash`。 |
+| 反证与不确定性 | 1.7–1.9 / 2 | 能处理负向 control、revert 和 benchmark pending，并明确 abstain；仍需限制 synthetic 信号的外推。 |
+| 影响边界 | 0.8–0.95 / 1 | 通常能区分 PR 局部机制、模拟信号和生产效果，少量答案有重复和措辞漂移。 |
+| **综合** | **9.2–9.6 / 10** | **当前可用的非双盲人工能力估计约 9.3/10。** |
+
+这表示约 `25–26/27` 轮达到高质量水平，不表示真实生产 RCA 准确率为 93%，也不表示模型具备自动修复或生产自治能力。代表性强项包括 Grafana workqueue 去重失效、Redis active-expire starvation、Kubernetes 不确定 revert，以及 Grafana detached-DOM 负向证据案例。
 
 Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分支 Evidence 可见性、`tool_execution_start/end` 审计、`finish_investigation` 完成、分支 Workspace 中存在 Evidence-bound Conclusion。最新结论为 `INSUFFICIENT_EVIDENCE`，引用当前分支唯一可见 Evidence；这表示系统正确拒答，不表示模型已经证明根因。
 
@@ -35,6 +50,7 @@ Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分�
 - Pi 使用真实 DeepSeek 模型调用只读工具、采集提案、Evidence 分析和 `finish_investigation`，没有把普通文本当作终态。
 - JYL Web 入口为 `https://<control-address>:80`。无 Key 的 `/api/livez` 为健康白名单；带 Key 的 `/api/agents` 和 `/api/readyz` 通过认证。默认 443 属于另一套 cloud Compose，不作为 JYL 评测入口。
 - 9x3 live runner 的策略为 `READ_ONLY` + `deny_write` + `ANSWER_ONLY`；27 轮均记录 provider attempt、tool start/end 和 Evidence 引用，未发送 raw pack。
+- 在给定 PR/diff/讨论和 Evidence Projection 的条件下，机制级代码归因、字段级证据引用、负向证据处理和影响范围约束已经达到高水平且三轮重复较稳定。
 
 ## 尚未宣称的能力
 
@@ -42,6 +58,8 @@ Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分�
 - 通用多支持集真值维护、自动选择准确祖先的局部回溯。
 - 自动修复、生产级公网信任证书和模型准确率基准。
 - 9x3 结构门禁通过不等于通用 RCA 准确率通过；质量评分必须单独按 oracle 检查机制、反证、不确定性和影响边界。
+- 本矩阵不是双盲 holdout：素材来自已知公开 PR，模型可能利用标题、diff 和讨论上下文；因此不能外推为通用根因定位率。
+- `simulated_runtime` 是合成、低规模的 wiring probe，不是真实故障日志、指标、拓扑或修复后回归验证；动态 RCA、拓扑发现、故障恢复、自动修复和生产自治仍未被本轮证明。
 - 评测完成后已将 JYL `MINI_DROP_EVAL_IMPORT_ENABLED` 恢复为 `0`，并清空临时 import token。
 
 ## 操作注意
