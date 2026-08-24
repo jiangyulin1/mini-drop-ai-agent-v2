@@ -24,7 +24,7 @@ Example::
     python scripts/run_github_pr_attribution_eval.py --offline \
         --output-dir reports/eval/github-pr-attribution-20260821
     python scripts/run_github_pr_attribution_eval.py --offline --low-bandwidth \
-        --output-dir reports/eval/github-pr-attribution-20260821
+        --rounds 3 --output-dir reports/eval/github-pr-attribution-9x3
 
 The report is intentionally useful even when live execution is blocked.  In
 that situation ``real_ai_score`` remains null and ``synthetic_evidence_check``
@@ -502,6 +502,35 @@ class GitHubFetcher:
 # The expected refs are only used for reproducibility checks.  They are not
 # written to public packs or sent to a provider.
 CASE_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "case_id": "prometheus-19393",
+        "repo": "prometheus/prometheus",
+        "number": 19393,
+        "related_issues": [],
+        "expected_state": "open",
+        "expected_refs": {
+            "base": "2b2c984026ab86d22d9396aafe35ad77a37b4b14",
+            "head": "2ca670a74baf9c672b1ce2d9d94f926704b0290a",
+            "merge": None
+        },
+        "oracle": {
+            "expected_verdict": "candidate_text_lexer_hotspot",
+            "expected_location": "self",
+            "expected_domain": "cpu",
+            "expected_mechanism": "the text format lexer spends avoidable work on tokenization and can be optimized at the parser boundary",
+            "required_evidence_kinds": ["pr_core", "external_evidence", "simulated_runtime"],
+            "counterevidence": "The PR is a WIP performance proposal; without a reproducible benchmark the runtime impact must remain qualified.",
+            "abstention_required": False
+        },
+        "runtime": {
+            "signals": [
+                {"name": "lexer_parse_p95_ms", "unit": "ms", "samples": [2.8, 2.1, 1.9]},
+                {"name": "tokens_per_second", "unit": "tokens_per_second", "samples": [41000, 56000, 61000]},
+                {"name": "benchmark_reproduction", "unit": "qualitative", "samples": ["pending", "pending", "pending"]}
+            ],
+            "evaluation_focus": "Identify the lexer boundary and keep the performance claim qualified because the PR is WIP and benchmark confirmation is pending."
+        }
+    },
     {
         "case_id": "grafana-123359",
         "repo": "grafana/grafana",
@@ -1995,6 +2024,7 @@ def write_feedback_cn(
     except (OSError, ValueError, json.JSONDecodeError):
         projection_manifest = {}
     focus = {
+        "prometheus-19393": "识别 text format lexer 的 CPU 优化边界；这是 WIP，必须保留 benchmark 未确认的不确定性。",
         "grafana-123359": "重点验证 workqueue 指针键导致去重失效和 Repository retention，不接受只写“内存泄漏”。",
         "prometheus-19412": "区分 oversized backing array 保留与传统泄漏，并引用 benchmark 未复现回归的边界。",
         "redis-15427": "验证 CPU 可以空闲但 expired backlog 仍增长，根因应是 activeExpireCycle 局部窗口偏差。",
@@ -2082,7 +2112,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--output-dir",
         help="Report directory; defaults to reports/eval/github-pr-attribution-<timestamp>.",
     )
-    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers (default: all eight).")
+    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers (default: all nine).")
     parser.add_argument("--offline", action="store_true", help="Use only cached responses; never access GitHub or control URLs.")
     parser.add_argument("--refresh", action="store_true", help="Ignore cached response bodies and refetch GitHub data.")
     parser.add_argument("--timeout", type=float, default=30.0, help="Per-request GitHub timeout in seconds.")
@@ -2098,7 +2128,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--rounds",
         type=int,
         default=1,
-        help="Manual/runtime evaluation rounds represented in the low-bandwidth plan (default: 1 smoke round; use 3 for stability).",
+        help="Manual/runtime evaluation rounds represented in the low-bandwidth plan (default: 1 smoke; formal 9x3 uses 3).",
     )
     parser.add_argument(
         "--case-map",

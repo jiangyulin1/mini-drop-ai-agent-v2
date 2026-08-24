@@ -1,0 +1,32 @@
+{
+  "schema": "mini-drop.evidence-native-9x3.contract.v1",
+  "case_count": 9,
+  "rounds_per_case": 3,
+  "expected_round_count": 27,
+  "source_policy": "pinned_public_github_pr_projection",
+  "runtime_pack_policy": "synthetic_wiring_probe_only",
+  "model_policy": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "fresh_session_per_round": true,
+    "side_effect_policy": "READ_ONLY",
+    "requested_disposition": "ANSWER_ONLY",
+    "write_tools_allowed": false
+  },
+  "required_round_assertions": [
+    "completed_assistant_answer",
+    "provider_model_attempt",
+    "runtime_event_audit",
+    "canonical_evidence_ids",
+    "projection_hashes",
+    "answer_citation_binding",
+    "no_raw_pack_in_turn",
+    "no_write_tool_policy"
+  ],
+  "quality_dimensions": [
+    "mechanism_attribution",
+    "evidence_citation",
+    "counterevidence_and_uncertainty",
+    "impact_boundary"
+  ]
+}

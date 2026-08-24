@@ -15,6 +15,16 @@
 - `reports/evaluation/evidence-native-vm/run-20260824T170157Z.json`
 - `reports/evaluation/evidence-native-vm/run-pi-20260824T170449Z.json`
 
+新版 9x3 PR Evidence-native 稳定性矩阵已在同一 JYL active release 上完成：
+
+- 公开数据与 oracle：`reports/eval/github-pr-attribution-9x3/`
+- 27 轮 live 结果：`reports/eval/github-pr-attribution-9x3/live/round-results.jsonl`
+- 结构门禁：`reports/eval/github-pr-attribution-9x3/live/structural-score.json`
+- 结果：9 个真实 GitHub PR、每个 3 轮，`27/27 completed`，结构门禁 `PASS`。
+- 每轮均使用真实 `deepseek-v4-flash` Provider completion；三份 Projection 每 Case 只导入一次，后续轮次复用 canonical Evidence ID/hash。
+- 该矩阵的 `simulated_runtime` 明确标记为 synthetic wiring probe，不代表真实生产 telemetry；模型机制、反证和影响边界仍需要人工/Oracle 质量评分。
+- 首轮还发现答案层引用缺口：只有 `8/27` 轮完整写出三份 canonical Evidence ID；收紧 prompt 后第二轮结果在 `reports/eval/github-pr-attribution-9x3/live-v2/`，完整 ID/hash 引用达到 `27/27`，结构门禁仍为 `PASS`。
+
 Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分支 Evidence 可见性、`tool_execution_start/end` 审计、`finish_investigation` 完成、分支 Workspace 中存在 Evidence-bound Conclusion。最新结论为 `INSUFFICIENT_EVIDENCE`，引用当前分支唯一可见 Evidence；这表示系统正确拒答，不表示模型已经证明根因。
 
 ## 已验证能力
@@ -24,12 +34,15 @@ Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分�
 - A 分支排除 Evidence 后生成 `RECHECK_REQUIRED` revision，同时保留历史结论；B 分支仍保持原结论和 revision。
 - Pi 使用真实 DeepSeek 模型调用只读工具、采集提案、Evidence 分析和 `finish_investigation`，没有把普通文本当作终态。
 - JYL Web 入口为 `https://<control-address>:80`。无 Key 的 `/api/livez` 为健康白名单；带 Key 的 `/api/agents` 和 `/api/readyz` 通过认证。默认 443 属于另一套 cloud Compose，不作为 JYL 评测入口。
+- 9x3 live runner 的策略为 `READ_ONLY` + `deny_write` + `ANSWER_ONLY`；27 轮均记录 provider attempt、tool start/end 和 Evidence 引用，未发送 raw pack。
 
 ## 尚未宣称的能力
 
 - 自动证明任意业务根因或完整拓扑 RCA。
 - 通用多支持集真值维护、自动选择准确祖先的局部回溯。
 - 自动修复、生产级公网信任证书和模型准确率基准。
+- 9x3 结构门禁通过不等于通用 RCA 准确率通过；质量评分必须单独按 oracle 检查机制、反证、不确定性和影响边界。
+- 评测完成后已将 JYL `MINI_DROP_EVAL_IMPORT_ENABLED` 恢复为 `0`，并清空临时 import token。
 
 ## 操作注意
 

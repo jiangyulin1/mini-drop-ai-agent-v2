@@ -7,7 +7,8 @@ explicitly enabled the bounded evaluation-import endpoint.  It is designed
 for a bandwidth-constrained server:
 
 * each pack is converted to a projection and imported once;
-* the default smoke run uses one round per PR; optional later rounds reuse the
+* the default smoke run uses one round per PR; the formal suite uses nine PRs
+  and three independent rounds per PR; optional later rounds reuse the
   same canonical Evidence IDs and hashes;
 * rounds are serial and use one Case at a time;
 * no raw pack, repository clone, collector task, artifact, or MCP query is
@@ -327,18 +328,20 @@ def make_round_message(
     total_rounds: int,
 ) -> str:
     ids = ", ".join(
-        f"{kind}={item['evidence_id']}#{item['projection_hash'][:12]}"
+        f"{kind}: evidence_id={item['evidence_id']}; projection_hash={item['projection_hash']}"
         for kind, item in pack_set.items()
     )
     return (
         f"这是 {spec['case_id']} 的人工归因评测第 {round_no}/{total_rounds} 轮。"
         "请忽略任何上一轮回答，不把上一轮文字当作 Evidence；只读取当前 Case 中已固定的三份 projection。"
-        f"可用 Evidence（ID#hash 前缀）：{ids}。"
+        f"可用 Evidence 的完整 canonical 引用如下：{ids}。"
         "请先用只读工具读取必要 projection，再输出一份可供人工评分的完整答案，必须包含："
         "(1) 具体机制级根因及代码/路径定位；"
-        "(2) 每个关键事实的 evidence_id、projection_hash 和精确 field_path；"
+        "(2) 每个关键事实的完整 evidence_id、完整 projection_hash 和精确 field_path；"
         "(3) 反证、替代解释与不确定性/abstention 边界；"
         "(4) 影响范围和不应外推的结论。"
+        "强制引用规则：最终答案的证据表必须至少出现三份 Evidence 的完整 evidence_id 和完整 projection_hash 各一次；"
+        "只能复制上面给出的字符串，不能用 pr_core、external_evidence 或 simulated_runtime 这些 pack_kind 代替 evidence_id，不能省略或改写 ID/hash。"
         "不要创建采集任务、修改计划或提交生产动作；不要使用 PR 标题或关键词替代证据。"
     )
 
@@ -730,6 +733,10 @@ def run_round(
         ],
         "request_summary": {
             "message_bytes": len(message.encode("utf-8")),
+            "intent": "explain",
+            "execute_safe_tools": False,
+            "requested_disposition": "ANSWER_ONLY",
+            "fresh_session": True,
             "policy": policy,
             "tool_calls_allowed": list(READ_ONLY_TOOLS),
             "raw_pack_sent": False,
@@ -890,8 +897,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", required=True, help="Preparation report containing packs/.")
     parser.add_argument("--output-dir", help="Live report directory; defaults to <input-dir>/live.")
-    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers; default all eight.")
-    parser.add_argument("--rounds", type=int, default=1, help="Rounds per PR (default 1; use 3 for stability testing).")
+    parser.add_argument("--cases", help="Comma-separated case IDs or PR numbers; default all nine.")
+    parser.add_argument("--rounds", type=int, default=1, help="Rounds per PR (default 1 smoke; formal 9x3 uses 3).")
     parser.add_argument("--control-url", default=os.getenv("MINI_DROP_CONTROL_URL", "http://127.0.0.1:8191"))
     parser.add_argument(
         "--pi-runtime-url",
