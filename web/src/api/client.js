@@ -237,6 +237,10 @@ export function listAgents() {
   return api.get("/agents").then(itemsOf);
 }
 
+export function setAgentCollectionMode(agentId, enabled) {
+  return api.post(`/agents/${encodeURIComponent(agentId)}/collection-mode`, { enabled });
+}
+
 /** 在目标 Worker 上扫描进程，返回可选择的诊断目标候选。
  *
  * 这是“选进程而不是填 PID”的关键接口：

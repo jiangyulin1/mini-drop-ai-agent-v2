@@ -3647,6 +3647,9 @@ class SqlRepository(SqlRepositoryV6Mixin):
             agent.last_heartbeat_at = now_utc()
             agent.updated_at = now_utc()
 
+            if not agent.collection_enabled:
+                return None
+
             dispatch_time = now_utc()
             expired_query = (
                 session.query(TaskModel)
@@ -3720,6 +3723,22 @@ class SqlRepository(SqlRepositoryV6Mixin):
             )
             task.status = TaskStatus.RUNNING.value
             return task
+
+    def set_agent_collection_enabled(self, agent_id: str, enabled: bool) -> AgentModel | None:
+        """Pause/resume new task dispatch without stopping the Agent heartbeat."""
+        with self._write_session() as session:
+            agent = session.get(AgentModel, agent_id)
+            if agent is None:
+                return None
+            agent.collection_enabled = bool(enabled)
+            agent.updated_at = now_utc()
+            self._write_audit(
+                session,
+                "AGENT_COLLECTION_ENABLED" if enabled else "AGENT_COLLECTION_PAUSED",
+                agent_id,
+                f"{agent_id} {'恢复' if enabled else '暂停'}接收新采集任务",
+            )
+            return agent
 
     def heartbeat_only(self, agent_id: str, ip_addr: str) -> None:
         """Update heartbeat timestamp without dispatching a new task."""

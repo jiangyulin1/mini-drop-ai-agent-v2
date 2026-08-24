@@ -20,6 +20,7 @@ import EvidenceDrawer from "../../components/EvidenceDrawer";
 import ExplainabilityDrawer from "../../components/ExplainabilityDrawer";
 import { evidenceTrust, planStatus, riskCode, riskLevel } from "../../utils/opsMappings";
 import "./CanonicalCaseWorkspace.css";
+import { formatBeijingDateTime } from "../../utils/time";
 
 function array(value) { return Array.isArray(value) ? value : value?.items || []; }
 function count(value) { return array(value).length; }
@@ -128,9 +129,7 @@ function shortIdentifier(value) {
 }
 
 function formatDateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  return value ? formatBeijingDateTime(value) : "-";
 }
 
 function dependencyNodeLabel(node) {

@@ -1,4 +1,5 @@
 import { EVENT_TYPE } from "../../utils/opsMappings";
+import { formatBeijingTime } from "../../utils/time";
 
 export const TERMINAL_DIAGNOSIS = new Set([
   "COMPLETED",
@@ -100,12 +101,7 @@ export const RELATION_OPTIONS = [
 ];
 
 export function formatTime(value, withDate = false) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return withDate
-    ? parsed.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-    : parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatBeijingTime(value, { withDate });
 }
 
 export function itemId(item) {

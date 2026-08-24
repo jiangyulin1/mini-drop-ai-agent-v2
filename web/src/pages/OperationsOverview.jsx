@@ -8,14 +8,17 @@ import {
   Col,
   Collapse,
   Empty,
+  Input,
   Progress,
   Row,
   Skeleton,
   Space,
+  Switch,
   Tag,
   Timeline,
   Tooltip,
   Typography,
+  message,
 } from "antd";
 import {
   AlertOutlined,
@@ -39,11 +42,13 @@ import {
   listIncidentCases,
   listSystemControls,
   listTasks,
+  setAgentCollectionMode,
 } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import useSSE from "../hooks/useSSE";
 import { caseStatus, eventType, isActiveCase } from "../utils/opsMappings";
 import styles from "./OperationsOverview.module.css";
+import { formatBeijingDateTime, relativeBeijingTime } from "../utils/time";
 
 const CHECK_LABELS = {
   server: "Server",
@@ -72,9 +77,8 @@ function switchEnabled(value) {
 function RelativeTime({ value }) {
   if (!value) return <span>—</span>;
   const time = new Date(value);
-  const seconds = Math.max(0, Math.floor((Date.now() - time.getTime()) / 1000));
-  const relative = seconds < 60 ? `${seconds} 秒前` : seconds < 3600 ? `${Math.floor(seconds / 60)} 分钟前` : `${Math.floor(seconds / 3600)} 小时前`;
-  return <time dateTime={time.toISOString()} title={time.toLocaleString()}>{relative}</time>;
+  const relative = relativeBeijingTime(value);
+  return <time dateTime={time.toISOString()} title={formatBeijingDateTime(value)}>{relative}</time>;
 }
 
 function HealthCheck({ label, healthy, detail }) {
@@ -115,6 +119,8 @@ export default function OperationsOverview() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [activeCaseQuery, setActiveCaseQuery] = useState("");
+  const [collectionUpdating, setCollectionUpdating] = useState("");
   const [data, setData] = useState({ health: null, runtime: null, controls: [], agents: [], cases: [], tasks: [], logs: [] });
 
   const load = useCallback(async ({ quiet = false } = {}) => {
@@ -159,8 +165,36 @@ export default function OperationsOverview() {
     const failed = data.tasks.filter((task) => task.status === "FAILED");
     const pending = data.tasks.filter((task) => task.status === "PENDING").length;
     const running = data.tasks.filter((task) => ["RUNNING", "UPLOADING", "ANALYZING"].includes(task.status)).length;
-    return { effectiveWorkers, online, activeCases, waitingApproval, failed, pending, running };
-  }, [data]);
+    const normalizedQuery = activeCaseQuery.trim().toLowerCase();
+    const searchable = (item) => [
+      item.title,
+      item.problem_description,
+      item.current_finding?.statement,
+      item.summary?.current_finding?.statement,
+      item.environment,
+      item.service_id,
+      item.target_scope?.service_id,
+      item.state,
+      item.case_id,
+    ].filter(Boolean).join(" ").toLowerCase();
+    const filteredActiveCases = normalizedQuery ? activeCases.filter(searchable) : activeCases;
+    return { effectiveWorkers, online, activeCases, filteredActiveCases, waitingApproval, failed, pending, running };
+  }, [activeCaseQuery, data]);
+
+  const toggleAgentCollection = useCallback(async (agent, enabled) => {
+    setCollectionUpdating(agent.id);
+    setError(null);
+    try {
+      const updated = await setAgentCollectionMode(agent.id, enabled);
+      setData((current) => ({ ...current, agents: current.agents.map((item) => item.id === agent.id ? { ...item, ...updated, collection_enabled: enabled } : item) }));
+      message.success(`${agent.hostname || agent.id} 已${enabled ? "恢复" : "暂停"}接收新采集任务`);
+    } catch (nextError) {
+      setError(nextError);
+      message.error(nextError.message);
+    } finally {
+      setCollectionUpdating("");
+    }
+  }, []);
 
   if (loading) {
     return <div className={styles.page}><Skeleton active paragraph={{ rows: 16 }} /></div>;
@@ -226,18 +260,30 @@ export default function OperationsOverview() {
             <CapabilityFlag label="MCP" value={flags.agent_mcp_enabled} help={FLAG_HELP.agent_mcp_enabled} />
             <CapabilityFlag label="Skills" value={flags.agent_skills_enabled} help={FLAG_HELP.agent_skills_enabled} />
             <CapabilityFlag label="Cluster Fanout" value={flags.agent_cluster_fanout_enabled} help={FLAG_HELP.agent_cluster_fanout_enabled} />
+            <div className={styles.workerDispatchList} aria-label="Worker 采集派发控制">
+              <div className={styles.workerDispatchHeading}><strong>Worker 接收新采集</strong><small>暂停不会影响心跳和正在执行的任务</small></div>
+              {derived.effectiveWorkers.length ? derived.effectiveWorkers.map((agent) => {
+                const enabled = agent.collection_enabled !== false;
+                return <div className={styles.workerDispatchRow} key={agent.id}>
+                  <span className={styles.workerDispatchIdentity}><span className={agent.status === "ONLINE" ? styles.dispatchOnline : styles.dispatchOffline} /><strong>{agent.hostname || agent.id}</strong><small>{agent.status === "ONLINE" ? "在线" : "离线"} · {enabled ? "可派发" : "已暂停派发"}</small></span>
+                  <Switch size="small" checked={enabled} loading={collectionUpdating === agent.id} disabled={agent.status !== "ONLINE" || collectionUpdating !== ""} onChange={(checked) => void toggleAgentCollection(agent, checked)} checkedChildren="开" unCheckedChildren="停" />
+                </div>;
+              }) : <Typography.Text type="secondary">尚未注册有效 Worker</Typography.Text>}
+            </div>
           </Card>
         </Col>
 
         <Col xs={24} lg={14}>
-          <Card title={<Space><FileSearchOutlined />正在调查</Space>} extra={<Button type="link" onClick={() => navigate("/cases")}>全部 Case <ArrowRightOutlined /></Button>}>
+          <Card title={<Space><FileSearchOutlined />正在调查 <Tag>{derived.activeCases.length}</Tag></Space>} extra={<Space size={8}><Input allowClear size="small" prefix={<FileSearchOutlined />} value={activeCaseQuery} onChange={(event) => setActiveCaseQuery(event.target.value)} placeholder="快速检索 Case" style={{ width: 180 }} /><Button type="link" onClick={() => navigate("/cases")}>全部 Case <ArrowRightOutlined /></Button></Space>}>
             {derived.activeCases.length === 0 ? (
               <Empty description="还没有故障调查。请进入 AI 调查页，在同一工作区描述问题并开始调查。">
                 <Button type="link" onClick={() => navigate("/cases")}>进入 AI 调查 <ArrowRightOutlined /></Button>
               </Empty>
+            ) : derived.filteredActiveCases.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的正在调查 Case" />
             ) : (
-              <div className={styles.caseList}>
-                {derived.activeCases.slice(0, 6).map((item) => {
+              <Collapse ghost defaultActiveKey={["active-cases"]} items={[{ key: "active-cases", label: `调查列表 · ${derived.filteredActiveCases.length} 项`, children: <div className={styles.caseList}>
+                {derived.filteredActiveCases.slice(0, 20).map((item) => {
                   const status = caseStatus(item.state);
                   const finding = item.summary?.current_finding?.statement || item.problem_description;
                   return (
@@ -249,14 +295,14 @@ export default function OperationsOverview() {
                     </button>
                   );
                 })}
-              </div>
+              </div> }]} />
             )}
           </Card>
         </Col>
 
         <Col xs={24} lg={10}>
           <Card title={<Space><AlertOutlined />需要我处理</Space>} extra={<Tag color={derived.waitingApproval.length ? "orange" : "default"}>{derived.waitingApproval.length + derived.effectiveWorkers.filter((a) => a.status !== "ONLINE").length}</Tag>}>
-            <div className={styles.attentionList}>
+            <Collapse ghost defaultActiveKey={["attention"]} items={[{ key: "attention", label: "待处理事项", children: <div className={styles.attentionList}>
               {derived.waitingApproval.map((item) => (
                 <button type="button" key={item.case_id} onClick={() => navigate(`/cases?caseId=${encodeURIComponent(item.case_id)}`)}>
                   <SafetyCertificateOutlined /><span><strong>{item.title}</strong><small>{item.summary?.need_you?.question || "Agent 请求人工审批或补充信息"}</small></span><Tag color="orange">处理</Tag>
@@ -270,7 +316,7 @@ export default function OperationsOverview() {
               {!derived.waitingApproval.length && derived.effectiveWorkers.every((agent) => agent.status === "ONLINE") && (
                 <Alert type="success" showIcon message="当前没有需要人工立即处理的事项" />
               )}
-            </div>
+            </div> }]} />
           </Card>
         </Col>
 

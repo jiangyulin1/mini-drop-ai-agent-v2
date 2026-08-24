@@ -30,6 +30,7 @@ import {
 import { getDiagnosisSession } from "../api/client";
 import EvidenceReference, { EvidenceDetailDrawer } from "./EvidenceReference";
 import styles from "./DiagnosisWorkbench.module.css";
+import { formatBeijingDateTime } from "../utils/time";
 
 const NODE_LABELS = {
   understand_intent: "意图理解",
@@ -84,9 +85,7 @@ const PIPELINE_STATUS_LABELS = {
 };
 
 function formatTime(value) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+  return value ? formatBeijingDateTime(value) : "-";
 }
 
 function formatDuration(start, end) {

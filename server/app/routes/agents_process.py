@@ -6,15 +6,21 @@ import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from server.app.artifact_service import extract_artifact_json
 from server.app.common_utils import status_value
 from server.app.http.dependencies import get_repository_application_service
+from server.app.http.auth import require_role
 from server.app.schemas import APIResponse, CreateTaskRequest
 
 
 router = APIRouter()
 Repository = Annotated[Any, Depends(get_repository_application_service)]
+
+
+class AgentCollectionModeRequest(BaseModel):
+    enabled: bool
 
 # ── Agent（查询面） ────────────────────────────────────────────
 
@@ -40,6 +46,21 @@ def list_agents(
     total = len(all_items)
     page = all_items[offset:offset + limit] if offset < total else []
     return APIResponse(data={"items": page, "total": total, "offset": offset, "limit": limit})
+
+
+@router.post("/api/agents/{agent_id}/collection-mode")
+def set_agent_collection_mode(
+    agent_id: str,
+    payload: AgentCollectionModeRequest,
+    request: Request,
+    repo: Repository,
+) -> APIResponse:
+    """Keep heartbeats alive while pausing/resuming new collection dispatch."""
+    require_role(request, "operator")
+    agent = repo.set_agent_collection_enabled(agent_id, payload.enabled)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent 不存在")
+    return APIResponse(data=repo.as_dict(agent))
 
 
 # ── 进程发现（选择诊断目标用） ────────────────────────────────────

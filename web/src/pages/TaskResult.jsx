@@ -35,6 +35,7 @@ import {
   RobotOutlined,
   StopOutlined,
 } from "@ant-design/icons";
+import { formatBeijingDateTime } from "../utils/time";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   cancelTask,
@@ -983,7 +984,7 @@ export default function TaskResult() {
                   width: 170,
                   render: (value) =>
                     value
-                      ? new Date(value * 1000).toLocaleString()
+                      ? formatBeijingDateTime(new Date(value * 1000))
                       : "-",
                 },
                 {
@@ -992,7 +993,7 @@ export default function TaskResult() {
                   width: 170,
                   render: (value) =>
                     value
-                      ? new Date(value * 1000).toLocaleString()
+                      ? formatBeijingDateTime(new Date(value * 1000))
                       : "-",
                 },
                 {

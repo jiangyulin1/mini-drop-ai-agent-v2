@@ -1,5 +1,6 @@
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -24,6 +25,7 @@ class AgentModel(Base):
     os_info = Column(String(256), default="unknown")
     capabilities = Column(JSON, default=list)
     status = Column(String(16), default="ONLINE")
+    collection_enabled = Column(Boolean, nullable=False, default=True)
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
@@ -37,6 +39,7 @@ class AgentModel(Base):
             "os_info": self.os_info,
             "capabilities": self.capabilities or [],
             "status": self.status,
+            "collection_enabled": bool(self.collection_enabled),
             "last_heartbeat_at": self.last_heartbeat_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -284,5 +287,3 @@ class AuthorizationGrantModel(Base):
 
 
 # ── AI Incident Case 协作层 ─────────────────────────────────────
-
-

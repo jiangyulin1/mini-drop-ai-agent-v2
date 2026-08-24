@@ -44,6 +44,7 @@ class AgentRecord:
     last_heartbeat_at: datetime
     created_at: datetime
     updated_at: datetime
+    collection_enabled: bool = True
 
 
 @dataclass
@@ -129,6 +130,7 @@ class InMemoryRepository:
                 os_info=os_info,
                 capabilities=caps,
                 status="ONLINE",
+                collection_enabled=existing.collection_enabled if existing else True,
                 last_heartbeat_at=timestamp,
                 created_at=existing.created_at if existing else timestamp,
                 updated_at=timestamp,
@@ -154,6 +156,9 @@ class InMemoryRepository:
             agent.status = "ONLINE"
             agent.last_heartbeat_at = now_utc()
             agent.updated_at = now_utc()
+
+            if not agent.collection_enabled:
+                return None
 
             # 从该 IP 的任务队列取下一个 PENDING 任务
             queue = self._task_queues.get(ip_addr)
@@ -184,6 +189,20 @@ class InMemoryRepository:
             agent.status = "ONLINE"
             agent.last_heartbeat_at = now_utc()
             agent.updated_at = now_utc()
+
+    def set_agent_collection_enabled(self, agent_id: str, enabled: bool) -> AgentRecord | None:
+        with self._lock:
+            agent = self.agents.get(agent_id)
+            if agent is None:
+                return None
+            agent.collection_enabled = bool(enabled)
+            agent.updated_at = now_utc()
+            self._append_audit(
+                event_type="AGENT_COLLECTION_ENABLED" if enabled else "AGENT_COLLECTION_PAUSED",
+                agent_id=agent_id,
+                message=f"{agent_id} {'恢复' if enabled else '暂停'}接收新采集任务",
+            )
+            return agent
 
     def mark_offline_agents(self, timeout_sec: int = 30) -> list[AgentRecord]:
         """将超时未心跳的 Agent 标记为 OFFLINE。"""

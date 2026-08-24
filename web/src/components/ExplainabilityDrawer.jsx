@@ -1,6 +1,7 @@
 import { Descriptions, Drawer, Empty, List, Space, Tag, Typography } from "antd";
 import { AuditOutlined, BulbOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { riskLevel } from "../utils/opsMappings";
+import { formatBeijingDateTime } from "../utils/time";
 
 function array(value) { return Array.isArray(value) ? value : value ? [value] : []; }
 function text(value, fallback = "未提供") {
@@ -21,7 +22,7 @@ export default function ExplainabilityDrawer({ open, onClose, decision }) {
       {!decision ? <Empty description="选择一项 Agent 决策以查看解释" /> : <Space direction="vertical" size={18} style={{ width: "100%" }}>
         <section><Typography.Text type="secondary">决策结果</Typography.Text><Typography.Title level={4} style={{ margin: "4px 0" }}>{text(item.title || item.statement || item.summary || item.purpose, "Agent 决策")}</Typography.Title><Typography.Paragraph>{text(item.explanation || item.description || item.expected_information, "当前接口没有提供额外自然语言解释。")}</Typography.Paragraph></section>
         <Descriptions size="small" bordered column={1}>
-          <Descriptions.Item label="决策时间">{item.decided_at || item.updated_at || item.created_at ? new Date(item.decided_at || item.updated_at || item.created_at).toLocaleString() : "未提供"}</Descriptions.Item>
+          <Descriptions.Item label="决策时间">{item.decided_at || item.updated_at || item.created_at ? formatBeijingDateTime(item.decided_at || item.updated_at || item.created_at) : "未提供"}</Descriptions.Item>
           <Descriptions.Item label="决策主体">{item.actor_id || item.created_by || item.source || "Mini-Drop Agent"}</Descriptions.Item>
           <Descriptions.Item label="规则 / 策略">{text(item.policy || item.rule || item.priority_source, "服务端白名单与 Case Policy")}</Descriptions.Item>
           <Descriptions.Item label="风险约束"><Tag color={risk.color}>{risk.label}</Tag> {risk.description}</Descriptions.Item>

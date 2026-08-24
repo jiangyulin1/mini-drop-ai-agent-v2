@@ -55,7 +55,7 @@ FROZEN_REPOSITORY_SURFACE = frozenset({
     "record_agent_runtime_turn", "record_audit", "record_case_event",
     "record_model_attempt", "record_rca_feedback", "record_target_signal",
     "record_task_retry", "reclaim_expired_outbox", "recover_dead_outbox", "requeue_runtime_wakeup",
-    "recover_stale_tasks", "register_agent",
+    "recover_stale_tasks", "register_agent", "set_agent_collection_enabled",
     "revoke_authorization_grant", "seal_runtime_wakeup", "set_system_control",
     "mark_outbox_delivered",
     "should_cancel_attempt", "submit_conclusion_revision", "complete_agent_runtime_turn",

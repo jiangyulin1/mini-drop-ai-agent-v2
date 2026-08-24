@@ -4,6 +4,7 @@ import { ReloadOutlined, AuditOutlined, SearchOutlined, FilterOutlined } from "@
 import { listAuditLogs } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import { COLORS, SPACING } from "../theme";
+import { formatBeijingDateTime } from "../utils/time";
 
 const EVENT_COLORS = {
   agent_registered: "green",
@@ -88,7 +89,7 @@ export default function AuditLogs() {
       title: "时间",
       dataIndex: "created_at",
       width: 180,
-      render: (v) => (v ? new Date(v).toLocaleString() : "-"),
+      render: (v) => (v ? formatBeijingDateTime(v) : "-"),
     },
   ];
 

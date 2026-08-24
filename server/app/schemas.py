@@ -130,6 +130,7 @@ class AgentView(BaseModel):
     os_info: str
     capabilities: list[str]
     status: str
+    collection_enabled: bool = True
     last_heartbeat_at: datetime
     created_at: datetime
     updated_at: datetime

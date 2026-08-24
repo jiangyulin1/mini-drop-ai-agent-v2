@@ -21,6 +21,7 @@ vi.mock("../api/client", () => ({
   listIncidentCases: vi.fn(),
   listSystemControls: vi.fn(),
   listTasks: vi.fn(),
+  setAgentCollectionMode: vi.fn(),
 }));
 vi.mock("../hooks/useSSE", () => ({ default: () => ({ connected: false, connectionState: "polling" }) }));
 

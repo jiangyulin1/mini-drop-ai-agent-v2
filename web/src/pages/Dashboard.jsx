@@ -37,6 +37,7 @@ import {
   ThunderboltOutlined,
   WifiOutlined,
 } from "@ant-design/icons";
+import { formatBeijingDateTime, formatBeijingTime } from "../utils/time";
 import { Link, useNavigate } from "react-router-dom";
 import { deleteTask, getTask, getTaskEvents, listAgents, listTasks } from "../api/client";
 import NLPTaskInput from "../components/NLPTaskInput";
@@ -161,7 +162,7 @@ function TaskDetailPanel({ taskId, taskRevision, onDeleted, onAnalyze }) {
             <Tag color={meta.color}>{meta.label}</Tag>
           </div>
           <Typography.Text type="secondary" className={styles.detailMeta}>
-            PID {task.target_pid} · {task.agent_id} · {new Date(task.created_at).toLocaleString()}
+            PID {task.target_pid} · {task.agent_id} · {formatBeijingDateTime(task.created_at)}
           </Typography.Text>
         </div>
         <div className={styles.detailActions}>
@@ -208,7 +209,7 @@ function TaskDetailPanel({ taskId, taskRevision, onDeleted, onAnalyze }) {
               children: (
                 <div className={styles.timelineEvent}>
                   <span>{event.from_status || "—"} → {event.to_status}</span>
-                  <time>{new Date(event.created_at).toLocaleTimeString()}</time>
+                  <time>{formatBeijingTime(event.created_at)}</time>
                   {event.reason && <small title={event.reason}>{event.reason}</small>}
                 </div>
               ),
@@ -548,7 +549,7 @@ export default function Dashboard() {
                     </span>
                     <span className={styles.taskMetaRow}>
                       <small>{meta.label} · PID {task.target_pid}</small>
-                      <time>{new Date(task.created_at).toLocaleString()}</time>
+                      <time>{formatBeijingDateTime(task.created_at)}</time>
                     </span>
                   </button>
                 );

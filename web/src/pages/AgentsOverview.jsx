@@ -5,6 +5,7 @@ import { ApiOutlined, CloudServerOutlined, DatabaseOutlined, GlobalOutlined, Hdd
 import { listAgents } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import styles from "./AgentsOverview.module.css";
+import { formatBeijingDateTime, relativeBeijingTime } from "../utils/time";
 
 const CAPABILITY_GROUPS = [
   ["系统观察", ["sys_metrics", "process_scan", "runtime_snapshot", "log_scan", "connection_probe"]],
@@ -14,13 +15,7 @@ const CAPABILITY_GROUPS = [
 ];
 
 function relative(value) {
-  if (!value) return "无心跳记录";
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "心跳时间无效";
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return `${seconds} 秒前`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
-  return `${Math.floor(seconds / 3600)} 小时前`;
+  return value ? relativeBeijingTime(value) : "无心跳记录";
 }
 
 function ResourceMeter({ label, value, suffix = "%", max = 100 }) {
@@ -46,7 +41,7 @@ function WorkerCard({ agent, onOpen }) {
       <div className={styles.identityGrid}>
         <span><small>IP</small><strong>{agent.ip_addr || "—"}</strong></span>
         <span><small>版本</small><strong>{agent.version || "—"}</strong></span>
-        <span><small>最后心跳</small><Tooltip title={agent.last_heartbeat_at ? new Date(agent.last_heartbeat_at).toLocaleString() : "—"}><strong>{relative(agent.last_heartbeat_at)}</strong></Tooltip></span>
+        <span><small>最后心跳</small><Tooltip title={agent.last_heartbeat_at ? formatBeijingDateTime(agent.last_heartbeat_at) : "—"}><strong>{relative(agent.last_heartbeat_at)}</strong></Tooltip></span>
       </div>
       <div className={styles.resources} aria-label={`${agent.id} Agent 进程开销`}>
         <strong className={styles.sectionLabel}>Agent 进程开销</strong>

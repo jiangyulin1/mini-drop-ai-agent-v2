@@ -27,6 +27,7 @@ import usePolling from "../hooks/usePolling";
 import echarts from "../lib/echarts";
 import { taskDisplayName } from "../utils/taskNames";
 import styles from "./AgentDetail.module.css";
+import { formatBeijingDateTime, formatBeijingTime } from "../utils/time";
 
 function reported(value) {
   return value === null || value === undefined || value === "" ? "未上报" : value;
@@ -126,11 +127,11 @@ export default function AgentDetail() {
     chartInst.current = inst;
 
     const cpuData = cpuHistory.map((p) => [
-      new Date(p.ts).toLocaleTimeString(),
+      formatBeijingTime(p.ts),
       p.value,
     ]);
     const rssData = rssHistory.map((p) => [
-      new Date(p.ts).toLocaleTimeString(),
+      formatBeijingTime(p.ts),
       p.value,
     ]);
 
@@ -222,7 +223,7 @@ export default function AgentDetail() {
       title: "时间",
       dataIndex: "created_at",
       width: 180,
-      render: (v) => (v ? new Date(v).toLocaleString() : "-"),
+      render: (v) => (v ? formatBeijingDateTime(v) : "-"),
     },
   ];
 
@@ -326,12 +327,12 @@ export default function AgentDetail() {
             <Descriptions.Item label="OS">{reported(agent.os_info)}</Descriptions.Item>
             <Descriptions.Item label="最后心跳">
               {agent.last_heartbeat_at
-                ? new Date(agent.last_heartbeat_at).toLocaleString()
+                ? formatBeijingDateTime(agent.last_heartbeat_at)
                 : "未上报"}
             </Descriptions.Item>
             <Descriptions.Item label="注册时间">
               {agent.created_at
-                ? new Date(agent.created_at).toLocaleString()
+                ? formatBeijingDateTime(agent.created_at)
                 : "未上报"}
             </Descriptions.Item>
           </Descriptions>

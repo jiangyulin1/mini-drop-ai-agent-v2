@@ -13,6 +13,7 @@ import {
 } from "../api/client";
 import { formatArtifactSize } from "../utils/evidence";
 import { evidenceTrust } from "../utils/opsMappings";
+import { formatBeijingDateTime } from "../utils/time";
 import ErrorAlert from "./ErrorAlert";
 import styles from "./EvidenceDrawer.module.css";
 
@@ -213,7 +214,7 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
             <Descriptions.Item label="Agent ID">{value(item, "agent_id") || "—"}</Descriptions.Item>
             <Descriptions.Item label="Task ID"><Typography.Text copyable>{value(item, "task_id") || "—"}</Typography.Text></Descriptions.Item>
             <Descriptions.Item label="时间范围">{stringify(value(item, "time_range", "window") || "—")}</Descriptions.Item>
-            <Descriptions.Item label="采集时间">{value(item, "collected_at", "created_at", "observed_at") ? new Date(value(item, "collected_at", "created_at", "observed_at")).toLocaleString() : "—"}</Descriptions.Item>
+            <Descriptions.Item label="采集时间">{value(item, "collected_at", "created_at", "observed_at") ? formatBeijingDateTime(value(item, "collected_at", "created_at", "observed_at")) : "—"}</Descriptions.Item>
             <Descriptions.Item label="Scope Revision">r{value(item, "scope_revision") ?? "—"}</Descriptions.Item>
             <Descriptions.Item label="Review Revision">r{value(item, "review_revision") ?? reviews.length}</Descriptions.Item>
             <Descriptions.Item label="生命周期">{item.lifecycle_status || "ACTIVE"}</Descriptions.Item>
@@ -238,9 +239,9 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
           <Divider orientation="left">数据摘要 / 原始投影</Divider>
           {raw ? <pre className={styles.rawProjection}>{stringify(raw)}</pre> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Evidence 投影未包含可预览原始数据；可通过 Artifact 下载查看。" />}
           <Divider orientation="left"><RobotOutlined /> AI 分析记录</Divider>
-          <List size="small" bordered dataSource={analyses} locale={{ emptyText: "还没有 AI 分析记录" }} renderItem={(analysis) => <List.Item><List.Item.Meta title={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : analysis.status === "FAILED" ? "red" : "processing"}>{analysis.status}</Tag><span>{analysis.mode}</span>{analysis.input_state !== "CURRENT" && <Tag color="warning">{analysis.input_state}</Tag>}</Space>} description={(analysis.facts || []).map((fact) => fact.claim).filter(Boolean).join("；") || (analysis.limitations || []).join("；") || analysis.analysis_run_id} /><time>{analysis.created_at ? new Date(analysis.created_at).toLocaleString() : "—"}</time></List.Item>} />
+          <List size="small" bordered dataSource={analyses} locale={{ emptyText: "还没有 AI 分析记录" }} renderItem={(analysis) => <List.Item><List.Item.Meta title={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : analysis.status === "FAILED" ? "red" : "processing"}>{analysis.status}</Tag><span>{analysis.mode}</span>{analysis.input_state !== "CURRENT" && <Tag color="warning">{analysis.input_state}</Tag>}</Space>} description={(analysis.facts || []).map((fact) => fact.claim).filter(Boolean).join("；") || (analysis.limitations || []).join("；") || analysis.analysis_run_id} /><time>{analysis.created_at ? formatBeijingDateTime(analysis.created_at) : "—"}</time></List.Item>} />
           <Divider orientation="left"><HistoryOutlined /> Review 历史</Divider>
-          <List size="small" bordered dataSource={reviews} locale={{ emptyText: "还没有人工审查记录" }} renderItem={(review) => <List.Item><List.Item.Meta title={<Space><Tag color={evidenceTrust(review.decision).color}>{review.decision}</Tag><span>Revision {review.review_revision || "—"}</span></Space>} description={`${review.reason_code || "NO_REASON_CODE"} · ${review.reason || "未填写说明"}`} /><time>{review.created_at ? new Date(review.created_at).toLocaleString() : "—"}</time></List.Item>} />
+          <List size="small" bordered dataSource={reviews} locale={{ emptyText: "还没有人工审查记录" }} renderItem={(review) => <List.Item><List.Item.Meta title={<Space><Tag color={evidenceTrust(review.decision).color}>{review.decision}</Tag><span>Revision {review.review_revision || "—"}</span></Space>} description={`${review.reason_code || "NO_REASON_CODE"} · ${review.reason || "未填写说明"}`} /><time>{review.created_at ? formatBeijingDateTime(review.created_at) : "—"}</time></List.Item>} />
           <Divider orientation="left">证据链影响与可解释置信度</Divider>
           <List size="small" bordered dataSource={(chainImpact?.chains || []).filter((chain) => (chain.ledger || []).some((item) => item.evidence_id === evidenceId))} locale={{ emptyText: "当前证据尚未进入可解释链路" }} renderItem={(chain) => <List.Item actions={[<Button key="adjust" size="small" onClick={() => { adjustmentForm.resetFields(); setAdjustment(chain); }}>提高置信度</Button>]}><List.Item.Meta title={<Space><Tag color={chain.status === "ACTIVE" ? "green" : chain.status === "INVALIDATED" ? "red" : "gold"}>{chain.status}</Tag><Typography.Text code>{chain.chain_type}:{chain.chain_id}</Typography.Text><span>{Number(chain.computed_confidence || 0).toFixed(2)} → {Number(chain.effective_confidence || 0).toFixed(2)}</span></Space>} description={<Space direction="vertical" size={0}><span>{chain.confidence_reason}</span><span>失效：{(chain.invalidated_evidence_refs || []).join(", ") || "无"}；剩余支持：{(chain.remaining_active_support || []).join(", ") || "无"}</span><Typography.Text type="secondary">模型 {chain.calculation_version} · Revision {chain.revision || 0}</Typography.Text></Space>} /></List.Item>} />
         </Space>}
