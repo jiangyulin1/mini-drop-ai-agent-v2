@@ -981,23 +981,6 @@ export default function AIDiagnosisWorkspace() {
     );
   }
 
-  function investigationSummary() {
-    if (!caseDetail) return null;
-    const finding = currentUnderstanding?.current_finding
-      || caseDetail.summary?.current_finding
-      || diagnosis?.current_finding
-      || {};
-    const hypothesis = currentUnderstanding?.active_hypothesis
-      || caseDetail.summary?.active_hypothesis
-      || diagnosis?.active_hypothesis
-      || finding.statement
-      || "尚未形成可验证假设";
-    const evidenceItems = workspace?.evidence || diagnosis?.evidence || [];
-    const gaps = currentUnderstanding?.evidence_gaps || caseDetail.summary?.evidence_gaps || [];
-    const phase = caseDetail.state === "WAITING_APPROVAL" ? "等待人工决策" : CASE_STATE_META[caseDetail.state]?.label || caseDetail.state || "调查中";
-    return { finding, hypothesis, evidenceCount: evidenceItems.length, gapCount: Array.isArray(gaps) ? gaps.length : 0, phase };
-  }
-
   const selectedNewTarget = targetSessions.find(
     (item) => item.target_session_id === selectedNewTargetId,
   );
@@ -1079,15 +1062,6 @@ export default function AIDiagnosisWorkspace() {
           />
         ) : caseDetail ? (
           <div className={styles.caseWorkspaceShell}>
-            {(() => {
-              const summary = investigationSummary();
-              return summary ? <section className={styles.investigationSummary} aria-label="当前调查摘要">
-                <div className={styles.summaryCell}><span>阶段</span><strong>{summary.phase}</strong><small>{caseDetail.updated_at ? formatTime(caseDetail.updated_at, true) : ""}</small></div>
-                <div className={styles.summaryCell}><span>当前假设</span><strong title={String(summary.hypothesis)}>{String(summary.hypothesis)}</strong><small>{summary.finding.confidence ? `置信度 ${summary.finding.confidence}` : "等待证据验证"}</small></div>
-                <div className={styles.summaryCell}><span>证据与缺口</span><strong>{summary.evidenceCount} 条证据 · {summary.gapCount} 个缺口</strong><small>{summary.gapCount ? "需要继续采集或人工补充" : "当前没有记录的证据缺口"}</small></div>
-                <div className={styles.summaryCell}><span>下一步</span><strong>{proposals.some((item) => item.status === "PROPOSED") ? "处理采集提案" : caseDetail.state === "WAITING_APPROVAL" ? "等待你的决定" : "继续对话推进"}</strong><small>所有结论均保留证据引用和历史版本</small></div>
-              </section> : null;
-            })()}
             <div className={styles.conversationPane}>
               <CaseConversation
               detail={caseDetail}

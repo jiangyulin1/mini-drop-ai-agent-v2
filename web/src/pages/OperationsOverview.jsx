@@ -274,7 +274,7 @@ export default function OperationsOverview() {
         </Col>
 
         <Col xs={24} lg={14}>
-          <Card title={<Space><FileSearchOutlined />正在调查 <Tag>{derived.activeCases.length}</Tag></Space>} extra={<Space size={8}><Input allowClear size="small" prefix={<FileSearchOutlined />} value={activeCaseQuery} onChange={(event) => setActiveCaseQuery(event.target.value)} placeholder="快速检索 Case" style={{ width: 180 }} /><Button type="link" onClick={() => navigate("/cases")}>全部 Case <ArrowRightOutlined /></Button></Space>}>
+          <Card title={<Space><FileSearchOutlined />正在调查 <Typography.Text type="secondary">· {derived.activeCases.length} 项</Typography.Text></Space>} extra={<Input allowClear size="small" prefix={<FileSearchOutlined />} value={activeCaseQuery} onChange={(event) => setActiveCaseQuery(event.target.value)} placeholder="快速检索 Case" style={{ width: 180 }} />}>
             {derived.activeCases.length === 0 ? (
               <Empty description="还没有故障调查。请进入 AI 调查页，在同一工作区描述问题并开始调查。">
                 <Button type="link" onClick={() => navigate("/cases")}>进入 AI 调查 <ArrowRightOutlined /></Button>
@@ -282,7 +282,7 @@ export default function OperationsOverview() {
             ) : derived.filteredActiveCases.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的正在调查 Case" />
             ) : (
-              <Collapse ghost defaultActiveKey={["active-cases"]} items={[{ key: "active-cases", label: `调查列表 · ${derived.filteredActiveCases.length} 项`, children: <div className={styles.caseList}>
+              <Collapse ghost defaultActiveKey={["active-cases"]} items={[{ key: "active-cases", label: `调查列表 · ${derived.filteredActiveCases.length} 项`, children: <div className={styles.caseListViewport}><div className={styles.caseList}>
                 {derived.filteredActiveCases.slice(0, 20).map((item) => {
                   const status = caseStatus(item.state);
                   const finding = item.summary?.current_finding?.statement || item.problem_description;
@@ -295,14 +295,14 @@ export default function OperationsOverview() {
                     </button>
                   );
                 })}
-              </div> }]} />
+              </div></div> }]} />
             )}
           </Card>
         </Col>
 
         <Col xs={24} lg={10}>
           <Card title={<Space><AlertOutlined />需要我处理</Space>} extra={<Tag color={derived.waitingApproval.length ? "orange" : "default"}>{derived.waitingApproval.length + derived.effectiveWorkers.filter((a) => a.status !== "ONLINE").length}</Tag>}>
-            <Collapse ghost defaultActiveKey={["attention"]} items={[{ key: "attention", label: "待处理事项", children: <div className={styles.attentionList}>
+            <Collapse ghost defaultActiveKey={["attention"]} items={[{ key: "attention", label: "待处理事项", children: <div className={styles.attentionListViewport}><div className={styles.attentionList}>
               {derived.waitingApproval.map((item) => (
                 <button type="button" key={item.case_id} onClick={() => navigate(`/cases?caseId=${encodeURIComponent(item.case_id)}`)}>
                   <SafetyCertificateOutlined /><span><strong>{item.title}</strong><small>{item.summary?.need_you?.question || "Agent 请求人工审批或补充信息"}</small></span><Tag color="orange">处理</Tag>
@@ -316,7 +316,7 @@ export default function OperationsOverview() {
               {!derived.waitingApproval.length && derived.effectiveWorkers.every((agent) => agent.status === "ONLINE") && (
                 <Alert type="success" showIcon message="当前没有需要人工立即处理的事项" />
               )}
-            </div> }]} />
+            </div></div> }]} />
           </Card>
         </Col>
 

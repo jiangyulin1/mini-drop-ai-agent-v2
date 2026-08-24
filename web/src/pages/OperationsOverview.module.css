@@ -45,6 +45,8 @@
 .page :global(.ant-collapse-ghost > .ant-collapse-item > .ant-collapse-header) { padding:8px 0; color:var(--app-text-secondary); font-size:11px; }
 .page :global(.ant-collapse-ghost > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box) { padding:0 0 4px; }
 .caseList,.attentionList { display:flex; flex-direction:column; gap:7px; }
+.caseListViewport { max-height:360px; overflow-y:auto; padding-right:4px; overscroll-behavior:contain; }
+.attentionListViewport { max-height:300px; overflow-y:auto; padding-right:4px; overscroll-behavior:contain; }
 .caseRow { display:grid; grid-template-columns:120px minmax(0,1fr) 130px auto; align-items:center; gap:12px; width:100%; padding:10px; border:1px solid transparent; border-bottom-color:var(--app-border); color:inherit; background:transparent; text-align:left; cursor:pointer; }
 .caseRow:hover,.caseRow:focus-visible { border-color:#adc6ff; border-radius:8px; outline:0; background:rgba(22,119,255,.035); }
 .caseState,.caseCopy,.caseProgress { display:flex; min-width:0; flex-direction:column; gap:3px; }

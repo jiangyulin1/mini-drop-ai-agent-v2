@@ -154,23 +154,8 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(500px, 1.05fr) minmax(390px, .95fr);
-  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
-
-.investigationSummary {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  padding: 8px;
-  border-bottom: 1px solid var(--line);
-  background: var(--line);
-}
-.summaryCell { min-width: 0; padding: 8px 10px; background: var(--app-surface); }
-.summaryCell span,.summaryCell small { display: block; color: var(--muted); font-size: 10px; }
-.summaryCell strong { display: block; overflow: hidden; margin: 3px 0; color: var(--app-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.summaryCell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .conversationPane {
   min-width: 0;
@@ -209,8 +194,6 @@
     flex-direction: column;
     overflow: auto;
   }
-
-  .investigationSummary { flex: 0 0 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .conversationPane {
     min-height: 620px;
