@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from mini_drop_contracts import get_collector_spec
+from server.app.agent_runtime.config import agent_cluster_fanout_enabled
 from server.app.agent_runtime.policy import RuntimePolicy, resolve_runtime_policy
 from server.app.diagnosis.cluster_scope import EnvironmentProfile, MembershipSnapshot, TargetResolver
 from server.app.diagnosis.fanout import FanoutCollectionRun, FanoutCollectionService
@@ -132,6 +133,13 @@ class PlanDriver:
         except ValueError as exc:
             return {"step_id": step_id, "status": "REJECTED", "reason": str(exc)}
         if is_cluster_step(schedulable):
+            if not agent_cluster_fanout_enabled():
+                return {
+                    "step_id": step_id,
+                    "status": "CLUSTER_FANOUT_DISABLED",
+                    "reason": "MINI_DROP_AGENT_CLUSTER_FANOUT_ENABLED=0",
+                    "kind": "cluster",
+                }
             return self._dispatch_cluster_step(
                 case_id, tenant_id, schedulable, plan_revision, scope_revision, principal_id,
             )

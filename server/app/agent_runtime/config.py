@@ -80,7 +80,9 @@ def agent_skill_max_per_turn() -> int:
 
 
 def agent_cluster_fanout_enabled() -> bool:
-    return _as_bool("MINI_DROP_AGENT_CLUSTER_FANOUT_ENABLED", "0")
+    # Cluster investigations are the primary deployment mode. Operators can
+    # explicitly disable fanout for a single-node compatibility run.
+    return _as_bool("MINI_DROP_AGENT_CLUSTER_FANOUT_ENABLED", "1")
 
 
 def agent_max_fanout_targets() -> int:

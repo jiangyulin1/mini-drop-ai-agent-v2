@@ -24,7 +24,6 @@ import {
   ClockCircleOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
-  ExperimentOutlined,
   FileSearchOutlined,
   PauseCircleOutlined,
   ReloadOutlined,
@@ -59,7 +58,7 @@ const FLAG_HELP = {
   agent_auto_read_low: "关闭时，Agent 可以提出低风险采集计划，但不会在无人确认时自动创建任务。",
   agent_mcp_enabled: "关闭时，Agent 不会连接外部 MCP 数据源。",
   agent_skills_enabled: "关闭时，Runtime 仅使用内置白名单工具，不加载扩展 Skills。",
-  agent_cluster_fanout_enabled: "关闭时，同一诊断动作不会自动扩散到多个目标节点。",
+  agent_cluster_fanout_enabled: "开启时，声明为集群范围的诊断动作会按冻结的成员快照展开到多个 Worker；关闭只适合单节点兼容运行。",
 };
 
 function asItems(value) {
@@ -86,6 +85,17 @@ function HealthCheck({ label, healthy, detail }) {
       <Tag color={healthy ? "success" : "error"}>{healthy ? "HEALTHY" : "DEGRADED"}</Tag>
     </div>
   );
+}
+
+function dependencyHealthy(check) {
+  return check?.status === "ok" || check?.status === "disabled";
+}
+
+function dependencyDetail(check, kind) {
+  if (check?.status === "disabled") {
+    return kind === "storage" ? "未启用：使用本地 Artifact 目录" : "未启用";
+  }
+  return check?.error_code || "";
 }
 
 function CapabilityFlag({ label, value, help }) {
@@ -178,7 +188,6 @@ export default function OperationsOverview() {
             实时通道：{connected ? "已连接" : connectionState === "reconnecting" ? "正在重连" : "轮询降级"}
           </Tag>
           <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => load({ quiet: true })}>刷新</Button>
-          <Button type="primary" icon={<ExperimentOutlined />} onClick={() => navigate("/cases?new=1")}>新建故障调查</Button>
         </Space>
       </header>
 
@@ -198,8 +207,8 @@ export default function OperationsOverview() {
             <div className={styles.healthGrid}>
               <HealthCheck label={CHECK_LABELS.server} healthy={Boolean(data.health?.healthy)} detail={`v${data.health?.version || "—"}`} />
               <HealthCheck label={CHECK_LABELS.database} healthy={checks.database?.status === "ok"} />
-              <HealthCheck label={CHECK_LABELS.storage} healthy={checks.storage?.status === "ok"} />
-              <HealthCheck label={CHECK_LABELS.analyzer} healthy={analyzerHealthy} detail={`${checks.analyzer?.workers_online ?? 0} worker`} />
+              <HealthCheck label={CHECK_LABELS.storage} healthy={dependencyHealthy(checks.storage)} detail={dependencyDetail(checks.storage, "storage")} />
+              <HealthCheck label={CHECK_LABELS.analyzer} healthy={analyzerHealthy || checks.analyzer?.status === "disabled"} detail={checks.analyzer?.status === "disabled" ? "未启用" : `${checks.analyzer?.workers_online ?? 0} worker`} />
               <HealthCheck label={CHECK_LABELS.runtime} healthy={runtimeHealthy} detail={`${data.runtime?.runtime_type || "—"} ${data.runtime?.runtime_version || ""}`} />
               <HealthCheck label={CHECK_LABELS.worker} healthy={derived.online.length > 0} detail={`${derived.online.length} 在线`} />
             </div>
@@ -223,8 +232,8 @@ export default function OperationsOverview() {
         <Col xs={24} lg={14}>
           <Card title={<Space><FileSearchOutlined />正在调查</Space>} extra={<Button type="link" onClick={() => navigate("/cases")}>全部 Case <ArrowRightOutlined /></Button>}>
             {derived.activeCases.length === 0 ? (
-              <Empty description="还没有故障调查。创建 Case 后，Agent 会基于目标范围和初始证据生成调查计划。">
-                <Button type="primary" onClick={() => navigate("/cases?new=1")}>创建 Case</Button>
+              <Empty description="还没有故障调查。请进入 AI 调查页，在同一工作区描述问题并开始调查。">
+                <Button type="link" onClick={() => navigate("/cases")}>进入 AI 调查 <ArrowRightOutlined /></Button>
               </Empty>
             ) : (
               <div className={styles.caseList}>

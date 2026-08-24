@@ -26,6 +26,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 
+def _load_start_env(environment: dict[str, str]) -> None:
+    """Load simple KEY=VALUE entries so Node sidecars receive the same .env."""
+    env_file = ROOT / ".env"
+    if not env_file.is_file():
+        return
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if not key or key in environment:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        environment[key] = value
+
+
 def cmd_proto():
     """编译 .proto 文件为 Python gRPC stub。"""
     script = ROOT / "scripts" / "compile_proto.py"
@@ -43,6 +65,7 @@ def cmd_server():
 def cmd_start():
     """启动完整本地工作台：Server、Pi sidecar、Analyzer、Agent 和 Web。"""
     env = os.environ.copy()
+    _load_start_env(env)
     # The local workbench uses the Pi path by default.  Set deterministic
     # explicitly when an offline compatibility run is desired.
     env.setdefault("MINI_DROP_AGENT_RUNTIME", "pi")

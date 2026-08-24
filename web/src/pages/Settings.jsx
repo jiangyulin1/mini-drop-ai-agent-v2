@@ -34,6 +34,13 @@ import { COLORS, FONT_SIZES, SPACING } from "../theme";
 
 const CONFIG_DETAIL_PATTERN = /(api[\s_-]?key|token|secret|credential|password|authorization|not[\s_-]?configured|missing)/i;
 
+function dependencyStatus(check) {
+  if (check?.status === "ok") return { color: "green", label: "✓ 已连接" };
+  if (check?.status === "disabled") return { color: "default", label: "未启用" };
+  if (check?.status === "unavailable") return { color: "red", label: "✗ 不可用" };
+  return { color: "default", label: "未知" };
+}
+
 function aiConfigErrorMessage(reason) {
   if (reason?.status === 404) return "AI 服务由部署环境管理";
   const detail = String(reason?.message || "").trim();
@@ -198,13 +205,10 @@ export default function Settings() {
             )}
           </Descriptions.Item>
           <Descriptions.Item label="对象存储">
-            {checks.storage ? (
-              <Tag color={checks.storage.status === "ok" ? "green" : "red"}>
-                {checks.storage.status === "ok" ? "✓ 连通" : "✗ 不可用"}
-              </Tag>
-            ) : (
-              <Tag>未知</Tag>
-            )}
+            {(() => {
+              const status = dependencyStatus(checks.storage);
+              return <Space size={6}><Tag color={status.color}>{status.label}</Tag><Typography.Text type="secondary">Artifact 原始文件的 S3/MinIO 存储</Typography.Text></Space>;
+            })()}
           </Descriptions.Item>
         </Descriptions>
       </Card>
@@ -261,6 +265,13 @@ export default function Settings() {
             showIcon
           />
         )}
+        <Alert
+          style={{ marginTop: 12 }}
+          type={aiConfig?.has_api_key ? "success" : "warning"}
+          showIcon
+          message={aiConfig?.has_api_key ? "Provider 凭据已由 Control 配置" : "Provider 凭据未配置"}
+          description="DeepSeek/API Key 不写入仓库，也不会在前端展示。Control 与 Pi sidecar 必须在服务器环境中分别注入同一 Provider 的允许凭据；浏览器里的 MINI_DROP_API_KEY 只是访问 Control 的 Key。"
+        />
       </Card>
 
       {/* API 认证 */}
