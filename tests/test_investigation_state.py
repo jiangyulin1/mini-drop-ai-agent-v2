@@ -279,6 +279,85 @@ def test_explicit_abstention_can_finish_without_evidence(client: TestClient):
     assert response.json()["data"]["state"] == "INSUFFICIENT_EVIDENCE"
 
 
+def test_structured_abstention_requires_unknown_root_and_gap(client: TestClient):
+    case, evidence_id = _case_and_evidence(client)
+    response = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"],
+            "summary": "The causal chain is not closed",
+            "state": "INSUFFICIENT_EVIDENCE",
+            "evidence_ids": [evidence_id],
+            "root_location": {"type": "self", "evidence_refs": [evidence_id]},
+            "mechanism": {
+                "statement": "unverified",
+                "supporting_evidence": [evidence_id],
+                "confidence": 0.2,
+            },
+            "confidence_reason": "Only a correlation is available",
+            "abstention_reason": "No mechanism-level observation",
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "INSUFFICIENT_EVIDENCE_ROOT_MUST_BE_UNKNOWN"
+
+
+def test_confirmed_structured_conclusion_cannot_use_unknown_root(client: TestClient):
+    case, evidence_id = _case_and_evidence(client)
+    response = client.post(
+        "/internal/agent/tools/finish",
+        json={
+            "case_id": case["case_id"],
+            "summary": "The mechanism is confirmed",
+            "state": "CONFIRMED",
+            "evidence_ids": [evidence_id],
+            "root_location": {"type": "unknown", "evidence_refs": [evidence_id]},
+            "mechanism": {
+                "statement": "confirmed mechanism",
+                "supporting_evidence": [evidence_id],
+                "confidence": 0.9,
+            },
+            "confidence_reason": "Direct observation",
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "CONFIRMED_ROOT_CANNOT_BE_UNKNOWN"
+
+
+def test_conclusion_history_keeps_superseded_revision_visible(client: TestClient):
+    case, evidence_id = _case_and_evidence(client)
+    first = repo.submit_conclusion_revision(
+        case_id=case["case_id"], tenant_id="tenant-a", investigation_run_id="run-1",
+        state="PARTIALLY_CONFIRMED", claims=[{
+            "claim_id": "claim-old", "evidence_id": evidence_id,
+            "projection_hash": repo.list_evidence_projections(case["case_id"], "tenant-a")[0]["projection_hash"],
+        }], report_text="旧结论：CPU 可能相关",
+    )
+    second = repo.submit_conclusion_revision(
+        case_id=case["case_id"], tenant_id="tenant-a", investigation_run_id="run-2",
+        state="INSUFFICIENT_EVIDENCE", claims=[], report_text="新证据仍不足以闭合因果链",
+    )
+
+    response = client.get(f"/api/v1/cases/{case['case_id']}/conclusions")
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["total"] == 2
+    assert data["conclusion"]["conclusion_id"] == second["conclusion_id"]
+    assert data["conclusion"]["revision_status"] == "CURRENT"
+    history_by_id = {item["conclusion_id"]: item for item in data["history"]}
+    assert history_by_id[first["conclusion_id"]]["revision_status"] == "SUPERSEDED"
+    assert history_by_id[first["conclusion_id"]]["claim_evidence_bindings"]
+
+    workspace = client.get(f"/api/v1/cases/{case['case_id']}/workspace")
+    assert workspace.status_code == 200, workspace.text
+    workspace_history = workspace.json()["data"]["conclusion_history"]
+    assert [item["conclusion_id"] for item in workspace_history] == [
+        second["conclusion_id"], first["conclusion_id"],
+    ]
+
+
 def test_finish_persists_evidence_bound_recommendation_in_workspace(client: TestClient):
     case, evidence_id = _case_and_evidence(client)
     response = client.post(

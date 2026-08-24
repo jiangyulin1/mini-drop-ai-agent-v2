@@ -614,17 +614,9 @@ def _deliver_one_wakeup(
                 evidence_id = str(item.get("evidence_id") or "").strip()
                 if evidence_id:
                     wakeup_evidence_ids.add(evidence_id)
-    # finish_investigation is terminal for the current run. Evidence that races
-    # with an accepted conclusion stays durable, but must not enqueue another
-    # autonomous model turn after the Agent has explicitly stopped.
-    if (
-        reason_class not in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"}
-        and hasattr(repo, "get_conclusion")
-        and repo.get_conclusion(case_id, tenant_id) is not None
-    ):
-        if hasattr(repo, "consume_runtime_wakeup"):
-            repo.consume_runtime_wakeup(wakeup_id, "SKIPPED_CONCLUDED")
-        return False
+    # A conclusion is terminal only for the current evidence watermark. New
+    # Evidence opens a new exploration revision; the prior conclusion remains
+    # durable and is included in the next Case snapshot for comparison.
     inherited_policy, inherited_options, inherited_strategy_id = (
         _latest_runtime_turn_preferences(case_id, tenant_id)
     )
@@ -819,9 +811,9 @@ def _deliver_one_wakeup(
                 note = (
                     f"新 Evidence 已物化：{source_summary}；"
                     f"本批次的 EvidenceAnalysisRun 是 {analysis_run_id}。"
-                    "请先读取该运行锁定的 Evidence Projection，再调用 submit_evidence_analysis。"
+                    "旧结论仅对旧 Evidence watermark 有效；请展示并保留旧结论，先读取该运行锁定的 Evidence Projection，再调用 submit_evidence_analysis。"
                     "每个 fact 必须提供 claim、certainty，以及包含 evidence_id、projection_hash、field_path 的准确 citations。"
-                    "分析提交成功后，再更新假设、缺口和因果图并决定下一步。"
+                    "分析提交成功后，在保留历史的前提下更新假设、缺口和因果图并决定下一步。"
                 )
             else:
                 # A topology run may materialize Evidence directly through its
@@ -833,7 +825,8 @@ def _deliver_one_wakeup(
                 note = (
                     f"新 Evidence 已物化：{source_summary}；本批次没有预注册的 EvidenceAnalysisRun。"
                     "不要调用 submit_evidence_analysis，也不要编造 analysis_run_id。"
-                    "请读取当前 Evidence Projection、依赖图和证据缺口，"
+                    "旧结论仅对旧 Evidence watermark 有效；请先展示并读取旧结论、当前 Evidence Projection、依赖图和证据缺口，"
+                    "保留旧结论和本批次新 Evidence 的历史，重新探索并提交新的结论 revision；"
                     "然后使用 finish_investigation 提交带 evidence_id、projection_hash、field_path 引用的结构化结论；"
                     "如果证据不足，使用 INSUFFICIENT_EVIDENCE，并明确缺失事实。"
                 )

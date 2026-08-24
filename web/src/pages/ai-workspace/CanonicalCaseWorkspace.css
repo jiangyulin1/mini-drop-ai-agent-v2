@@ -551,6 +551,34 @@
   font-size: 11px;
 }
 
+.ccw-conclusion-history {
+  margin-top: 18px;
+  border-top: 1px solid var(--app-border, #e5e7eb);
+  padding-top: 14px;
+}
+
+.ccw-conclusion-history > header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ccw-conclusion-history > header small {
+  color: var(--app-text-secondary, #6b7280);
+}
+
+.ccw-conclusion-history-item {
+  padding: 10px 0;
+  border-top: 1px solid var(--app-border-subtle, #f0f1f3);
+}
+
+.ccw-conclusion-history-item > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .ccw-stagebar {
   padding: 8px 12px;
   display: grid;

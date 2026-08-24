@@ -283,6 +283,10 @@ def _build_runtime_case_context(
             })
         ]
     investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
+    conclusion_history = (
+        repo.list_conclusion_revisions(case_id, tenant_id)
+        if hasattr(repo, "list_conclusion_revisions") else []
+    )
     hypothesis_graph = investigation_state["hypothesis_graph"]
     active_evidence_ids = {
         str(item.get("evidence_id")) for item in evidence_summary if item.get("evidence_id")
@@ -435,6 +439,7 @@ def _build_runtime_case_context(
         evidence_gaps=evidence_gaps[:30],
         causal_graph=causal_graph_view,
         conclusion=investigation_state["conclusion"] or {},
+        conclusion_history=conclusion_history[:10],
         recommendations=recommendations_view,
         evidence_summary=evidence_summary[:20],
         missing_facts=missing_facts[:20],
@@ -2334,6 +2339,37 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
         verified_state = "PARTIALLY_CONFIRMED"
     if legacy_compat:
         verified_state = "PARTIALLY_CONFIRMED"
+
+    # Structured conclusions are a machine contract, not a prose hint.  Make
+    # uncertainty explicit so a sentence such as "not verified" cannot be
+    # persisted as a confirmed/self-root conclusion and later misread by the
+    # UI, recovery planner, or benchmark scorer.
+    if structured_mode:
+        root_type = (
+            str(root_location.get("type") or "").strip().lower()
+            if isinstance(root_location, dict) else ""
+        )
+        mechanism_confidence = mechanism.get("confidence")
+        try:
+            mechanism_confidence_value = (
+                float(mechanism_confidence) if mechanism_confidence is not None else None
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="INVALID_MECHANISM_CONFIDENCE") from exc
+        if verified_state == "INSUFFICIENT_EVIDENCE":
+            if root_type and root_type != "unknown":
+                raise HTTPException(status_code=409, detail="INSUFFICIENT_EVIDENCE_ROOT_MUST_BE_UNKNOWN")
+            if not abstention_reason:
+                raise HTTPException(status_code=400, detail="ABSTENTION_REASON_REQUIRED")
+            if not (payload.get("evidence_gaps") or open_blocker_gaps):
+                raise HTTPException(status_code=409, detail="EVIDENCE_GAP_REQUIRED_FOR_ABSTENTION")
+        elif requested_state == "CONFIRMED" or verified_state == "CONFIRMED":
+            if root_type == "unknown":
+                raise HTTPException(status_code=409, detail="CONFIRMED_ROOT_CANNOT_BE_UNKNOWN")
+            if mechanism_confidence_value is not None and mechanism_confidence_value < 0.5:
+                raise HTTPException(status_code=409, detail="CONFIRMED_MECHANISM_CONFIDENCE_TOO_LOW")
+        if mechanism_confidence_value is not None and not 0.0 <= mechanism_confidence_value <= 1.0:
+            raise HTTPException(status_code=400, detail="INVALID_MECHANISM_CONFIDENCE")
     signature_payload = {
         "case_id": case_id,
         "trigger_turn_id": trigger_turn_id,

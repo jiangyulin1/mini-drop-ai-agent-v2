@@ -3708,6 +3708,37 @@ class SqlRepositoryV6Mixin:
             ).all()
             result = conclusion.to_dict()
             result["claim_evidence_bindings"] = [row.to_dict() for row in bindings]
+            latest_revision = session.query(ConclusionRevisionModel.revision).filter(
+                ConclusionRevisionModel.case_id == case_id,
+                ConclusionRevisionModel.tenant_id == tenant_id,
+            ).order_by(ConclusionRevisionModel.revision.desc()).first()
+            latest_revision_value = int(latest_revision[0]) if latest_revision else int(conclusion.revision or 0)
+            result["is_current"] = int(conclusion.revision or 0) == latest_revision_value
+            result["revision_status"] = (
+                "CURRENT" if result["is_current"] else "SUPERSEDED"
+            )
+            return result
+
+    def list_conclusion_revisions(
+        self, case_id: str, tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return every conclusion revision, newest first, without deleting history."""
+        with self._read_session() as session:
+            rows = session.query(ConclusionRevisionModel).filter(
+                ConclusionRevisionModel.case_id == case_id,
+                ConclusionRevisionModel.tenant_id == tenant_id,
+            ).order_by(ConclusionRevisionModel.revision.desc()).all()
+            latest_revision = int(rows[0].revision or 0) if rows else 0
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                item = row.to_dict()
+                bindings = session.query(ClaimEvidenceBindingModel).filter(
+                    ClaimEvidenceBindingModel.conclusion_id == row.conclusion_id,
+                ).all()
+                item["claim_evidence_bindings"] = [binding.to_dict() for binding in bindings]
+                item["is_current"] = int(row.revision or 0) == latest_revision
+                item["revision_status"] = "CURRENT" if item["is_current"] else "SUPERSEDED"
+                result.append(item)
             return result
 
     def add_repair_recommendation(self, **payload: Any) -> dict[str, Any]:

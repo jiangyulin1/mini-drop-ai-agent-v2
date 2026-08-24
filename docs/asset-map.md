@@ -2,7 +2,7 @@
 
 > 状态：当前代码库的能力盘点，不是路线图或愿望清单。
 > 基线：`main` @ `6589f90`（`feat: add explainable evidence confidence ledger`）。
-> 盘点日期：2026-08-23。
+> 盘点日期：2026-08-24。
 > 事实优先级：当前代码和测试 > 当前实施架构文档 > 历史设计文档。
 
 ## 1. 阅读规则
@@ -98,7 +98,7 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 | 诊断计划 | Plan/PlanStep/Revision、CollectionProposal、Request、Fanout | 已闭环；旧 Plan 与 v6 Plan 仍需持续核对 |
 | 服务关系 | 请求上下文依赖、Network Discovery、MembershipSnapshot、有界 BFS、Dependency Graph | MVP 已闭环；L7、长期拓扑流和完整远端身份解析未闭环 |
 | Agent Runtime | AgentRuntimePort、Deterministic、Pi Adapter、Pi Sidecar、Shadow Plan、可选 LangGraph adapter | 已闭环骨架；LangGraph 只负责 bounded graph/checkpoint/interrupt，Pi 业务分支树不是持久化真值 |
-| 推理状态 | Hypothesis、Evidence Gap、Evidence Analysis、Causal Graph、Conclusion | 已闭环基础；多支持集/完整局部重算尚未成为统一语义 |
+| 推理状态 | Hypothesis、Evidence Gap、Evidence Analysis、Causal Graph、Conclusion、Conclusion history API | 已闭环基础；结论 revision 保留并标记 `CURRENT`/`SUPERSEDED`，新 Evidence 会触发新 Runtime exploration revision；多支持集/完整局部重算尚未成为统一语义 |
 | 恢复执行 | RecoveryPlan、Action Registry、Dry-run、Approval、Execute、Rollback、Verify | 已闭环窄白名单动作；不是通用自动修复 |
 | 知识与外部源 | KnowledgeDocument/Memory、MCP Source Gateway、Grant、Skill/Query Registry | 已闭环受控读取；知识不能直接充当事故 Evidence |
 | Web 工作台 | Case Workspace、Evidence Drawer、Plan/Proposal/Topology/Causal/Recovery 视图、SSE | 已闭环主要视图；长期目标配置和完整拓扑交互仍有限 |
@@ -258,6 +258,10 @@ Case 级存储和调查链上下文是两个不同层次：Artifact、CaseEviden
 
 `Evidence Review` 已提供影响预览、短时 impact token、关联分析 stale、结论重验证、恢复方案冻结和 Outbox/Wakeup。页面隐藏或归档不改变推理准入。
 
+当新 Evidence 到达时，系统不会因为已有结论而跳过 Wakeup：原始 Artifact、CaseEvidence、Projection、工具轨迹和旧 ConclusionRevision 都保留；Runtime 收到当前 Evidence watermark 与结论历史，必须展示旧结论、解释其 superseded 原因，并提交新的 revision。`GET /api/v1/cases/{case_id}/conclusions` 返回当前结论及全部历史，Case Workspace 也内嵌 `conclusion_history`，因此新采集内容与旧结论可以在同一首屏对照。
+
+服务端结构化门禁位于 `v6_routes.py` 的 `finish_investigation`：`INSUFFICIENT_EVIDENCE` 必须使用空/unknown 根因、拒答理由和 Evidence Gap；请求 `CONFIRMED` 不能使用 unknown 根因，机制 confidence 必须在 `[0,1]` 且不能低于确认阈值。门禁不依赖 Prompt 或评分器，拒绝发生在持久化之前。
+
 当前 Confidence Ledger 使用 trust、freshness、scope、directness、independence 等因子计算解释性分数；它不是事实证明器，也不应被当作完整的多支持集 Truth Maintenance。
 
 ### 9.3 Hypothesis、Gap、Causal、Conclusion
@@ -269,7 +273,7 @@ Case 级存储和调查链上下文是两个不同层次：Artifact、CaseEviden
 - `ConclusionRevisionModel`：当前结论、证据审查、拒答/不足证据和报告版本。
 - `ClaimEvidenceBindingModel`：Claim 与 Evidence 的显式绑定。
 
-当前已经可以做到“证据排除后旧分析/结论不能继续作为 current”，但“一个 Claim 的多个替代支持集、冲突集和跨分支局部重算”还没有被统一成完整的 ATMS/ECRD 语义。这个缺口不能通过再增加 `InvestigationBranch` 表自动解决。
+当前已经可以做到“证据排除后旧分析/结论不能继续作为 current”，并保留 superseded revision 供用户回看；“一个 Claim 的多个替代支持集、冲突集和跨分支局部重算”还没有被统一成完整的 ATMS/ECRD 语义。这个缺口不能通过再增加 `InvestigationBranch` 表自动解决。
 
 ## 10. Agent Runtime、Pi 和工具
 

@@ -53,6 +53,7 @@ class CaseContextSnapshot(StrictModel):
     evidence_gaps: list[dict[str, Any]] = Field(default_factory=list)
     causal_graph: dict[str, Any] = Field(default_factory=dict)
     conclusion: dict[str, Any] = Field(default_factory=dict)
+    conclusion_history: list[dict[str, Any]] = Field(default_factory=list)
     recommendations: list[dict[str, Any]] = Field(default_factory=list)
     evidence_summary: list[dict[str, Any]] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)

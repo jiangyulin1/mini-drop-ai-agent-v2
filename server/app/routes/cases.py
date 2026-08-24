@@ -983,6 +983,10 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
     for item in evidence_items:
         item["analysis_count"] = analysis_count_by_evidence.get(str(item.get("evidence_id") or ""), 0)
     investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
+    conclusion_history = (
+        repo.list_conclusion_revisions(case_id, tenant_id)
+        if hasattr(repo, "list_conclusion_revisions") else ([investigation_state["conclusion"]] if investigation_state["conclusion"] else [])
+    )
     execution_units = repo.list_execution_units(case_id, tenant_id) if hasattr(repo, "list_execution_units") else []
     fanout_runs = repo.list_fanout_runs(case_id, tenant_id)
     turns = repo.list_agent_runtime_turns(case_id, tenant_id)
@@ -1150,6 +1154,7 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
         "causal_graph": investigation_state["causal_graph"] or {},
         "dependency_graph": dependency_graph,
         "conclusion": investigation_state["conclusion"],
+        "conclusion_history": conclusion_history,
         "recommendations": investigation_state["recommendations"],
         "execution_units": execution_units,
         "fanout_runs": fanout_runs,
@@ -1229,7 +1234,11 @@ def get_case_conclusions(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
     conclusion = repo.get_conclusion(case_id, tenant_id) if hasattr(repo, "get_conclusion") else None
-    return APIResponse(data={"conclusion": conclusion})
+    history = (
+        repo.list_conclusion_revisions(case_id, tenant_id)
+        if hasattr(repo, "list_conclusion_revisions") else ([conclusion] if conclusion else [])
+    )
+    return APIResponse(data={"conclusion": conclusion, "history": history, "total": len(history)})
 
 
 @router.get("/api/v1/cases/{case_id}/recommendations")

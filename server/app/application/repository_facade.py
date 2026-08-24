@@ -40,7 +40,7 @@ FROZEN_REPOSITORY_SURFACE = frozenset({
     "list_context_packets", "list_diagnoses_for_task", "list_diagnosis_history",
     "list_collection_proposals", "list_collection_requests",
     "list_evidence_analysis_runs", "list_evidence_gaps", "list_evidence_projections", "list_evidence_reviews", "list_execution_units",
-    "list_evidence_dependency_edges", "propose_evidence_dependency",
+    "list_evidence_dependency_edges", "list_conclusion_revisions", "propose_evidence_dependency",
     "build_confidence_chain_impact", "save_confidence_snapshot", "list_confidence_snapshots",
     "list_confidence_adjustments", "record_confidence_adjustment",
     "submit_causal_graph_revision",

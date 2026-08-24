@@ -310,11 +310,21 @@ export function boundCaseContextPayload(payload, maxChars = contextMaxChars()) {
           report_text: truncateText(value.report_text || value.summary || "", 120),
         };
       }
+      if (field === "conclusion_history" && Array.isArray(value)) {
+        return value.slice(0, 10).map((item) => ({
+          conclusion_id: item?.conclusion_id,
+          state: item?.state,
+          revision: item?.revision,
+          revision_status: item?.revision_status,
+          invalidated_claims: (item?.invalidated_claims || []).slice(0, 6),
+          report_text: truncateText(item?.report_text || "", 120),
+        }));
+      }
       return compactValue(value, { stringLimit: 120, listLimit: 4, maxDepth: 3 });
     };
     for (const field of [
       "intervention", "evidence_summary", "case_id", "runtime_generation", "control_revision", "scope_revision", "plan_revision",
-      "evidence_watermark", "conclusion", "evidence_gaps",
+      "evidence_watermark", "conclusion", "conclusion_history", "evidence_gaps",
       "target_scope", "current_support", "counterevidence",
     ]) {
       if (result[field] === undefined) continue;
@@ -518,6 +528,7 @@ export function buildEvidenceAgentSystemPrompt(promptVariant = "default") {
     "For an investigative turn where finish_investigation is available, every terminal outcome, including insufficient evidence, " +
     "must be submitted through finish_investigation. Never substitute a plain-text final or stage conclusion. " +
     "Every non-abstaining finish must include root_location (type, target_ref, evidence_refs), mechanism (statement, supporting_evidence, contradicting_evidence, confidence, confidence_reason), evidence_gaps, invalidated_claims, remaining_active_support and excluded_evidence_used=false. " +
+    "When conclusion_history is present, show the prior revision and why it is superseded, then compare it with the current Evidence watermark; never erase the prior revision from the user-facing investigation record. " +
     "A finish after intervention must include intervention_ack=true, the exact intervention_id, evidence_state_rechecked=true, revision_before, revision_after and invalidated_claims/remaining_active_support. " +
     "Final claims must cite evidence_id, projection_hash and exact " +
     `field/span support. prompt_variant=${promptVariant}.`
@@ -887,6 +898,7 @@ export class RuntimeManager {
         counterevidence: (context.counterevidence || []).slice(0, 20),
         causal_graph: context.causal_graph || {},
         conclusion: context.conclusion || {},
+        conclusion_history: (context.conclusion_history || []).slice(0, 10),
         recommendations: (context.recommendations || []).slice(0, 20),
         evidence_analyses: (context.evidence_analyses || []).slice(-10),
         information_goals: context.information_goals || context.missing_facts || [],
