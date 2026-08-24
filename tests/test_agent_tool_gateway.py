@@ -466,6 +466,88 @@ def test_internal_case_snapshot_returns_projection(client: TestClient):
     assert "process.list" in data.get("query_operations", [])
 
 
+def test_case_branch_workspace_can_be_created_and_selected(client: TestClient):
+    case = _create_case(client)
+    created = client.post(
+        f"/api/v1/cases/{case['case_id']}/branches",
+        json={"label": "第一条假设", "reason": "independent_probe"},
+    )
+    assert created.status_code == 200, created.text
+    branch_id = created.json()["data"]["branch_id"]
+    listed = client.get(f"/api/v1/cases/{case['case_id']}/branches")
+    assert listed.status_code == 200, listed.text
+    assert any(item["branch_id"] == branch_id for item in listed.json()["data"]["items"])
+    workspace = client.get(
+        f"/api/v1/cases/{case['case_id']}/workspace",
+        params={"branch_id": branch_id},
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["data"]["branch_id"] == branch_id
+    assert workspace.json()["data"]["hypothesis_graph"]["hypotheses"] == []
+
+
+def test_branch_evidence_visibility_is_isolated(client: TestClient):
+    case = _create_case(client)
+    common = {
+        "case_id": case["case_id"], "tenant_id": "tenant-a",
+        "attachment_id": None, "task_id": None, "artifact_id": None,
+        "artifact_type": "metric", "collector_id": "test",
+        "source_type": "test", "target_ref": "service-a",
+        "content_hash": "h", "projection_hash": "p",
+    }
+    repo.upsert_case_evidence(
+        evidence_id="ev-branch-a", lineage={"branch_id": "branch-a", "visibility_scope": "BRANCH_LOCAL"}, **common,
+    )
+    repo.upsert_case_evidence(
+        evidence_id="ev-branch-b", lineage={"branch_id": "branch-b", "visibility_scope": "BRANCH_LOCAL"}, **common,
+    )
+    repo.upsert_case_evidence(
+        evidence_id="ev-seed", lineage={}, **common,
+    )
+    for evidence_id in ("ev-branch-a", "ev-branch-b", "ev-seed"):
+        repo.upsert_evidence_projection(
+            evidence_id=evidence_id, case_id=case["case_id"], tenant_id="tenant-a",
+            projection_kind="metric", content={"summary": evidence_id},
+            projection_schema="test.v1", projection_version=1, truncated=False,
+            source_bytes=1, parser_version="test",
+        )
+    response = client.post(
+        "/internal/agent/tools/list-case-evidence",
+        json={"case_id": case["case_id"], "branch_id": "branch-a"},
+        headers=_headers(),
+    )
+    assert response.status_code == 200, response.text
+    ids = {item["evidence_id"] for item in response.json()["data"]["items"]}
+    assert ids == {"ev-branch-a", "ev-seed"}
+
+    promoted = repo.promote_case_evidence(
+        case["case_id"], "tenant-a", "ev-branch-a", target_branch_id="branch-b",
+        actor_id="operator",
+    )
+    assert promoted["lineage"]["visibility_scope"] == "PROMOTED"
+    assert {
+        item["evidence_id"] for item in client.post(
+            "/internal/agent/tools/list-case-evidence",
+            json={"case_id": case["case_id"], "branch_id": "branch-a"},
+            headers=_headers(),
+        ).json()["data"]["items"]
+    } == {"ev-branch-a", "ev-seed"}
+    assert {
+        item["evidence_id"] for item in client.post(
+            "/internal/agent/tools/list-case-evidence",
+            json={"case_id": case["case_id"], "branch_id": "branch-b"},
+            headers=_headers(),
+        ).json()["data"]["items"]
+    } == {"ev-branch-a", "ev-branch-b", "ev-seed"}
+    assert {
+        item["evidence_id"] for item in client.post(
+            "/internal/agent/tools/list-case-evidence",
+            json={"case_id": case["case_id"], "branch_id": "branch-c"},
+            headers=_headers(),
+        ).json()["data"]["items"]
+    } == {"ev-seed"}
+
+
 def test_collection_proposal_requires_scope_fence(client: TestClient):
     case = _create_case(client)
     turn_id = "turn-collection-scheduled"

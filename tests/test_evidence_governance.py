@@ -402,7 +402,7 @@ def test_restored_evidence_conservatively_revalidates_conclusion(client: TestCli
     excluded = _submit(client, case["case_id"], evidence_id, "EXCLUDED")
     assert excluded.status_code == 200, excluded.text
     downgraded = repo.get_conclusion(case["case_id"], "tenant-a")
-    assert downgraded["state"] == "INSUFFICIENT_EVIDENCE"
+    assert downgraded["state"] == "RECHECK_REQUIRED"
 
     restored = _submit(
         client, case["case_id"], evidence_id, "RESTORE_AS_TRUSTED",

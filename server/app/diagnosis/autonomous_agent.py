@@ -81,6 +81,13 @@ class AutonomousIncidentAgent:
                 result = self.callbacks.start_diagnosis(case)
             except Exception as exc:
                 return self._escalate(case, tenant_id, loop, f"DIAGNOSIS_START_FAILED:{exc}", principal_id)
+            if result.get("outcome") == "LEGACY_DIAGNOSIS_DISABLED":
+                loop.update({
+                    "phase": "LEGACY_DISABLED",
+                    "last_error": result.get("reason"),
+                })
+                self._save(case, tenant_id, loop, "legacy_diagnosis_disabled", principal_id)
+                return {"outcome": "LEGACY_DIAGNOSIS_DISABLED", "loop": loop}
             loop.update({
                 "phase": "DIAGNOSING",
                 "diagnosis_id": (result.get("diagnosis") or {}).get("diagnosis_id"),

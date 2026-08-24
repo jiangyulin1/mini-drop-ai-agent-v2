@@ -32,6 +32,9 @@ class CaseContextSnapshot(StrictModel):
     campaign_revision: int = 0
     evidence_watermark: int = 0
     investigation_run_id: Optional[str] = None
+    # Optional branch identity.  Legacy callers without it retain case-wide
+    # visibility; branch-aware runtimes receive an isolated Evidence view.
+    branch_id: Optional[str] = None
     turn_id: Optional[str] = None
     disposition: Optional[str] = None
     side_effect_policy: Optional[str] = None
@@ -85,6 +88,7 @@ class RuntimeBinding(StrictModel):
 
 class AgentTurnInput(StrictModel):
     case_id: str
+    branch_id: Optional[str] = None
     message: str = Field(min_length=1, max_length=8000)
     references: list[dict[str, Any]] = Field(default_factory=list)
     requested_mode: Optional[str] = None

@@ -310,11 +310,14 @@ class InvestigationPlanService:
 
     def list_reviews(self, case_id: str, tenant_id: str,
                      evidence_id: str | None = None) -> list[dict[str, Any]]:
-        if hasattr(self._repo, "list_evidence_review_revisions"):
-            return self._repo.list_evidence_review_revisions(
-                case_id, tenant_id, evidence_id=evidence_id,
-            )
-        return self._repo.list_evidence_reviews(case_id, tenant_id, evidence_id=evidence_id)
+        """Read the canonical EvidenceReviewRevision ledger.
+
+        The pre-v6 ``evidence_reviews`` table is retained for historical
+        reads only; no active plan or workspace path falls back to it.
+        """
+        return self._repo.list_evidence_review_revisions(
+            case_id, tenant_id, evidence_id=evidence_id,
+        )
 
     def _get_step(self, case_id: str, tenant_id: str, step_id: str) -> Optional[dict[str, Any]]:
         for step in self._repo.list_plan_steps(case_id, tenant_id):

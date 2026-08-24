@@ -280,14 +280,10 @@ class TestMaintenanceLoop:
             "persist_agent_metric_snapshots",
             lambda: calls.append("metrics"),
         )
-        monkeypatch.setattr(
-            "server.app.main.diagnosis_orchestrator.advance_active",
-            lambda: calls.append("diagnosis"),
-        )
 
         _run_offline_sweep_pass(timeout_sec=30, stale_task_timeout_sec=900)
 
-        assert calls == ["recover", "metrics", "diagnosis"]
+        assert calls == ["recover", "metrics"]
         metrics = REGISTRY.generate()
         assert (
             'mini_drop_maintenance_runs_total{outcome="failure",step="agent_offline_detection"}'

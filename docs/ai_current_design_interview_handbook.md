@@ -4,7 +4,7 @@
 >
 > 核验日期：2026-08-22
 >
-> 代码基线：ace45dc（feat: complete evidence-native investigation workflow）
+> 代码基线：当前工作树（含 `0037_branch_reasoning_scope` 分支推理状态迁移）
 >
 > 面试运行假设：Pi Sidecar、模型 Provider 与 API Key 已正确配置，MINI_DROP_AGENT_RUNTIME=pi
 >
@@ -61,6 +61,8 @@ Mini-Drop 是一个 Evidence-native 的受监督诊断 Agent：模型负责理�
 | 原始产物 | 完整部署使用 MinIO；本机轻量模式可使用本地 Artifact |
 | AI 权限 | 模型只能调用注册工具，不能直接创建 Task 或运行任意命令 |
 | 最终状态 | CONFIRMED、PARTIALLY_CONFIRMED、INSUFFICIENT_EVIDENCE |
+
+截至 2026-08-24，分支推理状态已经由 `0037_branch_reasoning_scope` 持久化：Hypothesis、Evidence Gap、Causal Graph、Evidence Dependency、Conclusion 和相关 Assistant Message 都可绑定 `branch_id`。旧 Case 数据以 `NULL` 作为兼容的 Case-wide 范围；Pi Session tree 仍只是运行时上下文，不能代替业务分支账本。当前后端验收为 `1235 passed, 6 skipped`，前端为 `104 passed`，生产构建成功。
 
 ### 2.2 面试环境假设与仓库默认值的区别
 

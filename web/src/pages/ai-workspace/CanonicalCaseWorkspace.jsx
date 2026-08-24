@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Card, Empty, Skeleton, Space, Tag, Tooltip, Typography, message } from "antd";
+import { Alert, Badge, Button, Card, Empty, Select, Skeleton, Space, Tag, Tooltip, Typography, message } from "antd";
 import {
   AimOutlined,
   ArrowRightOutlined,
@@ -162,6 +162,101 @@ function stageState({ count: total, attention, active, ready, available }) {
   if (active) return "active";
   if (ready) return "ready";
   return available ? "available" : "active";
+}
+
+const PATH_STATE_LABEL = {
+  empty: "未开始",
+  attention: "需处理",
+  active: "进行中",
+  partial: "覆盖有限",
+  ready: "已就绪",
+  available: "可查看",
+};
+
+function pathStateLabel(state) {
+  return PATH_STATE_LABEL[state] || "未开始";
+}
+
+function InvestigationPathOverview({
+  workspace,
+  evidence,
+  reviews,
+  analyses,
+  proposals,
+  informationGoals,
+  hypothesisGraph,
+  dependencyGraph,
+  conclusion,
+  onNavigate,
+  onOpenEvidence,
+}) {
+  const targetScope = workspace.case?.target_scope || {};
+  const hasScope = Boolean(targetScope.service_id || targetScope.service_ids?.length || targetScope.instances?.length);
+  const latestReview = latestReviewMap(reviews);
+  const staleEvidence = evidence.filter((item) => {
+    const id = item.evidence_id || item.id;
+    const state = String(latestReview.get(id)?.decision || item.status || item.trust_status || "").toUpperCase();
+    return ["EXCLUDED", "INVALID", "SUPERSEDED", "STALE"].includes(state);
+  });
+  const staleAnalyses = analyses.filter((item) => String(item.input_state || "CURRENT").toUpperCase() !== "CURRENT");
+  const currentAnalyses = analyses.filter((item) => item.status === "COMPLETED" && (!item.input_state || item.input_state === "CURRENT"));
+  const activeRequests = [...proposals, ...array(workspace.collection_requests)].filter((item) => !["COMPLETED", "DONE", "SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"].includes(String(item.status || "").toUpperCase()));
+  const dependencyPartial = String(dependencyGraph.coverage?.conclusion || "").toLowerCase() === "insufficient_coverage"
+    || array(dependencyGraph.coverage?.items).some((item) => ["partial", "insufficient_coverage"].includes(String(item?.status || item?.conclusion || "").toLowerCase()));
+  const hypotheses = array(hypothesisGraph?.hypotheses);
+  const currentHypothesis = hypotheses.find((item) => ["CONFIRMED", "SUPPORTED", "ACTIVE", "PROPOSED"].includes(String(item.status || "").toUpperCase()));
+  const nextGoal = informationGoals.find((item) => ["BLOCKED", "PROPOSED", "WAITING_APPROVAL", "COLLECTING"].includes(String(item.status || "").toUpperCase()));
+  const conclusionState = String(conclusion?.state || "").toUpperCase();
+  const path = [
+    {
+      key: "scope", label: "范围", icon: <AimOutlined />, state: hasScope ? "ready" : "attention",
+      detail: hasScope ? `${array(targetScope.instances).length || targetScope.service_id || "已确认目标"}` : "等待确认 Worker / PID",
+    },
+    {
+      key: "collections", label: "采集", icon: <DatabaseOutlined />, state: activeRequests.length ? "active" : evidence.length ? "ready" : "empty",
+      detail: activeRequests.length ? `${activeRequests.length} 个请求进行中` : evidence.length ? `${evidence.length} 条产出` : "尚无 Task",
+    },
+    {
+      key: "evidence", label: "Evidence", icon: <FileSearchOutlined />, state: staleEvidence.length ? "attention" : evidence.length ? "ready" : "empty",
+      detail: staleEvidence.length ? `${staleEvidence.length} 条需要复核` : `${evidence.length} 条当前证据`,
+    },
+    {
+      key: "analyses", label: "验证", icon: <RobotOutlined />, state: staleAnalyses.length ? "attention" : currentAnalyses.length ? "ready" : analyses.length ? "active" : "empty",
+      detail: staleAnalyses.length ? `${staleAnalyses.length} 次输入已失效` : currentAnalyses.length ? `${currentAnalyses.length} 次分析有效` : "等待引用分析",
+    },
+    {
+      key: "conclusion", label: "结论", icon: <SafetyCertificateOutlined />, state: conclusionState === "CONFIRMED" ? "ready" : conclusionState === "INSUFFICIENT_EVIDENCE" ? "attention" : conclusion ? "active" : "empty",
+      detail: conclusionState === "CONFIRMED" ? "已确认" : conclusion?.state || "尚未提交",
+    },
+    {
+      key: "recommendations", label: "行动", icon: <ToolOutlined />, state: array(workspace.recommendations).length ? "available" : "empty",
+      detail: array(workspace.recommendations).length ? `${array(workspace.recommendations).length} 条受控建议` : "等待结论",
+    },
+  ];
+  return <div className="ccw-overview" aria-label="Evidence 调查路径">
+    <div className="ccw-overview-intro">
+      <div>
+        <span className="ccw-eyebrow">EVIDENCE-NATIVE INVESTIGATION</span>
+        <h3>当前调查路径</h3>
+        <p>每一步都由当前 Evidence 和 revision 驱动；失效证据会让后续分析回到待验证状态。</p>
+      </div>
+      <div className="ccw-overview-state"><span className="ccw-live-dot" />{workspace.engine?.state === "RUNNING" ? "Agent 正在推进" : conclusion ? "等待下一次证据变化" : "等待调查输入"}</div>
+    </div>
+    <div className="ccw-path" role="list">
+      {path.map((item, index) => <div className="ccw-path-item" key={item.key} role="listitem">
+        <button type="button" className={`ccw-path-node is-${item.state}`} onClick={() => onNavigate(item.key === "scope" ? "goals" : item.key)} aria-label={`${item.label}，${pathStateLabel(item.state)}，${item.detail}`}>
+          <span className="ccw-path-icon">{item.icon}</span><strong>{item.label}</strong><small>{pathStateLabel(item.state)}</small><em>{item.detail}</em>
+        </button>
+        {index < path.length - 1 && <span className="ccw-path-connector" aria-hidden="true" />}
+      </div>)}
+    </div>
+    <div className="ccw-brief-grid">
+      <div className="ccw-brief-block"><span>当前假设</span><strong>{currentHypothesis?.statement || currentHypothesis?.description || "尚未形成候选假设"}</strong><small>{currentHypothesis ? `${currentHypothesis.status || "PROPOSED"} · 支持 ${array(currentHypothesis.supporting_evidence_refs).length} · 反证 ${array(currentHypothesis.contradicting_evidence_refs).length}` : "Agent 将基于引用事实提出候选"}</small></div>
+      <div className={`ccw-brief-block ${staleEvidence.length || staleAnalyses.length ? "is-warning" : ""}`}><span>失效传播</span><strong>{staleEvidence.length || staleAnalyses.length ? `${staleEvidence.length + staleAnalyses.length} 项需要回溯` : evidence.length ? "当前未发现失效项" : "尚无 Evidence，尚未形成证明链"}</strong><small>{dependencyPartial ? "拓扑覆盖有限，依赖关系不能直接作为因果" : "排除 Evidence 会冻结受影响的分析与结论"}</small></div>
+      <div className="ccw-brief-block"><span>下一信息目标</span><strong>{nextGoal?.title || "等待 Agent 选择下一步"}</strong><small>{nextGoal?.reason || "优先补齐能区分竞争假设的事实"}</small>{nextGoal && <Button type="link" size="small" onClick={() => onNavigate("goals")}>查看目标 <ArrowRightOutlined /></Button>}</div>
+    </div>
+    {staleEvidence.length > 0 && <div className="ccw-revocation-strip"><WarningOutlined /><span><strong>证据链发生变化</strong> {staleEvidence.slice(0, 2).map((item) => item.evidence_id || item.id).join("、")} 已不再作为当前依据。</span><Button size="small" onClick={() => { onNavigate("evidence"); onOpenEvidence?.(staleEvidence[0]); }}>查看受影响 Evidence</Button></div>}
+  </div>;
 }
 
 function LoadFailed({ what, error, onRetry }) {
@@ -512,7 +607,7 @@ function RecommendationsTab({ recommendations, onDiscuss, onCreateRecovery }) {
 }
 
 /** Canonical supervised-investigation workspace backed by one aggregate snapshot. */
-export default function CanonicalCaseWorkspace({ workspace, connected, caseId, focusEvidenceId, onFocusEvidenceConsumed, onRefresh, onDiscussRecommendation, onCreateRecovery }) {
+export default function CanonicalCaseWorkspace({ workspace, connected, caseId, focusEvidenceId, onFocusEvidenceConsumed, onRefresh, onDiscussRecommendation, onCreateRecovery, branches = [], activeBranchId = "", onBranchChange, onCreateBranch }) {
   const [plan, setPlan] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -616,7 +711,8 @@ export default function CanonicalCaseWorkspace({ workspace, connected, caseId, f
     document.getElementById(`ccw-tab-${next.key}`)?.focus();
   };
   return <section className="ccw-shell" aria-label="Case Workspace" data-testid="canonical-workspace">
-    <header className="ccw-header"><div><h2>AI 调查与 Evidence 工作区</h2></div><div className="ccw-status"><Tag color={connected ? "success" : "orange"}>{connected ? "实时同步" : "轮询同步"}</Tag><Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => { void load(); onRefresh?.(); }}>刷新</Button><Button size="small" type="text" onClick={() => setShowInternals((value) => !value)}>{showInternals ? "隐藏技术细节" : "技术细节"}</Button></div></header>
+    <header className="ccw-header"><div><h2>AI 调查与 Evidence 工作区</h2><div className="ccw-branch-controls"><Typography.Text type="secondary">调查上下文</Typography.Text><Select size="small" value={activeBranchId || "__case__"} onChange={(value) => onBranchChange?.(value === "__case__" ? "" : value)} options={[{ value: "__case__", label: "Case 总览（仅用于审查）" }, ...branches.map((item) => ({ value: item.branch_id, label: `${item.label || item.branch_id} · ${item.evidence_count || 0} 条 Evidence` }))]} /><Button size="small" onClick={() => onCreateBranch?.()}>新建隔离分支</Button></div></div><div className="ccw-status"><Tag color={connected ? "success" : "orange"}>{connected ? "实时同步" : "轮询同步"}</Tag><Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => { void load(); onRefresh?.(); }}>刷新</Button><Button size="small" type="text" onClick={() => setShowInternals((value) => !value)}>{showInternals ? "隐藏技术细节" : "技术细节"}</Button></div></header>
+    <InvestigationPathOverview workspace={workspace} evidence={evidence} reviews={reviews} analyses={analyses} proposals={proposals} informationGoals={informationGoals} hypothesisGraph={hypothesisGraph} dependencyGraph={dependencyGraph} conclusion={conclusion} onNavigate={setActiveTab} onOpenEvidence={openById} />
     <nav className="ccw-stagebar" aria-label="工作区导航" role="tablist">{stages.map((stage, index) => <button type="button" role="tab" id={`ccw-tab-${stage.key}`} aria-controls={`ccw-panel-${stage.key}`} aria-selected={activeTab === stage.key} tabIndex={activeTab === stage.key ? 0 : -1} aria-label={`${stage.label}，${STAGE_STATE_LABEL[stage.state]}，${stage.count} 项`} key={stage.key} className={`${activeTab === stage.key ? "is-active" : ""} is-${stage.state}`} onClick={() => setActiveTab(stage.key)} onKeyDown={(event) => handleStageKeyDown(event, index)}><span className="ccw-stage-icon">{stage.icon}</span><strong>{stage.shortLabel}</strong><span className="ccw-stage-state" aria-hidden="true" /><small>{stage.count}</small></button>)}</nav>
     {showInternals && <div className="ccw-revisions"><span>命令 r{revisions.case_command || 0}</span><span>控制 r{revisions.control || 0}</span><span>范围 r{revisions.scope || 0}</span><span>运行时 {workspace.engine?.state || "IDLE"}</span><span>事件 #{workspace.last_event_seq || 0}</span></div>}
     {loading && !plan ? <Skeleton active paragraph={{ rows: 6 }} /> : <div className="ccw-tab-panel" role="tabpanel" id={`ccw-panel-${activeItem.key}`} aria-labelledby={`ccw-tab-${activeItem.key}`} tabIndex={0}>{activeItem.children}</div>}

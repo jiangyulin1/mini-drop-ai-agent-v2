@@ -135,6 +135,66 @@ def test_hypothesis_gap_causal_and_conclusion_loop(client: TestClient):
     assert data["conclusion"]["conclusion_id"] == stored["conclusion_id"]
 
 
+def test_branch_reasoning_state_is_persisted_and_isolated(client: TestClient):
+    case, evidence_id = _case_and_evidence(client)
+    envelope = {
+        "case_id": case["case_id"],
+        "branch_id": "branch-a",
+        "expected_scope_revision": case["scope_revision"],
+        "expected_control_revision": case["control_revision"],
+        "hypotheses": [{
+            "hypothesis_id": "branch-a-hypothesis",
+            "statement": "Only branch A can see this hypothesis",
+            "supporting_evidence_refs": [evidence_id],
+        }],
+    }
+    response = client.post("/internal/agent/tools/hypotheses", json=envelope, headers=_headers())
+    assert response.status_code == 200, response.text
+    assert any(item["hypothesis_id"] == "branch-a-hypothesis" for item in response.json()["data"]["graph"]["hypotheses"])
+
+    branch_a = client.get(f"/api/v1/cases/{case['case_id']}/hypotheses?branch_id=branch-a")
+    branch_b = client.get(f"/api/v1/cases/{case['case_id']}/hypotheses?branch_id=branch-b")
+    assert branch_a.status_code == 200 and branch_b.status_code == 200
+    assert any(item["hypothesis_id"] == "branch-a-hypothesis" for item in branch_a.json()["data"]["hypotheses"])
+    assert all(item["hypothesis_id"] != "branch-a-hypothesis" for item in branch_b.json()["data"]["hypotheses"])
+
+    gap = client.post(
+        "/internal/agent/tools/evidence-gaps",
+        json={**{key: envelope[key] for key in ("case_id", "branch_id", "expected_scope_revision", "expected_control_revision")},
+              "gaps": [{"gap_id": "branch-a-gap", "required_fact": "branch-local fact"}]},
+        headers=_headers(),
+    )
+    assert gap.status_code == 200, gap.text
+    assert repo.list_evidence_gaps(case["case_id"], "tenant-a", branch_id="branch-a")[0]["gap_id"] == "branch-a-gap"
+    assert repo.list_evidence_gaps(case["case_id"], "tenant-a", branch_id="branch-b") == []
+
+
+def test_branch_conclusion_does_not_follow_another_branch_message(client: TestClient):
+    case, _ = _case_and_evidence(client)
+    for branch_id, conclusion_id in (("branch-a", "conclusion-a"), ("branch-b", "conclusion-b")):
+        repo.submit_conclusion_revision(
+            case_id=case["case_id"], tenant_id="tenant-a", branch_id=branch_id,
+            investigation_run_id="run-" + branch_id, state="INSUFFICIENT_EVIDENCE",
+            claims=[], root_location={}, mechanism={}, confidence_reason="missing evidence",
+            abstention_reason="branch needs more evidence", report_text=conclusion_id,
+            conclusion_id=conclusion_id,
+        )
+        repo.finalize_investigation_result(
+            case_id=case["case_id"], tenant_id="tenant-a", branch_id=branch_id,
+            summary=conclusion_id, evidence_refs=[], limitations=[],
+            conclusion_state="INSUFFICIENT_EVIDENCE", conclusion_id=conclusion_id,
+            message_id="message-" + branch_id, visible_content=conclusion_id,
+            trigger_turn_id=None,
+        )
+    assert repo.get_conclusion(case["case_id"], "tenant-a", branch_id="branch-a")["conclusion_id"] == "conclusion-a"
+    assert repo.get_conclusion(case["case_id"], "tenant-a", branch_id="branch-b")["conclusion_id"] == "conclusion-b"
+    events = repo.list_case_events(case["case_id"], "tenant-a", limit=100)
+    branch_messages = [
+        item for item in events if item["event_type"] == "assistant.message"
+    ]
+    assert {item["payload"].get("branch_id") for item in branch_messages} >= {"branch-a", "branch-b"}
+
+
 def test_agent_aliases_are_normalized_and_causal_ids_are_graph_scoped(client: TestClient):
     case, evidence_id = _case_and_evidence(client)
     envelope = {

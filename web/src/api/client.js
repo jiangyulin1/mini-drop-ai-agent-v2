@@ -497,8 +497,21 @@ export function getCaseCampaign(caseId) {
 }
 
 /** v6 canonical workspace / command / projection / causal APIs. */
-export function getCaseWorkspace(caseId) {
-  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/workspace`);
+export function getCaseWorkspace(caseId, params = {}) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/workspace`, { params });
+}
+
+export function listCaseInvestigationBranches(caseId) {
+  return api.get(`/v1/cases/${encodeURIComponent(caseId)}/branches`);
+}
+
+export function createCaseInvestigationBranch(caseId, payload = {}) {
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/branches`, payload);
+}
+
+export function promoteCaseEvidence(caseId, evidenceId, targetBranchId = "") {
+  const params = targetBranchId ? { target_branch_id: targetBranchId } : {};
+  return api.post(`/v1/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/promote`, null, { params });
 }
 
 /** Approve or reject the exact persisted AI collection proposal. */
@@ -510,9 +523,10 @@ export function decideCaseCollectionProposal(caseId, proposalId, payload) {
 }
 
 /** Open the canonical per-Case stream from a Workspace Snapshot cursor. */
-export function createCaseEventSource(caseId, afterSeq = 0) {
+export function createCaseEventSource(caseId, afterSeq = 0, branchId = "") {
   const params = new URLSearchParams();
   if (Number(afterSeq) > 0) params.set("after_seq", String(afterSeq));
+  if (branchId) params.set("branch_id", branchId);
   const query = params.toString();
   return new EventSource(
     `/api/v1/cases/${encodeURIComponent(caseId)}/events/stream${query ? `?${query}` : ""}`,

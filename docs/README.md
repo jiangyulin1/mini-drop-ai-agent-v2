@@ -13,7 +13,11 @@
 | [`deployment-profiles.md`](deployment-profiles.md) | Native、Local Compose、Linux 全栈、Control/Worker、Pi 与低带宽评测模式 | 当前部署入口 |
 | [`repository-maintenance.md`](repository-maintenance.md) | 文档归档、生成物清理、凭据、依赖和提交门禁 | 当前维护规范 |
 | [`../reports/evaluation/verified-20260821.md`](../reports/evaluation/verified-20260821.md) | DeepSeek 真实 PR 单轮与未知拓扑 Pi 链路人工核验 | 带日期的验证证据 |
+| [`progress-checkpoint-2026-08-24.md`](progress-checkpoint-2026-08-24.md) | 分支推理状态改造、测试结果和当前未完成语义的检查点 | 本轮检查记录；发生后续代码变更时以资产地图为准 |
+| [`showcase-convergence-plan-2026-08-24.md`](showcase-convergence-plan-2026-08-24.md) | 当前展示主路径、冻结边界、进度记录和验收命令 | 展示收敛执行记录 |
+| [`legacy-module-retirement-2026-08-24.md`](legacy-module-retirement-2026-08-24.md) | 旧模块下线、可复用元素分类、删除门禁和数据库清理边界 | 维护清理记录 |
 | [`evidence_native_agent_unified_architecture.md`](evidence_native_agent_unified_architecture.md) | 恢复旧 v2/v6 受监督调查闭环并融合新版 Evidence/Collector，定义唯一主线、写入权威、并发语义、迁移和删除门禁 | 当前产品与实施架构合同 |
+| [`evidence-native-investigation-positioning.md`](evidence-native-investigation-positioning.md) | 定义以 Evidence 生命周期为真值的产品定位、分支盲隔离、全局 lineage、局部回滚、共享授权和 AI/确定性边界 | 当前产品定位与答辩叙事 |
 | [`ai_collector_architecture_and_migration_plan.md`](ai_collector_architecture_and_migration_plan.md) | AI 深度采集与 Evidence 分析阶段的架构审计、删除门禁和评测计划 | 历史阶段决策；Collector 是当前诊断 Agent 的执行核心而非产品边界 |
 | [`ai_diagnostic_agent_evolution_plan.md`](ai_diagnostic_agent_evolution_plan.md) | 本轮并行架构审计的细节稿，包含旧链路、Evidence 完成度和早期迁移取舍 | 历史审计素材；当前执行只以 AI Collector 基线为准 |
 | [`v2_continuation_master_prompt_v1.md`](v2_continuation_master_prompt_v1.md) | V2 架构收敛与产品闭环总提示词，包含事务/Outbox、Agent 安全、跨平台门禁和候选交付素材 | 历史实施合同；仅复用不与 AI Collector 基线冲突的机制 |

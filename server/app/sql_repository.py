@@ -37,7 +37,6 @@ from server.app.models import (
     AuditLogModel,
     AuthorizationGrantModel,
     CaseResourceAttachmentModel,
-    EvidenceReviewModel,
     FanoutCollectionRunModel,
     InvestigationPlanModel,
     InvestigationPlanStepModel,
@@ -1345,49 +1344,6 @@ class SqlRepository(SqlRepositoryV6Mixin):
             ).order_by(FanoutCollectionRunModel.created_at.desc()).all()
             return [row.to_dict() for row in rows]
 
-    def add_evidence_review(self, case_id: str, tenant_id: str,
-                            payload: dict[str, Any]) -> dict[str, Any]:
-        now = now_utc()
-        with self._write_session() as session:
-            previous = session.query(EvidenceReviewModel).filter(
-                EvidenceReviewModel.case_id == case_id,
-                EvidenceReviewModel.tenant_id == tenant_id,
-                EvidenceReviewModel.evidence_id == payload["evidence_id"],
-            ).order_by(EvidenceReviewModel.review_revision.desc()).first()
-            revision = (previous.review_revision if previous else 0) + 1
-            review = EvidenceReviewModel(
-                review_id=payload["review_id"],
-                case_id=case_id,
-                tenant_id=tenant_id,
-                evidence_id=payload["evidence_id"],
-                decision=payload["decision"],
-                reason_code=payload.get("reason_code"),
-                reason=payload.get("reason"),
-                actor_id=payload.get("actor_id") or "unknown",
-                review_revision=revision,
-                created_at=now,
-            )
-            session.add(review)
-            session.flush()
-            return review.to_dict()
-
-    def list_evidence_reviews(self, case_id: str, tenant_id: str,
-                              evidence_id: str | None = None) -> list[dict[str, Any]]:
-        with self._read_session() as session:
-            query = session.query(EvidenceReviewModel).filter(
-                EvidenceReviewModel.case_id == case_id,
-                EvidenceReviewModel.tenant_id == tenant_id,
-            )
-            if evidence_id:
-                query = query.filter(EvidenceReviewModel.evidence_id == evidence_id)
-            rows = query.order_by(
-                EvidenceReviewModel.created_at.desc(),
-                EvidenceReviewModel.evidence_id.asc(),
-                EvidenceReviewModel.review_revision.desc(),
-                EvidenceReviewModel.review_id.desc(),
-            ).all()
-            return [row.to_dict() for row in rows]
-
     def append_case_message(
         self,
         case_id: str,
@@ -2044,6 +2000,39 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 return None
             row.lifecycle_status = "ACTIVE"
             row.status = "LOW_TRUST" if row.review_trust_state == "LOW_TRUST" else "ACTIVE"
+            row.updated_at = now
+            session.flush()
+            return row.to_dict()
+
+    def promote_case_evidence(
+        self,
+        case_id: str,
+        tenant_id: str,
+        evidence_id: str,
+        *,
+        target_branch_id: str | None = None,
+        actor_id: str = "operator",
+    ) -> dict[str, Any] | None:
+        """Explicitly publish branch Evidence without changing provenance."""
+        now = now_utc()
+        with self._write_session() as session:
+            row = session.query(CaseEvidenceModel).filter(
+                CaseEvidenceModel.case_id == case_id,
+                CaseEvidenceModel.tenant_id == tenant_id,
+                CaseEvidenceModel.evidence_id == evidence_id,
+            ).with_for_update().first()
+            if row is None:
+                return None
+            lifecycle = str(row.lifecycle_status or row.status or "ACTIVE").upper()
+            if lifecycle in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
+                raise ValueError("EVIDENCE_NOT_ELIGIBLE")
+            lineage = dict(row.lineage_json or {})
+            lineage["visibility_scope"] = "PROMOTED"
+            if target_branch_id:
+                lineage["promoted_to_branch_id"] = str(target_branch_id)
+            lineage["promoted_by"] = actor_id
+            lineage["promoted_at"] = now.isoformat()
+            row.lineage_json = lineage
             row.updated_at = now
             session.flush()
             return row.to_dict()
@@ -2876,6 +2865,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
         graph: dict[str, Any],
         source: str,
         actor_id: str,
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         now = now_utc()
         status_map = {
@@ -2918,6 +2908,8 @@ class SqlRepository(SqlRepositoryV6Mixin):
                     CaseHypothesisNodeModel.case_id == case_id,
                     CaseHypothesisNodeModel.tenant_id == tenant_id,
                     CaseHypothesisNodeModel.hypothesis_id == hypothesis_id,
+                    CaseHypothesisNodeModel.branch_id.is_(None)
+                    if branch_id is None else CaseHypothesisNodeModel.branch_id == branch_id,
                 ).first()
                 previous_status = row.status if row else None
                 previous_invalidated_refs = list(row.invalidated_evidence_refs_json or []) if row else []
@@ -2927,6 +2919,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
                         id=f"hyp_node_{uuid4().hex}",
                         case_id=case_id,
                         tenant_id=tenant_id,
+                        branch_id=branch_id,
                         hypothesis_id=hypothesis_id,
                         created_at=now,
                         revision=1,
@@ -2971,6 +2964,8 @@ class SqlRepository(SqlRepositoryV6Mixin):
             session.query(CaseHypothesisEdgeModel).filter(
                 CaseHypothesisEdgeModel.case_id == case_id,
                 CaseHypothesisEdgeModel.tenant_id == tenant_id,
+                CaseHypothesisEdgeModel.branch_id.is_(None)
+                if branch_id is None else CaseHypothesisEdgeModel.branch_id == branch_id,
             ).delete(synchronize_session=False)
             for edge in graph.get("edges") or []:
                 source_id = edge.get("source") or edge.get("source_hypothesis_id")
@@ -2981,6 +2976,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
                     id=f"hyp_edge_{uuid4().hex}",
                     case_id=case_id,
                     tenant_id=tenant_id,
+                    branch_id=branch_id,
                     source_hypothesis_id=source_id,
                     target_hypothesis_id=target_id,
                     relation=str(edge.get("relation") or "ALTERNATIVE_TO")[:32],
@@ -2999,10 +2995,14 @@ class SqlRepository(SqlRepositoryV6Mixin):
             nodes = session.query(CaseHypothesisNodeModel).filter(
                 CaseHypothesisNodeModel.case_id == case_id,
                 CaseHypothesisNodeModel.tenant_id == tenant_id,
+                CaseHypothesisNodeModel.branch_id.is_(None)
+                if branch_id is None else CaseHypothesisNodeModel.branch_id == branch_id,
             ).order_by(CaseHypothesisNodeModel.hypothesis_id.asc()).all()
             edges = session.query(CaseHypothesisEdgeModel).filter(
                 CaseHypothesisEdgeModel.case_id == case_id,
                 CaseHypothesisEdgeModel.tenant_id == tenant_id,
+                CaseHypothesisEdgeModel.branch_id.is_(None)
+                if branch_id is None else CaseHypothesisEdgeModel.branch_id == branch_id,
             ).all()
             return {
                 "hypotheses": [row.to_dict() for row in nodes],
@@ -3010,7 +3010,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
             }
 
     def get_case_hypothesis_graph(
-        self, case_id: str, tenant_id: str,
+        self, case_id: str, tenant_id: str, branch_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self._read_session() as session:
             exists = session.query(IncidentCaseModel.id).filter(
@@ -3022,10 +3022,14 @@ class SqlRepository(SqlRepositoryV6Mixin):
             nodes = session.query(CaseHypothesisNodeModel).filter(
                 CaseHypothesisNodeModel.case_id == case_id,
                 CaseHypothesisNodeModel.tenant_id == tenant_id,
+                CaseHypothesisNodeModel.branch_id.is_(None)
+                if branch_id is None else CaseHypothesisNodeModel.branch_id == branch_id,
             ).order_by(CaseHypothesisNodeModel.hypothesis_id.asc()).all()
             edges = session.query(CaseHypothesisEdgeModel).filter(
                 CaseHypothesisEdgeModel.case_id == case_id,
                 CaseHypothesisEdgeModel.tenant_id == tenant_id,
+                CaseHypothesisEdgeModel.branch_id.is_(None)
+                if branch_id is None else CaseHypothesisEdgeModel.branch_id == branch_id,
             ).all()
             return {
                 "hypotheses": [row.to_dict() for row in nodes],

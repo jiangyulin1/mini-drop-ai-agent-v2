@@ -23,6 +23,7 @@ from server.app.application.task_views import task_view
 from server.app.artifact_service import inspect_artifact
 from server.app.common_utils import status_value
 from server.app.http.dependencies import get_repository_application_service
+from server.app.legacy_compat import legacy_diagnosis_disabled_detail, legacy_diagnosis_enabled
 from server.app.logging_utils import log_event
 from server.app.schemas import (
     APIResponse,
@@ -519,6 +520,8 @@ def submit_diagnosis_feedback(
     payload: RCAFeedbackRequest,
     repo: Repository,
 ) -> APIResponse:
+    if not legacy_diagnosis_enabled():
+        raise HTTPException(status_code=410, detail=legacy_diagnosis_disabled_detail())
     item = repo.get_diagnosis(diagnosis_id)
     if item is None:
         raise HTTPException(status_code=404, detail="诊断不存在")

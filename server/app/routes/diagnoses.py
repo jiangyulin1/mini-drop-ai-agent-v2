@@ -34,6 +34,10 @@ from server.app.http.auth import (
     request_tenant as _request_tenant,
     require_role as _require_role,
 )
+from server.app.legacy_compat import (
+    legacy_diagnosis_disabled_detail,
+    legacy_diagnosis_enabled,
+)
 from server.app.runtime_services import (
     case_evidence_service,
     diagnosis_orchestrator,
@@ -59,6 +63,8 @@ def _safe_download_filename(value: str) -> str:
 @router.post("/api/v1/diagnoses")
 def create_diagnosis_session(payload: CreateDiagnosisRequest) -> APIResponse:
     """创建独立诊断会话，并只编排注册表中的受控探针。"""
+    if not legacy_diagnosis_enabled():
+        raise HTTPException(status_code=410, detail=legacy_diagnosis_disabled_detail())
     try:
         data = diagnosis_orchestrator.create(payload, creator_id="demo_user")
     except PermissionError as exc:
@@ -83,7 +89,11 @@ def list_diagnosis_sessions(limit: int = 100, offset: int = 0) -> APIResponse:
 
 @router.get("/api/v1/diagnoses/{diagnosis_id}")
 def get_diagnosis_session(diagnosis_id: str) -> APIResponse:
-    data = diagnosis_orchestrator.get(diagnosis_id, advance=True)
+    # Historical reads must not implicitly advance the retired workflow.
+    data = diagnosis_orchestrator.get(
+        diagnosis_id,
+        advance=legacy_diagnosis_enabled(),
+    )
     if data is None:
         raise HTTPException(status_code=404, detail="诊断会话不存在")
     artifacts_by_task = repo.artifacts
@@ -298,6 +308,8 @@ def reconcile_artifact_storage(limit: int = 1000, verify_hash: bool = False) -> 
 @router.post("/api/v1/diagnoses/{diagnosis_id}/cancel")
 def cancel_diagnosis_session(diagnosis_id: str, body: Optional[dict] = None) -> APIResponse:
     """取消诊断会话：终态幂等；非终态收敛到 USER_CANCELED 并取消活跃子任务。"""
+    if not legacy_diagnosis_enabled():
+        raise HTTPException(status_code=410, detail=legacy_diagnosis_disabled_detail())
     reason = ((body or {}).get("reason") or "").strip() or "用户取消诊断"
     try:
         data = diagnosis_orchestrator.cancel(diagnosis_id, reason)
@@ -310,6 +322,8 @@ def cancel_diagnosis_session(diagnosis_id: str, body: Optional[dict] = None) -> 
 
 @router.post("/api/v1/diagnoses/{diagnosis_id}/approvals")
 def approve_diagnosis_probe(diagnosis_id: str, payload: ApprovalRequest) -> APIResponse:
+    if not legacy_diagnosis_enabled():
+        raise HTTPException(status_code=410, detail=legacy_diagnosis_disabled_detail())
     try:
         data = diagnosis_orchestrator.approve(diagnosis_id, payload)
     except ValueError as exc:

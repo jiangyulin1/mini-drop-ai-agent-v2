@@ -49,6 +49,7 @@ from server.app.diagnosis.investigation_planner import (
     evaluate_investigation_stop,
     rank_investigation_actions,
 )
+from server.app.diagnosis.current_understanding import derive_current_understanding
 from server.app.diagnosis.confidence_engine import CALCULATION_VERSION, calculate_chain_confidence
 from server.app.diagnosis.proposal_card import build_proposal_cards
 from server.app.diagnosis.reference_resolver import ResourceRef
@@ -59,6 +60,10 @@ from server.app.http.auth import (
     request_principal as _request_principal,
     request_tenant as _request_tenant,
     require_role as _require_role,
+)
+from server.app.legacy_compat import (
+    legacy_diagnosis_disabled_detail,
+    legacy_diagnosis_enabled,
 )
 from server.app.routes.cases import _case_agent_progress
 from server.app.runtime_services import (
@@ -639,7 +644,8 @@ def list_case_model_attempts(
 @router.get("/api/v1/cases/{case_id}/hypotheses")
 def get_case_hypotheses(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
-    graph = repo.get_case_hypothesis_graph(case_id, _request_tenant())
+    branch_id = str(request.query_params.get("branch_id") or "").strip() or None
+    graph = repo.get_case_hypothesis_graph(case_id, _request_tenant(), branch_id)
     if graph is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
     return APIResponse(data=graph)
@@ -671,6 +677,8 @@ def start_case_diagnosis(
     request: Request,
 ) -> APIResponse:
     """Start the existing deterministic diagnosis workflow under Case governance."""
+    if not legacy_diagnosis_enabled():
+        raise HTTPException(status_code=410, detail=legacy_diagnosis_disabled_detail())
     _require_role(request, "operator")
     tenant_id = _request_tenant()
     principal_id = _request_principal(request)
@@ -870,25 +878,44 @@ def start_case_diagnosis(
 
 @router.get("/api/v1/cases/{case_id}/proposals")
 def list_case_proposals(case_id: str, request: Request) -> APIResponse:
-    """提案卡：把 Case 诊断的待审批动作派生为可读卡片（依据/作用/影响/成本）。"""
+    """Return proposal cards from the canonical collection ledger.
+
+    The old DiagnosisSession conclusion is used only while the explicit
+    compatibility switch is enabled.  New/default reads are derived from
+    collection proposals so this endpoint cannot resurrect the retired RCA
+    workflow as the Case source of truth.
+    """
     _require_role(request, "operator")
     tenant_id = _request_tenant()
     case = repo.get_incident_case(case_id, tenant_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
     actions: list[dict] = []
-    diagnosis_id = case.get("diagnosis_session_id")
-    if diagnosis_id:
-        session = diagnosis_orchestrator.store.get_detail(diagnosis_id)
-        conclusion = (session or {}).get("latest_conclusion") or {}
-        actions = conclusion.get("actions") or []
+    if legacy_diagnosis_enabled():
+        diagnosis_id = case.get("diagnosis_session_id")
+        if diagnosis_id:
+            session = diagnosis_orchestrator.store.get_detail(diagnosis_id)
+            conclusion = (session or {}).get("latest_conclusion") or {}
+            actions = conclusion.get("actions") or []
+    else:
+        for proposal in repo.list_collection_proposals(case_id, tenant_id):
+            actions.append({
+                "action_id": proposal.get("proposal_id") or proposal.get("collector_id") or "collection-proposal",
+                "action_type": "collect",
+                "collector_type": proposal.get("collector_id") or "",
+                "target": proposal.get("target") or {},
+                "comment": proposal.get("reason_summary") or proposal.get("information_goal") or "Evidence-native Collector proposal",
+                "risk_level": proposal.get("expected_risk") or "R1",
+                "requires_approval": bool((proposal.get("validation_result") or {}).get("awaiting_execution_authority")),
+                "evidence_refs": proposal.get("evidence_refs") or [],
+            })
     cards = build_proposal_cards(actions, step_id_prefix=f"{case_id}:")
     return APIResponse(data={"case_id": case_id, "proposals": cards})
 
 
 @router.get("/api/v1/cases/{case_id}/understanding")
 def get_case_current_understanding(case_id: str, request: Request) -> APIResponse:
-    """Return the current programmatic understanding from live Case evidence."""
+    """Return current understanding from canonical Evidence-native state."""
     _require_role(request, "operator")
     tenant_id = _request_tenant()
     case = repo.get_incident_case(case_id, tenant_id)
@@ -897,7 +924,7 @@ def get_case_current_understanding(case_id: str, request: Request) -> APIRespons
     graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {
         "hypotheses": [], "edges": [],
     }
-    diagnosis_id = case.get("diagnosis_session_id")
+    diagnosis_id = case.get("diagnosis_session_id") if legacy_diagnosis_enabled() else None
     detail = (
         diagnosis_orchestrator.store.get_detail(diagnosis_id)
         if diagnosis_id else {}
@@ -908,17 +935,27 @@ def get_case_current_understanding(case_id: str, request: Request) -> APIRespons
         environment=case.get("environment"),
         limit=10,
     )
-    packet, _, _ = build_case_context_packet(
-        case,
-        diagnosis={"hypothesis_graph": graph},
-        evidence=detail.get("evidence") or [],
-        recent_changes=recent_changes,
-        required_output_schema="current-understanding.v1",
-    )
+    if legacy_diagnosis_enabled():
+        packet, _, _ = build_case_context_packet(
+            case,
+            diagnosis={"hypothesis_graph": graph},
+            evidence=detail.get("evidence") or [],
+            recent_changes=recent_changes,
+            required_output_schema="current-understanding.v1",
+        )
+        understanding = packet["current_understanding"]
+    else:
+        evidence = repo.list_case_evidence(case_id, tenant_id, status=None)
+        understanding = derive_current_understanding(
+            target=str((case.get("target_scope") or {}).get("service_id") or case.get("title") or ""),
+            symptom=str(case.get("problem_description") or ""),
+            hypotheses=graph.get("hypotheses") or [],
+            evidence=evidence,
+        ).model_dump(mode="json")
     return APIResponse(data={
         "case_id": case_id,
         "diagnosis_id": diagnosis_id,
-        "current_understanding": packet["current_understanding"],
+        "current_understanding": understanding,
     })
 
 
@@ -1149,6 +1186,7 @@ def run_incident_case_agent_turn(
                 runtime_policy=effective_policy,
                 runtime_options=effective_options,
                 strategy_id=strategy.strategy_id,
+                branch_id=payload.branch_id,
             )
             packet_payload = runtime_context.model_dump(mode="json")
             packet = repo.create_context_packet({
@@ -1187,6 +1225,7 @@ def run_incident_case_agent_turn(
                 case_id,
                 AgentTurnInput(
                     case_id=case_id,
+                    branch_id=payload.branch_id,
                     message=payload.message,
                     references=payload.model_dump(mode="json").get("references", []),
                     requested_mode=intent.value,
@@ -1264,7 +1303,9 @@ def run_incident_case_agent_turn(
 
     case = repo.get_incident_case(case_id, tenant_id) or case
     graph = repo.get_case_hypothesis_graph(case_id, tenant_id) or {"hypotheses": [], "edges": []}
-    diagnosis_id = case.get("diagnosis_session_id")
+    diagnosis_id = (
+        case.get("diagnosis_session_id") if legacy_diagnosis_enabled() else None
+    )
     diagnosis = (
         diagnosis_orchestrator.store.get_detail(diagnosis_id)
         if diagnosis_id else {}

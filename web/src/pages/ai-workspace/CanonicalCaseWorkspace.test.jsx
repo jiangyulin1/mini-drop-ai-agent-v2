@@ -134,6 +134,9 @@ describe("CanonicalCaseWorkspace", () => {
   it("uses one state-aware workspace navigation without completion checks", async () => {
     const { container } = render(<CanonicalCaseWorkspace workspace={WORKSPACE} caseId="case-1" connected onRefresh={vi.fn()} />);
 
+    expect(await screen.findByText("当前调查路径")).toBeInTheDocument();
+    expect(screen.getByText("当前假设")).toBeInTheDocument();
+    expect(screen.getByText("失效传播")).toBeInTheDocument();
     expect(await screen.findByRole("tab", { name: "信息目标，需处理，1 项" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Evidence，已就绪，1 项" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "依赖关系，覆盖有限，1 项" })).toBeInTheDocument();
@@ -250,6 +253,19 @@ describe("CanonicalCaseWorkspace", () => {
     expect(await screen.findByText("RESTORED")).toBeInTheDocument();
     expect(container.querySelector(".ccw-evidence-card.is-excluded")).toBeNull();
     expect(screen.queryByText("已从后续 Agent 上下文中排除")).not.toBeInTheDocument();
+  });
+
+  it("surfaces review exclusion as a path-level invalidation", async () => {
+    listCaseEvidenceReviews.mockResolvedValue({ items: [{
+      evidence_id: "ev-current-123456789",
+      decision: "EXCLUDED",
+      review_revision: 2,
+    }] });
+
+    render(<CanonicalCaseWorkspace workspace={WORKSPACE} caseId="case-1" connected onRefresh={vi.fn()} />);
+
+    expect(await screen.findByText("证据链发生变化")).toBeInTheDocument();
+    expect(screen.getByText("2 项需要回溯")).toBeInTheDocument();
   });
 
   it("treats dispatch failures as collection attention", async () => {

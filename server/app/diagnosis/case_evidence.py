@@ -47,6 +47,7 @@ class CaseEvidenceService:
         attachment_id: str | None = None,
         actor_id: str = "mini-drop-evidence-service",
         stale_for_current_revision: bool = False,
+        branch_id: str | None = None,
     ) -> list[str]:
         """Materialize all structured Task artifacts as canonical Case Evidence."""
         artifacts = self._repo.artifacts.get(task_id, []) if getattr(self._repo, "artifacts", None) else []
@@ -155,6 +156,9 @@ class CaseEvidenceService:
                     "discovery_run_id": request_options.get("discovery_run_id"),
                     "discovery_seed_ref": request_options.get("discovery_seed_ref"),
                     "discovery_parent_task_id": request_options.get("discovery_parent_task_id"),
+                    "branch_id": branch_id or request_options.get("branch_id"),
+                    "visibility_scope": "BRANCH_LOCAL" if (branch_id or request_options.get("branch_id")) else "PUBLIC_SEED",
+                    "provenance_status": "CURRENT_PATH",
                 },
                 trace_id=str(getattr(task, "traceparent", "") or "") or None,
                 stale_for_current_revision=stale_for_current_revision,

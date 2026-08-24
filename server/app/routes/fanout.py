@@ -51,6 +51,7 @@ from server.app.http.auth import (
     request_tenant as _request_tenant,
     require_role as _require_role,
 )
+from server.app.legacy_compat import legacy_diagnosis_enabled
 from server.app.prometheus_metrics import record_source_access
 from server.app.runtime_services import (
     diagnosis_orchestrator,
@@ -276,7 +277,9 @@ def verify_case_recovery(
     case = repo.get_incident_case(case_id, tenant_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
-    diagnosis_id = payload.get("diagnosis_id") or case.get("diagnosis_session_id")
+    diagnosis_id = (
+        payload.get("diagnosis_id") or case.get("diagnosis_session_id")
+    ) if legacy_diagnosis_enabled() else None
     if not diagnosis_id:
         raise HTTPException(status_code=409, detail="Case 尚未关联诊断会话")
     diagnosis = diagnosis_orchestrator.get(diagnosis_id, advance=False)
@@ -418,7 +421,9 @@ def correct_incident_case(
         and current["row_version"] != payload.expected_row_version
     ):
         raise HTTPException(status_code=409, detail="CASE_VERSION_CONFLICT")
-    superseded_diagnosis_id = current.get("diagnosis_session_id")
+    superseded_diagnosis_id = (
+        current.get("diagnosis_session_id") if legacy_diagnosis_enabled() else None
+    )
     if superseded_diagnosis_id:
         try:
             diagnosis_orchestrator.cancel(
@@ -474,7 +479,9 @@ def _transition_case_from_api(
     current = repo.get_incident_case(case_id, tenant_id)
     if current is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
-    diagnosis_id = current.get("diagnosis_session_id")
+    diagnosis_id = (
+        current.get("diagnosis_session_id") if legacy_diagnosis_enabled() else None
+    )
     diagnosis_changed = False
     try:
         if diagnosis_id and action == "pause":

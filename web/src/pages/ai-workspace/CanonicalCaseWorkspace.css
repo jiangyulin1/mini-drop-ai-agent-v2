@@ -16,6 +16,18 @@
   border-bottom: 1px solid var(--app-border);
 }
 
+.ccw-branch-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.ccw-branch-controls .ant-select {
+  min-width: 220px;
+}
+
 .ccw-header span {
   color: var(--app-text-secondary);
   font-size: 9px;
@@ -36,6 +48,230 @@
 
 .ccw-status .ant-tag {
   margin: 0;
+}
+
+.ccw-overview {
+  padding: 16px;
+  border-bottom: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-surface) 96%, var(--app-accent-surface, #eaf1ff));
+}
+
+.ccw-overview-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ccw-eyebrow {
+  color: var(--app-accent-text, #2256a3);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.ccw-overview h3 {
+  margin: 3px 0 2px;
+  color: var(--app-text);
+  font-size: 16px;
+}
+
+.ccw-overview-intro p {
+  margin: 0;
+  color: var(--app-text-secondary);
+  font-size: 11px;
+}
+
+.ccw-overview-state {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 2px;
+  color: var(--app-text-secondary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ccw-live-dot {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  border-radius: 50%;
+  background: #067647;
+  box-shadow: 0 0 0 3px rgba(6, 118, 71, 0.1);
+}
+
+.ccw-path {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.ccw-path-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ccw-path-node {
+  min-width: 0;
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 9px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 6px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  color: var(--app-text);
+  background: var(--app-surface);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ccw-path-node:hover,
+.ccw-path-node:focus-visible {
+  border-color: color-mix(in srgb, var(--app-accent-text, #2256a3) 46%, var(--app-border));
+  outline: none;
+}
+
+.ccw-path-node:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent-text, #2256a3) 24%, transparent);
+}
+
+.ccw-path-node.is-ready {
+  border-color: color-mix(in srgb, #067647 34%, var(--app-border));
+}
+
+.ccw-path-node.is-active {
+  border-color: color-mix(in srgb, var(--app-accent-text, #2256a3) 46%, var(--app-border));
+  background: var(--app-accent-surface, #eaf1ff);
+}
+
+.ccw-path-node.is-attention {
+  border-color: color-mix(in srgb, #b54708 46%, var(--app-border));
+  background: #fffbeb;
+}
+
+.ccw-path-icon {
+  grid-row: 1 / 3;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  color: var(--app-accent-text, #2256a3);
+  font-size: 13px;
+}
+
+.ccw-path-node.is-ready .ccw-path-icon { color: #067647; }
+.ccw-path-node.is-attention .ccw-path-icon { color: #b54708; }
+
+.ccw-path-node strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ccw-path-node small {
+  color: var(--app-text-secondary);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.ccw-path-node em {
+  grid-column: 2 / 4;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-text-secondary);
+  font-size: 9px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ccw-path-connector {
+  flex: 0 0 5px;
+  height: 1px;
+  margin: 0 2px;
+  background: var(--app-border);
+}
+
+.ccw-brief-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ccw-brief-block {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  background: var(--app-surface);
+}
+
+.ccw-brief-block.is-warning {
+  border-color: color-mix(in srgb, #b54708 42%, var(--app-border));
+  background: #fffbeb;
+}
+
+.ccw-brief-block > span,
+.ccw-brief-block > small {
+  display: block;
+  color: var(--app-text-secondary);
+  font-size: 10px;
+}
+
+.ccw-brief-block > strong {
+  display: block;
+  margin: 4px 0;
+  overflow: hidden;
+  color: var(--app-text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ccw-brief-block > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ccw-brief-block .ant-btn {
+  padding-inline: 0;
+  height: auto;
+  font-size: 10px;
+}
+
+.ccw-revocation-strip {
+  margin-top: 9px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #f3c26b;
+  border-radius: 7px;
+  color: #8a4b08;
+  background: #fffbeb;
+  font-size: 10px;
+}
+
+.ccw-revocation-strip > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.ccw-revocation-strip .ant-btn {
+  flex: 0 0 auto;
 }
 
 .ccw-revisions {
@@ -903,6 +1139,45 @@
 @container (min-width: 680px) {
   .ccw-stagebar {
     grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 700px) {
+  .ccw-path {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 6px;
+  }
+
+  .ccw-path-connector {
+    display: none;
+  }
+
+  .ccw-brief-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container (max-width: 430px) {
+  .ccw-overview {
+    padding: 12px;
+  }
+
+  .ccw-overview-intro {
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .ccw-path {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ccw-revocation-strip {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ccw-revocation-strip .ant-btn {
+    margin-left: 28px;
   }
 }
 

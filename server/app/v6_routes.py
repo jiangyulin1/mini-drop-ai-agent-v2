@@ -45,9 +45,11 @@ from server.app.agent_runtime.shadow import (
     request_shadow_plan,
 )
 from server.app.http.auth import (
+    request_principal as _request_principal,
     request_tenant as _request_tenant,
     require_role as _require_role,
 )
+from server.app.legacy_compat import legacy_diagnosis_enabled
 from server.app.logging_utils import log_event
 from server.app.routes.topology_discovery import (
     AdvanceTopologyDiscoveryRequest,
@@ -74,6 +76,92 @@ from server.app.diagnosis.v6_policy import (
 
 
 router = APIRouter()
+
+
+def _evidence_lineage(item: dict[str, Any]) -> dict[str, Any]:
+    lineage = item.get("lineage")
+    if not isinstance(lineage, dict):
+        lineage = item.get("lineage_json")
+    return lineage if isinstance(lineage, dict) else {}
+
+
+def _evidence_visible_to_branch(item: dict[str, Any], branch_id: str | None) -> bool:
+    """Return the narrow branch view used by Agent-facing read boundaries.
+
+    Rows created before branch isolation are public seeds.  Sharing is an
+    explicit promotion recorded in lineage; no other branch-local row leaks.
+    """
+    if not branch_id:
+        return True
+    lineage = _evidence_lineage(item)
+    owner = str(lineage.get("branch_id") or "")
+    scope = str(lineage.get("visibility_scope") or ("BRANCH_LOCAL" if owner else "PUBLIC_SEED")).upper()
+    if scope == "PROMOTED":
+        target = str(lineage.get("promoted_to_branch_id") or "")
+        # Promotion grants an additional reader scope.  It must not revoke the
+        # producing branch's own access, otherwise promoting a local result
+        # would make it disappear from the investigation that created it.
+        return (
+            not target
+            or target == str(branch_id)
+            or owner == str(branch_id)
+        )
+    return scope == "PUBLIC_SEED" or owner == str(branch_id)
+
+
+def _branch_cycle_ids(
+    tree: dict[str, Any], branch_id: str | None,
+) -> set[str]:
+    """Resolve durable cycle -> branch ownership from the investigation tree."""
+    if not branch_id:
+        return set()
+    return {
+        str((node.get("metadata") or {}).get("cycle_id") or "")
+        for node in tree.get("nodes") or []
+        if str(node.get("branch_id") or "") == str(branch_id)
+        and (node.get("metadata") or {}).get("cycle_id")
+    }
+
+
+def _filter_branch_collection_items(
+    items: list[dict[str, Any]], tree: dict[str, Any], branch_id: str | None,
+    *, visible_proposal_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Fail closed for proposal/request rows without a branch-owned cycle."""
+    if not branch_id:
+        return items
+    cycle_ids = _branch_cycle_ids(tree, branch_id)
+    branch_run_ids = {
+        str(node.get("run_id") or "") for node in tree.get("nodes") or []
+        if str(node.get("branch_id") or "") == str(branch_id)
+    }
+    return [
+        item for item in items
+        if str(item.get("cycle_id") or "") in cycle_ids
+        or str(item.get("agent_run_id") or "") in branch_run_ids
+        or (
+            visible_proposal_ids is not None
+            and str(item.get("proposal_id") or "") in visible_proposal_ids
+        )
+    ]
+
+
+def _filter_tree_for_branch(tree: dict[str, Any], branch_id: str | None) -> dict[str, Any]:
+    if not branch_id:
+        return tree
+    nodes = [
+        node for node in tree.get("nodes") or []
+        if str(node.get("branch_id") or "") == str(branch_id)
+    ]
+    node_ids = {str(node.get("node_id") or "") for node in nodes}
+    return {
+        **tree,
+        "nodes": nodes,
+        "dependencies": [
+            dep for dep in tree.get("dependencies") or []
+            if str(dep.get("node_id") or "") in node_ids
+        ],
+    }
 
 
 def _resolve_query_target(
@@ -124,6 +212,7 @@ def _create_case_query_task(
     parameters: dict[str, Any],
     *,
     idempotency_key: str | None = None,
+    branch_id: str | None = None,
 ):
     operation = QUERY_REGISTRY.get(operation_id)
     if operation is None:
@@ -155,6 +244,7 @@ def _create_case_query_task(
                 "query_operation": operation_id,
                 "target_ref": target_ref,
                 "created_by": principal_id,
+                "branch_id": branch_id,
             },
         ),
         idempotency_key=idempotency_key,
@@ -186,6 +276,7 @@ def _build_runtime_case_context(
     strategy_id: str | None = None,
     intervention: dict[str, Any] | None = None,
     evidence_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    branch_id: str | None = None,
 ) -> CaseContextSnapshot:
     """Build the L0/L1 Case projection handed to an AgentRuntimePort before a Turn."""
     case_id = str(case.get("case_id") or "")
@@ -211,6 +302,8 @@ def _build_runtime_case_context(
             projections_by_evidence.setdefault(evidence_key, []).append(projection)
     canonical_evidence = case_evidence_service.list_evidence(case_id, tenant_id, status=None)
     for item in canonical_evidence:
+        if branch_id and not _evidence_visible_to_branch(item, branch_id):
+            continue
         if visible_evidence_ids is not None and str(item.get("evidence_id") or "") not in visible_evidence_ids:
             continue
         if str(item.get("status") or item.get("lifecycle_status") or "ACTIVE").upper() in {
@@ -258,6 +351,15 @@ def _build_runtime_case_context(
         attachment_evidence_ids = {
             str(item) for item in (attachment.get("evidence_ids") or []) if str(item)
         }
+        if branch_id:
+            visible_attachment_ids = {
+                str(item.get("evidence_id") or "")
+                for item in canonical_evidence
+                if _evidence_visible_to_branch(item, branch_id)
+            }
+            attachment_evidence_ids &= visible_attachment_ids
+            if not attachment_evidence_ids:
+                continue
         if (
             visible_evidence_ids is not None
             and not visible_evidence_ids.intersection(attachment_evidence_ids)
@@ -272,8 +374,19 @@ def _build_runtime_case_context(
             "quality": attachment.get("quality"),
         })
     binding = repo.get_agent_runtime_binding(case_id, tenant_id)
-    collection_proposals = repo.list_collection_proposals(case_id, tenant_id)
-    collection_requests = repo.list_collection_requests(case_id, tenant_id)
+    branch_tree: dict[str, Any] = {"nodes": [], "dependencies": []}
+    if branch_id and hasattr(repo, "list_investigation_tree"):
+        branch_tree = repo.list_investigation_tree(case_id, tenant_id)
+    collection_proposals = _filter_branch_collection_items(
+        repo.list_collection_proposals(case_id, tenant_id), branch_tree, branch_id,
+    )
+    visible_proposal_ids = {
+        str(item.get("proposal_id") or "") for item in collection_proposals
+    }
+    collection_requests = _filter_branch_collection_items(
+        repo.list_collection_requests(case_id, tenant_id), branch_tree, branch_id,
+        visible_proposal_ids=visible_proposal_ids if branch_id else None,
+    )
     evidence_analyses = repo.list_evidence_analysis_runs(case_id, tenant_id)
     if visible_evidence_ids is not None:
         evidence_analyses = [
@@ -282,9 +395,11 @@ def _build_runtime_case_context(
                 str(ref) for ref in (item.get("evidence_inputs") or [])
             })
         ]
-    investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
+    investigation_state = investigation_state_service.snapshot(case_id, tenant_id, branch_id)
+    if branch_id:
+        branch_tree = _filter_tree_for_branch(branch_tree, branch_id)
     conclusion_history = (
-        repo.list_conclusion_revisions(case_id, tenant_id)
+        repo.list_conclusion_revisions(case_id, tenant_id, branch_id=branch_id)
         if hasattr(repo, "list_conclusion_revisions") else []
     )
     hypothesis_graph = investigation_state["hypothesis_graph"]
@@ -406,6 +521,29 @@ def _build_runtime_case_context(
         }
         for item in evidence_analyses[-10:]
     ]
+    # Case-level hypotheses/conclusions are deliberately withheld from an
+    # isolated branch until an operator promotes a claim. The branch receives
+    # only its own tree projection plus visible Evidence.
+    if branch_id:
+        collection_proposals = [
+            item for item in collection_proposals
+            if str((item.get("metadata") or {}).get("branch_id") or item.get("branch_id") or "") == branch_id
+        ]
+        collection_requests = [
+            item for item in collection_requests
+            if str((item.get("request_options") or {}).get("branch_id") or item.get("branch_id") or "") == branch_id
+        ]
+        hypotheses = []
+        sanitized_hypothesis_edges = []
+        evidence_gaps = []
+        causal_graph_view = {}
+        conclusion_history = []
+        recommendations_view = []
+        current_support = []
+        counterevidence = []
+        analysis_summary = []
+        information_goals = []
+        missing_facts = []
     return CaseContextSnapshot(
         case_id=case_id,
         tenant_id=tenant_id,
@@ -419,6 +557,7 @@ def _build_runtime_case_context(
         campaign_revision=0,
         evidence_watermark=len(all_projections),
         investigation_run_id=investigation_run_id,
+        branch_id=branch_id,
         turn_id=turn_id,
         disposition=disposition,
         side_effect_policy=resolved_policy.side_effect_policy,
@@ -438,7 +577,7 @@ def _build_runtime_case_context(
         hypothesis_edges=sanitized_hypothesis_edges[:60],
         evidence_gaps=evidence_gaps[:30],
         causal_graph=causal_graph_view,
-        conclusion=investigation_state["conclusion"] or {},
+        conclusion={} if branch_id else (investigation_state["conclusion"] or {}),
         conclusion_history=conclusion_history[:10],
         recommendations=recommendations_view,
         evidence_summary=evidence_summary[:20],
@@ -474,6 +613,7 @@ def _build_runtime_case_context(
                 "no_new_evidence_after_two_cycles",
                 "scope_or_approval_required",
             ],
+            "branch_tree": branch_tree,
         },
         intervention=intervention or {},
         current_support=current_support[:30],
@@ -936,13 +1076,31 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
     intervention_id = str(payload.get("intervention_id") or "").strip()
     runtime_generation = int(payload.get("runtime_generation") or 0)
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     plan = investigation_plan_service.read_plan(case_id, tenant_id) or {"plan_id": None, "steps": []}
     attachments = evidence_attachment_service.list_attachments(case_id, tenant_id)
-    investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
+    if branch_id:
+        visible_ids = {
+            str(item.get("evidence_id") or "")
+            for item in case_evidence_service.list_evidence(case_id, tenant_id)
+            if _evidence_visible_to_branch(item, branch_id)
+        }
+        filtered_attachments = []
+        for attachment in attachments:
+            evidence_ids = [
+                str(item) for item in attachment.get("evidence_ids") or []
+                if str(item) in visible_ids
+            ]
+            if evidence_ids:
+                filtered_attachments.append({**attachment, "evidence_ids": evidence_ids})
+        attachments = filtered_attachments
+    investigation_state = investigation_state_service.snapshot(case_id, tenant_id, branch_id)
     evidence_items: list[dict[str, Any]] = []
     excluded_evidence: list[dict[str, Any]] = []
     projection_count = 0
     for item in case_evidence_service.list_evidence(case_id, tenant_id):
+        if branch_id and not _evidence_visible_to_branch(item, branch_id):
+            continue
         if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper() in {
             "EXCLUDED", "SUPERSEDED", "INVALID",
         }:
@@ -1052,6 +1210,7 @@ def internal_tool_case_snapshot(payload: dict[str, Any], request: Request) -> AP
         )
     return APIResponse(data={
         "case_id": case_id,
+        "branch_id": branch_id,
         "goal": case.get("problem_description", "")[:500],
         "target_scope": case.get("target_scope") or {},
         "case_command_revision": case.get("case_command_revision") or 1,
@@ -1093,6 +1252,7 @@ def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) 
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
     intervention_id = str(payload.get("intervention_id") or "").strip()
     runtime_generation = int(payload.get("runtime_generation") or 0)
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     filters = payload.get("filters") or {}
     status = filters.get("status")
     if str(status or "").upper() in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
@@ -1106,6 +1266,8 @@ def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) 
             if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper()
             not in {"EXCLUDED", "SUPERSEDED", "INVALID"}
         ]
+    if branch_id:
+        items = [item for item in items if _evidence_visible_to_branch(item, branch_id)]
     projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
     by_evidence: dict[str, list[dict[str, Any]]] = {}
     for projection in projections:
@@ -1131,11 +1293,40 @@ def internal_tool_list_case_evidence(payload: dict[str, Any], request: Request) 
             }, actor_id="mini-drop-pi-runtime",
         )
     return APIResponse(data={
+        "branch_id": branch_id,
         "items": result,
         "total": len(result),
         "evidence_watermark": len(projections),
         "cursor": payload.get("cursor"),
     })
+
+
+@router.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/promote")
+def promote_case_evidence(case_id: str, evidence_id: str, request: Request) -> APIResponse:
+    """Operator-only explicit cross-branch Evidence promotion for the demo."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    actor_id = _request_principal(request)
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    target_branch_id = str(request.query_params.get("target_branch_id") or "").strip() or None
+    try:
+        evidence = repo.promote_case_evidence(
+            case_id, tenant_id, evidence_id,
+            target_branch_id=target_branch_id,
+            actor_id=actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+    repo.record_case_event(
+        case_id, tenant_id,
+        event_type="evidence_promoted",
+        payload={"evidence_id": evidence_id, "target_branch_id": target_branch_id},
+        actor_id=actor_id,
+    )
+    return APIResponse(data={"evidence": evidence, "visibility_scope": "PROMOTED"})
 
 
 @router.post("/internal/agent/tools/list-operations")
@@ -1259,6 +1450,8 @@ def internal_tool_propose_collection(payload: dict[str, Any], request: Request) 
         # corrected before dispatch.
         authorized_agent_ids = {requested_agent_id}
     try:
+        branch_id = str(payload.get("branch_id") or "").strip() or None
+        _validate_branch_evidence_refs(case_id, tenant_id, input_evidence_refs, branch_id)
         collector_spec = get_collector_spec(str(payload.get("collector_id") or ""))
         if (
             collector_spec is not None
@@ -1300,7 +1493,10 @@ def internal_tool_propose_collection(payload: dict[str, Any], request: Request) 
             ),
             allow_low_trust_reuse=payload.get("allow_low_trust_reuse") is True,
             authorized_agent_ids=authorized_agent_ids,
-            dispatch_context=dispatch_context,
+            dispatch_context={
+                **(dispatch_context or {}),
+                **({"branch_id": branch_id} if branch_id else {}),
+            },
         )
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1523,6 +1719,7 @@ def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Requ
     if repo.get_incident_case(case_id, tenant_id) is None:
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
     evidence_ids = [str(item) for item in (payload.get("evidence_ids") or [])]
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     kinds = [str(item) for item in (payload.get("projection_kinds") or [])]
     max_bytes = int(payload.get("max_bytes") or 131072)
     projections = repo.list_evidence_projections(case_id, tenant_id) if hasattr(repo, "list_evidence_projections") else []
@@ -1532,6 +1729,8 @@ def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Requ
             case_id, tenant_id, str(projection.get("evidence_id") or ""),
         )
         if evidence is None:
+            continue
+        if branch_id and not _evidence_visible_to_branch(evidence, branch_id):
             continue
         evidence_status = str(evidence.get("status") or "ACTIVE")
         # Ordinary investigation reads cannot resurrect excluded Evidence.
@@ -1552,10 +1751,9 @@ def internal_tool_get_evidence_projection(payload: dict[str, Any], request: Requ
         selected.append({
             **projection,
             "evidence_status": evidence_status,
-            "review_revision": len(repo.list_evidence_reviews(
-                case_id, tenant_id,
-                evidence_id=str(projection.get("evidence_id") or ""),
-            )),
+            "review_revision": int(
+                evidence.get("review_revision") or 0
+            ),
         })
     return APIResponse(data={
         "items": selected,
@@ -1640,7 +1838,8 @@ def internal_tool_get_causal_graph(payload: dict[str, Any], request: Request) ->
     tenant_id = _request_tenant()
     if repo.get_incident_case(case_id, tenant_id) is None:
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
-    graph = repo.get_causal_graph(case_id, tenant_id) if hasattr(repo, "get_causal_graph") else None
+    branch_id = str(payload.get("branch_id") or "").strip() or None
+    graph = repo.get_causal_graph(case_id, tenant_id, branch_id=branch_id) if hasattr(repo, "get_causal_graph") else None
     return APIResponse(data={"graph": graph})
 
 
@@ -1662,7 +1861,8 @@ def internal_tool_get_evidence_gaps(payload: dict[str, Any], request: Request) -
     tenant_id = _request_tenant()
     if repo.get_incident_case(case_id, tenant_id) is None:
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
-    items = repo.list_evidence_gaps(case_id, tenant_id) if hasattr(repo, "list_evidence_gaps") else []
+    branch_id = str(payload.get("branch_id") or "").strip() or None
+    items = repo.list_evidence_gaps(case_id, tenant_id, branch_id=branch_id) if hasattr(repo, "list_evidence_gaps") else []
     return APIResponse(data={"items": items})
 
 
@@ -1679,6 +1879,15 @@ def _validate_tree_evidence_refs(case_id: str, tenant_id: str, refs: list[str]) 
             raise HTTPException(status_code=409, detail=f"EVIDENCE_NOT_ELIGIBLE:{evidence_id}")
 
 
+def _validate_branch_evidence_refs(case_id: str, tenant_id: str, refs: list[str], branch_id: str | None) -> None:
+    if not branch_id:
+        return
+    for evidence_id in dict.fromkeys(str(item) for item in refs if str(item)):
+        evidence = repo.get_case_evidence(case_id, tenant_id, evidence_id)
+        if evidence is None or not _evidence_visible_to_branch(evidence, branch_id):
+            raise HTTPException(status_code=403, detail=f"EVIDENCE_OUTSIDE_BRANCH:{evidence_id}")
+
+
 @router.post("/internal/agent/tools/investigation-tree")
 def internal_tool_get_investigation_tree(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
@@ -1690,14 +1899,20 @@ def internal_tool_get_investigation_tree(payload: dict[str, Any], request: Reque
     fence_error = _tool_fence(case, tenant_id, payload, "get_investigation_tree")
     if fence_error:
         raise HTTPException(status_code=409, detail=fence_error)
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     tree = repo.list_investigation_tree(
         case_id, tenant_id,
         run_id=str(payload.get("run_id") or "") or None,
         include_terminal=bool(payload.get("include_terminal", True)),
     )
-    return APIResponse(data={"tree": tree, "events": repo.list_investigation_tree_events(
+    tree = _filter_tree_for_branch(tree, branch_id)
+    visible_nodes = {str(item.get("node_id") or "") for item in tree.get("nodes") or []}
+    events = repo.list_investigation_tree_events(
         case_id, tenant_id, run_id=str(payload.get("run_id") or "") or None,
-    )})
+    )
+    if branch_id:
+        events = [item for item in events if str(item.get("node_id") or "") in visible_nodes]
+    return APIResponse(data={"tree": tree, "events": events, "branch_id": branch_id})
 
 
 @router.post("/internal/agent/tools/investigation-tree/node")
@@ -1710,6 +1925,8 @@ def internal_tool_propose_investigation_tree_node(payload: dict[str, Any], reque
         raise HTTPException(status_code=400, detail="TREE_STATEMENT_REQUIRED")
     evidence_refs = [str(item) for item in payload.get("evidence_refs") or [] if str(item)]
     _validate_tree_evidence_refs(case_id, tenant_id, evidence_refs)
+    branch_id = str(payload.get("branch_id") or "").strip() or None
+    _validate_branch_evidence_refs(case_id, tenant_id, evidence_refs, branch_id)
     try:
         node = repo.create_investigation_tree_node(
             case_id=case_id, tenant_id=tenant_id,
@@ -1717,7 +1934,7 @@ def internal_tool_propose_investigation_tree_node(payload: dict[str, Any], reque
             node_type=str(payload.get("node_type") or "HYPOTHESIS"),
             statement=str(payload.get("statement") or ""),
             parent_node_id=str(payload.get("parent_node_id") or "") or None,
-            branch_id=str(payload.get("branch_id") or "") or None,
+            branch_id=branch_id,
             hypothesis_id=str(payload.get("hypothesis_id") or "") or None,
             obligation=payload.get("obligation") or {}, evidence_refs=evidence_refs,
             metadata=payload.get("metadata") or {},
@@ -1745,6 +1962,7 @@ def internal_tool_propose_investigation_tree_dependency(payload: dict[str, Any],
         raise HTTPException(status_code=400, detail="TREE_DEPENDENCY_FIELDS_REQUIRED")
     if target_kind == "EVIDENCE":
         _validate_tree_evidence_refs(case_id, tenant_id, [target_id])
+        _validate_branch_evidence_refs(case_id, tenant_id, [target_id], str(payload.get("branch_id") or "").strip() or None)
     elif target_kind == "PROJECTION":
         projections = repo.list_evidence_projections(case_id, tenant_id)
         if not any(str(item.get("projection_id") or "") == target_id for item in projections):
@@ -1777,6 +1995,7 @@ def _investigation_tool_case(payload: dict[str, Any], tool_name: str) -> tuple[s
 def internal_tool_propose_hypotheses(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id, tenant_id, _ = _investigation_tool_case(payload, "propose_hypothesis_revision")
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     try:
         graph = investigation_state_service.propose_hypotheses(
             case_id, tenant_id,
@@ -1784,6 +2003,7 @@ def internal_tool_propose_hypotheses(payload: dict[str, Any], request: Request) 
             actor_id="mini-drop-pi-runtime",
             expected_scope_revision=payload.get("expected_scope_revision"),
             expected_control_revision=payload.get("expected_control_revision"),
+            branch_id=branch_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1794,12 +2014,14 @@ def internal_tool_propose_hypotheses(payload: dict[str, Any], request: Request) 
 def internal_tool_record_evidence_gaps(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id, tenant_id, _ = _investigation_tool_case(payload, "record_evidence_gaps")
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     try:
         items = investigation_state_service.record_gaps(
             case_id, tenant_id, gaps=list(payload.get("gaps") or []),
             actor_id="mini-drop-pi-runtime",
             expected_scope_revision=payload.get("expected_scope_revision"),
             expected_control_revision=payload.get("expected_control_revision"),
+            branch_id=branch_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1810,6 +2032,7 @@ def internal_tool_record_evidence_gaps(payload: dict[str, Any], request: Request
 def internal_tool_propose_evidence_dependency(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id, tenant_id, case = _investigation_tool_case(payload, "propose_evidence_dependency")
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     source_kind = str(payload.get("source_kind") or "").upper()
     target_kind = str(payload.get("target_kind") or "").upper()
     relation = str(payload.get("relation") or "").upper()
@@ -1822,6 +2045,7 @@ def internal_tool_propose_evidence_dependency(payload: dict[str, Any], request: 
     evidence = repo.get_case_evidence(case_id, tenant_id, source_id)
     if evidence is None:
         raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+    _validate_branch_evidence_refs(case_id, tenant_id, [source_id], branch_id)
     lifecycle = str(evidence.get("lifecycle_status") or evidence.get("status") or "ACTIVE").upper()
     if lifecycle in {"EXCLUDED", "SUPERSEDED", "INVALID"}:
         raise HTTPException(status_code=409, detail="EXCLUDED_EVIDENCE_CANNOT_BE_DEPENDENCY")
@@ -1830,6 +2054,7 @@ def internal_tool_propose_evidence_dependency(payload: dict[str, Any], request: 
     result = repo.propose_evidence_dependency(
         case_id=case_id, tenant_id=tenant_id, source_kind=source_kind,
         source_id=source_id, target_kind=target_kind, target_id=target_id,
+        branch_id=branch_id,
         relation=relation, support_weight=float(payload.get("support_weight", 1.0) or 0.0),
         reason=str(payload.get("reason") or ""),
     )
@@ -1841,6 +2066,7 @@ def internal_tool_propose_evidence_dependency(payload: dict[str, Any], request: 
 def internal_tool_propose_causal_graph(payload: dict[str, Any], request: Request) -> APIResponse:
     _require_internal_token(request)
     case_id, tenant_id, _ = _investigation_tool_case(payload, "propose_causal_graph")
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     try:
         graph = investigation_state_service.propose_causal_graph(
             case_id, tenant_id, nodes=list(payload.get("nodes") or []),
@@ -1849,6 +2075,7 @@ def internal_tool_propose_causal_graph(payload: dict[str, Any], request: Request
             expected_control_revision=payload.get("expected_control_revision"),
             expected_evidence_watermark=payload.get("expected_evidence_watermark"),
             investigation_run_id=payload.get("investigation_run_id"),
+            branch_id=branch_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1935,6 +2162,7 @@ def internal_tool_create_query(payload: dict[str, Any], request: Request) -> API
             operation_id,
             payload.get("parameters") or {},
             idempotency_key=str(payload.get("idempotency_key") or "") or None,
+            branch_id=str(payload.get("branch_id") or "").strip() or None,
         )
     except QueryError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -1978,6 +2206,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
     tenant_id = _request_tenant()
     summary = str(payload.get("summary") or "").strip()
     evidence_ids = [str(item) for item in (payload.get("evidence_ids") or [])]
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     requested_state = str(payload.get("state") or "PARTIALLY_CONFIRMED").upper()
     requested_state = {"CONCLUDED": "CONFIRMED"}.get(requested_state, requested_state)
     if requested_state not in {
@@ -1992,6 +2221,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
     case = repo.get_incident_case(case_id, tenant_id)
     if case is None:
         raise HTTPException(status_code=404, detail="CASE_NOT_FOUND")
+    _validate_branch_evidence_refs(case_id, tenant_id, evidence_ids, branch_id)
     fence_error = _tool_fence(case, tenant_id, payload, "finish_investigation")
     if fence_error:
         raise HTTPException(status_code=409, detail=fence_error)
@@ -2038,7 +2268,9 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
             known_evidence_ids.discard(evidence_id)
             if evidence_id:
                 excluded_evidence_ids.add(evidence_id)
-    diagnosis_id = case.get("diagnosis_session_id")
+    diagnosis_id = (
+        case.get("diagnosis_session_id") if legacy_diagnosis_enabled() else None
+    )
     if diagnosis_id:
         diagnosis = diagnosis_orchestrator.store.get_detail(diagnosis_id) or {}
         for item in (diagnosis.get("evidence") or []):
@@ -2263,16 +2495,16 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
     runs = repo.list_investigation_runs(case_id, tenant_id) if hasattr(repo, "list_investigation_runs") else []
     if runs:
         run_id = runs[0].get("run_id")
-    graph = repo.get_causal_graph(case_id, tenant_id) if hasattr(repo, "get_causal_graph") else None
+    graph = repo.get_causal_graph(case_id, tenant_id, branch_id=branch_id) if hasattr(repo, "get_causal_graph") else None
     graph_edges = (graph or {}).get("edges") or []
-    evidence_gaps = repo.list_evidence_gaps(case_id, tenant_id) if hasattr(repo, "list_evidence_gaps") else []
+    evidence_gaps = repo.list_evidence_gaps(case_id, tenant_id, branch_id=branch_id) if hasattr(repo, "list_evidence_gaps") else []
     open_blocker_gaps = [
         item for item in evidence_gaps
         if str(item.get("status") or "") in {"OPEN", "BLOCKING"}
         and (str(item.get("status") or "") == "BLOCKING" or item.get("blocked_claim"))
     ]
     unresolved_alternatives = investigation_state_service.unresolved_alternative_count(
-        case_id, tenant_id,
+        case_id, tenant_id, branch_id,
     )
     unsupported_business_symptoms = _business_symptom_missing_direct_evidence(
         graph or {}, case_id, tenant_id,
@@ -2416,6 +2648,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
         conclusion = repo.submit_conclusion_revision(
             case_id=case_id,
             tenant_id=tenant_id,
+            branch_id=branch_id,
             investigation_run_id=run_id or "",
             state=verified_state,
             causal_graph_revision_id=(graph or {}).get("graph_id"),
@@ -2443,7 +2676,8 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
     if limitations:
         visible_summary += "\n\n限制：" + "；".join(dict.fromkeys(limitations))
     conclusion_id = conclusion.get("conclusion_id") if conclusion else conclusion_id
-    message_id = f"amsg-{hashlib.sha256(f'{case_id}:{conclusion_id or summary}:verified'.encode()).hexdigest()[:24]}"
+    branch_key = branch_id or "case"
+    message_id = f"amsg-{hashlib.sha256(f'{case_id}:{branch_key}:{conclusion_id or summary}:verified'.encode()).hexdigest()[:24]}"
     finalized = repo.finalize_investigation_result(
         case_id=case_id,
         tenant_id=tenant_id,
@@ -2457,6 +2691,7 @@ def _internal_tool_finish_impl(payload: dict[str, Any], request: Request) -> API
         trigger_turn_id=trigger_turn_id or None,
         limitation_refs=unsupported_business_symptoms,
         actor_id="mini-drop-pi-runtime",
+        branch_id=branch_id,
         intervention_audit=intervention_audit,
     )
     assistant_message = finalized["message"]

@@ -411,7 +411,11 @@ class FanoutCollectionRunModel(Base):
 
 
 class EvidenceReviewModel(Base):
-    """User/system decision about an evidence item (E2, plan 5.5)."""
+    """Historical pre-v6 review ledger; active writes use v6 revisions.
+
+    Keep the table mapped so old databases and audit exports remain readable,
+    but do not add new Repository methods for this model.
+    """
 
     __tablename__ = "evidence_reviews"
     __table_args__ = (
@@ -859,7 +863,7 @@ class CaseHypothesisNodeModel(Base):
     __tablename__ = "case_hypothesis_nodes"
     __table_args__ = (
         UniqueConstraint(
-            "case_id", "tenant_id", "hypothesis_id", name="uq_case_hypothesis",
+            "case_id", "tenant_id", "branch_id", "hypothesis_id", name="uq_case_hypothesis",
         ),
         ForeignKeyConstraint(
             ["case_id", "tenant_id"],
@@ -872,6 +876,7 @@ class CaseHypothesisNodeModel(Base):
     id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     hypothesis_id = Column(String(128), nullable=False, index=True)
     statement = Column(Text, nullable=False)
     root_entity = Column(String(256), nullable=True)
@@ -895,6 +900,7 @@ class CaseHypothesisNodeModel(Base):
             "hypothesis_id": self.hypothesis_id,
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
             "statement": self.statement,
             "root_entity": self.root_entity,
             "mechanism": self.mechanism,
@@ -928,6 +934,7 @@ class CaseHypothesisEdgeModel(Base):
     id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     source_hypothesis_id = Column(String(128), nullable=False)
     target_hypothesis_id = Column(String(128), nullable=False)
     relation = Column(String(32), nullable=False)
@@ -939,6 +946,7 @@ class CaseHypothesisEdgeModel(Base):
             "edge_id": self.id,
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
             "source": self.source_hypothesis_id,
             "target": self.target_hypothesis_id,
             "relation": self.relation,

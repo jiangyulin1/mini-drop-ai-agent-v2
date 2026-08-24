@@ -26,22 +26,28 @@ class InvestigationStateService:
     def __init__(self, repository: Any):
         self._repo = repository
 
-    def snapshot(self, case_id: str, tenant_id: str) -> dict[str, Any]:
-        hypotheses = self._repo.get_case_hypothesis_graph(case_id, tenant_id) or {
+    def snapshot(self, case_id: str, tenant_id: str, branch_id: str | None = None) -> dict[str, Any]:
+        hypotheses = self._repo.get_case_hypothesis_graph(case_id, tenant_id, branch_id) or {
             "hypotheses": [], "edges": [],
         }
-        gaps = self._repo.list_evidence_gaps(case_id, tenant_id) if hasattr(
+        gaps = self._repo.list_evidence_gaps(case_id, tenant_id, branch_id=branch_id) if hasattr(
             self._repo, "list_evidence_gaps",
         ) else []
-        causal_graph = self._repo.get_causal_graph(case_id, tenant_id) if hasattr(
+        causal_graph = self._repo.get_causal_graph(case_id, tenant_id, branch_id=branch_id) if hasattr(
             self._repo, "get_causal_graph",
         ) else None
-        conclusion = self._repo.get_conclusion(case_id, tenant_id) if hasattr(
+        conclusion = self._repo.get_conclusion(case_id, tenant_id, branch_id=branch_id) if hasattr(
             self._repo, "get_conclusion",
         ) else None
         recommendations = self._repo.list_repair_recommendations(case_id, tenant_id) if hasattr(
             self._repo, "list_repair_recommendations",
         ) else []
+        if branch_id:
+            conclusion_id = str((conclusion or {}).get("conclusion_id") or "")
+            recommendations = [
+                item for item in recommendations
+                if conclusion_id and str(item.get("conclusion_id") or "") == conclusion_id
+            ]
         return {
             "hypothesis_graph": hypotheses,
             "evidence_gaps": gaps,
@@ -54,6 +60,7 @@ class InvestigationStateService:
         self, case_id: str, tenant_id: str, *, graph: dict[str, Any], actor_id: str,
         expected_scope_revision: int | None = None,
         expected_control_revision: int | None = None,
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         self._require_case_revision(
             case_id, tenant_id, expected_scope_revision, expected_control_revision,
@@ -98,7 +105,7 @@ class InvestigationStateService:
                 raise ValueError(f"INVALID_HYPOTHESIS_EDGE:{source}->{target}")
         result = self._repo.sync_case_hypothesis_graph(
             case_id, tenant_id, graph={"hypotheses": hypotheses, "edges": graph.get("edges") or []},
-            source="agent_proposal", actor_id=actor_id,
+            source="agent_proposal", actor_id=actor_id, branch_id=branch_id,
         )
         return result
 
@@ -106,6 +113,7 @@ class InvestigationStateService:
         self, case_id: str, tenant_id: str, *, gaps: list[dict[str, Any]], actor_id: str,
         expected_scope_revision: int | None = None,
         expected_control_revision: int | None = None,
+        branch_id: str | None = None,
     ) -> list[dict[str, Any]]:
         self._require_case_revision(
             case_id, tenant_id, expected_scope_revision, expected_control_revision,
@@ -114,7 +122,7 @@ class InvestigationStateService:
             raise ValueError("EVIDENCE_GAPS_REQUIRED")
         existing = {
             str(item.get("gap_id") or ""): item
-            for item in self._repo.list_evidence_gaps(case_id, tenant_id)
+            for item in self._repo.list_evidence_gaps(case_id, tenant_id, branch_id=branch_id)
         }
         active_evidence = self._active_evidence_ids(case_id, tenant_id)
         persisted: list[dict[str, Any]] = []
@@ -172,6 +180,7 @@ class InvestigationStateService:
                 what_it_does_not_support=item.get("what_it_does_not_support"),
                 conflicting_evidence_refs=conflicts, retryable=bool(item.get("retryable", False)),
                 next_best_action=item.get("next_best_action"),
+                branch_id=branch_id,
             ))
         self._repo.record_case_event(
             case_id, tenant_id, event_type="evidence_gaps_recorded",
@@ -186,6 +195,7 @@ class InvestigationStateService:
         expected_control_revision: int | None = None,
         expected_evidence_watermark: int | None = None,
         investigation_run_id: str | None = None,
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         self._require_case_revision(
             case_id, tenant_id, expected_scope_revision, expected_control_revision,
@@ -258,16 +268,19 @@ class InvestigationStateService:
             case_id=case_id, tenant_id=tenant_id, investigation_run_id=investigation_run_id,
             evidence_watermark=watermark, nodes=nodes, edges=edges,
             verifier_version="causal-graph-verifier.v1",
+            branch_id=branch_id,
         )
         self._repo.record_case_event(
             case_id, tenant_id, event_type="causal_graph_proposed",
             payload={"graph_id": result.get("graph_id"), "evidence_watermark": watermark},
             actor_id=actor_id,
         )
-        return self._repo.get_causal_graph(case_id, tenant_id, result.get("graph_id")) or result
+        return self._repo.get_causal_graph(
+            case_id, tenant_id, result.get("graph_id"), branch_id=branch_id,
+        ) or result
 
-    def unresolved_alternative_count(self, case_id: str, tenant_id: str) -> int:
-        graph = self._repo.get_case_hypothesis_graph(case_id, tenant_id) or {}
+    def unresolved_alternative_count(self, case_id: str, tenant_id: str, branch_id: str | None = None) -> int:
+        graph = self._repo.get_case_hypothesis_graph(case_id, tenant_id, branch_id) or {}
         return sum(
             1 for item in graph.get("hypotheses") or []
             if item.get("hypothesis_id") != "OTHER_UNKNOWN"

@@ -340,13 +340,14 @@ class ModelResponseModel(Base):
 class AssistantMessageModel(Base):
     __tablename__ = "assistant_messages"
     __table_args__ = (
-        UniqueConstraint("case_id", "message_id", name="uq_assistant_message"),
+        UniqueConstraint("case_id", "branch_id", "message_id", name="uq_assistant_message"),
         Index("ix_assistant_messages_turn", "trigger_turn_id", "created_at"),
     )
 
     message_id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     trigger_turn_id = Column(String(128), nullable=True)
     origin_turn_id = Column(String(128), nullable=True)
     cycle_id = Column(String(128), nullable=True, index=True)
@@ -362,6 +363,7 @@ class AssistantMessageModel(Base):
             "message_id": self.message_id,
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
             "trigger_turn_id": self.trigger_turn_id,
             "origin_turn_id": self.origin_turn_id,
             "cycle_id": self.cycle_id,
@@ -1326,7 +1328,7 @@ class EvidenceDependencyEdgeModel(Base):
     __table_args__ = (
         UniqueConstraint(
             "case_id", "tenant_id", "source_kind", "source_id",
-            "target_kind", "target_id", "relation",
+            "branch_id", "target_kind", "target_id", "relation",
             name="uq_evidence_dependency_edge",
         ),
         Index("ix_evidence_dependency_source", "case_id", "tenant_id", "source_id"),
@@ -1336,6 +1338,7 @@ class EvidenceDependencyEdgeModel(Base):
     dependency_id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     source_kind = Column(String(24), nullable=False, default="EVIDENCE")
     source_id = Column(String(256), nullable=False)
     target_kind = Column(String(24), nullable=False)
@@ -1354,6 +1357,7 @@ class EvidenceDependencyEdgeModel(Base):
             "dependency_id": self.dependency_id,
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
             "source_kind": self.source_kind,
             "source_id": self.source_id,
             "target_kind": self.target_kind,
@@ -1467,12 +1471,13 @@ class ConfidenceAdjustmentModel(Base):
 class CausalGraphRevisionModel(Base):
     __tablename__ = "causal_graph_revisions"
     __table_args__ = (
-        UniqueConstraint("case_id", "graph_revision", name="uq_causal_graph_revision"),
+        UniqueConstraint("case_id", "branch_id", "graph_revision", name="uq_causal_graph_revision"),
     )
 
     graph_id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     investigation_run_id = Column(String(128), nullable=True, index=True)
     graph_revision = Column(Integer, nullable=False, default=1)
     evidence_watermark = Column(Integer, nullable=False, default=0)
@@ -1488,6 +1493,7 @@ class CausalGraphRevisionModel(Base):
             "graph_id": self.graph_id,
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
             "investigation_run_id": self.investigation_run_id,
             "graph_revision": self.graph_revision,
             "evidence_watermark": self.evidence_watermark,
@@ -1595,12 +1601,13 @@ class CausalEdgeModel(Base):
 class EvidenceGapModel(Base):
     __tablename__ = "evidence_gaps"
     __table_args__ = (
-        UniqueConstraint("case_id", "gap_id", name="uq_evidence_gap"),
+        UniqueConstraint("case_id", "branch_id", "gap_id", name="uq_evidence_gap"),
     )
 
     gap_id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     investigation_run_id = Column(String(128), nullable=True, index=True)
     blocked_claim = Column(Text, nullable=True)
     required_fact = Column(Text, nullable=False)
@@ -1624,6 +1631,7 @@ class EvidenceGapModel(Base):
             "gap_id": self.gap_id,
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
             "investigation_run_id": self.investigation_run_id,
             "blocked_claim": self.blocked_claim,
             "required_fact": self.required_fact,
@@ -1647,12 +1655,13 @@ class EvidenceGapModel(Base):
 class ConclusionRevisionModel(Base):
     __tablename__ = "conclusion_revisions"
     __table_args__ = (
-        UniqueConstraint("case_id", "revision", name="uq_conclusion_revision"),
+        UniqueConstraint("case_id", "branch_id", "revision", name="uq_conclusion_revision"),
     )
 
     conclusion_id = Column(String(128), primary_key=True)
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     investigation_run_id = Column(String(128), nullable=False, index=True)
     revision = Column(Integer, nullable=False, default=1)
     state = Column(String(32), nullable=False, default="PARTIALLY_CONFIRMED")
@@ -1686,6 +1695,7 @@ class ConclusionRevisionModel(Base):
             "conclusion_id": self.conclusion_id,
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
             "investigation_run_id": self.investigation_run_id,
             "revision": self.revision,
             "state": self.state,

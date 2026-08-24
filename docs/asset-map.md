@@ -1,17 +1,18 @@
 # Mini-Drop 资产地图
 
 > 状态：当前代码库的能力盘点，不是路线图或愿望清单。
-> 基线：`main` @ `6589f90`（`feat: add explainable evidence confidence ledger`）。
+> 基线：以当前工作树代码和迁移为准；最近已核验提交为 `24d6ed6`，分支推理状态改造尚未提交。
 > 盘点日期：2026-08-24。
 > 事实优先级：当前代码和测试 > 当前实施架构文档 > 历史设计文档。
 
 ## 1. 阅读规则
 
-本文件把资产分成三种状态：
+本文件只登记当前代码库中有实现和证据的资产；未接入方向不列为资产。
+
+资产按两种状态标记：
 
 - **已闭环**：代码、API/任务链和自动化测试能够证明该能力存在。
-- **部分闭环**：主要路径存在，但依赖外部连接器、Linux 能力、人工步骤或仍有旧链路并存。
-- **设计/未接入**：文档描述了方向，但当前运行时不能据此宣称已经具备能力。
+- **不完整**：主要路径存在，但依赖外部连接器、Linux 能力、人工步骤或仍有兼容链路并存。
 
 “有模型、有表或有 API”不等于能力闭环。闭环必须同时检查：写入权威、权限边界、异步恢复、证据引用、失效处理和测试。
 
@@ -41,7 +42,9 @@ Mini-Drop 当前是“受控采集与证据调查工作台”，不是完整的�
 
 ## 3. 在线主线与兼容主线
 
-### 3.1 当前推荐主线：Evidence-native Supervised Diagnostic Agent
+### 3.1 当前推荐主线：Evidence-native Investigation Runtime
+
+产品定位不是一次性 AI 根因回答，而是以 Evidence 生命周期为真值、支持分支盲隔离的动态调查运行时：每个分支默认只能看到公共初始 Evidence 和自己的采集结果；服务端保留全局 lineage 用于审计和失效传播，但不把其他分支上下文注入 Agent。Evidence 可审核、排除和显式授权共享；依赖它的推理分支会失效，系统从有效祖先创建新的 cycle/generation 并继续探索。完整定位、状态语义和答辩叙事见 [`evidence-native-investigation-positioning.md`](evidence-native-investigation-positioning.md)。
 
 ```text
 IncidentCase / target scope / user goal
@@ -82,7 +85,7 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 
 ### 3.2 仍然存在的兼容主线
 
-`server/app/diagnosis/orchestrator.py` 加 `server/app/routes/diagnoses.py` 仍提供较早的 `DiagnosisSession`/`ProbePlan` 编排路径。它有自己的假设、探针、领域分析器和状态机，测试覆盖很广；但它不是新的 v6 Case/Agent Runtime 语义的完全替代品。
+`server/app/diagnosis/orchestrator.py` 加 `server/app/routes/diagnoses.py` 仍提供较早的 `DiagnosisSession`/`ProbePlan` 编排路径。它有自己的假设、探针、领域分析器和状态机，测试覆盖很广；但它不是新的 v6 Case/Agent Runtime 语义的完全替代品。Canonical Case Workspace 不再自动加载旧 DiagnosisSession；新 Case 的分支调查通过 `/api/v1/cases/{case_id}/workspace?branch_id=...` 和 `/api/v1/cases/{case_id}/branches` 工作。当前旧写入口默认返回 `410 LEGACY_DIAGNOSIS_DISABLED`，仅显式兼容开关可启用；采集器、Artifact/Evidence 转换、验证合同和审计/fence 元素继续复用。
 
 当前仓库同时注册旧路由和 `v6_routes.py`。因此不能把“旧 DiagnosisOrchestrator 的测试通过”解释为“v6 主线所有能力都已完成”，也不能在没有读入口调用链的情况下删除旧代码。
 
@@ -94,14 +97,14 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 | Case 协作 | IncidentCase、TargetSession、CaseEvent、Command、Scope/Control Revision | 已闭环 |
 | 采集执行 | Agent、Task、Attempt、Collector Catalog、取消/重试、Result Spool | 已闭环；真实 Collector 能力依赖 Linux/权限 |
 | 产物分析 | Artifact、AnalysisJob、Analyzer Worker、Projection | 已闭环；不同 Artifact 的解析深度不同 |
-| Evidence 治理 | CaseEvidence、Projection、Review、Lifecycle、Trust、Impact Preview、EvidenceReuseDecision | 已闭环基础；Artifact/Projection 引用不可变，依赖传播按当前支持/反证关系重算；显式复用已记录，但多支持集仍未统一 |
+| Evidence 治理 | CaseEvidence、Projection、Review、Lifecycle、Trust、Impact Preview、EvidenceReuseDecision、branch lineage | 已闭环基础；分支 Evidence 默认盲隔离，公共种子/本分支/显式 PROMOTED 可见；Artifact/Projection 引用不可变，依赖传播按当前支持/反证关系重算；统一预览、下载、单条分析入口已存在；多支持集仍未统一 |
 | 诊断计划 | Plan/PlanStep/Revision、CollectionProposal、Request、Fanout | 已闭环；旧 Plan 与 v6 Plan 仍需持续核对 |
 | 服务关系 | 请求上下文依赖、Network Discovery、MembershipSnapshot、有界 BFS、Dependency Graph | MVP 已闭环；L7、长期拓扑流和完整远端身份解析未闭环 |
-| Agent Runtime | AgentRuntimePort、Deterministic、Pi Adapter、Pi Sidecar、Shadow Plan、可选 LangGraph adapter | 已闭环骨架；LangGraph 只负责 bounded graph/checkpoint/interrupt，Pi 业务分支树不是持久化真值 |
-| 推理状态 | Hypothesis、Evidence Gap、Evidence Analysis、Causal Graph、Conclusion、Conclusion history API | 已闭环基础；结论 revision 保留并标记 `CURRENT`/`SUPERSEDED`，新 Evidence 会触发新 Runtime exploration revision；多支持集/完整局部重算尚未成为统一语义 |
+| Agent Runtime | AgentRuntimePort、Deterministic、Pi Adapter、Pi Sidecar、Shadow Plan、可选 LangGraph adapter、branch_id context | 已闭环 MVP；branch_id 已贯穿 Runtime/Tool Gateway/采集 lineage，LangGraph 只在安装 extra 后可用，Pi 业务分支树不是持久化真值 |
+| 推理状态 | Hypothesis、Evidence Gap、Evidence Analysis、Causal Graph、Conclusion、Conclusion history API | 已闭环答辩 MVP；Hypothesis/Gap/Causal Graph/Conclusion/Dependency 已支持 branch scope，旧 Case 数据以 `NULL` 作为兼容范围；多支持集/完整局部重算尚未成为统一语义 |
 | 恢复执行 | RecoveryPlan、Action Registry、Dry-run、Approval、Execute、Rollback、Verify | 已闭环窄白名单动作；不是通用自动修复 |
 | 知识与外部源 | KnowledgeDocument/Memory、MCP Source Gateway、Grant、Skill/Query Registry | 已闭环受控读取；知识不能直接充当事故 Evidence |
-| Web 工作台 | Case Workspace、Evidence Drawer、Plan/Proposal/Topology/Causal/Recovery 视图、SSE | 已闭环主要视图；长期目标配置和完整拓扑交互仍有限 |
+| Web 工作台 | Case Workspace、Evidence Drawer、Branch selector、Plan/Proposal/Topology/Causal/Recovery 视图、SSE | 已闭环主要视图；用户可创建/切换隔离分支；长期目标配置和完整拓扑交互仍有限 |
 | 评测与运维 | Golden/Holdout、评分器、VM gate、迁移检查、审计、OpenTelemetry | 已闭环测试基础；真实 Linux/外部 Holdout 不是本机测试可替代的 |
 
 ## 5. 服务端控制面
@@ -132,7 +135,7 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 
 ### 5.3 后台可靠性
 
-`app_factory.py` 启动以下后台循环：任务唤醒、Runtime Wakeup、Outbox Relay、离线/自治推进、Plan Driver。数据库状态是恢复依据；Sidecar 内存不是恢复依据。
+`app_factory.py` 启动以下后台循环：任务唤醒、Runtime Wakeup、Outbox Relay、离线/自治推进、Plan Driver。数据库状态是恢复依据；Sidecar 内存不是恢复依据。旧 `DiagnosisSession` 的 `diagnosis_advance` 默认冻结，只有设置 `MINI_DROP_ENABLE_LEGACY_DIAGNOSIS=true` 才会运行。
 
 本机轻量模式按单租户进程运行；当前 Runtime Wakeup sweeper 使用进程级 tenant 配置扫描 Outbox。多租户同实例部署还需要按租户分片的队列/worker，不能把本机 sweeper 直接视为多租户生产方案。
 
@@ -175,7 +178,7 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 ### 7.1 Server 侧
 
 - `server/app/models/agent_task.py`：Agent、Task、TaskAttempt、StatusEvent、AuditLog、AuthorizationGrant。
-- `server/app/diagnosis/collection_supervisor.py`：CollectorSpec、scope、capability、risk、budget、idempotency、discovery authority 和 revision 的确定性校验；它是 Agent 采集的唯一编译入口。
+- `server/app/diagnosis/collection_supervisor.py`：CollectorSpec、scope、capability、risk、budget、idempotency、discovery authority 和 revision 的确定性校验；它是 v6 Agent Proposal 的编译入口。旧 Diagnosis、人工任务和部分兼容编排仍保留直接创建 Task 的路径，不能宣称全仓库已经统一为单一入口。
 - `server/app/diagnosis/collection_reuse.py`：`normalize -> hard-gate -> score -> select` 的 fail-closed 复用判定。`collection-reuse.v2` 会补 CollectorSpec 默认值、统一 `pid/target_pid`、集合参数顺序和带时区时间表示；`probe_key` 表示物理探针，完整 `probe_fingerprint` 仍包含观测窗口和 scope revision。复用必须由当前链路显式提交 `reuse_existing_request_id`，多 Evidence/Projection 还要提交 `reuse_existing_evidence_id` 或 `reuse_existing_projection_id`；不会把 Case 内的旧 Evidence 自动放进上下文。`collector_id`、PID 或相同信息目标本身都不足以证明等价。评分只用于已通过硬约束的候选排序，近似并列默认返回 `REUSE_AMBIGUOUS`，不能靠模糊分数越过身份、版本、生命周期或 Projection 校验。
 - `EvidenceReuseDecisionModel`（`evidence_reuse_decisions`）：按 Case/run/cycle/contract 记录一次明确的 `REUSED` 或 `RECOLLECT_REQUIRED` 决定，保存 probe/result/projection、目标身份、时间窗以及 control/scope/runtime/review 修订快照。它是解释和失效台账，不是 Evidence 真值，也不授予跨分支的隐式可见性；Evidence Review 排除/低信任和 Case scope 修订会把既有复用标为 `RECOLLECT_REQUIRED`，历史行保留。
 - `PlanDriver` 的旧计划去重仍是兼容状态机路径，只能表示“计划步骤跳过”，不等同于新 Evidence 已向当前分支授权；新链路的 Evidence 复用必须经过 Supervisor 的指纹、生命周期、Projection 和显式 Evidence 选择校验。
@@ -188,11 +191,23 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 
 入口：`agent/mini_drop_agent/main.py`。它负责注册、心跳、拉取 Task、身份校验、Collector 执行、Artifact 上传、结果 spool 和取消响应。
 
-当前 Collector 目录包括：
+Worker 代码实现包括：
 
-`sys_metrics`、`perf_cpu`、`continuous_perf`、`ebpf_io`、`process_scan`、`memory_smaps`、`runtime_snapshot`、`connection_probe`、`network_discovery`、`log_scan`、`pyspy`、`java_async`、`go_pprof`、`swarm_actuation`。
+`sys_metrics`、`perf_cpu`、`continuous_perf`、`ebpf_io`、`process_scan`、`memory_smaps`、`runtime_snapshot`、`connection_probe`、`network_discovery`、`log_scan`、`pyspy`、`java_async`、`go_pprof`，以及仅用于受控动作的 `swarm_actuation`。
+
+AI 可见的正式目录是 `mini_drop_contracts/catalog/collectors.v1.json` 中的 13 项；`swarm_actuation` 不在该目录，也不在 Pi 的采集工具白名单中。
 
 可用性受 Linux 内核、工具、权限、容器/namespace 和目标进程 incarnation 约束。Collector 出现在代码目录不代表目标 Worker 一定具备能力。
+
+### 7.2.1 Collector 风险和执行边界
+
+正式风险等级以 `mini_drop_contracts/catalog/collectors.v1.json` 为准，不以历史注释或前端标签为准：
+
+- 当前 catalog **没有正式 R0 Collector**。`process_scan.py` 的历史注释曾称其为 R0，但实际 catalog 等级是 `R1`，执行策略按 R1 处理。
+- 当前 R1 是 `memory_smaps`、`sys_metrics`、`process_scan`、`network_discovery`、`log_scan`、`runtime_snapshot`、`connection_probe`。
+- 当前 R2 是 `perf_cpu`、`pyspy`、`continuous_perf`、`java_async`、`go_pprof`、`ebpf_io`。
+
+Catalog 只定义有限 `duration_sec`/`sample_rate` 的 Task；`continuous_perf` 仍受最长 600 秒约束。多样本结果属于一次 Task 的时间序列 Artifact，不是目标主机常驻 telemetry。`log_scan` 是日志尾部读取，`network_discovery` 是时间点快照，均没有持续订阅语义。
 
 ### 7.3 Analyzer 和存储
 
@@ -233,12 +248,9 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 
 远端新 PID 的采集权不是由模型一句话获得，而必须同时满足 discovery run、active Evidence、MembershipSnapshot、target entity、boot ID、process start time 和当前 scope/control revision。`external_unmanaged_endpoint`、`virtual_endpoint` 和未解析实体不可直接作为可采集目标。
 
-### 8.4 当前未闭环的拓扑能力
+### 8.4 拓扑资产边界
 
-- 常驻 eBPF/SOCK_DIAG 事件流和长期拓扑历史。
-- Kubernetes EndpointSlice、Docker/Swarm Provider、DNS 历史和 L7/OTel Span 关联。
-- 未注册远端主机的安全接入和跨租户成员发现。
-- 把拓扑关系自动提升为因果传播的能力（当前明确禁止）。
+当前资产只覆盖有界、Case-scoped 的 L4 发现和身份 fencing；Dependency Graph 的语义固定为 `dependency_only_not_causal`。未注册成员、虚拟端点和仅凭通信关系的因果结论不在资产范围内。
 
 ## 9. Evidence、推理和结论
 
@@ -317,6 +329,36 @@ Pi 没有内置 Mini-Drop 级的子 Agent Supervisor、Evidence invalidation、�
 - `PROPOSE_ONLY`：可以持久化可审阅的 `CollectionProposal`，但不拥有执行权；审批时会重新校验 scope、discovery authority 和 revision，失败则 fail-closed。
 - `AUTO_READ_LOW`：默认策略，只能在代码允许的工具、预算和 `R0/R1` 风险范围内自动创建 `CollectionRequest/Task`；`R2/R3` 不能由该策略直接越过审批。超出当前 Case scope 的进程/Agent 还必须有拓扑发现 Evidence、Membership 和身份 fencing。
 
+`MINI_DROP_AGENT_AUTO_READ_LOW` 默认是关闭的；它控制后台自动推进是否创建低风险采集，不会改变 Tool Gateway 的代码权限边界。启动时 Runtime mode/flags 由环境变量读取，当前没有前端动态修改启动配置的能力。
+
+### 10.4 AI 能力的实际边界
+
+当前真正接入 Case 调查模型的是 Pi Sidecar 链路：`MINI_DROP_AGENT_RUNTIME=pi`（或配置 Sidecar URL 时的默认模式）调用 Pi 0.84.2，默认 Provider/Model 为 DeepSeek `deepseek-v4-flash`。Pi Provider 凭证只在 Sidecar 进程中使用；Sidecar 存活或健康检查通过不代表 completion 已成功，必须有真实受控 Turn 才能证明可用。
+
+当前 Tool Catalog 共 25 个工具，其中 13 个 `READ_ONLY`、12 个 `PROPOSE_ONLY`，没有 `WRITE` 工具。模型能读取有界 Case/Evidence Projection、知识和依赖图；也能提出注册 Collector 的采集提案、拓扑发现、计划、假设、Evidence Gap、Evidence Analysis、Evidence Dependency、因果图和结束调查请求。上述请求都经过 Tool Catalog、RuntimePolicy、tenant/scope、risk、budget、revision/generation 和引用校验。模型不能执行 Shell、任意文件读写、未注册 Collector 或直接写入 Task/Artifact/结论真值。
+
+`finish_investigation` 只提交候选结论；服务端 verifier 才决定 `CONFIRMED`、`PARTIALLY_CONFIRMED` 或 `INSUFFICIENT_EVIDENCE`，并检查引用、因果闭合、置信度和 Evidence Gap。Dependency Graph 只能证明观察到的通信/依赖，不能单独升级为因果根因。恢复动作也不在 Pi Tool Catalog 中，必须走独立 RecoveryPlan 的预检、审批、执行、回滚和验证 API。
+
+`deterministic` 是不调用模型的控制组/离线路径；它保留 Case、Evidence 和人工工作台，不会替 AI 选择探针或自动创建新的 AI 采集任务。`pi_shadow` 只生成 Shadow Plan，不创建真实 Task。旧 `/diagnoses` 兼容路径仍可使用规则/领域分析器，但不能作为 Pi 主线的模型能力证据。
+
+RuntimeOptions 当前真正影响 Pi 请求的是 `model`、`reasoning_effort`、`prompt_variant` 和会话选项；`temperature`、`max_tokens`、`seed` 仅作为实验元数据记录，不能宣称已改变 SDK 调用。Server 侧 NLP/旧 RCA 仍有独立的 OpenAI-compatible Provider 和无 Key 的关键词 fallback，它们与 Pi Case 调查不是同一条能力链。
+
+截至本次盘点，`reports/evaluation/verified-20260821.md` 记录了 8 个真实 GitHub PR 的单轮 DeepSeek 运行（人工 75/80）以及一次未知拓扑真实 Pi 运行（覆盖不足时拒答）。这些结果证明链路和边界在指定样本上工作，不构成通用准确率或多轮稳定性结论。
+
+### 10.5 线上展示环境实测边界（2026-08-24）
+
+本次对 `https://47.112.10.137:80/` 的实测只能证明“受控演示环境可访问”，不能替代发布验收：
+
+- `/api/livez`、`/api/readyz?core_only=true` 和完整 `/api/readyz` 均返回健康；数据库、对象存储和 Analyzer 正常，检查时有 1 个 Analyzer 在线、2 个 Linux Worker 在线（各暴露 13 个 Collector 能力），任务队列无 pending/running/failed。
+- 认证后的 `/api/v1/agent-runtime/config` 返回 `pi-0.84.2`、`mode=pi`、`ai_ready=true`。线上 Tool Catalog 实测为 25 项：13 个 `READ_ONLY`、12 个 `PROPOSE_ONLY`、0 个 `WRITE`；`agent_auto_read_low=false`，因此默认是模型提案加服务端门禁，不是模型直接执行。
+- 线上开启了 `MINI_DROP_WEB_AUTO_SESSION_ENABLED`：未携带 API Key 的访问者可以通过当前站点的 bootstrap 获得共享 HttpOnly Web session，身份为配置的 `jyl-operator`，角色包含 `operator` 和 `authorization_admin`。这适合受控评审，不适合公开不可信用户或生产数据。
+- 数据库中存在 127 个 Case，主要是 `Benchmark case-*` 和 `SYNTHETIC_EVAL/REPLAY` 数据。部分 Case 的 scope 使用 `redacted-service`、虚拟 PID `12345`，线上真实 Worker 无法观测该 PID；这类 Case 可以展示 Evidence 约束下的 `PARTIALLY_CONFIRMED`/`INSUFFICIENT_EVIDENCE` 和拒答，但不能宣传成真实生产事故 RCA 或准确率证明。
+- 一个可展示的 Case 已出现 5 条 Evidence、2 次分析、4 个假设、4 个采集提案和 `PARTIALLY_CONFIRMED` 结论；其结论仍明确写出目标 PID 不可观测、机制只能部分确认。这是合格的 Evidence-native 交互样例，但不是完整真实拓扑闭环。
+- 线上 Web bundle 仍是旧版本：远端 `AIDiagnosis` 资源没有当前源码中的“当前调查路径”“失效传播”总览，而本地最新构建已包含。不能把本地最新前端能力写成线上已部署能力，必须重新构建并发布 Web 后再演示该界面。
+- 该地址实际是“HTTPS over port 80”，证书由 `Mini-Drop JYL Private CA` 签发。未安装该私有 CA 的普通浏览器会报 `ERR_CERT_AUTHORITY_INVALID`；普通 HTTP 请求也会收到“plain HTTP request was sent to HTTPS port”。面向外部评审应改为可信证书的 443，并让 80 只做重定向。
+
+因此，线上环境当前可以描述为：**受认证边界保护、Pi Runtime 已就绪、以合成/回放 Evidence 和有限真实采集为主的受控 Evidence-native Demo**。不能描述为：公网可直接访问的生产级服务、真实多主机拓扑 RCA、完整调查树产品、通用自动修复 Agent 或已验证的模型准确率。
+
 ## 11. 知识、外部源和记忆
 
 - `knowledge_memory.py`：租户知识文档、Case Memory、文本分块和可选向量/词法检索。
@@ -348,7 +390,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 - `web/src/components/MultiAgentCollectionModal.jsx`：Fanout/多 Agent 采集。
 - `web/src/api/client.js`：REST 客户端和 SSE/Workspace 数据访问。
 
-当前 Web 已能展示 Case、Evidence、Dependency Graph、Plan、Proposal、Hypothesis、Gap、Causal Graph、Conclusion、Recovery 和事件流；长期 Target Session 的初始化配置和全量拓扑控制仍不如 Case 工作台完整。
+当前 Web 已能展示 Case、Evidence、Dependency Graph、Plan、Proposal、Hypothesis、Gap、Causal Graph、Conclusion、Recovery 和事件流；长期 Target Session 的初始化配置和全量拓扑控制仍不如 Case 工作台完整。AI 调查页现有 Evidence 路径总览，会把范围、采集、Evidence、验证、结论和受控行动串成当前状态投影，并提示 Evidence review/分析输入失效后的回溯；它仍不是完整持久化调查树时间线，也没有独立成型的“干预中心”。审批/干预前端改造必须先对应已存在的后端 API、状态迁移和 revision 门禁。
 
 ## 14. 持久化模型分组
 
@@ -364,7 +406,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 
 ## 15. 测试和评测资产
 
-本地 `.venv` 当前可收集 **1211 个 pytest 测试**；收集命令：
+本轮后端验收执行结果为 **1235 passed, 6 skipped**；前端为 **104 passed**，生产构建成功。收集命令：
 
 ```bash
 ./.venv/bin/python -m pytest --collect-only -q
@@ -396,22 +438,15 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 6. 受审批、可回滚、可验证的少量恢复动作。
 7. Web 工作台、SSE、审计、测试和评测基础。
 
-### 部分闭环或依赖外部条件
+### 不完整或依赖外部条件
 
-1. 旧 DiagnosisOrchestrator 与 v6 Evidence-native 主线仍并存，写入和状态语义需要继续收敛。
-2. Evidence 排除会使旧分析、结论和恢复计划失效，但多支持集/冲突集的通用局部重算还不是统一实现。
+1. 旧 DiagnosisOrchestrator 与 v6 Evidence-native 主线仍并存，但旧链已冻结为默认关闭的兼容入口，后台默认不推进（`MINI_DROP_ENABLE_LEGACY_DIAGNOSIS=true` 才显式启用）；新功能不得再写入旧根因排名链。旧链中的可复用 parser、Evidence 字段映射、benchmark、授权、审计和 fencing 不随入口删除。
+2. Evidence 排除会使旧分析、结论和恢复计划失效；分支级新 cycle/generation 会从有效 Evidence 继续，跨分支共享需要 operator 显式 promote；多支持集/冲突集的通用局部重算还不是统一实现。
 3. Target Session、Target Signal 和 Profile Window 有 API，自动 Agent/event bus 订阅和长期聚合尚未完整接入。
 4. 拓扑发现是有界 L4 MVP；不是完整服务地图或 L7 因果系统。
-5. Pi Session tree 可 fork，但当前 Sidecar 是一 Case 一内存 Session，不能代替并行业务分支账本。
+5. 当前分支隔离已覆盖 Evidence、Hypothesis、Gap、Causal Graph、Dependency、Conclusion 和 InvestigationTree；Pi Session tree 可 fork，但 Sidecar 是一 Case 一内存 Session，不能代替完整并行业务分支账本。
 6. Knowledge/MCP 已有受控读取，不能视为实时事故 Evidence RAG。
 7. 恢复执行是窄白名单，不能外推成任意生产自动修复。
-
-### 目前只是设计素材或未来方向
-
-- 常驻拓扑事件流、7/90 天长期聚合、Kubernetes/Docker Provider、L7/OTel 关系。
-- 完整 ATMS/ECRD 支持环境、多分支 Claim 合并和自动反事实调查。
-- 通用多 Agent Supervisor 和长期独立 Pi 子会话。
-- 未接入的外部告警、监控和服务变更连接器。
 
 ## 17. 架构结论
 
@@ -419,40 +454,9 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 
 更准确的判断是：
 
-> Mini-Drop 已经有“Case + 受控采集 + 拓扑发现 + Evidence 治理 + Agent Runtime + 计划/恢复”的骨架；现在缺的是把两套诊断状态统一成一条主线，以及把 Evidence 生命周期变化稳定地投影到 Hypothesis、Gap、Plan、Task 和 Conclusion。
+> Mini-Drop 已经有“Case + 受控采集 + 拓扑发现 + Evidence 治理 + Agent Runtime + 计划/恢复”的可验收主线；旧诊断链已冻结为兼容路径。当前主要缺口是多支持集真值维护、复杂冲突的自动局部回溯、统一 Source/MCP ingestion，以及跨分支 Claim/Hypothesis/Conclusion 的完整共享撤销传播。
 
-因此后续设计优先级应是：
-
-1. 确认 v6 Evidence-native Case 主线为唯一在线写入权威，旧 DiagnosisOrchestrator 只保留兼容读/评测路径。
-2. 先完善现有 Evidence Dependency/Confidence/Review 传播；树表只记录分支节点、依赖和状态事件，不复制 Evidence 真值。
-3. 把 topology graph 作为共享 Scope/Observation 资产，继续保持“依赖边不等于因果边”。
-4. 只有当真实场景证明单一 Runtime Context 不够时，才增加临时 Frame/fork；不要把 Pi Session tree 升格为业务账本。
-5. 以“Evidence 排除 -> 影响预览 -> 旧分析/计划 fence -> Wakeup -> 当前理解重建”作为下一条验收闭环。
-
-## 18. 候选演进：可回溯证据调查网络
-
-以下是对用户目标的设计映射，不是当前已接入能力。它的重点不是把每个假设变成长期 Pi Session，而是让调查树成为一份可重放账本的投影：Evidence 全局共享，推理分支局部隔离，证据审查会反向重算支持关系和下一步探针。
-
-候选存储不应是一棵单一真相树，而是三层共享结构：
-
-1. 不可变 Observation/Artifact provenance DAG：按时间窗、目标身份和 hash 共享原始观察及其来源。
-2. 按 assumption set 分叉的 Claim/Proof lattice：支持集是 AND/OR 关系，可共享子证据，但允许分支有不同的假设和反证。
-3. 可取消的 Execution tree：`Proposal -> Task -> Attempt -> Artifact`，通过 generation fence 取消或重绑定迟到任务。
-
-因此“证据链被摧毁”表示证明闭包被撤销、后代 Claim 变成 stale/refuted、待执行任务被 fence，原始 Artifact 仍保留并可由兄弟分支显式复用。实时会话 RAG 只应加载当前 obligation 的 Projection 和自上次 watermark 以来的 delta，不应把全部原始采集结果灌入每个分支上下文。
-
-| 候选对象 | 可复用的现有资产 | 仍需补齐的语义 |
-|---|---|---|
-| Immutable Evidence Blackboard | `CaseEvidence`、`Artifact`、`Projection`、Review/Lifecycle/Trust | 统一 `projection_hash`、review revision 和不可变引用快照 |
-| Claim / Counterclaim | `CaseHypothesisNode/Edge`、`ClaimEvidenceBinding`、Causal Graph | 多个替代 support set、opposing set、assumption 和 branch-local 状态 |
-| Justification / Proof Obligation | `EvidenceAnalysisRun`、`EvidenceGap`、Current Understanding | 可重放的支持超边、反证集、失效闭包和最小证明包 |
-| Probe Frontier / falsifiable experiment | `ProbeRegistry`、`AdaptivePlanner`、`CollectionProposal`、Supervisor | 为每个缺口记录预测结果、信息增益、成本/风险、expiry 和 disproof budget |
-| Branch Cycle | `AgentCycle`、`ContextSnapshot`、Runtime generation、Pi bounded turn | 只保存分支假设/Claim/frontier；不把 Pi 会话树当持久化真值 |
-| Revocation / backtrack | Evidence Review impact、Outbox/Wakeup、revision/generation fence | 排除/过期 Evidence 后增量 tombstone 后代 Claim、重开 Gap、激活 sibling frontier，并保留原始 Artifact |
-
-目标状态应能区分 `SUPPORTED`、`REFUTED`、`UNKNOWN`、`STALE/CONTESTED`，而不是只用一个 confidence 排名。结论应携带最小支持集、未解决替代解释和覆盖范围；调查树只是该账本在某个 Case、branch 和 revision 下的视图。
-
-## 19. 维护规则
+## 18. 维护规则
 
 每次重大代码变更后更新本文件：
 
@@ -461,8 +465,10 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 3. 检查新增 API 是否通过 scope、tenant、risk、budget 和 revision fence。
 4. 检查新增 Evidence 是否有 Artifact/Projection/hash/lineage 和引用验证。
 5. 检查异步流程是否有 Outbox/Wakeup、幂等和迟到写入处理。
-6. 同时更新“已闭环/部分闭环/设计素材”三类清单和对应测试。
+6. 同时更新“已闭环/不完整”两类清单和对应测试。
 7. 如果能力依赖 Linux、Pi、外部 Provider 或真实多主机环境，必须在状态中写明验证条件。
+8. 新增 Collector 时必须同时记录风险等级、目标类型、时长/采样边界、输出 Artifact、权限限制和测试；不能只把 Collector 名称加入列表。
+9. 新增前端按钮时必须记录它对应的实际 API、状态迁移、失败/过期行为；没有后端动作的设计不登记为资产。
 
 相关当前文档：
 

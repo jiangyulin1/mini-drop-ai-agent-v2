@@ -35,6 +35,7 @@ class CollectionSupervisor:
         "discovery_followup_authority",
         "discovery_phase", "membership_snapshot_id",
         "expected_boot_id", "expected_process_start_time", "expected_entity_id",
+        "branch_id",
     })
 
     def __init__(self, repository: Any):

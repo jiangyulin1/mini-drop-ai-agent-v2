@@ -56,6 +56,7 @@ from server.app.http.auth import (
     request_tenant as _request_tenant,
     require_role as _require_role,
 )
+from server.app.legacy_compat import legacy_diagnosis_enabled
 from server.app.logging_utils import log_event
 from server.app.runtime_services import (
     case_supervision_repository,
@@ -114,6 +115,11 @@ def _internal_operator_request(path: str) -> Request:
 
 
 def _autonomy_start_diagnosis(case: dict[str, Any]) -> dict[str, Any]:
+    if not legacy_diagnosis_enabled():
+        return {
+            "outcome": "LEGACY_DIAGNOSIS_DISABLED",
+            "reason": "MINI_DROP_ENABLE_LEGACY_DIAGNOSIS is not enabled",
+        }
     current = repo.get_incident_case(case["case_id"], _request_tenant())
     if current is None:
         raise ValueError("CASE_NOT_FOUND")

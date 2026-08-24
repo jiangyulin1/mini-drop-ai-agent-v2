@@ -293,7 +293,7 @@ def test_evidence_review_excluded_updates_canonical_store(client: TestClient):
     assert resp.status_code == 400
 
 
-def test_excluding_supporting_evidence_appends_downgraded_conclusion(client: TestClient):
+def test_excluding_supporting_evidence_requires_recheck_revision(client: TestClient):
     task_id = _done_task_with_artifact()
     case = _create_case(client)
     attached = client.post(
@@ -320,7 +320,7 @@ def test_excluding_supporting_evidence_appends_downgraded_conclusion(client: Tes
     assert review.status_code == 200, review.text
     downgraded = repo.get_conclusion(case["case_id"], "tenant-a")
     assert downgraded["revision"] == 2
-    assert downgraded["state"] == "INSUFFICIENT_EVIDENCE"
+    assert downgraded["state"] == "RECHECK_REQUIRED"
     assert downgraded["verifier_version"] == "causal-report-verifier.v2-revalidation"
     assert downgraded["claim_evidence_bindings"][0]["verifier_result"] == "EVIDENCE_EXCLUDED"
     published_message = repo.list_assistant_messages(case["case_id"], "tenant-a")[-1]

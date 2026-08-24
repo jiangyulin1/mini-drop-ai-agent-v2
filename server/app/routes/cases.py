@@ -7,6 +7,7 @@ import hmac
 import io
 import json as _json
 import os
+import secrets
 import zipfile
 from datetime import datetime
 from typing import Any
@@ -53,6 +54,7 @@ from server.app.http.auth import (
     request_tenant as _request_tenant,
     require_role as _require_role,
 )
+from server.app.legacy_compat import legacy_diagnosis_enabled
 from server.app.runtime_services import (
     case_evidence_service,
     collection_supervisor,
@@ -65,7 +67,13 @@ from server.app.runtime_services import (
     repo,
 )
 from server.app.schemas import APIResponse
-from server.app.v6_routes import QueryError, _create_case_query_task
+from server.app.v6_routes import (
+    QueryError,
+    _create_case_query_task,
+    _filter_branch_collection_items,
+    _evidence_visible_to_branch,
+    _filter_tree_for_branch,
+)
 
 
 router = APIRouter()
@@ -360,7 +368,9 @@ def _case_agent_progress(case: dict[str, Any]) -> dict[str, Any]:
     required = int(policy.get("stable_verification_count") or 2) if isinstance(policy, dict) else 2
     actions = int(loop.get("actions_executed") or 0)
     max_actions = int(policy.get("max_actions") or 3) if isinstance(policy, dict) else 3
-    diagnosis_id = case.get("diagnosis_session_id")
+    diagnosis_id = (
+        case.get("diagnosis_session_id") if legacy_diagnosis_enabled() else None
+    )
     diagnosis_status = None
     if diagnosis_id:
         session = diagnosis_orchestrator.store.get_session(diagnosis_id)
@@ -396,6 +406,7 @@ async def stream_incident_case_events(
     case_id: str,
     request: Request,
     after_seq: int = 0,
+    branch_id: str = "",
 ) -> StreamingResponse:
     """v6 SSE: replay DB events after Last-Event-ID, then subscribe without a gap."""
     _require_role(request, "operator")
@@ -412,11 +423,19 @@ async def stream_incident_case_events(
     # both; the monotonic cursor below removes the possible duplicate.
     subscription = BUS.subscribe()
     replay = repo.list_case_events(case_id, tenant_id, limit=1000, after_seq=cursor) or []
+    branch_id = str(branch_id or "").strip()
+
+    def branch_event_visible(item: dict[str, Any]) -> bool:
+        if not branch_id:
+            return True
+        return str((item.get("payload") or {}).get("branch_id") or "") == branch_id
 
     async def event_stream():
         high_water = cursor
         try:
             for item in replay:
+                if not branch_event_visible(item):
+                    continue
                 seq = int(item.get("case_event_seq") or 0)
                 if seq <= high_water:
                     continue
@@ -434,6 +453,8 @@ async def stream_incident_case_events(
                     continue
                 data = bus_event.get("data") or {}
                 if str(data.get("case_id") or "") != case_id:
+                    continue
+                if not branch_event_visible(data):
                     continue
                 seq = int(data.get("case_event_seq") or 0)
                 if seq <= high_water:
@@ -459,6 +480,7 @@ def list_incident_case_events(
     after_seq: int = 0,
     before_seq: int | None = None,
     latest: bool = False,
+    branch_id: str = "",
 ) -> APIResponse:
     _require_role(request, "operator")
     if latest:
@@ -475,6 +497,12 @@ def list_incident_case_events(
     )
     if before_seq is not None:
         items = [item for item in items or [] if int(item.get("case_event_seq") or 0) <= before_seq]
+    branch_id = str(branch_id or "").strip()
+    if branch_id:
+        items = [
+            item for item in items or []
+            if str((item.get("payload") or {}).get("branch_id") or "") == branch_id
+        ]
     if items is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
     return APIResponse(data={"items": items, "total": len(items)})
@@ -947,15 +975,21 @@ def get_case_evidence_projections(
 
 
 @router.get("/api/v1/cases/{case_id}/workspace")
-def get_case_workspace(case_id: str, request: Request) -> APIResponse:
+def get_case_workspace(case_id: str, request: Request, branch_id: str = "") -> APIResponse:
     """v6 9.2: one database snapshot for the Workbench first paint."""
     _require_role(request, "operator")
     tenant_id = _request_tenant()
     case = repo.get_incident_case(case_id, tenant_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
+    branch_id = str(branch_id or "").strip() or None
     plan = investigation_plan_service.read_plan(case_id, tenant_id) or {}
     evidence_items = repo.list_case_evidence(case_id, tenant_id)
+    if branch_id:
+        evidence_items = [
+            item for item in evidence_items
+            if _evidence_visible_to_branch(item, branch_id)
+        ]
     for item in evidence_items:
         item["projections"] = repo.list_evidence_projections(
             case_id, tenant_id, evidence_id=item.get("evidence_id"),
@@ -968,8 +1002,20 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
             for projection in item.get("projections") or []
         ],
     )
-    collection_proposals = repo.list_collection_proposals(case_id, tenant_id)
-    collection_requests = repo.list_collection_requests(case_id, tenant_id)
+    all_tree = repo.list_investigation_tree(case_id, tenant_id) if hasattr(repo, "list_investigation_tree") else {"nodes": [], "dependencies": []}
+    collection_proposals = _filter_branch_collection_items(
+        repo.list_collection_proposals(case_id, tenant_id), all_tree, branch_id,
+    )
+    visible_proposal_ids = {
+        str(item.get("proposal_id") or "") for item in collection_proposals
+    }
+    collection_requests = _filter_branch_collection_items(
+        repo.list_collection_requests(case_id, tenant_id), all_tree, branch_id,
+        visible_proposal_ids=visible_proposal_ids if branch_id else None,
+    )
+    # Collection rows are linked to their durable Agent cycle; they do not
+    # carry a second mutable branch column.  The helper above resolves the
+    # cycle ownership from the investigation tree and fails closed.
     evidence_analyses = repo.list_evidence_analysis_runs(case_id, tenant_id)
     analysis_count_by_evidence: dict[str, int] = {}
     for analysis in evidence_analyses:
@@ -982,9 +1028,35 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
             analysis_count_by_evidence[evidence_id] = analysis_count_by_evidence.get(evidence_id, 0) + 1
     for item in evidence_items:
         item["analysis_count"] = analysis_count_by_evidence.get(str(item.get("evidence_id") or ""), 0)
-    investigation_state = investigation_state_service.snapshot(case_id, tenant_id)
+    investigation_state = investigation_state_service.snapshot(case_id, tenant_id, branch_id)
+    investigation_tree = _filter_tree_for_branch(
+        repo.list_investigation_tree(case_id, tenant_id), branch_id,
+    ) if hasattr(repo, "list_investigation_tree") else {"nodes": [], "dependencies": []}
+    branch_handles: dict[str, dict[str, Any]] = {}
+    for node in all_tree.get("nodes") or []:
+        node_branch = str(node.get("branch_id") or "").strip()
+        if not node_branch:
+            continue
+        handle = branch_handles.setdefault(node_branch, {
+            "branch_id": node_branch, "run_ids": [], "node_count": 0,
+            "open_node_count": 0, "created_at": node.get("created_at"),
+        })
+        handle["node_count"] += 1
+        handle["open_node_count"] += int(node.get("status") in {"OPEN", "WAITING_EVIDENCE", "PAUSED"})
+        if node.get("run_id") and node["run_id"] not in handle["run_ids"]:
+            handle["run_ids"].append(node["run_id"])
+    for evidence in repo.list_case_evidence(case_id, tenant_id):
+        lineage = evidence.get("lineage") or evidence.get("lineage_json") or {}
+        node_branch = str(lineage.get("branch_id") or "").strip()
+        if node_branch:
+            handle = branch_handles.setdefault(node_branch, {"branch_id": node_branch, "run_ids": [], "node_count": 0, "open_node_count": 0})
+            handle["evidence_count"] = int(handle.get("evidence_count") or 0) + 1
+    branches = sorted(branch_handles.values(), key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    for index, handle in enumerate(branches, start=1):
+        handle.setdefault("evidence_count", 0)
+        handle["label"] = f"探索分支 {index}"
     conclusion_history = (
-        repo.list_conclusion_revisions(case_id, tenant_id)
+        repo.list_conclusion_revisions(case_id, tenant_id, branch_id=branch_id)
         if hasattr(repo, "list_conclusion_revisions") else ([investigation_state["conclusion"]] if investigation_state["conclusion"] else [])
     )
     execution_units = repo.list_execution_units(case_id, tenant_id) if hasattr(repo, "list_execution_units") else []
@@ -996,6 +1068,21 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
         item for item in reversed(turns)
         if item.get("status") in {"ACCEPTED", "ROUTED", "RUNNING"}
     ), None)
+    if branch_id:
+        branch_cycle_ids = {
+            str((node.get("metadata") or {}).get("cycle_id") or "")
+            for node in investigation_tree.get("nodes") or []
+            if (node.get("metadata") or {}).get("cycle_id")
+        }
+        messages = [
+            item for item in messages
+            if str(item.get("cycle_id") or "") in branch_cycle_ids
+        ]
+        # AgentRuntimeTurn has no branch column in the compatibility schema;
+        # hiding the global turn list is fail-closed until a turn is attached
+        # to a durable cycle.
+        turns = []
+        active_turn = None
     active_plan_steps = [item for item in (plan.get("steps") or []) if item.get("status") not in {
         "COMPLETED", "CANCELLED", "FAILED", "SUPERSEDED",
     }]
@@ -1124,6 +1211,8 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
             "campaign": 0,
         },
         "case": case,
+        "branch_id": branch_id,
+        "branches": branches,
         "engine": {
             "mode": runtime_mode().value,
             "availability": "READY" if binding else "UNAVAILABLE",
@@ -1158,9 +1247,98 @@ def get_case_workspace(case_id: str, request: Request) -> APIResponse:
         "recommendations": investigation_state["recommendations"],
         "execution_units": execution_units,
         "fanout_runs": fanout_runs,
+        "investigation_tree": investigation_tree,
         "messages": messages,
         "runtime_turns": turns,
         "last_event_seq": max([int(item.get("case_event_seq") or 0) for item in repo.list_case_events(case_id, tenant_id, limit=200) or []] or [0]),
+    })
+
+
+@router.get("/api/v1/cases/{case_id}/branches")
+def list_case_investigation_branches(case_id: str, request: Request) -> APIResponse:
+    """List branch handles for the operator workspace without exposing content."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    if repo.get_incident_case(case_id, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    tree = repo.list_investigation_tree(case_id, tenant_id) if hasattr(repo, "list_investigation_tree") else {"nodes": [], "dependencies": []}
+    evidence = repo.list_case_evidence(case_id, tenant_id)
+    branch_rows: dict[str, dict[str, Any]] = {}
+    for node in tree.get("nodes") or []:
+        branch = str(node.get("branch_id") or "").strip()
+        if not branch:
+            continue
+        row = branch_rows.setdefault(branch, {
+            "branch_id": branch,
+            "run_ids": [],
+            "node_count": 0,
+            "open_node_count": 0,
+            "last_status": node.get("status"),
+            "created_at": node.get("created_at"),
+        })
+        row["node_count"] += 1
+        row["open_node_count"] += int(node.get("status") in {"OPEN", "WAITING_EVIDENCE", "PAUSED"})
+        if node.get("run_id") and node["run_id"] not in row["run_ids"]:
+            row["run_ids"].append(node["run_id"])
+        row["last_status"] = node.get("status") or row["last_status"]
+        row["created_at"] = min(filter(None, [row.get("created_at"), node.get("created_at")]), default=row.get("created_at"))
+    for item in evidence:
+        lineage = item.get("lineage") or item.get("lineage_json") or {}
+        branch = str(lineage.get("branch_id") or "").strip()
+        if not branch:
+            continue
+        row = branch_rows.setdefault(branch, {"branch_id": branch, "run_ids": [], "node_count": 0, "open_node_count": 0})
+        row["evidence_count"] = int(row.get("evidence_count") or 0) + 1
+    items = sorted(branch_rows.values(), key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    for index, item in enumerate(items, start=1):
+        item.setdefault("evidence_count", 0)
+        item["label"] = f"探索分支 {index}"
+    return APIResponse(data={"items": items, "total": len(items), "public_seed_available": True})
+
+
+@router.post("/api/v1/cases/{case_id}/branches")
+def create_case_investigation_branch(
+    case_id: str, payload: dict[str, Any], request: Request,
+) -> APIResponse:
+    """Create an isolated branch root for an operator-led investigation turn."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    branch_id = f"branch_{secrets.token_hex(8)}"
+    try:
+        run = repo.create_investigation_run(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            created_from_turn_id=str(payload.get("created_from_turn_id") or "") or None,
+            scope_revision=case.get("scope_revision"),
+            control_revision=case.get("control_revision"),
+            case_command_revision=case.get("case_command_revision"),
+        )
+        cycle = repo.create_agent_cycle(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            run_id=run["run_id"],
+            trigger_type="USER_BRANCH_CREATED",
+            trigger_ref=str(payload.get("reason") or "operator_created"),
+            generation=int((repo.get_agent_runtime_binding(case_id, tenant_id) or {}).get("runtime_generation") or 1),
+            branch_id=branch_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    repo.record_case_event(
+        case_id, tenant_id,
+        event_type="investigation_branch_created",
+        payload={"branch_id": branch_id, "run_id": run["run_id"], "cycle_id": cycle["cycle_id"]},
+        actor_id=principal_id,
+    )
+    return APIResponse(data={
+        "branch_id": branch_id,
+        "run": run,
+        "cycle": cycle,
+        "label": str(payload.get("label") or "新探索分支")[:80],
     })
 
 
@@ -1217,7 +1395,8 @@ def get_case_causal_graphs(case_id: str, request: Request) -> APIResponse:
     tenant_id = _request_tenant()
     if repo.get_incident_case(case_id, tenant_id) is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
-    graph = repo.get_causal_graph(case_id, tenant_id) if hasattr(repo, "get_causal_graph") else None
+    branch_id = str(request.query_params.get("branch_id") or "").strip() or None
+    graph = repo.get_causal_graph(case_id, tenant_id, branch_id=branch_id) if hasattr(repo, "get_causal_graph") else None
     return APIResponse(data={"graph": graph})
 
 
@@ -1225,7 +1404,8 @@ def get_case_causal_graphs(case_id: str, request: Request) -> APIResponse:
 def get_case_evidence_gaps(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
-    items = repo.list_evidence_gaps(case_id, tenant_id) if hasattr(repo, "list_evidence_gaps") else []
+    branch_id = str(request.query_params.get("branch_id") or "").strip() or None
+    items = repo.list_evidence_gaps(case_id, tenant_id, branch_id=branch_id) if hasattr(repo, "list_evidence_gaps") else []
     return APIResponse(data={"items": items, "total": len(items)})
 
 
@@ -1233,9 +1413,10 @@ def get_case_evidence_gaps(case_id: str, request: Request) -> APIResponse:
 def get_case_conclusions(case_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")
     tenant_id = _request_tenant()
-    conclusion = repo.get_conclusion(case_id, tenant_id) if hasattr(repo, "get_conclusion") else None
+    branch_id = str(request.query_params.get("branch_id") or "").strip() or None
+    conclusion = repo.get_conclusion(case_id, tenant_id, branch_id=branch_id) if hasattr(repo, "get_conclusion") else None
     history = (
-        repo.list_conclusion_revisions(case_id, tenant_id)
+        repo.list_conclusion_revisions(case_id, tenant_id, branch_id=branch_id)
         if hasattr(repo, "list_conclusion_revisions") else ([conclusion] if conclusion else [])
     )
     return APIResponse(data={"conclusion": conclusion, "history": history, "total": len(history)})

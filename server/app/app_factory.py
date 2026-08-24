@@ -625,6 +625,24 @@ def _deliver_one_wakeup(
         if wakeup.get("cycle_id") and hasattr(repo, "get_agent_cycle")
         else None
     )
+    branch_id = str(wakeup.get("branch_id") or "").strip() or None
+    if cycle and hasattr(repo, "get_investigation_tree_node"):
+        root = repo.get_investigation_tree_node(
+            case_id, tenant_id, f"tnode_cycle_{cycle.get('cycle_id')}"
+        )
+        branch_id = str((root or {}).get("branch_id") or "").strip() or branch_id
+    if branch_id is None and reason_class in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"} and hasattr(repo, "list_investigation_tree"):
+        tree = repo.list_investigation_tree(case_id, tenant_id, run_id=run.get("run_id"))
+        affected = {
+            str(item.get("evidence_id") or "")
+            for item in (wakeup.get("evidence_ids") or []) if str(item)
+        }
+        for dep in tree.get("dependencies") or []:
+            if str(dep.get("target_kind") or "").upper() == "EVIDENCE" and str(dep.get("target_id") or "") in affected:
+                node = next((n for n in tree.get("nodes") or [] if n.get("node_id") == dep.get("node_id")), None)
+                if node and node.get("branch_id"):
+                    branch_id = str(node["branch_id"])
+                    break
     intervention: dict[str, Any] = {}
     if reason_class in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"}:
         review_refs = [str(item) for item in (wakeup.get("source_refs") or [])]
@@ -674,6 +692,7 @@ def _deliver_one_wakeup(
         strategy_id=inherited_strategy_id,
         intervention=intervention,
         evidence_ids=sorted(wakeup_evidence_ids),
+        branch_id=branch_id,
     )
     # Evidence lifecycle changes invalidate every old Pi transcript. Rotate
     # the durable generation before creating the cycle so stale tool events
@@ -739,6 +758,7 @@ def _deliver_one_wakeup(
             evidence_watermark=int(wakeup.get("to_evidence_watermark") or 0),
             runtime_binding_id=case_id,
             generation=generation,
+            branch_id=branch_id,
         ) if hasattr(repo, "create_agent_cycle") else None
         if cycle and hasattr(repo, "create_model_request"):
             projections = []
@@ -1287,7 +1307,10 @@ def _run_offline_sweep_pass(timeout_sec: int, stale_task_timeout_sec: int) -> No
     )
     if hasattr(repo, "persist_agent_metric_snapshots"):
         _run_maintenance_step("agent_metric_snapshot", repo.persist_agent_metric_snapshots)
-    _run_maintenance_step("diagnosis_advance", diagnosis_orchestrator.advance_active)
+    # The pre-v6 DiagnosisSession loop is compatibility-only. New deployments
+    # keep it frozen unless an operator explicitly opts in for legacy cases.
+    if env_bool("MINI_DROP_ENABLE_LEGACY_DIAGNOSIS", False):
+        _run_maintenance_step("diagnosis_advance", diagnosis_orchestrator.advance_active)
     _run_maintenance_step("case_task_wake", _run_case_task_wake_pass)
 
 

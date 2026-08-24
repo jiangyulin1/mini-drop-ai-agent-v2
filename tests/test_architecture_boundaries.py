@@ -137,6 +137,21 @@ def test_legacy_repository_facade_surface_cannot_grow_implicitly():
     assert used <= FROZEN_REPOSITORY_SURFACE
 
 
+def test_legacy_evidence_review_writer_is_not_exposed_to_application_code():
+    """Review truth has one active writer: the v6 revision ledger."""
+    assert "add_evidence_review" not in FROZEN_REPOSITORY_SURFACE
+    assert "list_evidence_reviews" not in FROZEN_REPOSITORY_SURFACE
+    source_paths = [
+        *(ROOT / "server" / "app" / "routes").glob("*.py"),
+        ROOT / "server" / "app" / "v6_routes.py",
+        ROOT / "server" / "app" / "app_factory.py",
+        *(ROOT / "server" / "app" / "diagnosis").glob("*.py"),
+    ]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in source_paths)
+    assert "add_evidence_review(" not in source
+    assert "list_evidence_reviews(" not in source
+
+
 def test_models_have_one_canonical_package_source():
     assert not (ROOT / "server" / "app" / "models.py").exists()
     assert (ROOT / "server" / "app" / "models" / "__init__.py").is_file()

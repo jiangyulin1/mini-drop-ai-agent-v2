@@ -42,10 +42,10 @@ import {
   decideCaseRecoveryPlan,
   dryRunCaseRecoveryPlan,
   executeCaseRecoveryPlan,
-  getDiagnosisSession,
   getCaseCurrentUnderstanding,
   getIncidentCase,
   getCaseWorkspace,
+  createCaseInvestigationBranch,
   getTask,
   listAgents,
   listIncidentCaseEvents,
@@ -193,6 +193,7 @@ export default function AIDiagnosisWorkspace() {
   const [caseDetail, setCaseDetail] = useState(null);
   const [events, setEvents] = useState([]);
   const [workspace, setWorkspace] = useState(null);
+  const [activeBranchId, setActiveBranchId] = useState("");
   const [workspaceConnected, setWorkspaceConnected] = useState(false);
   const [workspaceStreamSeed, setWorkspaceStreamSeed] = useState(null);
   const [diagnosis, setDiagnosis] = useState(null);
@@ -254,6 +255,7 @@ export default function AIDiagnosisWorkspace() {
   const chooseSelection = useCallback((key) => {
     selectedKeyRef.current = key;
     setSelectedKey(key);
+    setActiveBranchId("");
     // Picking another case should land on its conversation; staying on the raw
     // data console makes the click look like it did nothing.
     setMode("ai");
@@ -332,20 +334,21 @@ export default function AIDiagnosisWorkspace() {
     try {
       if (key.startsWith("case:")) {
         const caseId = key.slice(5);
-        const [workspaceResult, eventResult, understandingResult, proposalResult, recoveryResult] = await Promise.all([
-          getCaseWorkspace(caseId),
-          listIncidentCaseEvents(caseId, { limit: 300 }),
+        const workspaceResult = activeBranchId
+          ? await getCaseWorkspace(caseId, { branch_id: activeBranchId })
+          : await getCaseWorkspace(caseId);
+        const [eventResult, understandingResult, proposalResult, recoveryResult] = await Promise.all([
+          listIncidentCaseEvents(caseId, { limit: 300, ...(activeBranchId ? { branch_id: activeBranchId } : {}) }),
           getCaseCurrentUnderstanding(caseId),
           listCaseProposals(caseId),
           listCaseRecoveryPlans(caseId),
         ]);
         if (!isCurrent()) return;
         const detail = workspaceResult.case;
-        let nextDiagnosis = null;
-        if (detail.diagnosis_session_id) {
-          nextDiagnosis = await getDiagnosisSession(detail.diagnosis_session_id);
-        }
-        if (!isCurrent()) return;
+        // Legacy DiagnosisSession remains available from its compatibility
+        // route, but it is intentionally not loaded into the canonical Case
+        // workspace. New interaction is Evidence-native and branch-scoped.
+        const nextDiagnosis = null;
         setWorkspace(workspaceResult);
         setWorkspaceStreamSeed((current) => (
           current?.caseId === caseId
@@ -364,7 +367,24 @@ export default function AIDiagnosisWorkspace() {
     } finally {
       if (!quiet && isCurrent()) setDetailLoading(false);
     }
-  }, []);
+  }, [activeBranchId]);
+
+  const createBranch = useCallback(async () => {
+    if (!caseDetail?.case_id) return;
+    try {
+      const result = await createCaseInvestigationBranch(caseDetail.case_id, {
+        label: "答辩探索分支",
+        reason: "operator_workspace",
+      });
+      const branchId = result?.branch_id || result?.data?.branch_id;
+      if (branchId) {
+        setActiveBranchId(branchId);
+        message.success("已创建隔离探索分支");
+      }
+    } catch (error) {
+      message.error(`创建分支失败：${error.message}`);
+    }
+  }, [caseDetail?.case_id]);
 
   useEffect(() => { refreshLists(); }, [refreshLists]);
   useEffect(() => { loadSelection(selectedKey); }, [loadSelection, selectedKey]);
@@ -420,7 +440,7 @@ export default function AIDiagnosisWorkspace() {
       if (closed) return;
       void ensureEventSourceAuthCookie().then(() => {
         if (closed) return;
-        source = createCaseEventSource(caseId, afterSeq);
+        source = createCaseEventSource(caseId, afterSeq, activeBranchId);
         source.onopen = () => {
           if (closed) return;
           retryCount = 0;
@@ -469,7 +489,7 @@ export default function AIDiagnosisWorkspace() {
       source?.close();
       setWorkspaceConnected(false);
     };
-  }, [loadSelection, selectedKey, workspaceStreamSeed]);
+  }, [activeBranchId, loadSelection, selectedKey, workspaceStreamSeed]);
   useEffect(() => {
     if (!selectedKey) return undefined;
     let cancelled = false;
@@ -775,6 +795,7 @@ export default function AIDiagnosisWorkspace() {
       const turn = await runIncidentCaseAgentTurn(base.case_id, {
         message: "请基于当前目标和已有 Evidence，识别最重要的信息缺口并提出下一项受控采集。证据不足时请明确停止或拒答。",
         execute_safe_tools: true,
+        branch_id: activeBranchId || undefined,
       });
       const turnId = turn?.next_actions?.find((item) => item.turn_id)?.turn_id || turn?.turn_id || "";
       setPendingTurn({ caseId: base.case_id, turnId, message: "开始 Evidence 调查", startedAt: Date.now() });
@@ -807,6 +828,7 @@ export default function AIDiagnosisWorkspace() {
         await runIncidentCaseAgentTurn(updated.case_id, {
           message: "范围已确认。请评估现有 Evidence，提出最有信息价值的下一项受控采集。",
           execute_safe_tools: true,
+          branch_id: activeBranchId || undefined,
         });
       }
       await loadSelection(`case:${updated.case_id}`);
@@ -829,6 +851,7 @@ export default function AIDiagnosisWorkspace() {
         message: content,
         execute_safe_tools: true,
         requested_disposition: sendMode === "investigate" ? "INVESTIGATE" : "ANSWER_ONLY",
+        branch_id: activeBranchId || undefined,
       });
       updateMessageText("");
       // The runtime answers asynchronously.  Keep a pending marker so the
@@ -937,6 +960,7 @@ export default function AIDiagnosisWorkspace() {
       await runIncidentCaseAgentTurn(current.case_id, {
         message: `请分析刚关联的采集批次 ${group.collectionId}，只输出有字段引用的事实、冲突、限制和下一信息目标。`,
         execute_safe_tools: false,
+        branch_id: activeBranchId || undefined,
       });
       setMode("ai");
       await Promise.all([refreshLists({ quiet: true }), loadSelection(`case:${current.case_id}`)]);
@@ -1096,6 +1120,10 @@ export default function AIDiagnosisWorkspace() {
                 workspace={workspace}
                 connected={workspaceConnected}
                 caseId={caseDetail.case_id}
+                activeBranchId={activeBranchId}
+                branches={workspace?.branches || []}
+                onBranchChange={setActiveBranchId}
+                onCreateBranch={createBranch}
                 focusEvidenceId={focusEvidenceId}
                 onFocusEvidenceConsumed={() => setFocusEvidenceId("")}
                 onRefresh={refreshAll}

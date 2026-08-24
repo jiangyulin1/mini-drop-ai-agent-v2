@@ -45,7 +45,6 @@ from server.app.models import (
     EvidenceProjectionModel,
     EvidenceReuseDecisionModel,
     EvidenceReviewRevisionModel,
-    EvidenceReviewModel,
     ExecutionUnitModel,
     InvestigationRunModel,
     InvestigationTreeNodeModel,
@@ -510,6 +509,7 @@ class SqlRepositoryV6Mixin:
         context_snapshot_id: str | None = None,
         evidence_watermark: int = 0, runtime_binding_id: str | None = None,
         generation: int = 1, cycle_id: str | None = None,
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         now = now_utc()
         with self._write_session() as session:
@@ -542,7 +542,7 @@ class SqlRepositoryV6Mixin:
                 tenant_id=tenant_id,
                 run_id=run_id,
                 parent_node_id=None,
-                branch_id=self._new_id("branch"),
+                branch_id=str(branch_id or self._new_id("branch")),
                 node_type="CYCLE",
                 status="OPEN",
                 statement=f"Agent cycle {row.cycle_id}: {trigger_type}",
@@ -758,6 +758,7 @@ class SqlRepositoryV6Mixin:
         conclusion_id: str | None, message_id: str, visible_content: str,
         trigger_turn_id: str | None, limitation_refs: list[str] | None = None,
         intervention_audit: dict[str, Any] | None = None,
+        branch_id: str | None = None,
         actor_id: str = "mini-drop-pi-runtime",
     ) -> dict[str, Any]:
         """Atomically publish the Case conclusion, assistant message and Turn completion."""
@@ -770,37 +771,39 @@ class SqlRepositoryV6Mixin:
             if existing is not None:
                 return {"message": existing.to_dict(), "case": case.to_dict(), "duplicate": True}
 
-            case.current_finding_json = {
-                "status": "concluded",
-                "statement": summary,
-                "evidence_refs": list(evidence_refs),
-                "limitations": list(limitations),
-            }
-            case.current_activity_json = {
-                "phase": "conclusion_drafted",
-                "message": "Agent 已提交证据约束的结论，等待处置或继续追问",
-            }
-            if str(conclusion_state).upper() == "INSUFFICIENT_EVIDENCE":
-                case.state = "INSUFFICIENT_EVIDENCE"
-                case.state_reason = "agent_finished_with_insufficient_evidence"
-                case.need_user_json = {
-                    "required": True,
-                    "question": "当前证据不足。请补充范围、时间窗或新的可观测数据后新开调查。",
+            if not branch_id:
+                case.current_finding_json = {
+                    "status": "concluded",
+                    "statement": summary,
+                    "evidence_refs": list(evidence_refs),
+                    "limitations": list(limitations),
                 }
-            elif case.state not in {"PAUSED", "STOPPED", "RESOLVED"}:
-                case.state = "WAITING_USER"
-                case.state_reason = "agent_conclusion_ready"
-                case.need_user_json = {
-                    "required": True,
-                    "question": "结论已形成。请审查证据、选择恢复建议，或继续追问。",
+                case.current_activity_json = {
+                    "phase": "conclusion_drafted",
+                    "message": "Agent 已提交证据约束的结论，等待处置或继续追问",
                 }
-            case.row_version += 1
-            case.updated_at = now
+                if str(conclusion_state).upper() == "INSUFFICIENT_EVIDENCE":
+                    case.state = "INSUFFICIENT_EVIDENCE"
+                    case.state_reason = "agent_finished_with_insufficient_evidence"
+                    case.need_user_json = {
+                        "required": True,
+                        "question": "当前证据不足。请补充范围、时间窗或新的可观测数据后新开调查。",
+                    }
+                elif case.state not in {"PAUSED", "STOPPED", "RESOLVED"}:
+                    case.state = "WAITING_USER"
+                    case.state_reason = "agent_conclusion_ready"
+                    case.need_user_json = {
+                        "required": True,
+                        "question": "结论已形成。请审查证据、选择恢复建议，或继续追问。",
+                    }
+                case.row_version += 1
+                case.updated_at = now
 
             message = AssistantMessageModel(
                 message_id=message_id,
                 case_id=case_id,
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 trigger_turn_id=trigger_turn_id,
                 origin_turn_id=trigger_turn_id,
                 content=visible_content,
@@ -820,12 +823,14 @@ class SqlRepositoryV6Mixin:
             event_payloads = [
                 ("assistant.message", "mini-drop-agent-runtime", {
                     "message_id": message_id,
+                    "branch_id": branch_id,
                     "trigger_turn_id": trigger_turn_id,
                     "content": visible_content,
                     "evidence_refs": list(evidence_refs),
                     "conclusion_revision_id": conclusion_id,
                 }),
                 ("agent_finish_investigation", actor_id, {
+                    "branch_id": branch_id,
                     "summary": summary,
                     "evidence_refs": list(evidence_refs),
                     "verifier": "causal-report-verifier.v1",
@@ -838,6 +843,7 @@ class SqlRepositoryV6Mixin:
             if trigger_turn_id:
                 event_payloads.insert(1, ("turn.completed", "mini-drop-agent-runtime", {
                     "turn_id": trigger_turn_id,
+                    "branch_id": branch_id,
                     "message_id": message_id,
                 }))
             events: list[CaseEventModel] = []
@@ -1854,11 +1860,14 @@ class SqlRepositoryV6Mixin:
 
     def list_evidence_dependency_edges(
         self, case_id: str, tenant_id: str, *, target_kind: str | None = None,
+        branch_id: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._read_session() as session:
             query = session.query(EvidenceDependencyEdgeModel).filter(
                 EvidenceDependencyEdgeModel.case_id == case_id,
                 EvidenceDependencyEdgeModel.tenant_id == tenant_id,
+                EvidenceDependencyEdgeModel.branch_id.is_(None)
+                if branch_id is None else EvidenceDependencyEdgeModel.branch_id == branch_id,
             )
             if target_kind:
                 query = query.filter(EvidenceDependencyEdgeModel.target_kind == target_kind)
@@ -1870,7 +1879,7 @@ class SqlRepositoryV6Mixin:
         key = (
             payload["case_id"], payload["tenant_id"], payload["source_kind"],
             payload["source_id"], payload["target_kind"], payload["target_id"],
-            payload.get("relation", "SUPPORTS"),
+            payload.get("relation", "SUPPORTS"), payload.get("branch_id"),
         )
         with self._write_session() as session:
             existing = session.query(EvidenceDependencyEdgeModel).filter(
@@ -1881,6 +1890,8 @@ class SqlRepositoryV6Mixin:
                 EvidenceDependencyEdgeModel.target_kind == key[4],
                 EvidenceDependencyEdgeModel.target_id == key[5],
                 EvidenceDependencyEdgeModel.relation == key[6],
+                EvidenceDependencyEdgeModel.branch_id.is_(None)
+                if key[7] is None else EvidenceDependencyEdgeModel.branch_id == key[7],
             ).first()
             if existing:
                 existing.support_weight = float(payload.get("support_weight", existing.support_weight) or 0.0)
@@ -1888,6 +1899,7 @@ class SqlRepositoryV6Mixin:
                 return existing.to_dict()
             row = EvidenceDependencyEdgeModel(
                 dependency_id=self._dependency_id(*key), case_id=key[0], tenant_id=key[1],
+                branch_id=key[7],
                 source_kind=key[2], source_id=key[3], target_kind=key[4], target_id=key[5],
                 relation=key[6], support_weight=float(payload.get("support_weight", 1.0) or 0.0),
                 status="PROPOSED", invalidated_reason=payload.get("reason"),
@@ -2112,7 +2124,11 @@ class SqlRepositoryV6Mixin:
                 ClaimEvidenceBindingModel.support_kind == "SUPPORTS",
             ).all() if latest else []
             remaining = [item for item in supporting if item.evidence_id != evidence.evidence_id]
-            predicted = "PARTIALLY_CONFIRMED" if remaining else "INSUFFICIENT_EVIDENCE"
+            # Exclusion changes the current fact boundary.  The operator has
+            # not yet run a new investigation, so the workspace must expose a
+            # recheck transition rather than pretending that abstention is the
+            # final result of the next investigation.
+            predicted = "RECHECK_REQUIRED" if not remaining else "PARTIALLY_CONFIRMED"
         elif supporting_bindings and outcome["inference_changed"] and outcome["trust_state"] == "LOW_TRUST":
             predicted = "PARTIALLY_CONFIRMED" if latest else None
         recollection = []
@@ -2351,19 +2367,6 @@ class SqlRepositoryV6Mixin:
                 raise ValueError("EVIDENCE_REVIEW_OVERRIDE_REASON_REQUIRED")
             outcome = preview["outcome"]
             revision = int(evidence.review_revision or 0) + 1
-            legacy = EvidenceReviewModel(
-                review_id=self._new_id("review"),
-                case_id=case_id,
-                tenant_id=tenant_id,
-                evidence_id=evidence_id,
-                decision=decision,
-                reason_code=reason_code,
-                reason=reason,
-                actor_id=actor_id,
-                review_revision=revision,
-                created_at=now,
-            )
-            session.add(legacy)
             review = EvidenceReviewRevisionModel(
                 review_revision_id=self._new_id("rev"),
                 evidence_id=evidence_id,
@@ -2653,7 +2656,12 @@ class SqlRepositoryV6Mixin:
         status: str,
         now: datetime,
     ) -> None:
-        """Append a machine-downgraded Conclusion revision after invalidation."""
+        """Append a revalidation revision after a supporting Evidence changes.
+
+        ``RECHECK_REQUIRED`` is a transient current-workspace state.  It keeps
+        the historical conclusion auditable without treating the post-review
+        boundary as the final ``INSUFFICIENT_EVIDENCE`` outcome of a new run.
+        """
         affected = session.query(ClaimEvidenceBindingModel).filter(
             ClaimEvidenceBindingModel.evidence_id == evidence.evidence_id,
             # A CONTRADICTS binding is a counter-signal, not a prerequisite
@@ -2694,10 +2702,13 @@ class SqlRepositoryV6Mixin:
             if evidence_rows[binding.evidence_id].review_trust_state != "LOW_TRUST"
         ]
         new_state = (
-            ("PARTIALLY_CONFIRMED" if latest.state == "INSUFFICIENT_EVIDENCE" else latest.state)
+            (
+                "PARTIALLY_CONFIRMED"
+                if latest.state in {"INSUFFICIENT_EVIDENCE", "RECHECK_REQUIRED"}
+                else latest.state
+            )
             if strong_support
-            else "PARTIALLY_CONFIRMED" if directional_support
-            else "INSUFFICIENT_EVIDENCE"
+            else "RECHECK_REQUIRED"
         )
         if new_state == latest.state:
             return
@@ -2715,7 +2726,7 @@ class SqlRepositoryV6Mixin:
             state=new_state,
             # Do not carry values derived from an invalidated Evidence item
             # into the new effective conclusion. The prior revision remains in
-            # history for audit, while this revision is an explicit abstention.
+            # history for audit, while this revision requires fresh evidence.
             primary_root_causes=[],
             ranked_primary_candidates=[],
             contributing_factors=[],
@@ -2729,12 +2740,9 @@ class SqlRepositoryV6Mixin:
             evidence_gap_ids=latest.evidence_gap_ids or [],
             recommendation_ids=[],
             limitations=list(dict.fromkeys([*(latest.limitations or []), limitation])),
-            abstention_reason=(
-                "Previously supporting evidence is no longer active"
-                if new_state == "INSUFFICIENT_EVIDENCE" else latest.abstention_reason
-            ),
+            abstention_reason=latest.abstention_reason,
             report_text=(
-                "结论已因 Evidence 生命周期变更而失效；不得继续使用原结论中的数值或机制，"
+                "结论已因 Evidence 生命周期变更而需要重新验证；不得继续使用原结论中的数值或机制，"
                 "请先重新读取 Evidence lifecycle 和 review_revision。"
             ),
             created_from_cycle_id=latest.created_from_cycle_id,
@@ -3363,18 +3371,22 @@ class SqlRepositoryV6Mixin:
         edges: list[dict[str, Any]] | None = None,
         created_from_cycle_id: str | None = None,
         verifier_version: str = "causal-graph-verifier.v1",
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         now = now_utc()
         with self._write_session() as session:
             previous = session.query(CausalGraphRevisionModel).filter(
                 CausalGraphRevisionModel.case_id == case_id,
                 CausalGraphRevisionModel.tenant_id == tenant_id,
+                CausalGraphRevisionModel.branch_id.is_(None)
+                if branch_id is None else CausalGraphRevisionModel.branch_id == branch_id,
             ).order_by(CausalGraphRevisionModel.graph_revision.desc()).first()
             revision = int(previous.graph_revision or 0) + 1 if previous else 1
             graph = CausalGraphRevisionModel(
                 graph_id=self._new_id("graph"),
                 case_id=case_id,
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 investigation_run_id=investigation_run_id,
                 graph_revision=revision,
                 evidence_watermark=int(evidence_watermark or 0),
@@ -3431,11 +3443,14 @@ class SqlRepositoryV6Mixin:
 
     def get_causal_graph(
         self, case_id: str, tenant_id: str, graph_id: str | None = None,
+        *, branch_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self._read_session() as session:
             query = session.query(CausalGraphRevisionModel).filter(
                 CausalGraphRevisionModel.case_id == case_id,
                 CausalGraphRevisionModel.tenant_id == tenant_id,
+                CausalGraphRevisionModel.branch_id.is_(None)
+                if branch_id is None else CausalGraphRevisionModel.branch_id == branch_id,
             )
             if graph_id:
                 query = query.filter(CausalGraphRevisionModel.graph_id == graph_id)
@@ -3460,6 +3475,7 @@ class SqlRepositoryV6Mixin:
                 gap_id=payload.get("gap_id") or self._new_id("gap"),
                 case_id=payload["case_id"],
                 tenant_id=payload["tenant_id"],
+                branch_id=payload.get("branch_id"),
                 investigation_run_id=payload.get("investigation_run_id"),
                 blocked_claim=payload.get("blocked_claim"),
                 required_fact=payload.get("required_fact", ""),
@@ -3483,11 +3499,14 @@ class SqlRepositoryV6Mixin:
 
     def list_evidence_gaps(
         self, case_id: str, tenant_id: str, *, status: str | None = None,
+        branch_id: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._read_session() as session:
             query = session.query(EvidenceGapModel).filter(
                 EvidenceGapModel.case_id == case_id,
                 EvidenceGapModel.tenant_id == tenant_id,
+                EvidenceGapModel.branch_id.is_(None)
+                if branch_id is None else EvidenceGapModel.branch_id == branch_id,
             )
             if status:
                 query = query.filter(EvidenceGapModel.status == status)
@@ -3539,6 +3558,7 @@ class SqlRepositoryV6Mixin:
         model_request_id: str | None = None,
         verifier_version: str = "causal-report-verifier.v1",
         conclusion_id: str | None = None,
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         now = now_utc()
         with self._write_session() as session:
@@ -3551,6 +3571,8 @@ class SqlRepositoryV6Mixin:
             previous = session.query(ConclusionRevisionModel).filter(
                 ConclusionRevisionModel.case_id == case_id,
                 ConclusionRevisionModel.tenant_id == tenant_id,
+                ConclusionRevisionModel.branch_id.is_(None)
+                if branch_id is None else ConclusionRevisionModel.branch_id == branch_id,
             ).order_by(ConclusionRevisionModel.revision.desc()).first()
             revision = int(previous.revision or 0) + 1 if previous else 1
             evidence_rows = {
@@ -3582,6 +3604,7 @@ class SqlRepositoryV6Mixin:
                 conclusion_id=effective_conclusion_id,
                 case_id=case_id,
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 investigation_run_id=investigation_run_id,
                 revision=revision,
                 state=state,
@@ -3670,11 +3693,14 @@ class SqlRepositoryV6Mixin:
 
     def get_conclusion(
         self, case_id: str, tenant_id: str, conclusion_id: str | None = None,
+        *, branch_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self._read_session() as session:
             query = session.query(ConclusionRevisionModel).filter(
                 ConclusionRevisionModel.case_id == case_id,
                 ConclusionRevisionModel.tenant_id == tenant_id,
+                ConclusionRevisionModel.branch_id.is_(None)
+                if branch_id is None else ConclusionRevisionModel.branch_id == branch_id,
             )
             if conclusion_id:
                 query = query.filter(ConclusionRevisionModel.conclusion_id == conclusion_id)
@@ -3683,6 +3709,8 @@ class SqlRepositoryV6Mixin:
                 published = session.query(AssistantMessageModel).filter(
                     AssistantMessageModel.case_id == case_id,
                     AssistantMessageModel.tenant_id == tenant_id,
+                    AssistantMessageModel.branch_id.is_(None)
+                    if branch_id is None else AssistantMessageModel.branch_id == branch_id,
                     AssistantMessageModel.conclusion_revision_id.is_not(None),
                 ).order_by(AssistantMessageModel.created_at.desc()).first()
                 if published is not None:
@@ -3720,13 +3748,15 @@ class SqlRepositoryV6Mixin:
             return result
 
     def list_conclusion_revisions(
-        self, case_id: str, tenant_id: str,
+        self, case_id: str, tenant_id: str, *, branch_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return every conclusion revision, newest first, without deleting history."""
         with self._read_session() as session:
             rows = session.query(ConclusionRevisionModel).filter(
                 ConclusionRevisionModel.case_id == case_id,
                 ConclusionRevisionModel.tenant_id == tenant_id,
+                ConclusionRevisionModel.branch_id.is_(None)
+                if branch_id is None else ConclusionRevisionModel.branch_id == branch_id,
             ).order_by(ConclusionRevisionModel.revision.desc()).all()
             latest_revision = int(rows[0].revision or 0) if rows else 0
             result: list[dict[str, Any]] = []

@@ -473,7 +473,11 @@ class DiagnosisOutboxModel(Base):
 
 
 class DiagnosisEvidenceModel(Base):
-    """可追溯到 Task/Artifact 的不可变证据摘要。"""
+    """冻结的旧 DiagnosisSession 证据投影。
+
+    New Case investigations use runtime_core.CaseEvidenceModel instead. This
+    mapping remains only for historical /diagnoses reads and migration safety.
+    """
 
     __tablename__ = "diagnosis_evidence"
 
@@ -566,5 +570,4 @@ class DiagnosisNodeRunModel(Base):
 
 
 # ── Agent Runtime persistence (G1/G2) ──────────────────────────────
-
 

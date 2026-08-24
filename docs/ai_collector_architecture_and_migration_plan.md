@@ -1,10 +1,12 @@
 # Mini-Drop AI 深度采集与 Evidence 分析架构基线
 
-> 状态：架构审议基线，尚未授权生产代码删除
-> 固化日期：2026-08-19
+> 状态：历史阶段审计基线；当前实现以 `asset-map.md`、`evidence-native-investigation-positioning.md` 和统一架构合同为准。
+> 固化日期：2026-08-19；当前状态复核：2026-08-24
 > 适用范围：当前仓库的产品定位、AI 能力边界、架构收敛、竞品比较、迁移与评测
 > 决策优先级：用户最新确认方向 > 当前代码事实 > 本文 > v6/其他历史设计
-> 核心结论：Mini-Drop 应演化为 **Evidence-native AI Deep Collector**，而不是规则优先的根因排名系统，也不是现阶段的自治恢复平台。
+> 核心结论：Mini-Drop 应演化为 **Evidence-native Investigation Runtime**。本文保留迁移决策和删除门禁；已完成项以当前代码和最新验收结果为准。
+
+> **当前状态注记（2026-08-24）**：EvidenceAnalysisRun、单证据分析、Evidence 排除后的失效传播，以及 branch-local Hypothesis/Gap/Causal Graph/Conclusion/Dependency 持久化已经落地并通过回归测试。旧 Diagnosis 链默认冻结，仅设置 `MINI_DROP_ENABLE_LEGACY_DIAGNOSIS=true` 才启用。清理策略是退出旧在线产品路径，不是删除可复用 parser、Evidence 转换、授权、审计、fence 或 benchmark。本文后续“未落地/部分落地”表格是 2026-08-19 的审计快照，不应覆盖当前资产地图。
 
 ## 0. 执行摘要
 
@@ -60,7 +62,7 @@ Mini-Drop 当前并不是“没有 AI 功能”，而是同时存在太多相互
 | MCP 是否应成为产品核心 | 不应。MCP 是北向/外部适配协议，内部真源仍是 Collector、Task、Evidence 和 Policy |
 | 自动恢复是否现在保留 | 不作为当前主线。保留通用安全边界素材，关闭默认产品入口；未来单独立项 |
 | 是否继续维护多种诊断策略 | 仅在实验 Harness 中保留对照策略；生产不把策略标签变成多套并行架构 |
-| 是否立即删除旧代码 | 否。先建立替代主链、契约测试和只读兼容，再按删除门禁逐步移除 |
+| 是否立即删除旧代码 | 否。先建立替代主链、契约测试和复用迁移清单；只移除确认无复用价值的在线路径 |
 
 ### 1.3 本文替代的旧北极星
 
@@ -200,11 +202,11 @@ SourceQueryRequest
 | 降低 Evidence 影响 | 部分落地 | `LOW_TRUST` 被记录，但没有一致传播到所有 Planner/分析/结论约束 |
 | 所有 Evidence 可预览 | 部分落地 | Artifact/Projection 类型支持不一致；部分只显示摘要或提示下载 |
 | 所有 Evidence 可下载 | 部分落地 | Task Artifact 与 legacy Diagnosis 有下载接口；没有统一 canonical Case Evidence 下载合同 |
-| 单条 Evidence 独立 AI 分析 | 未落地 | 没有持久化的 `EvidenceAnalysisRun`、字段级 claim 和独立历史 |
+| 单条 Evidence 独立 AI 分析 | 已落地 MVP | `EvidenceAnalysisRun` 已持久化，固定 Evidence/Projection/Review revision，支持引用校验、fingerprint 去重和 stale 标记；跨 Source 类型 ingestion 仍不统一 |
 | Agent 自主下发全部注册采集器 | 部分落地 | Agent 物理实现约 13 项，但默认 `QUERY_REGISTRY` 仅暴露 4 个低风险 operation，深度采集器目录未统一进入 AI 工具 |
 | 人工删除 Evidence | 建议改为逻辑排除 | 物理删除会破坏审计与引用；产品操作应是 `EXCLUDED`，硬删除只由留存策略执行 |
 
-结论：该设计没有完全丢失，但只完成了底层的一部分。Evidence 治理已经是可复用资产，统一预览/下载、单证据 AI 分析、LOW_TRUST 传播和全量 Collector 自主提案仍需补齐。
+结论（历史快照）：Evidence 治理当时只完成了底层的一部分。当前代码已补齐单证据分析和分支推理状态；剩余差距集中在多支持集真值维护、复杂冲突回溯、统一 Source/MCP ingestion 和跨分支共享撤销传播。
 
 ### 2.5 当前最重要的结构性问题
 
