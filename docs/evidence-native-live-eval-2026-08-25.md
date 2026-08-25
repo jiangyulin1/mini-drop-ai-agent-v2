@@ -76,6 +76,18 @@ Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分�
 
 评测入口有两个边界：公网 `https://<control-address>:80` 适合 Web/API；JYL 内部评测应使用 server 容器的内网 `8191` 地址，否则 `/internal/runtime/...` 可能被 Web 返回 HTML。内网复跑 `reports/eval/github-pr-public-6-jyl-runtime-audit-k139850/` 捕获到 37 条 runtime event、3 次 DeepSeek attempt 和 `tool_execution_start/end`。评测结束后 import 开关为 `0`，临时 token 为空，`readyz` 为 200。
 
+## P07 隐藏事实动态补证验收
+
+为验证此前 9x3/公开 PR 评测没有覆盖的“盲区推理 + 证据链动态调整”，新增了本地 evaluator-controlled 测试：
+
+- 测试：`tests/test_blind_gap_dynamic_evidence.py`
+- 执行：`./.venv/bin/pytest -q tests/test_blind_gap_dynamic_evidence.py tests/test_agent_runtime_local_loop.py tests/test_investigation_state.py`
+- 结果：`25 passed`（含 1 个环境已有的 httpx/Starlette deprecation warning）
+
+测试严格分两轮。第一轮只给 Agent 一个 CPU distractor projection，不写入决定性锁事实；Agent 通过 Tool Gateway 记录具体 `EvidenceGap`，带 blocker 的高置信 `CONFIRMED` 请求只能得到 `PARTIALLY_CONFIRMED`。评测器随后才开放已注册的 `runtime_snapshot` Collector，并用 native Task 完成一个包含 waiter/holder 的运行时快照。第二轮验证新 Artifact 经过现有 parser 生成 canonical Evidence，runtime wakeup 只携带该 Task 的新 Evidence，Gap 能以该 Evidence 解决，Hypothesis/Causal Graph 可更新，最终结论不再引用开放 Gap；携带旧 scope revision 的迟到写入返回 `STALE_SCOPE`。
+
+这项测试的结论是 `PASS`：服务端的隐藏事实隔离、缺证拒绝、补证、Evidence materialization、wakeup 和 revision fencing 状态链已具备可验收闭环。它仍是 deterministic integration test，不证明 DeepSeek 在真实对话中一定会主动识别正确缺口、选择正确 Collector 或解释新证据；下一步应在 JYL Pi 上用最多两轮、低 token 的真实模型 smoke 复现同一协议，并人工判定 Agent 是否自主提出 `runtime_snapshot`。
+
 ## 操作注意
 
 Candidate archive 不包含受保护的 Compose `.env` 和 TLS 证书。部署到 `/jyl` 时必须从当前 active release 复制 `.env`，并将 `deploy/certs/{ca.crt,server.crt,server.key}` 复制到新 release；否则 Server/Worker 会因证书缺失无法启动。API Key 和 DeepSeek Key 只由受保护 env 注入，不写入报告或仓库。
