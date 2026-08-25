@@ -28,10 +28,11 @@ def parse_chat_control(message: str) -> dict[str, Any] | None:
         return {"kind": "COMMAND", "command": "RESUME", "reason": text}
 
     correction = any(token in lowered for token in ("纠正", "不是", "范围不对", "时间不对"))
+    focus_prefix = r"(?:改查|换查|切换到|切到|聚焦|关注|先查|调查) *"
     focus_match = re.search(
-        r"(?:改查|换查|切换到|切到|聚焦|关注|先查|调查) *([A-Za-z0-9_.:/@-]{2,128})",
-        text,
-        flags=re.IGNORECASE,
+        focus_prefix + r"(?:pid|process) *[:#]? *(\d+)", text, flags=re.IGNORECASE,
+    ) or re.search(
+        focus_prefix + r"([A-Za-z0-9_.:/@-]{2,128})", text, flags=re.IGNORECASE,
     )
     if focus_match:
         ref = focus_match.group(1).rstrip("，。；;。")

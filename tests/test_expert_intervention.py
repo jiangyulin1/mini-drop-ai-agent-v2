@@ -9,6 +9,7 @@ from server.app.agent_runtime.dispatcher import reset_runtime
 from server.app.database import init_db, reset_engine
 from server.app.main import app, repo
 from server.app.models import Base
+from server.app.diagnosis.case_control import parse_chat_control
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +43,16 @@ def _case(client: TestClient) -> dict:
     })
     assert response.status_code == 200, response.text
     return response.json()["data"]
+
+
+def test_chat_parser_extracts_pid_reference():
+    assert parse_chat_control("切换到 PID 123，先看进程") == {
+        "kind": "FOCUS",
+        "focus_kind": "PROCESS",
+        "focus_ref": "123",
+        "reason": "切换到 PID 123，先看进程",
+        "correction": False,
+    }
 
 
 def test_chat_pause_is_deterministic_and_does_not_submit_runtime_turn(client):
