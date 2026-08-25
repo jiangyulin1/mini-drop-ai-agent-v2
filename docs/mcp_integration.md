@@ -31,10 +31,10 @@ export MINI_DROP_MCP_TRANSPORT=stdio
 make mcp
 ```
 
-Docker Compose 可选 profile：
+Docker Compose（mcp 服务随主栈默认启动，仍需提供 token）：
 
 ```bash
-MINI_DROP_MCP_TOKEN="$(openssl rand -hex 32)" docker compose --profile mcp up -d mcp
+MINI_DROP_MCP_TOKEN="$(openssl rand -hex 32)" docker compose up -d mcp
 ```
 
 远程 Streamable HTTP：

@@ -98,7 +98,6 @@ services:
           cpus: "2.0"
 
   mcp:
-    profiles: ["mcp"]
     build:
       context: .
       dockerfile: deploy/dockerfiles/server.Dockerfile
