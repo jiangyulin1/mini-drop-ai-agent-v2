@@ -85,3 +85,40 @@ git diff --check
 
 代码、依赖、迁移或前端行为发生变化时，继续执行
 [`release-baseline-runbook.md`](release-baseline-runbook.md) 中相应门禁。
+
+## Evidence-native 控制链维护
+
+专家介入相关变更必须保持以下所有权边界：
+
+- `server/app/diagnosis/case_control.py` 只解析有限的聊天控制语法并通知 Runtime；Case、Scope、Plan 和 Revision 的真实提交仍由确定性服务完成。
+- `POST /api/v1/cases/{case_id}/commands` 与 `POST /api/v1/cases/{case_id}/agent/turn` 的控制路径必须共享 Case Command 语义；暂停、停止、恢复不能退化为普通模型 Turn。
+- Service/Process/Dependency Edge focus 必须经过 scope/control CAS；Process 只能使用当前 Discovery/Membership Evidence 证明的身份。Dependency Graph 不能被维护成 Causal Graph 的替代品。
+- focus 或 Evidence review 导致的 revision/generation 变化必须保留旧事件和 Artifact，但拒绝旧 revision 的新业务写入；Runtime 不可用时，Case 状态仍应先持久化，并留下可恢复通知状态。
+- `GET /api/v1/cases/{case_id}/investigation-summary`、Workspace 和 `CaseContextSnapshot` 的 focus 字段必须保持同一结构，前端只能消费这些投影，不能自行拼接控制状态。
+
+涉及上述边界的提交至少运行：
+
+```bash
+./.venv/bin/pytest -q tests/test_expert_intervention.py \
+  tests/test_agent_runtime_turn_endpoint.py \
+  tests/test_network_discovery_projection.py \
+  tests/test_evidence_governance.py \
+  tests/test_blind_gap_dynamic_evidence.py
+./.venv/bin/pytest -q
+git diff --check
+```
+
+低带宽环境下发布时，先确认 `git status --short` 只包含预期文件，再使用普通
+`git push origin main`。若 HTTPS/HTTP2 传输失败，不使用 `--force` 覆盖远端；保留本地提交
+和错误信息，待网络恢复后重试，或由有权限的维护者按同一父提交发布 Git Data API 提交。
+发布后核对：
+
+```bash
+git fetch origin main
+git rev-parse HEAD
+git rev-parse origin/main
+git diff --stat origin/main..HEAD
+```
+
+远端未包含本地提交时，维护记录必须明确写出本地 commit、远端 commit 和失败原因，不能把
+“已提交”表述成“已发布”。
