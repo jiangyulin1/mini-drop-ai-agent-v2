@@ -264,7 +264,8 @@ describe("CanonicalCaseWorkspace", () => {
 
     render(<CanonicalCaseWorkspace workspace={WORKSPACE} caseId="case-1" connected onRefresh={vi.fn()} />);
 
-    expect(await screen.findByText("证据链发生变化")).toBeInTheDocument();
+    const notices = await screen.findAllByText("证据链发生变化");
+    expect(notices.length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("2 项需要回溯")).toBeInTheDocument();
   });
 

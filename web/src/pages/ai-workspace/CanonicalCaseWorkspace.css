@@ -50,6 +50,14 @@
   margin: 0;
 }
 
+.ccw-case-banner {
+  margin: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
 .ccw-overview {
   padding: 16px;
   border-bottom: 1px solid var(--app-border);

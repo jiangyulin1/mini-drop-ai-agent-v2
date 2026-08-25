@@ -97,10 +97,10 @@ Optional RecoveryPlan -> approval -> execute -> verify -> observe
 | Case 协作 | IncidentCase、TargetSession、CaseEvent、Command、Scope/Control Revision | 已闭环 |
 | 采集执行 | Agent、Task、Attempt、Collector Catalog、取消/重试、Result Spool | 已闭环；真实 Collector 能力依赖 Linux/权限 |
 | 产物分析 | Artifact、AnalysisJob、Analyzer Worker、Projection | 已闭环；不同 Artifact 的解析深度不同 |
-| Evidence 治理 | CaseEvidence、Projection、Review、Lifecycle、Trust、Impact Preview、EvidenceReuseDecision、branch lineage | 已闭环基础；分支 Evidence 默认盲隔离，公共种子/本分支/显式 PROMOTED 可见；Artifact/Projection 引用不可变，依赖传播按当前支持/反证关系重算；统一预览、下载、单条分析入口已存在；多支持集仍未统一 |
+| Evidence 治理 | CaseEvidence、Projection、Review、Lifecycle、Trust、Impact Preview、EvidenceReuseDecision、branch lineage | 已闭环基础；分支 Evidence 默认盲隔离，公共种子/本分支/显式 PROMOTED 可见；Review 已区分 `NO_REOPEN`、`AUTO_RECALIBRATE`、`BLOCKED_NEEDS_APPROVAL`，链断时保留历史并围栏旧运行；多支持集仍未统一 |
 | 诊断计划 | Plan/PlanStep/Revision、CollectionProposal、Request、Fanout | 已闭环；旧 Plan 与 v6 Plan 仍需持续核对 |
 | 服务关系 | 请求上下文依赖、Network Discovery、MembershipSnapshot、有界 BFS、Dependency Graph | MVP 已闭环；L7、长期拓扑流和完整远端身份解析未闭环 |
-| Agent Runtime | AgentRuntimePort、Deterministic、Pi Adapter、Pi Sidecar、Shadow Plan、可选 LangGraph adapter、branch_id context | 已闭环 MVP；branch_id 已贯穿 Runtime/Tool Gateway/采集 lineage，LangGraph 只在安装 extra 后可用，Pi 业务分支树不是持久化真值 |
+| Agent Runtime | AgentRuntimePort、Deterministic、Pi Adapter、Pi Sidecar、Shadow Plan、可选 LangGraph adapter、branch_id context | 已闭环 MVP；Evidence Review 已围栏 Cycle/ModelRequest/Turn 并支持 generation 轮换，但 RuntimeBinding 仍是 Case 级，分支级 generation 隔离是 P0 缺口 |
 | 推理状态 | Hypothesis、Evidence Gap、Evidence Analysis、Causal Graph、Conclusion、Conclusion history API | 已闭环答辩 MVP；Hypothesis/Gap/Causal Graph/Conclusion/Dependency 已支持 branch scope，旧 Case 数据以 `NULL` 作为兼容范围；多支持集/完整局部重算尚未成为统一语义 |
 | 恢复执行 | RecoveryPlan、Action Registry、Dry-run、Approval、Execute、Rollback、Verify | 已闭环窄白名单动作；不是通用自动修复 |
 | 知识与外部源 | KnowledgeDocument/Memory、MCP Source Gateway、Grant、Skill/Query Registry | 已闭环受控读取；知识不能直接充当事故 Evidence |
@@ -390,7 +390,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 - `web/src/components/MultiAgentCollectionModal.jsx`：Fanout/多 Agent 采集。
 - `web/src/api/client.js`：REST 客户端和 SSE/Workspace 数据访问。
 
-当前 Web 已能展示 Case、Evidence、Dependency Graph、Plan、Proposal、Hypothesis、Gap、Causal Graph、Conclusion、Recovery 和事件流；长期 Target Session 的初始化配置和全量拓扑控制仍不如 Case 工作台完整。AI 调查页现有 Evidence 路径总览，会把范围、采集、Evidence、验证、结论和受控行动串成当前状态投影，并提示 Evidence review/分析输入失效后的回溯。专家介入已具备后端确定性控制面：对话/`/commands` 的暂停、停止、恢复，以及服务/进程/依赖边 focus 和 `investigation-summary`；前端仍需把这些 API 接入统一的专家模式交互，且必须继续遵守 revision CAS 与 Discovery Evidence 门禁。
+当前 Web 已能展示 Case、Evidence、Dependency Graph、Plan、Proposal、Hypothesis、Gap、Causal Graph、Conclusion、Recovery 和事件流；长期 Target Session 的初始化配置和全量拓扑控制仍不如 Case 工作台完整。AI 调查页现有 Evidence 路径总览，会把范围、采集、Evidence、验证、结论和受控行动串成当前状态投影，并提示 Evidence review/分析输入失效后的回溯。专家介入已具备后端确定性控制面：对话/`/commands` 的暂停、停止、恢复，以及服务/进程/依赖边 focus、`investigation-summary` 和 Evidence Review restart approval；前端仍需直接展示 `chain_impact`、`reopen_policy`、`blocked_reason` 与受影响运行实体，且必须继续遵守 revision CAS 与 Discovery Evidence 门禁。
 
 ## 14. 持久化模型分组
 
@@ -406,7 +406,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 
 ## 15. 测试和评测资产
 
-本轮后端验收执行结果为 **1235 passed, 6 skipped**；前端为 **104 passed**，生产构建成功。收集命令：
+本轮后端验收执行结果为 **1254 passed, 6 skipped**；前端为 **104 passed**，生产构建成功。收集命令：
 
 ```bash
 ./.venv/bin/python -m pytest --collect-only -q
@@ -426,7 +426,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 
 测试通过只能证明相应契约，不等于 Linux Collector、外部 Provider、Pi Sidecar、真实跨主机拓扑或生产动作已经验证。正式能力声明还要看 `reports/evaluation/` 和 Linux/VM runbook。
 
-## 16. 当前完成度重新判断
+## 16. 当前完成度重新判断（2026-08-25）
 
 ### 已经具备的核心资产
 
@@ -441,7 +441,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 ### 不完整或依赖外部条件
 
 1. 旧 DiagnosisOrchestrator 与 v6 Evidence-native 主线仍并存，但旧链已冻结为默认关闭的兼容入口，后台默认不推进（`MINI_DROP_ENABLE_LEGACY_DIAGNOSIS=true` 才显式启用）；新功能不得再写入旧根因排名链。旧链中的可复用 parser、Evidence 字段映射、benchmark、授权、审计和 fencing 不随入口删除。
-2. Evidence 排除会使旧分析、结论和恢复计划失效；分支级新 cycle/generation 会从有效 Evidence 继续，跨分支共享需要 operator 显式 promote；多支持集/冲突集的通用局部重算还不是统一实现。
+2. Evidence 排除会使旧分析、结论和恢复计划失效；链断时 Case 等待重启批准，其他干预自动校准；当前围栏已覆盖 Cycle/ModelRequest/Turn，但分支级 RuntimeBinding、Collection/Task/Plan 完整围栏和多支持集/冲突集的通用局部重算仍未统一实现。
 3. Target Session、Target Signal 和 Profile Window 有 API，自动 Agent/event bus 订阅和长期聚合尚未完整接入。
 4. 拓扑发现是有界 L4 MVP；不是完整服务地图或 L7 因果系统。
 5. 当前分支隔离已覆盖 Evidence、Hypothesis、Gap、Causal Graph、Dependency、Conclusion 和 InvestigationTree；Pi Session tree 可 fork，但 Sidecar 是一 Case 一内存 Session，不能代替完整并行业务分支账本。
@@ -454,7 +454,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 
 更准确的判断是：
 
-> Mini-Drop 已经有“Case + 受控采集 + 拓扑发现 + Evidence 治理 + Agent Runtime + 计划/恢复”的可验收主线；旧诊断链已冻结为兼容路径。当前主要缺口是多支持集真值维护、复杂冲突的自动局部回溯、统一 Source/MCP ingestion，以及跨分支 Claim/Hypothesis/Conclusion 的完整共享撤销传播。
+> Mini-Drop 已经有“Case + 受控采集 + 拓扑发现 + Evidence 治理 + Agent Runtime + 计划/恢复”的可验收主线；旧诊断链已冻结为兼容路径。当前最优先的后端缺口是分支级 RuntimeBinding 与完整干预围栏，其后是多支持集真值维护、复杂冲突的自动局部回溯、统一 Source/MCP ingestion、Workspace 干预投影，以及跨分支 Claim/Hypothesis/Conclusion 的完整共享撤销传播。
 
 ## 18. 维护规则
 

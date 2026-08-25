@@ -407,6 +407,7 @@ def query_mcp_for_fact(payload: dict[str, Any], request: Request) -> APIResponse
         try:
             result["canonical_evidence_id"] = case_evidence_service.materialize_source_envelope(
                 case_id, tenant_id, envelope=envelope, actor_id=_request_principal(request),
+                branch_id=str(payload.get("branch_id") or "").strip() or None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -2,9 +2,9 @@
 
 > 文档定位：当前实现说明、架构设计稿、面试背诵主线与追问核实记录
 >
-> 核验日期：2026-08-22
+> 核验日期：2026-08-25
 >
-> 代码基线：当前工作树（含 `0037_branch_reasoning_scope` 分支推理状态迁移）
+> 代码基线：当前工作树（含 `0037_branch_reasoning_scope`、`0038_branch_runtime_fencing` 分支运行态迁移）
 >
 > 面试运行假设：Pi Sidecar、模型 Provider 与 API Key 已正确配置，MINI_DROP_AGENT_RUNTIME=pi
 >
@@ -62,7 +62,7 @@ Mini-Drop 是一个 Evidence-native 的受监督诊断 Agent：模型负责理�
 | AI 权限 | 模型只能调用注册工具，不能直接创建 Task 或运行任意命令 |
 | 最终状态 | CONFIRMED、PARTIALLY_CONFIRMED、INSUFFICIENT_EVIDENCE |
 
-截至 2026-08-24，分支推理状态已经由 `0037_branch_reasoning_scope` 持久化：Hypothesis、Evidence Gap、Causal Graph、Evidence Dependency、Conclusion 和相关 Assistant Message 都可绑定 `branch_id`。旧 Case 数据以 `NULL` 作为兼容的 Case-wide 范围；Pi Session tree 仍只是运行时上下文，不能代替业务分支账本。当前后端验收为 `1235 passed, 6 skipped`，前端为 `104 passed`，生产构建成功。
+截至 2026-08-25，分支推理状态由 `0037_branch_reasoning_scope` 持久化，分支 RuntimeBinding、Cycle、ModelRequest、RuntimeTurn 和 generation fence 由 `0038_branch_runtime_fencing` 补齐。Evidence Review 会按分支围栏可执行实体，非破坏性干预自动重新校准，证据链破坏则进入 `WAITING_USER` 并要求幂等重启审批。旧 Case 数据以 `NULL` 作为兼容的 Case-wide 范围；Pi Session tree 仍只是运行时上下文，不能代替业务分支账本。当前后端验收为 `1254 passed, 6 skipped`，前端为 `104 passed`，生产构建成功。
 
 ### 2.2 面试环境假设与仓库默认值的区别
 
@@ -1123,6 +1123,9 @@ Worker 使用 gRPC 是因为有稳定 Proto 合同、心跳任务下发和结果
 5. Evidence Contract 的所有最少来源/窗口条件还没有统一成为 Pi finish 的硬门禁。
 6. Pi Session 仍有内存状态，但业务事实已经由 Server 数据库持久化；需要继续关注极端崩溃点的契约测试覆盖。
 7. temperature、max_tokens、seed 在当前 Pi SDK 接入中是实验元数据，不应宣称已真正应用。
+8. Evidence Review 已实现影响预览、链断判定和重启审批：`EXCLUDED` 若破坏当前必需支持则 Case 进入 `WAITING_USER`，不自动新开调查；`LOW_TRUST`、恢复或仍有有效支持时自动重新校准。
+9. Review 事务会围栏受影响的 `AgentCycle`、`ModelRequest`、`AgentRuntimeTurn` 并递增 runtime generation；目前 `AgentRuntimeBinding` 仍是 Case 级，因此不能把分支级 generation 隔离描述为已完成。
+10. “审批”要区分两件事：Evidence Review 的权限校验，以及证据链断裂后是否批准重新调查。后者由 `need_user.kind=EVIDENCE_REVIEW_RESTART_APPROVAL` 和 restart-approval API 表达。
 
 ### 19.2 不应夸大的能力
 
@@ -1132,6 +1135,8 @@ Worker 使用 gRPC 是因为有稳定 Proto 合同、心跳任务下发和结果
 - 有依赖图不代表根因已确认。
 - 少量演示场景不能证明普适准确率。
 - deterministic fallback 不能作为 Pi 模型结果统计。
+- Evidence Review 已能阻止链断后的自动重开，但 CollectionRequest、Task、PlanStep 和 Fanout 的完整同事务围栏仍待补齐。
+- 当前仍没有完整的多支持集/冲突集真值维护、统一 Source/MCP Ingestion 或跨分支 Claim/Hypothesis/Conclusion 共享撤销传播。
 
 ---
 

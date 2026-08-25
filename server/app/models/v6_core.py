@@ -78,8 +78,8 @@ class InvestigationTreeNodeModel(Base):
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
     run_id = Column(String(128), nullable=False, index=True)
-    parent_node_id = Column(String(128), nullable=True, index=True)
     branch_id = Column(String(128), nullable=False, index=True)
+    parent_node_id = Column(String(128), nullable=True, index=True)
     node_type = Column(String(32), nullable=False)
     status = Column(String(32), nullable=False, default="OPEN", index=True)
     statement = Column(Text, nullable=False, default="")
@@ -231,6 +231,7 @@ class AgentCycleModel(Base):
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
     run_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     trigger_type = Column(String(32), nullable=False)
     trigger_ref = Column(String(128), nullable=True)
     trigger_turn_id = Column(String(128), nullable=True, index=True)
@@ -250,6 +251,7 @@ class AgentCycleModel(Base):
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
             "run_id": self.run_id,
+            "branch_id": self.branch_id,
             "trigger_type": self.trigger_type,
             "trigger_ref": self.trigger_ref,
             "trigger_turn_id": self.trigger_turn_id,
@@ -277,6 +279,7 @@ class ModelRequestModel(Base):
     tenant_id = Column(String(128), nullable=False, index=True)
     run_id = Column(String(128), nullable=False, index=True)
     cycle_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     provider_request_id = Column(String(128), nullable=True)
     idempotency_key = Column(String(128), nullable=True, unique=True, index=True)
     input_snapshot_hash = Column(String(128), nullable=True)
@@ -294,6 +297,7 @@ class ModelRequestModel(Base):
             "tenant_id": self.tenant_id,
             "run_id": self.run_id,
             "cycle_id": self.cycle_id,
+            "branch_id": self.branch_id,
             "provider_request_id": self.provider_request_id,
             "idempotency_key": self.idempotency_key,
             "input_snapshot_hash": self.input_snapshot_hash,

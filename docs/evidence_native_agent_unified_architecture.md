@@ -173,15 +173,16 @@ Observe Case + hypothesis + gap + plan + Evidence + causal snapshot
 
 恢复依赖数据库状态和 Outbox/Wakeup，不依赖 Sidecar 进程内 memory。重复事件必须由 dedupe key 和 consumer effect 表保证 exactly-once effect；模型调用本身按 request/response idempotency 记录重放。
 
-## 6. 当前代码映射（2026-08-24）
+## 6. 当前代码映射（2026-08-25）
 
 | 合同 | 当前实现 | 完成度 |
 |---|---|---|
 | CollectorSpec 单一产品目录 | `mini_drop_contracts/collector_spec.py` | 已形成基线，需继续消除旧注册表漂移 |
 | Proposal -> Request -> Task | `diagnosis/collection_supervisor.py` | 自动低风险与审批精确恢复已可用；Outbox 原子派发待补 |
 | Hypothesis/Gap/Causal/Conclusion/Dependency state | `diagnosis/investigation_state.py`、`v6_routes.py`、`migrations/versions/0037_branch_reasoning_scope.py` | 已支持 branch-local 持久化、Evidence 引用与 revision/generation fence；旧 Case 数据以 `NULL` 作为兼容范围 |
+| Branch RuntimeBinding / generation fence | `models/runtime_core.py`、`sql_repository_v6.py`、`migrations/versions/0038_branch_runtime_fencing.py` | 每个分支拥有独立 runtime session/generation；Evidence Review 只围栏受影响分支，旧 Case-wide binding 仅作兼容 |
 | Plan -> Proposal lineage | `diagnosis/plan_driver.py`、migration `0028` | 单节点计划已统一经过 CollectionSupervisor；Fanout 保留 |
-| Evidence/Projection | `diagnosis/case_evidence.py`、`evidence_projection.py` | Task Artifact 主路径进入 canonical Evidence；Source/MCP 已有受控 Envelope 路径但尚未统一到同一 Ingestion contract，Projection 继续保持版本化 |
+| Evidence/Projection | `diagnosis/case_evidence.py`、`evidence_projection.py` | Task Artifact 与 Source/MCP 都进入 canonical Evidence/Projection，保留 lineage、hash、branch scope 和 review propagation |
 | Analysis fingerprint/reuse/fence | `diagnosis/evidence_analysis.py`、`sql_repository_v6.py` | 已落地 |
 | Citation verifier | `diagnosis/evidence_analysis.py` | 已支持 projection 前缀和数组路径；需扩展到 interpretations/conflicts |
 | Review invalidation | `investigation_plan.py`、`sql_repository_v6.py` | 已落地事务级 stale 标记 |
@@ -189,6 +190,47 @@ Observe Case + hypothesis + gap + plan + Evidence + causal snapshot
 | Durable Outbox/Wakeup | v6 persistence 与 app factory jobs | 已有基础；部分旧计划/兼容入口仍保留独立派发路径，不把 Sidecar 内存当真源 |
 | Supervised Workspace | `CanonicalCaseWorkspace.jsx`、Workspace aggregate API | 已合并 Plan、采集、Evidence、分析、假设、Gap、因果、结论、执行覆盖与建议 |
 | 公平 Agent 评测 | `benchmarks/collector_agent_v1/` 与 replay scripts | 已形成基线，真实外部 Holdout 仍需正式执行 |
+
+### 6.1 Evidence Review 重启语义（2026-08-25）
+
+当前后端已经把“证据干预”和“重新调查”拆成两个确定性阶段：
+
+```text
+Preview（签名 impact token）
+  -> Apply Review（CAS + review revision）
+  -> 传播分析/假设/结论失效
+  -> 围栏受影响的 Cycle / ModelRequest / Runtime Turn
+  -> 旋转 runtime generation
+  -> AUTO_RECALIBRATE：Outbox -> Wakeup -> 新 Cycle
+  -> BLOCKED_NEEDS_APPROVAL：Case WAITING_USER，不创建 Wakeup
+  -> restart-approval：校验 evidence/review/intervention revision
+  -> Outbox -> Wakeup -> 新 Cycle
+```
+
+当前 API：
+
+- `POST /api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/preview`
+- `POST /api/v1/cases/{case_id}/evidence/{evidence_id}/reviews`
+- `POST /api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/restart-approval`
+
+`EXCLUDED` 只有在当前主张或结论失去全部有效支持时才判为 `BROKEN`；这时 Evidence 本身立即进入排除状态，原始 Artifact 和历史结论保留，批准对象是“是否重新开启调查”，不是物理删除或修改历史。`HIDDEN`/`ARCHIVED` 为 `NO_REOPEN`；可信度下降或仍有支持时为 `AUTO_RECALIBRATE`。`requires_approval` 旧字段只表示历史上的高影响权限提示，不能代替新的 `reopen_policy`。
+
+### 6.2 后续后端设计优先级
+
+以下是基于当前代码的真实缺口，不应在产品文案中提前宣称完成：
+
+| 优先级 | 后端能力 | 原因与验收边界 |
+|---|---|---|
+| P0 | **分支级 Runtime Binding / generation** | `AgentRuntimeBindingModel` 目前以 `case_id` 为主键。分支本地 Evidence Review 仍可能旋转整个 Case 的 generation；需要 branch/cycle 级 binding 或 generation fence，验收为 A 分支干预不让 B 分支的 Turn、Cycle、ModelRequest 失效。 |
+| P0 | **完整干预围栏** | 当前已围栏 `AgentCycle`、`ModelRequest`、`AgentRuntimeTurn`；还要把相关 `CollectionRequest`、Task、PlanStep、等待中的 Proposal 和 Fanout 子任务纳入同一事务，并区分 `CANCEL_REQUESTED`、`CANCELLED`、`COMPLETED_LATE`。 |
+| P0 | **审批恢复幂等与并发测试** | restart approval 必须对重复点击只产生一个 wakeup/Cycle，对新 review revision、错误 intervention、Case scope 变化返回冲突；旧 generation 的迟到 final/tool 事件必须只留审计。 |
+| P1 | **多支持集与冲突可比性** | 一个 Claim 需要支持集、反证集、冲突集和时间窗/实例/指标语义比较；排除一条 Evidence 只能重算受影响集合，不能用“剩余一条”近似所有真值维护。 |
+| P1 | **统一 Source/MCP Ingestion** | 外部 Source/MCP 和 Task Artifact 必须进入同一个 EvidenceEnvelope/Projection/Review contract，统一 hash、lineage、scope、审计和 stale 传播。 |
+| P1 | **Workspace 干预投影** | Workspace/summary 需要直接返回 `chain_impact`、`reopen_policy`、`blocked_reason`、受影响运行实体、当前 `need_user.kind` 和恢复入口，避免前端从事件流推断状态。 |
+| P1 | **Outbox/Wakeup 可观测性与重放** | blocked、approved、auto-recalibrate 三条路径要有 durable consumer effect、重放工具、失败原因和指标；多租户部署还需按 tenant 分片，不把进程级 sweeper 当生产队列。 |
+| P2 | **Claim/Hypothesis/Conclusion 共享撤销** | Evidence promote 后建立显式授权、接收分支 revision 和可撤销传播；不能只共享 Evidence 行而不重建接收分支推理。 |
+
+下一阶段应先做 P0 的分支 Runtime Binding 和完整干预围栏，再做 P1 的 Workspace 投影与多支持集；否则并行分支的“局部干预”仍只有 UI 语义，没有完整服务端隔离保证。
 
 ## 7. 迁移顺序与删除门禁
 

@@ -30,6 +30,7 @@ from server.app.models import (
     AgentMetricSnapshotModel,
     AgentModel,
     AgentRuntimeBindingModel,
+    AgentRuntimeBranchBindingModel,
     AgentRuntimeEventModel,
     AgentRuntimeTurnModel,
     ArtifactModel,
@@ -1473,6 +1474,55 @@ class SqlRepository(SqlRepositoryV6Mixin):
             session.flush()
             return row.to_dict()
 
+    def upsert_agent_runtime_branch_binding(
+        self, case_id: str, tenant_id: str, branch_id: str, *,
+        runtime_type: str, runtime_version: str, runtime_session_id: str,
+        runtime_generation: int, status: str = "READY", last_event_seq: int = 0,
+        last_context_snapshot_id: str | None = None, lease_owner: str | None = None,
+    ) -> dict[str, Any]:
+        now = now_utc()
+        with self._write_session() as session:
+            row = session.query(AgentRuntimeBranchBindingModel).filter(
+                AgentRuntimeBranchBindingModel.case_id == case_id,
+                AgentRuntimeBranchBindingModel.tenant_id == tenant_id,
+                AgentRuntimeBranchBindingModel.branch_id == branch_id,
+            ).with_for_update().first()
+            if row is None:
+                row = AgentRuntimeBranchBindingModel(
+                    binding_id=f"binding-{case_id}-{branch_id}", case_id=case_id,
+                    tenant_id=tenant_id, branch_id=branch_id,
+                    runtime_type=runtime_type, runtime_version=runtime_version,
+                    runtime_session_id=runtime_session_id,
+                    runtime_generation=int(runtime_generation or 1), status=status,
+                    last_event_seq=int(last_event_seq or 0),
+                    last_context_snapshot_id=last_context_snapshot_id,
+                    lease_owner=lease_owner, created_at=now, updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.runtime_type = runtime_type
+                row.runtime_version = runtime_version
+                row.runtime_session_id = runtime_session_id
+                row.runtime_generation = int(runtime_generation or 1)
+                row.status = status
+                row.last_event_seq = int(last_event_seq or 0)
+                row.last_context_snapshot_id = last_context_snapshot_id
+                row.lease_owner = lease_owner
+                row.updated_at = now
+            session.flush()
+            return row.to_dict()
+
+    def get_agent_runtime_branch_binding(
+        self, case_id: str, tenant_id: str, branch_id: str,
+    ) -> dict[str, Any] | None:
+        with self._read_session() as session:
+            row = session.query(AgentRuntimeBranchBindingModel).filter(
+                AgentRuntimeBranchBindingModel.case_id == case_id,
+                AgentRuntimeBranchBindingModel.tenant_id == tenant_id,
+                AgentRuntimeBranchBindingModel.branch_id == branch_id,
+            ).first()
+            return row.to_dict() if row else None
+
     def get_agent_runtime_binding(
         self, case_id: str, tenant_id: str,
     ) -> dict[str, Any] | None:
@@ -1500,6 +1550,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
         side_effect_policy: str | None = None,
         actor_id: str | None = None,
         client_command_id: str | None = None,
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         now = now_utc()
         with self._write_session() as session:
@@ -1515,6 +1566,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 tenant_id=tenant_id,
                 runtime_session_id=runtime_session_id,
                 runtime_generation=runtime_generation,
+                branch_id=branch_id,
                 user_message=user_message,
                 requested_mode=requested_mode,
                 disposition=disposition,

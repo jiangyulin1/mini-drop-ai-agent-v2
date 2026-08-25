@@ -191,6 +191,7 @@ class CaseEvidenceService:
         *,
         envelope: dict[str, Any],
         actor_id: str = "mini-drop-source-evidence-service",
+        branch_id: str | None = None,
     ) -> str:
         """Commit a SourceGateway/MCP EvidenceEnvelope to the canonical store."""
         envelope_case = str(envelope.get("case_id") or case_id)
@@ -234,6 +235,7 @@ class CaseEvidenceService:
                 "envelope_projection_hash": envelope.get("projection_hash"),
                 "principal_id": envelope.get("principal_id"),
                 "policy": envelope.get("policy") or {},
+                **({"branch_id": branch_id, "visibility_scope": "BRANCH_LOCAL"} if branch_id else {}),
             },
             actor_id=actor_id,
         )

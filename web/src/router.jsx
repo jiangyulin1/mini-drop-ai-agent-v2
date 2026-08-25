@@ -12,6 +12,7 @@ const AgentDetail = lazy(() => import("./pages/AgentDetail"));
 const Settings = lazy(() => import("./pages/Settings"));
 const AgentsOverview = lazy(() => import("./pages/AgentsOverview"));
 const RuntimeConsole = lazy(() => import("./pages/RuntimeConsole"));
+const AIDesignPrototype = lazy(() => import("./pages/AIDesignPrototype"));
 
 const Lazy = ({ children }) => (
   <Suspense fallback={<Spin size="large" style={{ display: "block", margin: "40px auto" }} />}>
@@ -44,6 +45,10 @@ export default function Router() {
           <Route
             path="/cases"
             element={<Lazy><AIDiagnosis /></Lazy>}
+          />
+          <Route
+            path="/ai-prototype"
+            element={<Lazy><AIDesignPrototype /></Lazy>}
           />
           {/* Legacy aliases: redirect so layout, sidebar highlighting and
               browser history all resolve to a single canonical URL. */}

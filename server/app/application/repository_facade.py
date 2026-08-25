@@ -27,7 +27,7 @@ FROZEN_REPOSITORY_SURFACE = frozenset({
     "create_model_request", "create_runtime_wakeup", "create_target_session",
     "create_task", "delete_task", "enqueue_domain_outbox", "events",
     "fail_domain_outbox", "find_agent_by_ip", "finish_attempt", "finalize_investigation_result",
-    "get_agent_runtime_binding", "get_agent_runtime_turn", "get_case_event_high_water",
+    "get_agent_runtime_binding", "get_agent_runtime_branch_binding", "get_agent_runtime_turn", "get_case_event_high_water",
     "get_agent_cycle", "get_attempt", "get_case_evidence", "get_case_hypothesis_graph",
     "get_case_recovery_plan", "get_causal_graph", "get_conclusion",
     "get_collection_proposal", "get_diagnosis", "get_fanout_run", "get_incident_case",
@@ -63,7 +63,7 @@ FROZEN_REPOSITORY_SURFACE = frozenset({
     "transition_investigation_tree_node", "invalidate_investigation_tree_for_evidence",
     "transition_case_recovery_plan", "transition_incident_case",
     "transition_model_request", "transition_target_session", "transition_task",
-    "attach_evidence_analysis_turn", "update_case_instance_pid", "update_plan_step", "upsert_agent_runtime_binding",
+    "attach_evidence_analysis_turn", "update_case_instance_pid", "update_plan_step", "upsert_agent_runtime_binding", "upsert_agent_runtime_branch_binding",
 })
 
 

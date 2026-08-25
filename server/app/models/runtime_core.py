@@ -58,6 +58,54 @@ class AgentRuntimeBindingModel(Base):
         }
 
 
+class AgentRuntimeBranchBindingModel(Base):
+    """Branch-local runtime session and generation fence.
+
+    Case bindings remain for legacy/case-wide turns. New investigation
+    branches use this table so an intervention in one branch cannot rotate a
+    sibling branch's runtime generation.
+    """
+
+    __tablename__ = "agent_runtime_branch_bindings"
+    __table_args__ = (
+        UniqueConstraint("case_id", "tenant_id", "branch_id", name="uq_agent_runtime_binding_branch"),
+        Index("ix_agent_runtime_branch_bindings_case", "case_id", "tenant_id"),
+    )
+
+    binding_id = Column(String(128), primary_key=True)
+    case_id = Column(String(128), nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    branch_id = Column(String(128), nullable=False, index=True)
+    runtime_type = Column(String(32), nullable=False)
+    runtime_version = Column(String(64), nullable=False)
+    runtime_session_id = Column(String(128), nullable=False)
+    runtime_generation = Column(Integer, nullable=False, default=1)
+    status = Column(String(32), nullable=False, default="READY")
+    last_event_seq = Column(Integer, nullable=False, default=0)
+    last_context_snapshot_id = Column(String(128), nullable=True)
+    lease_owner = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "binding_id": self.binding_id,
+            "case_id": self.case_id,
+            "tenant_id": self.tenant_id,
+            "branch_id": self.branch_id,
+            "runtime_type": self.runtime_type,
+            "runtime_version": self.runtime_version,
+            "runtime_session_id": self.runtime_session_id,
+            "runtime_generation": self.runtime_generation,
+            "status": self.status,
+            "last_event_seq": self.last_event_seq,
+            "last_context_snapshot_id": self.last_context_snapshot_id,
+            "lease_owner": self.lease_owner,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 class AgentRuntimeTurnModel(Base):
     """One user Turn submitted to an Agent Runtime (AcceptedTurn separated from completion)."""
 
@@ -72,6 +120,7 @@ class AgentRuntimeTurnModel(Base):
     case_id = Column(String(128), nullable=False, index=True)
     tenant_id = Column(String(128), nullable=False, index=True)
     runtime_session_id = Column(String(128), nullable=True)
+    branch_id = Column(String(128), nullable=True, index=True)
     runtime_generation = Column(Integer, nullable=False, default=1)
     user_message = Column(Text, nullable=False)
     requested_mode = Column(String(40), nullable=True)
@@ -93,6 +142,7 @@ class AgentRuntimeTurnModel(Base):
             "case_id": self.case_id,
             "tenant_id": self.tenant_id,
             "runtime_session_id": self.runtime_session_id,
+            "branch_id": self.branch_id,
             "runtime_generation": self.runtime_generation,
             "user_message": self.user_message,
             "requested_mode": self.requested_mode,

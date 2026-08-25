@@ -57,6 +57,7 @@ from server.app.models.case_plan import (
 
 from server.app.models.runtime_core import (
     AgentRuntimeBindingModel,
+    AgentRuntimeBranchBindingModel,
     AgentRuntimeTurnModel,
     AgentRuntimeEventModel,
     CaseEvidenceModel,
@@ -155,6 +156,7 @@ __all__ = [
     "CaseCommandModel",
     "SystemControlModel",
     "AgentRuntimeBindingModel",
+    "AgentRuntimeBranchBindingModel",
     "AgentRuntimeTurnModel",
     "AgentRuntimeEventModel",
     "CaseEvidenceModel",

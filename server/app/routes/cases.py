@@ -987,6 +987,7 @@ def create_case_evidence_analysis(
             idempotency_key=f"evidence-analysis:{run['analysis_run_id']}",
             disposition="ANSWER_ONLY", side_effect_policy="READ_ONLY",
             actor_id=_request_principal(request), client_command_id=None,
+            branch_id=branch_id,
         )
         run = repo.attach_evidence_analysis_turn(
             run["analysis_run_id"], case_id, tenant_id, accepted.turn_id,
@@ -1101,6 +1102,12 @@ def get_case_workspace(case_id: str, request: Request, branch_id: str = "") -> A
     turns = repo.list_agent_runtime_turns(case_id, tenant_id)
     messages = repo.list_assistant_messages(case_id, tenant_id) if hasattr(repo, "list_assistant_messages") else []
     binding = repo.get_agent_runtime_binding(case_id, tenant_id)
+    branch_binding = (
+        repo.get_agent_runtime_branch_binding(case_id, tenant_id, branch_id)
+        if branch_id and hasattr(repo, "get_agent_runtime_branch_binding")
+        else None
+    )
+    need_user = (case.get("summary") or {}).get("need_you") or {}
     active_turn = next((
         item for item in reversed(turns)
         if item.get("status") in {"ACCEPTED", "ROUTED", "RUNNING"}
@@ -1113,13 +1120,23 @@ def get_case_workspace(case_id: str, request: Request, branch_id: str = "") -> A
         }
         messages = [
             item for item in messages
-            if str(item.get("cycle_id") or "") in branch_cycle_ids
+            if str(item.get("branch_id") or "") == branch_id
+            or str(item.get("cycle_id") or "") in branch_cycle_ids
         ]
-        # AgentRuntimeTurn has no branch column in the compatibility schema;
-        # hiding the global turn list is fail-closed until a turn is attached
-        # to a durable cycle.
-        turns = []
-        active_turn = None
+        branch_session_id = str((branch_binding or {}).get("runtime_session_id") or "")
+        turns = [
+            item for item in turns
+            if str(item.get("branch_id") or "") == branch_id
+            or (
+                not item.get("branch_id")
+                and branch_session_id
+                and str(item.get("runtime_session_id") or "") == branch_session_id
+            )
+        ]
+        active_turn = next((
+            item for item in reversed(turns)
+            if item.get("status") in {"ACCEPTED", "ROUTED", "RUNNING"}
+        ), None)
     active_plan_steps = [item for item in (plan.get("steps") or []) if item.get("status") not in {
         "COMPLETED", "CANCELLED", "FAILED", "SUPERSEDED",
     }]
@@ -1253,8 +1270,10 @@ def get_case_workspace(case_id: str, request: Request, branch_id: str = "") -> A
         "branches": branches,
         "engine": {
             "mode": runtime_mode().value,
-            "availability": "READY" if binding else "UNAVAILABLE",
+            "availability": "READY" if (branch_binding or binding) else "UNAVAILABLE",
             "state": "RUNNING" if active_turn else "IDLE",
+            "runtime_generation": int((branch_binding or binding or {}).get("runtime_generation") or 1),
+            "runtime_binding": branch_binding or binding,
         },
         "active_turn": active_turn,
         "active_action": {
@@ -1263,11 +1282,11 @@ def get_case_workspace(case_id: str, request: Request, branch_id: str = "") -> A
             "status": active_plan_steps[0].get("status") if active_plan_steps else None,
         },
         "next_action": None,
-        "user_action_required": ({
+        "user_action_required": (need_user if need_user.get("required") else ({
             "kind": "collection_approval",
             "proposal_id": waiting_proposal.get("proposal_id"),
             "summary": waiting_proposal.get("information_goal"),
-        } if waiting_proposal else None),
+        } if waiting_proposal else None)),
         "plan": plan,
         "information_goals": information_goals,
         "campaign": {},
@@ -1483,6 +1502,11 @@ def get_investigation_summary(case_id: str, request: Request, branch_id: str = "
         for edge in edges
     ]
     case = workspace.get("case") or {}
+    need_user = (case.get("summary") or {}).get("need_you") or {}
+    latest_review = next((
+        item for item in (workspace.get("messages") or [])
+        if item.get("event_type") == "evidence_reviewed"
+    ), None)
     return APIResponse(data={
         "focus": focus_from_case(case),
         "case_state": case.get("state"),
@@ -1497,6 +1521,15 @@ def get_investigation_summary(case_id: str, request: Request, branch_id: str = "
         "next_actions": [workspace.get("next_action")] if workspace.get("next_action") else [],
         "available_focus_targets": available_focus_targets,
         "dependency_semantics": graph.get("graph_semantics") or "dependency_only_not_causal",
+        "need_user": need_user,
+        "reopen_policy": need_user.get("reopen_policy") or (
+            "BLOCKED_NEEDS_APPROVAL" if need_user.get("kind") == "EVIDENCE_REVIEW_RESTART_APPROVAL" else None
+        ),
+        "chain_impact": need_user.get("chain_impact") or (
+            "BROKEN" if need_user.get("kind") == "EVIDENCE_REVIEW_RESTART_APPROVAL" else None
+        ),
+        "blocked_reason": need_user.get("blocked_reason"),
+        "runtime": workspace.get("engine") or {},
     })
 
 

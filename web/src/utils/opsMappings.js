@@ -71,6 +71,13 @@ export const RISK_CODE = {
   R3: entry("高风险", "red", "会改变运行状态，必须人工审批并可回滚"),
 };
 
+export const CONCLUSION_STATE = {
+  CONFIRMED: entry("已确认", "green", "所有必需主张都有当前有效证据支持"),
+  PARTIALLY_CONFIRMED: entry("部分确认", "orange", "部分主张的支持证据已减少，结论可信度下降"),
+  RECHECK_REQUIRED: entry("需要复核", "orange", "支持证据发生变化，需要重新调查后才能维持结论"),
+  INSUFFICIENT_EVIDENCE: entry("证据不足，暂缓结论", "default", "当前证据尚不足以支撑任何确定结论"),
+};
+
 export const EVENT_TYPE = {
   case_created: entry("Case 创建", "blue"),
   user_message: entry("用户消息", "blue"),
@@ -107,6 +114,10 @@ export function planStatus(value) {
 
 export function evidenceTrust(value) {
   return mappingOf(EVIDENCE_TRUST, value, "待审查");
+}
+
+export function conclusionStateMeta(value) {
+  return mappingOf(CONCLUSION_STATE, value, "尚未提交");
 }
 
 export function riskLevel(value) {

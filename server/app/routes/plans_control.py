@@ -546,8 +546,6 @@ def review_case_evidence(
         )
         if preview is None:
             raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
-        if preview.get("requires_approval"):
-            _require_role(request, "authorization_admin")
         review = investigation_plan_service.review_evidence(
             case_id, tenant_id,
             EvidenceReviewInput(**review_payload.model_dump(mode="json")),
@@ -564,7 +562,14 @@ def review_case_evidence(
     # the repository's immutable propagation report for clients.
     return APIResponse(data={
         **review,
-        "impact_report": review.get("propagation") or {},
+        "impact_report": {
+            **(review.get("propagation") or {}),
+            "chain_impact": review.get("chain_impact"),
+            "reopen_policy": review.get("reopen_policy"),
+            "blocked_reason": review.get("blocked_reason"),
+            "restart_approval_required": review.get("restart_approval_required"),
+            "runtime_fence": review.get("runtime_fence") or {},
+        },
     })
 
 
@@ -588,6 +593,29 @@ def preview_case_evidence_review(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
+    return APIResponse(data=result)
+
+
+@router.post("/api/v1/cases/{case_id}/evidence/{evidence_id}/reviews/restart-approval")
+def approve_case_evidence_review_restart(
+    case_id: str,
+    evidence_id: str,
+    payload: dict[str, Any],
+    request: Request,
+) -> APIResponse:
+    """Approve reopening an investigation after an Evidence chain break."""
+    _require_role(request, "operator")
+    try:
+        result = investigation_plan_service.approve_evidence_review_restart(
+            case_id,
+            _request_tenant(),
+            evidence_id=evidence_id,
+            review_revision=int(payload.get("review_revision") or 0),
+            intervention_id=str(payload.get("intervention_id") or "") or None,
+            actor_id=_request_principal(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return APIResponse(data=result)
 
 
@@ -1247,6 +1275,7 @@ def run_incident_case_agent_turn(
                 side_effect_policy=side_effect_policy,
                 actor_id=principal_id,
                 client_command_id=payload.client_command_id,
+                branch_id=payload.branch_id,
             )
 
     runtime_fallback_reason: str | None = None
@@ -1282,7 +1311,18 @@ def run_incident_case_agent_turn(
                 "context_packet_id": packet["context_packet_id"],
             })
             binding = runtime.start_or_resume(runtime_context)
-            if hasattr(repo, "upsert_agent_runtime_binding"):
+            if payload.branch_id and hasattr(repo, "upsert_agent_runtime_branch_binding"):
+                repo.upsert_agent_runtime_branch_binding(
+                    case_id, tenant_id, payload.branch_id,
+                    runtime_type=binding.runtime_type,
+                    runtime_version=binding.runtime_version,
+                    runtime_session_id=binding.runtime_session_id,
+                    runtime_generation=binding.runtime_generation,
+                    status=binding.status, last_event_seq=binding.last_event_seq,
+                    last_context_snapshot_id=binding.last_context_snapshot_id,
+                    lease_owner=binding.lease_owner,
+                )
+            elif hasattr(repo, "upsert_agent_runtime_binding"):
                 repo.upsert_agent_runtime_binding(
                     case_id,
                     tenant_id,
@@ -1327,6 +1367,7 @@ def run_incident_case_agent_turn(
                     side_effect_policy=side_effect_policy,
                     actor_id=principal_id,
                     client_command_id=payload.client_command_id,
+                    branch_id=payload.branch_id,
                 )
             # An accepted Pi turn must not resurrect or relabel a Case for a
             # read-only answer.  Only an explicit investigation disposition
@@ -1363,6 +1404,7 @@ def run_incident_case_agent_turn(
                 side_effect_policy=side_effect_policy,
                 actor_id=principal_id,
                 client_command_id=payload.client_command_id,
+                branch_id=payload.branch_id,
             )
         else:
             return _runtime_accepted_response(

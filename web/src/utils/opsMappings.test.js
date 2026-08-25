@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   caseStatus,
+  conclusionStateMeta,
   evidenceTrust,
   isActiveCase,
   isVerifiedSuccess,
@@ -24,5 +25,14 @@ describe("AIOps semantic mappings", () => {
   it("classifies active cases conservatively", () => {
     expect(isActiveCase("WAITING_APPROVAL")).toBe(true);
     expect(isActiveCase("RESOLVED")).toBe(false);
+  });
+
+  it("maps conclusion states to distinct colors", () => {
+    expect(conclusionStateMeta("CONFIRMED").color).toBe("green");
+    expect(conclusionStateMeta("PARTIALLY_CONFIRMED").color).toBe("orange");
+    expect(conclusionStateMeta("INSUFFICIENT_EVIDENCE").color).toBe("default");
+    expect(conclusionStateMeta("PARTIALLY_CONFIRMED").color).not.toBe(
+      conclusionStateMeta("CONFIRMED").color
+    );
   });
 });

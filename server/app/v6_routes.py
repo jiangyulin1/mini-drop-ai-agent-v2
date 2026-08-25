@@ -374,7 +374,11 @@ def _build_runtime_case_context(
             "freshness": attachment.get("freshness"),
             "quality": attachment.get("quality"),
         })
-    binding = repo.get_agent_runtime_binding(case_id, tenant_id)
+    binding = (
+        repo.get_agent_runtime_branch_binding(case_id, tenant_id, branch_id)
+        if branch_id and hasattr(repo, "get_agent_runtime_branch_binding")
+        else repo.get_agent_runtime_binding(case_id, tenant_id)
+    )
     branch_tree: dict[str, Any] = {"nodes": [], "dependencies": []}
     if branch_id and hasattr(repo, "list_investigation_tree"):
         branch_tree = repo.list_investigation_tree(case_id, tenant_id)
@@ -663,7 +667,6 @@ def _tool_fence(
     """Machine-level Tool Gateway fence.  Returns a rejection code or None."""
     read_only_tools = READ_ONLY_TOOLS if read_only_tools is None else read_only_tools
     case_id = str(case.get("case_id") or "")
-    binding = repo.get_agent_runtime_binding(case_id, tenant_id)
     # The active Turn policy arrives in the Sidecar Tool Envelope.  Inferring
     # policy from the most recent persisted turn would fence legitimate later
     # turns; a missing envelope field is therefore treated as legacy
@@ -2756,11 +2759,42 @@ def internal_runtime_events(
     generation = int(payload.get("runtime_generation") or 0)
     if generation <= 0:
         raise HTTPException(status_code=400, detail="INVALID_RUNTIME_GENERATION")
-    binding = repo.get_agent_runtime_binding(case_id, tenant_id)
+    event_branch_id = str(payload.get("branch_id") or "").strip() or None
+    raw_events = payload.get("events") or []
+    if not isinstance(raw_events, list):
+        raise HTTPException(status_code=400, detail="NO_RUNTIME_EVENTS")
+    if not event_branch_id:
+        for raw in raw_events:
+            if not isinstance(raw, dict):
+                continue
+            raw_payload = raw.get("payload") or {}
+            event_branch_id = str(
+                raw.get("branch_id") or raw_payload.get("branch_id") or ""
+            ).strip() or None
+            if event_branch_id:
+                break
+    if not event_branch_id:
+        for raw in raw_events:
+            if not isinstance(raw, dict):
+                continue
+            cycle_id = str(
+                raw.get("cycle_id") or (raw.get("payload") or {}).get("cycle_id") or ""
+            ).strip()
+            if cycle_id and hasattr(repo, "get_agent_cycle"):
+                event_branch_id = str(
+                    (repo.get_agent_cycle(cycle_id) or {}).get("branch_id") or ""
+                ).strip() or None
+            if event_branch_id:
+                break
+    binding = (
+        repo.get_agent_runtime_branch_binding(case_id, tenant_id, event_branch_id)
+        if event_branch_id and hasattr(repo, "get_agent_runtime_branch_binding")
+        else repo.get_agent_runtime_binding(case_id, tenant_id)
+    )
     if binding is not None and generation != int(binding.get("runtime_generation") or 0):
         raise HTTPException(status_code=409, detail="GENERATION_FENCED")
-    events = payload.get("events") or []
-    if not isinstance(events, list) or not events:
+    events = raw_events
+    if not events:
         raise HTTPException(status_code=400, detail="NO_RUNTIME_EVENTS")
     stored: list[dict[str, Any]] = []
     max_seq = 0
@@ -2780,6 +2814,9 @@ def internal_runtime_events(
         if event_seq <= 0:
             continue
         payload_json = raw.get("payload") or {}
+        raw_branch_id = str(raw.get("branch_id") or payload_json.get("branch_id") or "").strip() or event_branch_id
+        if raw_branch_id and payload_json.get("branch_id") != raw_branch_id:
+            payload_json = {**payload_json, "branch_id": raw_branch_id}
         if payload_json.get("foreign_turn_event"):
             # Keep the late/foreign lifecycle record for audit, but never let
             # it publish an assistant message or complete another turn.
@@ -2841,18 +2878,20 @@ def internal_runtime_events(
                 final_cycle_id = cycle_id or str(payload_json.get("cycle_id") or "")
                 final_model_request_id = model_request_id or str(payload_json.get("model_request_id") or "")
     if binding is not None and max_seq > int(binding.get("last_event_seq") or 0):
-        repo.upsert_agent_runtime_binding(
-            case_id,
-            tenant_id,
-            runtime_type=binding.get("runtime_type") or "pi",
-            runtime_version=binding.get("runtime_version") or "pi-0.84.2",
-            runtime_session_id=binding.get("runtime_session_id") or "",
-            runtime_generation=int(binding.get("runtime_generation") or generation),
-            status=binding.get("status") or "READY",
-            last_event_seq=max_seq,
-            last_context_snapshot_id=binding.get("last_context_snapshot_id"),
-            lease_owner=binding.get("lease_owner"),
-        )
+        values = {
+            "runtime_type": binding.get("runtime_type") or "pi",
+            "runtime_version": binding.get("runtime_version") or "pi-0.84.2",
+            "runtime_session_id": binding.get("runtime_session_id") or "",
+            "runtime_generation": int(binding.get("runtime_generation") or generation),
+            "status": binding.get("status") or "READY",
+            "last_event_seq": max_seq,
+            "last_context_snapshot_id": binding.get("last_context_snapshot_id"),
+            "lease_owner": binding.get("lease_owner"),
+        }
+        if event_branch_id and hasattr(repo, "upsert_agent_runtime_branch_binding"):
+            repo.upsert_agent_runtime_branch_binding(case_id, tenant_id, event_branch_id, **values)
+        else:
+            repo.upsert_agent_runtime_binding(case_id, tenant_id, **values)
     if final_content:
         if not final_turn_id:
             turns = repo.list_agent_runtime_turns(case_id, tenant_id)
@@ -2869,6 +2908,7 @@ def internal_runtime_events(
             origin_turn_id=final_turn_id or None,
             cycle_id=final_cycle_id or None,
             model_request_id=final_model_request_id or None,
+            branch_id=event_branch_id,
             evidence_refs=evidence_refs,
             message_id=message_id,
         )
@@ -2905,6 +2945,7 @@ def internal_runtime_events_list(
     request: Request,
     after_seq: int = 0,
     limit: int = 200,
+    branch_id: str = "",
 ) -> APIResponse:
     """供 Sidecar 或工作台按游标读取 Runtime 事件（不含私有思维链）。"""
     _require_internal_token(request)
@@ -2917,6 +2958,12 @@ def internal_runtime_events_list(
         after_seq=max(0, int(after_seq)),
         limit=min(max(int(limit), 1), 1000),
     )
+    branch_id = str(branch_id or "").strip()
+    if branch_id:
+        items = [
+            item for item in items
+            if str((item.get("payload") or {}).get("branch_id") or "") == branch_id
+        ]
     return APIResponse(data={"items": items, "total": len(items)})
 
 

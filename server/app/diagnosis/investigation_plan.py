@@ -308,6 +308,25 @@ class InvestigationPlanService:
             assessment=assessment or {},
         )
 
+    def approve_evidence_review_restart(
+        self,
+        case_id: str,
+        tenant_id: str,
+        *,
+        evidence_id: str,
+        review_revision: int,
+        intervention_id: str | None,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        return self._repo.approve_evidence_review_restart(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            evidence_id=evidence_id,
+            review_revision=review_revision,
+            intervention_id=intervention_id,
+            actor_id=actor_id,
+        )
+
     def list_reviews(self, case_id: str, tenant_id: str,
                      evidence_id: str | None = None) -> list[dict[str, Any]]:
         """Read the canonical EvidenceReviewRevision ledger.

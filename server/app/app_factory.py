@@ -698,13 +698,31 @@ def _deliver_one_wakeup(
     # the durable generation before creating the cycle so stale tool events
     # are rejected by the server as well as discarded by the Sidecar.
     if reason_class in {"EVIDENCE_REVIEWED", "EVIDENCE_ELIGIBILITY_CHANGED"} and cycle is None:
-        binding = repo.get_agent_runtime_binding(case_id, tenant_id) or {}
+        binding = (
+            repo.get_agent_runtime_branch_binding(case_id, tenant_id, branch_id)
+            if branch_id and hasattr(repo, "get_agent_runtime_branch_binding")
+            else repo.get_agent_runtime_binding(case_id, tenant_id)
+        ) or {}
         new_generation = int(binding.get("runtime_generation") or 1) + 1
         context = context.model_copy(update={
             "runtime_generation": new_generation,
             "runtime_session_id": "",
         })
-        if hasattr(repo, "upsert_agent_runtime_binding"):
+        upsert_binding = (
+            repo.upsert_agent_runtime_branch_binding
+            if branch_id and hasattr(repo, "upsert_agent_runtime_branch_binding")
+            else repo.upsert_agent_runtime_binding
+        )
+        if branch_id and hasattr(repo, "upsert_agent_runtime_branch_binding"):
+            upsert_binding(
+                case_id, tenant_id, branch_id,
+                runtime_type=binding.get("runtime_type") or "pi",
+                runtime_version=binding.get("runtime_version") or "pi",
+                runtime_session_id="", runtime_generation=new_generation,
+                status="REBUILD_REQUIRED", last_event_seq=0,
+                last_context_snapshot_id=None, lease_owner=binding.get("lease_owner"),
+            )
+        elif hasattr(repo, "upsert_agent_runtime_binding"):
             repo.upsert_agent_runtime_binding(
                 case_id,
                 tenant_id,
@@ -720,6 +738,25 @@ def _deliver_one_wakeup(
     snapshot = None
     model_request = None
     if cycle is None:
+        if branch_id and hasattr(repo, "get_agent_runtime_branch_binding") and hasattr(repo, "upsert_agent_runtime_branch_binding"):
+            branch_binding = repo.get_agent_runtime_branch_binding(case_id, tenant_id, branch_id)
+            if branch_binding is None:
+                case_binding = repo.get_agent_runtime_binding(case_id, tenant_id) or {}
+                branch_binding = repo.upsert_agent_runtime_branch_binding(
+                    case_id, tenant_id, branch_id,
+                    runtime_type=case_binding.get("runtime_type") or "pi",
+                    runtime_version=case_binding.get("runtime_version") or "pi",
+                    runtime_session_id=case_binding.get("runtime_session_id") or "",
+                    runtime_generation=int(case_binding.get("runtime_generation") or 1),
+                    status=case_binding.get("status") or "READY",
+                    last_event_seq=int(case_binding.get("last_event_seq") or 0),
+                    last_context_snapshot_id=case_binding.get("last_context_snapshot_id"),
+                    lease_owner=case_binding.get("lease_owner"),
+                )
+            context = context.model_copy(update={
+                "runtime_generation": int(branch_binding.get("runtime_generation") or 1),
+                "runtime_session_id": branch_binding.get("runtime_session_id") or "",
+            })
         context_payload = context.model_dump(mode="json")
         packet = repo.create_context_packet({
             "case_id": case_id,
@@ -746,7 +783,11 @@ def _deliver_one_wakeup(
             investigation_run_id=run.get("run_id"),
             content=context.model_dump(mode="json"),
         ) if hasattr(repo, "create_case_context_snapshot") else None
-        binding = repo.get_agent_runtime_binding(case_id, tenant_id)
+        binding = (
+            repo.get_agent_runtime_branch_binding(case_id, tenant_id, branch_id)
+            if branch_id and hasattr(repo, "get_agent_runtime_branch_binding")
+            else repo.get_agent_runtime_binding(case_id, tenant_id)
+        )
         generation = int((binding or {}).get("runtime_generation") or 1)
         cycle = repo.create_agent_cycle(
             case_id=case_id,
@@ -778,6 +819,7 @@ def _deliver_one_wakeup(
                     if item.get("projection_hash")
                 ],
                 idempotency_key=f"mreq:{wakeup_id}:{cycle['cycle_id']}",
+                branch_id=branch_id,
             )
     if hasattr(repo, "seal_runtime_wakeup"):
         repo.seal_runtime_wakeup(wakeup_id, cycle_id=cycle.get("cycle_id") if cycle else None)
@@ -786,7 +828,19 @@ def _deliver_one_wakeup(
         binding = None
         if hasattr(runtime, "start_or_resume"):
             binding = runtime.start_or_resume(context)
-        if binding is not None and hasattr(repo, "upsert_agent_runtime_binding"):
+        if binding is not None and branch_id and hasattr(repo, "upsert_agent_runtime_branch_binding"):
+            repo.upsert_agent_runtime_branch_binding(
+                case_id, tenant_id, branch_id,
+                runtime_type=binding.runtime_type,
+                runtime_version=binding.runtime_version,
+                runtime_session_id=binding.runtime_session_id,
+                runtime_generation=binding.runtime_generation,
+                status=binding.status,
+                last_event_seq=binding.last_event_seq,
+                last_context_snapshot_id=binding.last_context_snapshot_id,
+                lease_owner=binding.lease_owner,
+            )
+        elif binding is not None and hasattr(repo, "upsert_agent_runtime_binding"):
             repo.upsert_agent_runtime_binding(
                 case_id,
                 tenant_id,
@@ -918,6 +972,7 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
     event_type = str(event.get("event_type") or "")
     if event_type not in {
         "EVIDENCE_COMMITTED", "COLLECTION_TERMINAL", "EVIDENCE_ELIGIBILITY_CHANGED",
+        "EVIDENCE_REVIEW_BLOCKED", "EVIDENCE_REVIEW_RESTART_APPROVED",
     }:
         repo.record_outbox_consumer_effect(
             event_id=event_id,
@@ -940,6 +995,19 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
             effect_payload={"case_id": case_id, "event_type": event_type},
         )
         return
+    if event_type == "EVIDENCE_REVIEW_BLOCKED":
+        repo.record_outbox_consumer_effect(
+            event_id=event_id,
+            consumer_name="control-plane",
+            effect_key=f"review-blocked:{event_id}",
+            effect_payload={
+                "case_id": case_id,
+                "event_type": event_type,
+                "reopen_policy": "BLOCKED_NEEDS_APPROVAL",
+                "need_user_kind": "EVIDENCE_REVIEW_RESTART_APPROVAL",
+            },
+        )
+        return
     if not run_id:
         raise ValueError(f"{event_type} requires case_id and investigation_run_id")
     case = repo.get_incident_case(case_id, tenant_id) or {}
@@ -952,6 +1020,7 @@ def _dispatch_domain_outbox_event(event: dict[str, Any]) -> None:
         reason_class = {
             "COLLECTION_TERMINAL": "COLLECTION_TERMINAL",
             "EVIDENCE_ELIGIBILITY_CHANGED": "EVIDENCE_ELIGIBILITY_CHANGED",
+            "EVIDENCE_REVIEW_RESTART_APPROVED": "EVIDENCE_ELIGIBILITY_CHANGED",
         }.get(event_type, "EVIDENCE_COMMITTED")
         if reason_class == "COLLECTION_TERMINAL":
             dedupe_key = (

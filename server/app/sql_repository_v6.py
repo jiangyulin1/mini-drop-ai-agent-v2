@@ -20,6 +20,8 @@ from server.app.models import (
     AgentCycleModel,
     AgentDecisionRecordModel,
     AgentProposalModel,
+    AgentRuntimeBindingModel,
+    AgentRuntimeBranchBindingModel,
     AgentRuntimeTurnModel,
     AssistantMessageModel,
     CampaignRevisionModel,
@@ -52,6 +54,8 @@ from server.app.models import (
     InvestigationTreeEventModel,
     IncidentCaseModel,
     ModelRequestModel,
+    TaskModel,
+    InvestigationPlanStepModel,
     ModelResponseModel,
     OperationSpecModel,
     OutboxConsumerEffectModel,
@@ -68,6 +72,7 @@ from server.app.diagnosis.evidence_governance import (
 )
 from server.app.diagnosis.confidence_engine import calculate_chain_confidence, CALCULATION_VERSION
 from server.app.state_machine import now_utc
+from server.app.state_machine import Actor, TaskStatus
 
 
 def _parse_aware_datetime(value: Any) -> datetime | None:
@@ -519,6 +524,7 @@ class SqlRepositoryV6Mixin:
                 tenant_id=tenant_id,
                 run_id=run_id,
                 trigger_type=trigger_type,
+                branch_id=branch_id,
                 trigger_ref=trigger_ref,
                 trigger_turn_id=trigger_turn_id,
                 origin_turn_id=origin_turn_id,
@@ -600,12 +606,244 @@ class SqlRepositoryV6Mixin:
             session.flush()
             return row.to_dict()
 
+    def _fence_runtime_for_evidence_in_session(
+        self, session: OrmSession, *, case_id: str, tenant_id: str,
+        branch_id: str | None, reason: str, now: datetime,
+    ) -> dict[str, Any]:
+        """Fence the durable work set before an evidence-driven restart.
+
+        Conversation messages remain immutable.  Only executable runtime
+        records are fenced, so a late sidecar result can be retained for audit
+        while generation checks prevent it from changing the current case.
+        """
+        cycle_query = session.query(AgentCycleModel).filter(
+            AgentCycleModel.case_id == case_id,
+            AgentCycleModel.tenant_id == tenant_id,
+            AgentCycleModel.status.in_({"QUEUED", "RUNNING", "WAITING_TOOL", "WAITING_USER"}),
+        )
+        cycles = cycle_query.with_for_update().all()
+        affected_cycles: list[str] = []
+        if branch_id:
+            roots = session.query(InvestigationTreeNodeModel).filter(
+                InvestigationTreeNodeModel.case_id == case_id,
+                InvestigationTreeNodeModel.tenant_id == tenant_id,
+                InvestigationTreeNodeModel.node_type == "CYCLE",
+                InvestigationTreeNodeModel.branch_id == branch_id,
+            ).all()
+            branch_cycle_ids = {
+                str((row.metadata_json or {}).get("cycle_id") or "") for row in roots
+            }
+        else:
+            branch_cycle_ids = set()
+        for cycle in cycles:
+            if branch_id and cycle.cycle_id not in branch_cycle_ids:
+                continue
+            cycle.status = "FENCED"
+            cycle.updated_at = now
+            affected_cycles.append(cycle.cycle_id)
+        requests = session.query(ModelRequestModel).filter(
+            ModelRequestModel.case_id == case_id,
+            ModelRequestModel.tenant_id == tenant_id,
+            ModelRequestModel.status.in_({"QUEUED", "RUNNING", "WAITING_TOOL"}),
+        ).with_for_update().all()
+        affected_requests: list[str] = []
+        for request in requests:
+            if request.cycle_id not in affected_cycles:
+                continue
+            request.status = "FENCED"
+            request.completed_at = now
+            affected_requests.append(request.model_request_id)
+        affected_proposals: list[str] = []
+        proposals = session.query(CollectionProposalModel).filter(
+            CollectionProposalModel.case_id == case_id,
+            CollectionProposalModel.tenant_id == tenant_id,
+            CollectionProposalModel.status.in_({"PROPOSED", "APPROVED", "ACCEPTED", "DISPATCHING"}),
+        ).with_for_update().all()
+        for proposal in proposals:
+            if branch_id and proposal.cycle_id not in affected_cycles:
+                continue
+            proposal.status = "SUPERSEDED"
+            proposal.validation_result = {
+                **(proposal.validation_result or {}),
+                "fenced_reason": reason,
+            }
+            affected_proposals.append(proposal.proposal_id)
+        affected_tasks: list[str] = []
+        request_rows = session.query(CollectionRequestModel).filter(
+            CollectionRequestModel.case_id == case_id,
+            CollectionRequestModel.tenant_id == tenant_id,
+            CollectionRequestModel.status.in_({"ACCEPTED", "DISPATCHED", "RUNNING", "UPLOADING", "ANALYZING"}),
+        ).with_for_update().all()
+        for request in request_rows:
+            if branch_id and request.proposal_id not in affected_proposals and request.collection_request_id not in affected_requests:
+                continue
+            request.status = "FENCED"
+            request.updated_at = now
+            if request.task_id:
+                task = session.get(TaskModel, request.task_id)
+                if task is not None and task.status not in {"DONE", "FAILED", "CANCELLED"}:
+                    # Reuse the canonical transition path so the fence is
+                    # visible through task_status_events and TASK_STATE_CHANGED
+                    # outbox consumers, not only through the task row.
+                    self._transition_task_in_session(
+                        session, task.id, TaskStatus.CANCELLED,
+                        "EVIDENCE_REVIEW_FENCED", Actor.SERVER,
+                        metadata={"evidence_review_reason": reason},
+                    )
+                    affected_tasks.append(task.id)
+        affected_steps: list[str] = []
+        steps = session.query(InvestigationPlanStepModel).filter(
+            InvestigationPlanStepModel.case_id == case_id,
+            InvestigationPlanStepModel.tenant_id == tenant_id,
+            InvestigationPlanStepModel.status.in_({"DRAFT", "QUEUED", "DISPATCHING", "RUNNING", "WAITING_APPROVAL"}),
+        ).with_for_update().all()
+        for step in steps:
+            task_ids = set(str(item) for item in (step.task_ids_json or []))
+            if branch_id and not task_ids.intersection(affected_tasks):
+                continue
+            step.status = "SUPERSEDED"
+            step.version += 1
+            step.updated_at = now
+            affected_steps.append(step.step_id)
+        branch_binding = None
+        if branch_id:
+            branch_binding = session.query(AgentRuntimeBranchBindingModel).filter(
+                AgentRuntimeBranchBindingModel.case_id == case_id,
+                AgentRuntimeBranchBindingModel.tenant_id == tenant_id,
+                AgentRuntimeBranchBindingModel.branch_id == branch_id,
+            ).with_for_update().first()
+        turns = session.query(AgentRuntimeTurnModel).filter(
+            AgentRuntimeTurnModel.case_id == case_id,
+            AgentRuntimeTurnModel.tenant_id == tenant_id,
+            AgentRuntimeTurnModel.status.in_({"ACCEPTED", "RUNNING", "WAITING_TOOL"}),
+        ).with_for_update().all()
+        affected_turns: list[str] = []
+        for turn in turns:
+            if branch_id:
+                if turn.branch_id:
+                    if turn.branch_id != branch_id:
+                        continue
+                else:
+                    branch_session = str(branch_binding.runtime_session_id or "") if branch_binding else ""
+                    if not branch_session or str(turn.runtime_session_id or "") != branch_session:
+                        continue
+            turn.status = "SUPERSEDED"
+            turn.detail = reason
+            turn.updated_at = now
+            turn.completed_at = now
+            affected_turns.append(turn.turn_id)
+        binding = session.query(AgentRuntimeBindingModel).filter(
+            AgentRuntimeBindingModel.case_id == case_id,
+            AgentRuntimeBindingModel.tenant_id == tenant_id,
+        ).with_for_update().first()
+        new_generation = None
+        if binding is not None and not branch_id:
+            new_generation = int(binding.runtime_generation or 1) + 1
+            binding.runtime_generation = new_generation
+            binding.runtime_session_id = ""
+            binding.status = "REBUILD_REQUIRED"
+            binding.last_event_seq = 0
+            binding.last_context_snapshot_id = None
+            binding.updated_at = now
+        if branch_id:
+            if branch_binding is not None:
+                new_generation = int(branch_binding.runtime_generation or 1) + 1
+                branch_binding.runtime_generation = new_generation
+                branch_binding.runtime_session_id = ""
+                branch_binding.status = "REBUILD_REQUIRED"
+                branch_binding.last_event_seq = 0
+                branch_binding.last_context_snapshot_id = None
+                branch_binding.updated_at = now
+        return {
+            "affected_cycle_ids": affected_cycles,
+            "affected_model_request_ids": affected_requests,
+            "affected_turn_ids": affected_turns,
+            "affected_proposal_ids": affected_proposals,
+            "affected_task_ids": affected_tasks,
+            "affected_plan_step_ids": affected_steps,
+            "runtime_generation": new_generation,
+        }
+
+    def approve_evidence_review_restart(
+        self, *, case_id: str, tenant_id: str, evidence_id: str,
+        review_revision: int, intervention_id: str | None, actor_id: str,
+    ) -> dict[str, Any]:
+        """Approve a blocked evidence review and enqueue exactly one restart."""
+        now = now_utc()
+        with self._write_session() as session:
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is None:
+                raise ValueError("CASE_NOT_FOUND")
+            need_user = dict(case.need_user_json or {})
+            prior = session.query(CaseEventModel).filter(
+                CaseEventModel.case_id == case_id,
+                CaseEventModel.tenant_id == tenant_id,
+                CaseEventModel.event_type == "evidence_review_restart_approved",
+            ).order_by(CaseEventModel.created_at.desc()).first()
+            if prior is not None:
+                prior_payload = prior.payload_json or {}
+                if (
+                    str(prior_payload.get("evidence_id") or "") == evidence_id
+                    and int(prior_payload.get("review_revision") or 0) == int(review_revision)
+                ):
+                    return {
+                        "approved": True,
+                        "duplicate": True,
+                        "case": case.to_dict(),
+                        "intervention_id": prior_payload.get("intervention_id"),
+                    }
+            if not need_user.get("required") or need_user.get("kind") != "EVIDENCE_REVIEW_RESTART_APPROVAL":
+                raise ValueError("EVIDENCE_REVIEW_RESTART_NOT_REQUIRED")
+            if str(need_user.get("evidence_id") or "") != evidence_id:
+                raise ValueError("EVIDENCE_REVIEW_APPROVAL_EVIDENCE_MISMATCH")
+            if int(need_user.get("review_revision") or 0) != int(review_revision):
+                raise ValueError("EVIDENCE_REVIEW_APPROVAL_REVISION_STALE")
+            expected_intervention = str(need_user.get("intervention_id") or "")
+            if intervention_id and expected_intervention and intervention_id != expected_intervention:
+                raise ValueError("EVIDENCE_REVIEW_APPROVAL_INTERVENTION_MISMATCH")
+            run = session.query(InvestigationRunModel).filter(
+                InvestigationRunModel.case_id == case_id,
+                InvestigationRunModel.tenant_id == tenant_id,
+            ).order_by(InvestigationRunModel.created_at.desc()).first()
+            if run is None:
+                raise ValueError("INVESTIGATION_RUN_NOT_FOUND")
+            case.need_user_json = {"required": False, "question": None}
+            case.state_reason = "evidence_review_restart_approved"
+            case.current_activity_json = {
+                "phase": "recalibrating",
+                "message": "已批准重新调查，AI 正在从最新证据快照重新校准",
+            }
+            case.row_version += 1
+            case.updated_at = now
+            payload = {
+                "case_id": case_id, "tenant_id": tenant_id,
+                "investigation_run_id": run.run_id,
+                "evidence_id": evidence_id, "review_revision": int(review_revision),
+                "source_refs": [f"evidence-review:{evidence_id}:r{review_revision}"],
+                "reason": "Operator approved restart after evidence chain break",
+                "intervention_id": expected_intervention or intervention_id,
+            }
+            self._enqueue_domain_outbox_in_session(
+                session, aggregate_type="case", aggregate_id=case_id,
+                event_type="EVIDENCE_REVIEW_RESTART_APPROVED", payload=payload,
+                dedupe_key=f"evidence-review-restart:{evidence_id}:{review_revision}",
+                aggregate_revision=int(case.row_version),
+            )
+            session.add(CaseEventModel(
+                case_id=case_id, tenant_id=tenant_id,
+                event_type="evidence_review_restart_approved", actor_id=actor_id,
+                payload_json=payload, created_at=now,
+            ))
+            session.flush()
+            return {"approved": True, "case": case.to_dict(), "intervention_id": payload["intervention_id"]}
+
     def create_model_request(
         self, *, case_id: str, tenant_id: str, run_id: str, cycle_id: str,
         provider_request_id: str | None = None, idempotency_key: str | None = None,
         input_snapshot_hash: str | None = None,
         evidence_projection_hashes: list[str] | None = None,
         model_request_id: str | None = None,
+        branch_id: str | None = None,
     ) -> dict[str, Any]:
         now = now_utc()
         with self._write_session() as session:
@@ -615,6 +853,7 @@ class SqlRepositoryV6Mixin:
                 tenant_id=tenant_id,
                 run_id=run_id,
                 cycle_id=cycle_id,
+                branch_id=branch_id,
                 provider_request_id=provider_request_id,
                 idempotency_key=idempotency_key,
                 input_snapshot_hash=input_snapshot_hash,
@@ -695,6 +934,7 @@ class SqlRepositoryV6Mixin:
         self, *, case_id: str, tenant_id: str, content: str,
         trigger_turn_id: str | None = None, origin_turn_id: str | None = None,
         cycle_id: str | None = None, model_request_id: str | None = None,
+        branch_id: str | None = None,
         evidence_refs: list[str] | None = None,
         limitation_refs: list[str] | None = None,
         conclusion_revision_id: str | None = None,
@@ -710,6 +950,7 @@ class SqlRepositoryV6Mixin:
                 message_id=message_id or self._new_id("msg"),
                 case_id=case_id,
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 trigger_turn_id=trigger_turn_id,
                 origin_turn_id=origin_turn_id,
                 cycle_id=cycle_id,
@@ -2205,6 +2446,7 @@ class SqlRepositoryV6Mixin:
         ] if decision == "EXCLUDED" else []
         predicted_invalidated_claims: list[str] = []
         predicted_remaining_support: dict[str, list[str]] = {}
+        predicted_support_sets: dict[str, list[dict[str, Any]]] = {}
         for binding in bindings:
             if str(binding.support_kind or "SUPPORTS").upper() != "SUPPORTS":
                 continue
@@ -2216,10 +2458,52 @@ class SqlRepositoryV6Mixin:
             ).all()
             remaining = sorted({item.evidence_id for item in supports if item.evidence_id in active_evidence_ids})
             predicted_remaining_support[claim_key] = remaining
-            if decision == "EXCLUDED" and not remaining:
+            # A claim may be backed by more than one independent support set.
+            # Existing rows do not have a dedicated column, so producers can
+            # opt in via predicate.support_set_id; legacy rows remain one
+            # deterministic default set.
+            support_sets: dict[str, set[str]] = {}
+            for item in supports:
+                predicate = item.predicate or {}
+                set_id = str(
+                    predicate.get("support_set_id")
+                    or predicate.get("support_set")
+                    or "default"
+                )
+                support_sets.setdefault(set_id, set()).add(str(item.evidence_id))
+            support_set_view = [
+                {
+                    "set_id": set_id,
+                    "evidence_ids": sorted(refs),
+                    "valid": bool(refs & active_evidence_ids),
+                }
+                for set_id, refs in sorted(support_sets.items())
+            ]
+            predicted_support_sets[claim_key] = support_set_view
+            if decision == "EXCLUDED" and support_set_view and not any(
+                item["valid"] for item in support_set_view
+            ):
                 predicted_invalidated_claims.append(claim_key)
         affected["invalidated_hypotheses"] = len(predicted_invalidated_hypotheses)
         affected["dependency_edges"] = len(hypotheses) + len(bindings)
+        chain_broken = bool(
+            decision == "EXCLUDED"
+            and (predicted_invalidated_claims or predicted == "RECHECK_REQUIRED")
+        )
+        if not outcome["inference_changed"]:
+            chain_impact = "PRESERVED"
+            reopen_policy = "NO_REOPEN"
+        elif chain_broken:
+            chain_impact = "BROKEN"
+            reopen_policy = "BLOCKED_NEEDS_APPROVAL"
+        else:
+            chain_impact = "WEAKENED"
+            reopen_policy = "AUTO_RECALIBRATE"
+        blocked_reason = (
+            "排除该证据后，当前结论至少有一条必需主张失去全部有效支持；"
+            "调查已停止，需批准后才能重新调查。"
+            if chain_broken else None
+        )
         requires_approval = bool(
             plans
             or (
@@ -2245,9 +2529,14 @@ class SqlRepositoryV6Mixin:
                 "invalidated_hypotheses": sorted(set(predicted_invalidated_hypotheses)),
                 "invalidated_claims": sorted(set(predicted_invalidated_claims)),
                 "remaining_active_support": predicted_remaining_support,
+                "support_sets": predicted_support_sets,
             },
             "recovery_plan_ids": sorted(row.id for row in plans),
             "requires_approval": requires_approval,
+            "chain_impact": chain_impact,
+            "reopen_policy": reopen_policy,
+            "blocked_reason": blocked_reason,
+            "restart_approval_required": reopen_policy == "BLOCKED_NEEDS_APPROVAL",
         }
         return {
             **token_payload,
@@ -2397,6 +2686,8 @@ class SqlRepositoryV6Mixin:
                     "expected_review_revision", "projection_hash", "current_lifecycle_status",
                     "current_trust_state", "outcome", "affected", "predicted_conclusion_state",
                     "propagation", "recovery_plan_ids", "requires_approval",
+                    "chain_impact", "reopen_policy", "blocked_reason",
+                    "restart_approval_required",
                 )
             }
             if not verify_impact_token(impact_token, token_payload):
@@ -2436,6 +2727,10 @@ class SqlRepositoryV6Mixin:
                     "predicted_conclusion_state": preview["predicted_conclusion_state"],
                     "recommended_recollection": preview["recommended_recollection"],
                     "propagation": preview.get("propagation") or {},
+                    "chain_impact": preview.get("chain_impact"),
+                    "reopen_policy": preview.get("reopen_policy"),
+                    "blocked_reason": preview.get("blocked_reason"),
+                    "restart_approval_required": preview.get("restart_approval_required"),
                 },
                 overridden_recommendation=overridden,
                 reviewed_by=actor_id,
@@ -2478,6 +2773,7 @@ class SqlRepositoryV6Mixin:
                 "invalidated_nodes": [],
                 "abandoned_nodes": [],
             }
+            runtime_fence: dict[str, Any] = {}
             if decision in INFERENCE_DECISIONS:
                 invalidated = self._invalidate_analysis_rows(
                     session,
@@ -2528,6 +2824,46 @@ class SqlRepositoryV6Mixin:
                         evidence_id=evidence_id,
                         now=now,
                     )
+            reopen_policy = str(preview.get("reopen_policy") or "NO_REOPEN")
+            if reopen_policy in {"AUTO_RECALIBRATE", "BLOCKED_NEEDS_APPROVAL"}:
+                runtime_fence = self._fence_runtime_for_evidence_in_session(
+                    session,
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    branch_id=self._evidence_branch_id(evidence),
+                    reason=f"evidence_review:{evidence_id}:r{revision}",
+                    now=now,
+                )
+            case = self._locked_case(session, case_id, tenant_id)
+            if case is not None and reopen_policy == "BLOCKED_NEEDS_APPROVAL":
+                intervention_id = f"intervention-evidence-review-{evidence_id}-r{revision}"
+                case.state = "WAITING_USER"
+                case.state_reason = "evidence_chain_broken_waiting_restart_approval"
+                case.current_activity_json = {
+                    "phase": "stopped_for_evidence_review",
+                    "message": "证据链已断裂，调查已暂停，等待批准重新调查",
+                }
+                case.need_user_json = {
+                    "required": True,
+                    "kind": "EVIDENCE_REVIEW_RESTART_APPROVAL",
+                    "question": "当前证据链已断裂。是否批准从最新有效证据重新调查？",
+                    "evidence_id": evidence_id,
+                    "review_revision": revision,
+                    "intervention_id": intervention_id,
+                    "blocked_reason": preview.get("blocked_reason"),
+                }
+                case.row_version += 1
+                case.updated_at = now
+            elif case is not None and reopen_policy == "AUTO_RECALIBRATE":
+                case.state = "INVESTIGATING"
+                case.state_reason = "evidence_review_auto_recalibration"
+                case.need_user_json = {"required": False, "question": None}
+                case.current_activity_json = {
+                    "phase": "recalibrating",
+                    "message": "证据推理准入已调整，AI 正在自动重新校准调查",
+                }
+                case.row_version += 1
+                case.updated_at = now
             event_payload = {
                 "evidence_id": evidence_id,
                 "decision": decision,
@@ -2540,6 +2876,11 @@ class SqlRepositoryV6Mixin:
                 "resumed_recovery_plan_ids": resumed_plans,
                 "propagation": propagation,
                 "tree_propagation": tree_propagation,
+                "chain_impact": preview.get("chain_impact"),
+                "reopen_policy": reopen_policy,
+                "blocked_reason": preview.get("blocked_reason"),
+                "restart_approval_required": preview.get("restart_approval_required"),
+                "runtime_fence": runtime_fence,
             }
             session.add(CaseEventModel(
                 case_id=case_id,
@@ -2558,7 +2899,7 @@ class SqlRepositoryV6Mixin:
                     payload_json={"evidence_id": evidence_id, "recovery_plan_ids": held_plans},
                     created_at=now,
                 ))
-            if decision in INFERENCE_DECISIONS:
+            if decision in INFERENCE_DECISIONS and reopen_policy != "BLOCKED_NEEDS_APPROVAL":
                 run = session.query(InvestigationRunModel).filter(
                     InvestigationRunModel.case_id == case_id,
                     InvestigationRunModel.tenant_id == tenant_id,
@@ -2579,6 +2920,23 @@ class SqlRepositoryV6Mixin:
                     dedupe_key=f"evidence-review:{evidence_id}:{revision}",
                     aggregate_revision=revision,
                 )
+            elif decision in INFERENCE_DECISIONS:
+                run = session.query(InvestigationRunModel).filter(
+                    InvestigationRunModel.case_id == case_id,
+                    InvestigationRunModel.tenant_id == tenant_id,
+                ).order_by(InvestigationRunModel.created_at.desc()).first()
+                self._enqueue_domain_outbox_in_session(
+                    session, aggregate_type="case", aggregate_id=case_id,
+                    event_type="EVIDENCE_REVIEW_BLOCKED",
+                    payload={
+                        **event_payload, "case_id": case_id, "tenant_id": tenant_id,
+                        "investigation_run_id": run.run_id if run else None,
+                        "source_refs": [f"evidence-review:{evidence_id}:r{revision}"],
+                        "reason": preview.get("blocked_reason") or "Evidence chain broken",
+                    },
+                    dedupe_key=f"evidence-review-blocked:{evidence_id}:{revision}",
+                    aggregate_revision=revision,
+                )
             session.flush()
             return {
                 **review.to_dict(),
@@ -2592,6 +2950,11 @@ class SqlRepositoryV6Mixin:
                 "resumed_recovery_plan_ids": resumed_plans,
                 "propagation": propagation,
                 "tree_propagation": tree_propagation,
+                "chain_impact": preview.get("chain_impact"),
+                "reopen_policy": reopen_policy,
+                "blocked_reason": preview.get("blocked_reason"),
+                "restart_approval_required": preview.get("restart_approval_required"),
+                "runtime_fence": runtime_fence,
             }
 
     def add_evidence_review_revision(

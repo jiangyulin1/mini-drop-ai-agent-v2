@@ -37,6 +37,12 @@ function shortHash(value) {
   return text.length > 18 ? `${text.slice(0, 8)}…${text.slice(-6)}` : text;
 }
 
+const REOPEN_POLICY_META = {
+  NO_REOPEN: { label: "仅影响展示", color: "default" },
+  AUTO_RECALIBRATE: { label: "可自动重新校准", color: "blue" },
+  BLOCKED_NEEDS_APPROVAL: { label: "需要人工审批", color: "red" },
+};
+
 export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusCitation, onChanged, onExplain }) {
   const [form] = Form.useForm();
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -264,7 +270,7 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
           {reviewImpact?.assessment_result?.recommended_decision && reviewImpact.assessment_result.recommended_decision !== decision.replace("RESTORE_AS_", "") && <Form.Item name="override_reason" label="覆盖系统建议的原因" rules={[{ required: true, min: 3 }]}><Input.TextArea rows={2} maxLength={1000} /></Form.Item>}
           <Button loading={loading} onClick={() => form.validateFields().then((values) => loadReviewImpact(decision, values))}>预览影响</Button>
         </Form>
-        {reviewImpact && <Alert style={{ marginTop: 14 }} type={reviewImpact.requires_approval ? "warning" : "success"} showIcon message={`建议：${reviewImpact.assessment_result?.recommended_decision || "保持当前"} · 治理分 ${reviewImpact.assessment_result?.derived_trust_score ?? 50}`} description={<div><div>{(reviewImpact.assessment_result?.reasons || []).join("；") || "没有发现结构化质量警告"}</div><div>影响：分析 {reviewImpact.affected?.analysis_runs || 0}，假设 {reviewImpact.affected?.hypotheses || 0}，结论 {reviewImpact.affected?.conclusions || 0}，恢复方案 {reviewImpact.affected?.recovery_plans || 0}</div><div>预测结论状态：{reviewImpact.predicted_conclusion_state || "不变"}{reviewImpact.requires_approval ? "；本次操作需要审批角色" : ""}</div></div>} />}
+        {reviewImpact && <Alert style={{ marginTop: 14 }} type={reviewImpact.requires_approval ? "warning" : "success"} showIcon message={<Space wrap><span>建议：{reviewImpact.assessment_result?.recommended_decision || "保持当前"} · 治理分 {reviewImpact.assessment_result?.derived_trust_score ?? 50}</span><Tag color={REOPEN_POLICY_META[reviewImpact.reopen_policy]?.color || "default"}>{REOPEN_POLICY_META[reviewImpact.reopen_policy]?.label || "影响待评估"}</Tag></Space>} description={<div><div>{(reviewImpact.assessment_result?.reasons || []).join("；") || "没有发现结构化质量警告"}</div><div>影响：分析 {reviewImpact.affected?.analysis_runs || 0}，假设 {reviewImpact.affected?.hypotheses || 0}，结论 {reviewImpact.affected?.conclusions || 0}，恢复方案 {reviewImpact.affected?.recovery_plans || 0}</div><div>预测结论状态：{reviewImpact.predicted_conclusion_state || "不变"}{reviewImpact.requires_approval ? "；本次操作需要审批角色" : ""}</div>{reviewImpact.blocked_reason && <div>{reviewImpact.blocked_reason}</div>}</div>} />}
       </Modal>
       <Modal title={`提高链路置信度：${adjustment?.chain_id || ""}`} open={Boolean(adjustment)} onCancel={() => setAdjustment(null)} onOk={submitAdjustment} confirmLoading={loading} okText="提交调整">
         <Alert type="info" showIcon message={`自动值 ${Number(adjustment?.computed_confidence || 0).toFixed(2)}，上限 ${Number(adjustment?.confidence_cap || 0).toFixed(2)}`} description="调整只会记录人工意图；被排除证据不能恢复为支持，低可信证据仍受上限约束。" style={{ marginBottom: 14 }} />
