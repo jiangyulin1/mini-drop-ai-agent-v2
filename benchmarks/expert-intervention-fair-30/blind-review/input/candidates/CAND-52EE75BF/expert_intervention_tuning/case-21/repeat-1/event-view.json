@@ -1,0 +1,372 @@
+{
+  "case_id": "case-21",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2746,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:49:27.184640Z"
+    },
+    {
+      "event_id": 2747,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-21-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "949ad83e4f0323ff3c589931accc748f9c6895a18a7a9bdaf961f9f6a812dfb5",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:49:27.263725Z"
+    },
+    {
+      "event_id": 2748,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-21-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "2722634033c20379453c0fab6af5df74e8868bd5267b49705357716d896c7ee7",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:49:27.335055Z"
+    },
+    {
+      "event_id": 2749,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-21-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "ed9411c42d03c656628754555c68637551e934784686fbf962c2576fed47d6ba",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:49:27.407657Z"
+    },
+    {
+      "event_id": 2750,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:49:27.479235Z"
+    },
+    {
+      "event_id": 2751,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_f58603e08e6e4802a7e09393c340ba90",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "0c6bb6f9c7ed5d7429faa7d14d7dce45e5e8fee405c2a3140085dcad0b95de92"
+      },
+      "created_at": "2026-08-25T10:49:27.500564Z"
+    },
+    {
+      "event_id": 2752,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654967524",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654967524"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654967524",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:49:27.539440Z"
+    },
+    {
+      "event_id": 2753,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-7ca0600f6eefafb9bdafd1d0",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654967524",
+        "content": "All evidence projections are aligned: `scope_candidates` (ev-21-01) → `span_edges` (ev-21-02) → `dependency_latency` (ev-21-03), all with observations `[\"scope\",\"remote\",\"edge\"]` in window T0..T1 (sample_count 120). The dependency graph is empty, so the remote edge is only characterized by the trace projections; the collector catalog confirms R1 probes (network_discovery, connection_probe, sys_metrics) are available to resolve the redacted dependency identity on a future cycle.\n\n```json\n{\n  \"conclusion\": \"The fault is attributed to a remote dependency (downstream of the target service), not to the target service itself. The initial broad service scope was progressively narrowed by trace span edges to a single remote edge, where dependency latency is elevated; the target service is the symptom carrier, and the fault origin is the remote dependency reached over that traced edge.\",\n  \"root_location\": \"Remote dependency of redacted-service (target_pid 12345, worker-1 / host-1), reached via the trace edge surfaced in span_edges; the dependency's concrete service/host/endpoint identity is redacted in the current evidence and has not yet been resolved.\",\n  \"mechanism\": \"Trace-based narrowing: scope_candidates (ev-21-01) shows a broad candidate scope; span_edges (ev-21-02) identifies a specific cross-service edge carrying the fault; dependency_latency (ev-21-03) shows elevated latency on that remote edge. Consistent observations [scope, remote, edge] across all three signals indicate the observed degradation originates on the remote side of the edge and propagates back into the target service, rather than being generated locally.\",\n  \"confidence\": \"MEDIUM\",\n  \"confidence_reason\": \"All three evaluation projections are aligned (same T0..T1 window, sample_count 120, identical observations [scope, remote, edge], values 3.601/3.632/3.663 forming a coherent scope->edge->latency chain), which directionally supports a remote-dependency root. Confidence is capped at MEDIUM because the evidence is synthetic/unreviewed (trust_level SYNTHETIC_EVAL, derived_trust_score 50, trust_state UNREVIEWED), dimensions (service, host, request_id) are redacted so the dependency identity is unknown, and the signal values are abstract scores with no concrete latency/error-rate metrics.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-21-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-21-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-21-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Identity of the remote dependency (redacted service/host/endpoint) resolved to a concrete peer endpoint (e.g., via network_discovery/topology.discover from target_pid 12345)\",\n    \"Concrete dependency latency and error-rate metrics on the traced edge (current values are abstract scores, not ms/percentiles or error ratios)\",\n    \"Connectivity/health status of the downstream endpoint (e.g., connection_probe to the resolved peer) to confirm the dependency is the fault source\",\n    \"Local-cause exclusion data for the target service (CPU/thread/FD/network saturation via sys_metrics, runtime/GC state) to rule out an in-process root\",\n    \"Remote dependency logs or error timeline correlating with the T0..T1 window\"\n  ],\n  \"next_action\": \"On the next non-read-only cycle, register low-risk (R1) collection: network_discovery (topology.discover) on target_pid 12345 to resolve the remote peer identity from the traced edge, then connection_probe (service.connection) to the resolved downstream endpoint, plus a sys_metrics baseline on the target to exclude local saturation. No recovery or change actions are recommended while the dependency identity and health are unconfirmed.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-21-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-21-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-21-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:49:54.285182Z"
+    },
+    {
+      "event_id": 2754,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654967524",
+        "message_id": "amsg-7ca0600f6eefafb9bdafd1d0"
+      },
+      "created_at": "2026-08-25T10:49:54.288762Z"
+    },
+    {
+      "event_id": 2755,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type HYPOTHESIS_CHALLENGE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:49:55.530489Z"
+    },
+    {
+      "event_id": 2756,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_cb25df0245d84eeb8eae20b71cf4b0fa",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "542d43be8dfae4de5a9392fe273b31792bacda35e54b08467c14fddcbe78f042"
+      },
+      "created_at": "2026-08-25T10:49:55.550794Z"
+    },
+    {
+      "event_id": 2757,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654995566",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654995566"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654995566",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:49:55.582312Z"
+    },
+    {
+      "event_id": 2758,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-682e997e0a4c1e38cc227972",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654995566",
+        "content": "Evidence state is unchanged: still exactly 3 ACTIVE evidence items (ev-21-01/02/03) with the same projection hashes and content, no evidence gaps, no analyses, empty causal/dependency graphs. The HYPOTHESIS_CHALLENGE provides no new facts, so per answer-stability I defend the existing hypothesis rather than revise it: the remote-dependency attribution remains the only conclusion consistent with all three active projections (`scope_candidates` → `span_edges` → `dependency_latency`, observations `[\"scope\",\"remote\",\"edge\"]`), and the empty dependency graph is a resolution gap (redacted endpoint identity), not counter-evidence.\n\n```json\n{\n  \"conclusion\": \"The fault is attributed to a remote dependency (downstream of the target service), not to the target service itself. The initial broad service scope was progressively narrowed by trace span edges to a single remote edge, where dependency latency is elevated; the target service is the symptom carrier, and the fault origin is the remote dependency reached over that traced edge. The HYPOTHESIS_CHALLENGE was evaluated and the hypothesis is defended: no active evidence contradicts it, and no evidence supports a local in-process root.\",\n  \"root_location\": \"Remote dependency of redacted-service (target_pid 12345, worker-1 / host-1), reached via the trace edge surfaced in span_edges; the dependency's concrete service/host/endpoint identity is redacted in the current evidence and has not yet been resolved.\",\n  \"mechanism\": \"Trace-based narrowing: scope_candidates (ev-21-01) shows a broad candidate scope; span_edges (ev-21-02) identifies a specific cross-service edge carrying the fault; dependency_latency (ev-21-03) shows elevated latency on that remote edge. Consistent observations [scope, remote, edge] across all three signals indicate the observed degradation originates on the remote side of the edge and propagates back into the target service, rather than being generated locally.\",\n  \"confidence\": \"MEDIUM\",\n  \"confidence_reason\": \"All three active evaluation projections are aligned (same T0..T1 window, sample_count 120, identical observations [scope, remote, edge], values 3.601/3.632/3.663 forming a coherent scope->edge->latency chain), which directionally supports a remote-dependency root, and the challenge produced no counter-evidence or alternative supported hypothesis. Confidence remains capped at MEDIUM because the evidence is synthetic/unreviewed (trust_level SYNTHETIC_EVAL, derived_trust_score 50, trust_state UNREVIEWED), dimensions (service, host, request_id) are redacted so the dependency identity is unknown, signal values are abstract scores without concrete latency/error-rate metrics, and the dependency graph is still empty (the remote edge is characterized only by the trace projections, not by a resolved endpoint).\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-21-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-21-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-21-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Identity of the remote dependency (redacted service/host/endpoint) resolved to a concrete peer endpoint (e.g., via network_discovery/topology.discover from target_pid 12345)\",\n    \"Concrete dependency latency and error-rate metrics on the traced edge (current values are abstract scores, not ms/percentiles or error ratios)\",\n    \"Connectivity/health status of the downstream endpoint (e.g., connection_probe to the resolved peer) to confirm the dependency is the fault source\",\n    \"Local-cause exclusion data for the target service (CPU/thread/FD/network saturation via sys_metrics, runtime/GC state) to rule out an in-process root — this is the key evidence needed to fully resolve the challenge\",\n    \"Remote dependency logs or error timeline correlating with the T0..T1 window\"\n  ],\n  \"next_action\": \"On the next non-read-only cycle, register low-risk (R1) collection: network_discovery (topology.discover) on target_pid 12345 to resolve the remote peer identity from the traced edge, then connection_probe (service.connection) to the resolved downstream endpoint, plus a sys_metrics baseline on the target to exclude local saturation and complete the hypothesis-challenge resolution. No recovery or change actions are recommended while the dependency identity and health are unconfirmed.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-21-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-21-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-21-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:50:09.959645Z"
+    },
+    {
+      "event_id": 2759,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654995566",
+        "message_id": "amsg-682e997e0a4c1e38cc227972"
+      },
+      "created_at": "2026-08-25T10:50:09.964461Z"
+    }
+  ]
+}

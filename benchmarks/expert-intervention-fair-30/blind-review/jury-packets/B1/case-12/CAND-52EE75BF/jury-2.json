@@ -1,0 +1,19 @@
+{
+  "schema": "blind-review.jury-packet.v1",
+  "jury_id": "B1-case-12-jury-2",
+  "track": "B1",
+  "case_id": "case-12",
+  "candidate_id": "CAND-52EE75BF",
+  "repeat_order": [
+    "repeat-1"
+  ],
+  "allowed_paths": [
+    "cases/case-12/public.json",
+    "cases/case-12/replay.json",
+    "cases/case-12/intervention.json",
+    "candidates/CAND-52EE75BF/expert_intervention_tuning/case-12/repeat-1/event-view.json",
+    "candidates/CAND-52EE75BF/expert_intervention_tuning/case-12/repeat-1/injection-view.json"
+  ],
+  "oracle_access": false,
+  "prior_scores_access": false
+}

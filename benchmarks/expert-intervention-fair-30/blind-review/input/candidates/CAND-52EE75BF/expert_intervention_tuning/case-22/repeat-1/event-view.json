@@ -1,0 +1,372 @@
+{
+  "case_id": "case-22",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2760,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:50:10.260506Z"
+    },
+    {
+      "event_id": 2761,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-22-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e8e63033534359124831f67757f27ac13efab6003c0f257a5880809c9b7c487b",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:50:10.352259Z"
+    },
+    {
+      "event_id": 2762,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-22-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "368ae6ff016700674dfb8043f8ede1555692079479f13f0b0ee20a11e84ad077",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:50:10.418202Z"
+    },
+    {
+      "event_id": 2763,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-22-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "52b7369a57250e41d805c46e2e3dfa178c430c11ea9a6b6f6235fbd423896618",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:50:10.500821Z"
+    },
+    {
+      "event_id": 2764,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:50:10.583019Z"
+    },
+    {
+      "event_id": 2765,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_0d5ed42b74dd446894094d0ad2edac11",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "0aa38b24da0fa838def4a2064eb7cf9488a3e42f1b9b71d977fd58e615824302"
+      },
+      "created_at": "2026-08-25T10:50:10.619289Z"
+    },
+    {
+      "event_id": 2766,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655010655",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655010655"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655010655",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:50:10.690006Z"
+    },
+    {
+      "event_id": 2767,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-8c4b80d463add0b262951f18",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655010655",
+        "content": "```json\n{\n  \"conclusion\": \"A retention increase (elevated heap retention of request/worker objects) amplifies lock wait in the runtime wait profile and drives a concurrency/throughput collapse on redacted-service (worker-1, host-1, production-like).\",\n  \"root_location\": \"service=redacted-service, host=host-1, worker=worker-1, pid=12345, environment=production-like\",\n  \"mechanism\": \"A retention increase causes more objects/requests to be held in the heap for longer, increasing the number of in-flight units contending on shared locks. The runtime wait profile (ev-22-02) shows amplified lock wait; as lock holders occupy worker slots longer, the worker pool's effective concurrency shrinks, and the throughput context (ev-22-03) collapses. The heap_retainers signal (ev-22-01) is the upstream trigger; lock wait amplification is the intermediate amplification step; throughput collapse is the terminal symptom.\",\n  \"confidence\": \"MODERATE\",\n  \"confidence_reason\": \"Three ACTIVE, COMPLETE, aligned evidence projections (heap_retainers=ev-22-01, runtime_wait_profile=ev-22-02, throughput_context=ev-22-03) share the observations [retention, lock, amplifies] and consistently match the case goal chain. However, all are SYNTHETIC_EVAL / UNREVIEWED (derived_trust_score=50), dimensions (service, host, request_id) are redacted, projections carry only opaque numeric values with no baseline comparison or actual magnitudes, and no PR diff or before/after data is present to prove the retention change is the trigger.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Before/after (T0 vs T1) quantitative values for heap retainers, lock wait times, and throughput to establish magnitude and direction\",\n    \"The GitHub PR diff / change that introduced the retention increase (evidence is PR-attribution SOURCE_DERIVED but diff is not attached)\",\n    \"Lock-wait stack traces or contention breakdown identifying the specific lock/component\",\n    \"Correlation/timing data tying the retention change to the observed wait-profile and throughput collapse\",\n    \"Baseline error rate and concurrency capacity (max workers) to confirm the collapse is concurrency-driven and not capacity-driven\"\n  ],\n  \"next_action\": \"Request read-only collection of system.metrics, service.logs and service.connection for redacted-service (host-1/worker-1, pid 12345) over the incident window to quantify retainers, lock wait, and throughput; and retrieve the attributed GitHub PR diff to confirm the retention increase as the causal change.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-22-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-22-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-22-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:50:29.431637Z"
+    },
+    {
+      "event_id": 2768,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655010655",
+        "message_id": "amsg-8c4b80d463add0b262951f18"
+      },
+      "created_at": "2026-08-25T10:50:29.435370Z"
+    },
+    {
+      "event_id": 2769,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type PLAN_REPRIORITIZE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:50:31.563903Z"
+    },
+    {
+      "event_id": 2770,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_6a0195800c7c4c01a2a8af4adb59a793",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "0a43f8b149ee1d8f649de0cd2da0772359773402d8d558bcee8d94533f92b3db"
+      },
+      "created_at": "2026-08-25T10:50:31.602507Z"
+    },
+    {
+      "event_id": 2771,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655031622",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655031622"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655031622",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:50:31.636831Z"
+    },
+    {
+      "event_id": 2772,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-b2e3810c79eeadcba5003db5",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655031622",
+        "content": "The evidence state is unchanged (same 3 ACTIVE items, no new evidence, plan_revision still 0 with no plan steps materialized). Per the answer_stability skill, with no new evidence and no user correction, I defend the prior conclusion with the same evidence IDs and wording.\n\n```json\n{\n  \"conclusion\": \"A retention increase (elevated heap retention of request/worker objects) amplifies lock wait in the runtime wait profile and drives a concurrency/throughput collapse on redacted-service (worker-1, host-1, production-like).\",\n  \"root_location\": \"service=redacted-service, host=host-1, worker=worker-1, pid=12345, environment=production-like\",\n  \"mechanism\": \"A retention increase causes more objects/requests to be held in the heap for longer, increasing the number of in-flight units contending on shared locks. The runtime wait profile (ev-22-02) shows amplified lock wait; as lock holders occupy worker slots longer, the worker pool's effective concurrency shrinks, and the throughput context (ev-22-03) collapses. The heap_retainers signal (ev-22-01) is the upstream trigger; lock wait amplification is the intermediate amplification step; throughput collapse is the terminal symptom.\",\n  \"confidence\": \"MODERATE\",\n  \"confidence_reason\": \"The PLAN_REPRIORITIZE intervention did not add or invalidate any evidence: the case still holds the same three ACTIVE, COMPLETE, aligned projections (heap_retainers=ev-22-01, runtime_wait_profile=ev-22-02, throughput_context=ev-22-03) sharing observations [retention, lock, amplifies] and matching the case goal chain. However, all are SYNTHETIC_EVAL / UNREVIEWED (derived_trust_score=50), dimensions (service, host, request_id) are redacted, projections carry only opaque numeric values without baseline comparison or actual magnitudes, and no PR diff or before/after data proves the retention change is the trigger. Confidence remains MODERATE because the conclusion is consistent but not quantitatively confirmed.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Before/after (T0 vs T1) quantitative values for heap retainers, lock wait times, and throughput to establish magnitude and direction\",\n    \"The GitHub PR diff / change that introduced the retention increase (evidence is PR-attribution SOURCE_DERIVED but diff is not attached)\",\n    \"Lock-wait stack traces or contention breakdown identifying the specific lock/component\",\n    \"Correlation/timing data tying the retention change to the observed wait-profile and throughput collapse\",\n    \"Baseline error rate and concurrency capacity (max workers) to confirm the collapse is concurrency-driven and not capacity-driven\"\n  ],\n  \"next_action\": \"Keep the existing conclusion; reprioritize the plan toward closing the quantitative gaps rather than re-deriving the mechanism: first retrieve the attributed GitHub PR diff for the retention increase, then collect read-only system.metrics / service.logs / service.connection for redacted-service (host-1/worker-1, pid 12345) over T0..T1 to quantify retainers, lock wait, and throughput against baseline.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-22-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-22-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-22-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:50:40.468019Z"
+    },
+    {
+      "event_id": 2773,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655031622",
+        "message_id": "amsg-b2e3810c79eeadcba5003db5"
+      },
+      "created_at": "2026-08-25T10:50:40.474792Z"
+    }
+  ]
+}

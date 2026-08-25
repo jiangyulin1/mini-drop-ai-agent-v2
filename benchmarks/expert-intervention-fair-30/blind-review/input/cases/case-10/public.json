@@ -1,0 +1,65 @@
+{
+  "schema": "benchmark-agent.public-case.v1",
+  "case_id": "case-10",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "Payment calls time out while local request processing remains healthy.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-10-01",
+      "kind": "dependency_latency",
+      "summary": "Bounded dependency latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:bfcc1968474d2ec72e8e52bcafa37f0af78973de26ff4f5ff1419149ffdb189a",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-10-02",
+      "kind": "timeout_logs",
+      "summary": "Bounded timeout logs projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:bc1176ec014ac49411c30528e3abbe086eee8fce73394f1357255d0ce31e6aeb",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "search_logs"
+      ]
+    },
+    {
+      "evidence_id": "ev-10-03",
+      "kind": "local_cpu",
+      "summary": "Bounded local cpu projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:26adc88e92dbccd6b178e6c7727d0b82667c3a50d030c8fc366dc25d12be31b0",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

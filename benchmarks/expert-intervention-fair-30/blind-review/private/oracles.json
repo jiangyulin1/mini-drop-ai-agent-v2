@@ -1,0 +1,904 @@
+{
+  "schema": "mini-drop.private-oracle-suite.v1",
+  "cases": [
+    {
+      "case_id": "case-01",
+      "family": "self_cpu_hotspot",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "cpu",
+          "classification": "self_code_or_process_pressure",
+          "mechanism": "cpu hotspot self time bounded path",
+          "mechanism_keywords": [
+            "cpu hotspot",
+            "self time",
+            "bounded path"
+          ],
+          "required_evidence": [
+            "ev-01-01",
+            "ev-01-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "HYPOTHESIS_CHALLENGE"
+      }
+    },
+    {
+      "case_id": "case-02",
+      "family": "self_cpu_regression",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "cpu",
+          "classification": "self_code_or_process_pressure",
+          "mechanism": "regression new symbol endpoint",
+          "mechanism_keywords": [
+            "regression",
+            "new symbol",
+            "endpoint"
+          ],
+          "required_evidence": [
+            "ev-02-01",
+            "ev-02-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "PLAN_REPRIORITIZE"
+      }
+    },
+    {
+      "case_id": "case-03",
+      "family": "memory_leak",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "memory",
+          "classification": "memory_retention",
+          "mechanism": "retained dominator growth",
+          "mechanism_keywords": [
+            "retained",
+            "dominator",
+            "growth"
+          ],
+          "required_evidence": [
+            "ev-03-02",
+            "ev-03-03"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "EVIDENCE_REVIEW"
+      }
+    },
+    {
+      "case_id": "case-04",
+      "family": "memory_capacity_boundary",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "memory",
+          "classification": "retained_capacity_not_leak",
+          "mechanism": "capacity reachable not proof of leak",
+          "mechanism_keywords": [
+            "capacity",
+            "reachable",
+            "not proof of leak"
+          ],
+          "required_evidence": [
+            "ev-04-01",
+            "ev-04-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "SCOPE_CORRECTION"
+      }
+    },
+    {
+      "case_id": "case-05",
+      "family": "mutex_wait",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "runtime",
+          "classification": "runtime_lock_contention",
+          "mechanism": "mutex wait owner",
+          "mechanism_keywords": [
+            "mutex",
+            "wait",
+            "owner"
+          ],
+          "required_evidence": [
+            "ev-05-01",
+            "ev-05-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "OPERATOR_HINT_UNVERIFIED"
+      }
+    },
+    {
+      "case_id": "case-06",
+      "family": "pool_lock",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "runtime",
+          "classification": "runtime_lock_contention",
+          "mechanism": "pool queue critical section",
+          "mechanism_keywords": [
+            "pool",
+            "queue",
+            "critical section"
+          ],
+          "required_evidence": [
+            "ev-06-01",
+            "ev-06-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "HYPOTHESIS_CHALLENGE"
+      }
+    },
+    {
+      "case_id": "case-07",
+      "family": "network_latency",
+      "accepted_answers": [
+        {
+          "root_location": "downstream",
+          "domain_type": "network",
+          "classification": "network_degradation",
+          "mechanism": "rtt remote hop latency",
+          "mechanism_keywords": [
+            "rtt",
+            "remote hop",
+            "latency"
+          ],
+          "required_evidence": [
+            "ev-07-01",
+            "ev-07-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "PLAN_REPRIORITIZE"
+      }
+    },
+    {
+      "case_id": "case-08",
+      "family": "network_loss",
+      "accepted_answers": [
+        {
+          "root_location": "downstream",
+          "domain_type": "network",
+          "classification": "network_degradation",
+          "mechanism": "loss retransmit route",
+          "mechanism_keywords": [
+            "loss",
+            "retransmit",
+            "route"
+          ],
+          "required_evidence": [
+            "ev-08-02",
+            "ev-08-03"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "EVIDENCE_REVIEW"
+      }
+    },
+    {
+      "case_id": "case-09",
+      "family": "redis_saturation",
+      "accepted_answers": [
+        {
+          "root_location": "downstream",
+          "domain_type": "database",
+          "classification": "downstream_dependency",
+          "mechanism": "redis downstream queue",
+          "mechanism_keywords": [
+            "redis",
+            "downstream",
+            "queue"
+          ],
+          "required_evidence": [
+            "ev-09-01",
+            "ev-09-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "SCOPE_CORRECTION"
+      }
+    },
+    {
+      "case_id": "case-10",
+      "family": "payment_timeout",
+      "accepted_answers": [
+        {
+          "root_location": "downstream",
+          "domain_type": "network",
+          "classification": "downstream_dependency",
+          "mechanism": "payment timeout remote",
+          "mechanism_keywords": [
+            "payment",
+            "timeout",
+            "remote"
+          ],
+          "required_evidence": [
+            "ev-10-01",
+            "ev-10-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "OPERATOR_HINT_UNVERIFIED"
+      }
+    },
+    {
+      "case_id": "case-11",
+      "family": "same_host_cpu",
+      "accepted_answers": [
+        {
+          "root_location": "same_host",
+          "domain_type": "cpu",
+          "classification": "same_host_noisy_neighbor",
+          "mechanism": "noisy neighbor host unrelated process",
+          "mechanism_keywords": [
+            "noisy neighbor",
+            "host",
+            "unrelated process"
+          ],
+          "required_evidence": [
+            "ev-11-01",
+            "ev-11-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "HYPOTHESIS_CHALLENGE"
+      }
+    },
+    {
+      "case_id": "case-12",
+      "family": "same_host_memory",
+      "accepted_answers": [
+        {
+          "root_location": "same_host",
+          "domain_type": "memory",
+          "classification": "host_resource_contention",
+          "mechanism": "reclaim host pressure neighbor",
+          "mechanism_keywords": [
+            "reclaim",
+            "host pressure",
+            "neighbor"
+          ],
+          "required_evidence": [
+            "ev-12-01",
+            "ev-12-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "PLAN_REPRIORITIZE"
+      }
+    },
+    {
+      "case_id": "case-13",
+      "family": "disk_io",
+      "accepted_answers": [
+        {
+          "root_location": "shared_resource",
+          "domain_type": "io",
+          "classification": "host_resource_contention",
+          "mechanism": "device queue contention",
+          "mechanism_keywords": [
+            "device",
+            "queue",
+            "contention"
+          ],
+          "required_evidence": [
+            "ev-13-02",
+            "ev-13-03"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "EVIDENCE_REVIEW"
+      }
+    },
+    {
+      "case_id": "case-14",
+      "family": "fd_exhaustion",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "runtime",
+          "classification": "fd_exhaustion",
+          "mechanism": "file descriptor limit leak",
+          "mechanism_keywords": [
+            "file descriptor",
+            "limit",
+            "leak"
+          ],
+          "required_evidence": [
+            "ev-14-01",
+            "ev-14-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "SCOPE_CORRECTION"
+      }
+    },
+    {
+      "case_id": "case-15",
+      "family": "gc_pause",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "runtime",
+          "classification": "runtime_stall",
+          "mechanism": "gc pause allocation",
+          "mechanism_keywords": [
+            "gc",
+            "pause",
+            "allocation"
+          ],
+          "required_evidence": [
+            "ev-15-01",
+            "ev-15-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "OPERATOR_HINT_UNVERIFIED"
+      }
+    },
+    {
+      "case_id": "case-16",
+      "family": "scheduler_jitter",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "runtime",
+          "classification": "runtime_stall",
+          "mechanism": "periodic scheduler jitter",
+          "mechanism_keywords": [
+            "periodic",
+            "scheduler",
+            "jitter"
+          ],
+          "required_evidence": [
+            "ev-16-01",
+            "ev-16-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "HYPOTHESIS_CHALLENGE"
+      }
+    },
+    {
+      "case_id": "case-17",
+      "family": "insufficient_evidence",
+      "accepted_answers": [
+        {
+          "root_location": "unknown",
+          "domain_type": "unknown",
+          "classification": "insufficient_evidence",
+          "mechanism": "insufficient unknown missing",
+          "mechanism_keywords": [
+            "insufficient",
+            "unknown",
+            "missing"
+          ],
+          "required_evidence": [
+            "ev-17-01",
+            "ev-17-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": true,
+        "required": true
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "PLAN_REPRIORITIZE"
+      }
+    },
+    {
+      "case_id": "case-18",
+      "family": "stale_evidence",
+      "accepted_answers": [
+        {
+          "root_location": "unknown",
+          "domain_type": "unknown",
+          "classification": "stale_evidence",
+          "mechanism": "stale window cannot establish",
+          "mechanism_keywords": [
+            "stale",
+            "window",
+            "cannot establish"
+          ],
+          "required_evidence": [
+            "ev-18-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": true,
+        "required": true
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "EVIDENCE_REVIEW"
+      }
+    },
+    {
+      "case_id": "case-19",
+      "family": "conflicting_evidence",
+      "accepted_answers": [
+        {
+          "root_location": "unknown",
+          "domain_type": "unknown",
+          "classification": "conflicting_sources",
+          "mechanism": "conflict disagree abstain",
+          "mechanism_keywords": [
+            "conflict",
+            "disagree",
+            "abstain"
+          ],
+          "required_evidence": [
+            "ev-19-01",
+            "ev-19-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": true,
+        "required": true
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "SCOPE_CORRECTION"
+      }
+    },
+    {
+      "case_id": "case-20",
+      "family": "expert_hint_unverified",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "memory",
+          "classification": "memory_retention",
+          "mechanism": "cleanup retained verify",
+          "mechanism_keywords": [
+            "cleanup",
+            "retained",
+            "verify"
+          ],
+          "required_evidence": [
+            "ev-20-01",
+            "ev-20-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "OPERATOR_HINT_UNVERIFIED"
+      }
+    },
+    {
+      "case_id": "case-21",
+      "family": "scope_correction",
+      "accepted_answers": [
+        {
+          "root_location": "downstream",
+          "domain_type": "network",
+          "classification": "network_degradation",
+          "mechanism": "scope remote edge",
+          "mechanism_keywords": [
+            "scope",
+            "remote",
+            "edge"
+          ],
+          "required_evidence": [
+            "ev-21-01",
+            "ev-21-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "HYPOTHESIS_CHALLENGE"
+      }
+    },
+    {
+      "case_id": "case-22",
+      "family": "memory_lock_compound",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "runtime",
+          "classification": "compound_incident",
+          "mechanism": "retention lock amplifies",
+          "mechanism_keywords": [
+            "retention",
+            "lock",
+            "amplifies"
+          ],
+          "required_evidence": [
+            "ev-22-01",
+            "ev-22-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "PLAN_REPRIORITIZE"
+      }
+    },
+    {
+      "case_id": "case-23",
+      "family": "disk_network_compound",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "io",
+          "classification": "compound_incident",
+          "mechanism": "spool disk retries",
+          "mechanism_keywords": [
+            "spool",
+            "disk",
+            "retries"
+          ],
+          "required_evidence": [
+            "ev-23-02",
+            "ev-23-03"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "EVIDENCE_REVIEW"
+      }
+    },
+    {
+      "case_id": "case-24",
+      "family": "noisy_downstream_compound",
+      "accepted_answers": [
+        {
+          "root_location": "same_host",
+          "domain_type": "cpu",
+          "classification": "compound_incident",
+          "mechanism": "neighbor downstream two contributors",
+          "mechanism_keywords": [
+            "neighbor",
+            "downstream",
+            "two contributors"
+          ],
+          "required_evidence": [
+            "ev-24-01",
+            "ev-24-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "SCOPE_CORRECTION"
+      }
+    },
+    {
+      "case_id": "case-25",
+      "family": "fd_downstream_compound",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "runtime",
+          "classification": "compound_incident",
+          "mechanism": "descriptor downstream amplifier",
+          "mechanism_keywords": [
+            "descriptor",
+            "downstream",
+            "amplifier"
+          ],
+          "required_evidence": [
+            "ev-25-01",
+            "ev-25-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "OPERATOR_HINT_UNVERIFIED"
+      }
+    },
+    {
+      "case_id": "case-26",
+      "family": "cpu_gc_compound",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "cpu",
+          "classification": "compound_incident",
+          "mechanism": "serialization allocation pause",
+          "mechanism_keywords": [
+            "serialization",
+            "allocation",
+            "pause"
+          ],
+          "required_evidence": [
+            "ev-26-01",
+            "ev-26-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "HYPOTHESIS_CHALLENGE"
+      }
+    },
+    {
+      "case_id": "case-27",
+      "family": "evidence_review_exclusion",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "cpu",
+          "classification": "self_code_or_process_pressure",
+          "mechanism": "scope aligned local",
+          "mechanism_keywords": [
+            "scope",
+            "aligned",
+            "local"
+          ],
+          "required_evidence": [
+            "ev-27-01",
+            "ev-27-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "PLAN_REPRIORITIZE"
+      }
+    },
+    {
+      "case_id": "case-28",
+      "family": "hypothesis_challenge",
+      "accepted_answers": [
+        {
+          "root_location": "downstream",
+          "domain_type": "database",
+          "classification": "downstream_dependency",
+          "mechanism": "challenge queue dependency",
+          "mechanism_keywords": [
+            "challenge",
+            "queue",
+            "dependency"
+          ],
+          "required_evidence": [
+            "ev-28-02",
+            "ev-28-03"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "EVIDENCE_REVIEW"
+      }
+    },
+    {
+      "case_id": "case-29",
+      "family": "plan_reprioritize",
+      "accepted_answers": [
+        {
+          "root_location": "self",
+          "domain_type": "io",
+          "classification": "filesystem_exhaustion",
+          "mechanism": "capacity write error reprioritize",
+          "mechanism_keywords": [
+            "capacity",
+            "write error",
+            "reprioritize"
+          ],
+          "required_evidence": [
+            "ev-29-01",
+            "ev-29-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": false,
+        "required": false
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "SCOPE_CORRECTION"
+      }
+    },
+    {
+      "case_id": "case-30",
+      "family": "healthy_negative",
+      "accepted_answers": [
+        {
+          "root_location": "unknown",
+          "domain_type": "unknown",
+          "classification": "no_incident_confirmed",
+          "mechanism": "baseline healthy no incident",
+          "mechanism_keywords": [
+            "baseline",
+            "healthy",
+            "no incident"
+          ],
+          "required_evidence": [
+            "ev-30-01",
+            "ev-30-02"
+          ]
+        }
+      ],
+      "abstention": {
+        "allowed": true,
+        "required": true
+      },
+      "expert_track": {
+        "must_re_read_evidence": true,
+        "must_update_hypothesis": true,
+        "event_type": "OPERATOR_HINT_UNVERIFIED"
+      }
+    }
+  ]
+}

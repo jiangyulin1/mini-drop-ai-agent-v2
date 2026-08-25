@@ -1,0 +1,219 @@
+{
+  "case_id": "case-23",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2390,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:25:10.529448Z"
+    },
+    {
+      "event_id": 2391,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "0a6b42db96fbaf2ff20a1bfe7d6508866a9c50d76b0343f72f4fb1007088b7a3",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:25:10.591167Z"
+    },
+    {
+      "event_id": 2392,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "35aa40ce7697e8dacb5a246706e470f74444a0a104d82cee0d63f61b9a612d1c",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:25:10.657989Z"
+    },
+    {
+      "event_id": 2393,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "b3a2ca2c7253ef3f128f18facb9ac6eac128274fc2e9086bb2af863df284f6eb",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:25:10.727685Z"
+    },
+    {
+      "event_id": 2394,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:25:10.787691Z"
+    },
+    {
+      "event_id": 2395,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_716f811f521a4d80810abb09fa4dd5a8",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "278103cbdf66d84afbe9bb4583621d9fd7df0bde19118411b4444eef537122a3"
+      },
+      "created_at": "2026-08-25T10:25:10.809825Z"
+    },
+    {
+      "event_id": 2396,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653510839",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653510839"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653510839",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:25:10.853046Z"
+    },
+    {
+      "event_id": 2397,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-3745acfbca50ac6a1ef086af",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653510839",
+        "content": "## Investigation Summary\n\nI reviewed the case snapshot, listed all evidence (3 items), expanded the evidence projections, checked the causal/dependency graphs, searched knowledge, compared evidence across dimensions, and inspected the collector catalog.\n\n**What the evidence shows** (all ACTIVE, COMPLETE, same aligned window T0..T1, 120 samples each, observations tagged `spool/disk/retries`):\n- `ev-23-01` — `filesystem_usage` elevated (3.941)\n- `ev-23-02` — `device_latency` elevated (3.972)\n- `ev-23-03` — `retry_rate` elevated (4.003)\n\nAll three signals are consistently elevated (~4σ), temporally aligned, and match the case-goal mechanism (full local spool → I/O delay → retries → extra network traffic). Causal/dependency graphs and evidence gaps are empty. Knowledge search returned only an unrelated `checkout-api` RAG case (`knowledge_is_evidence=false`, not usable as evidence).\n\n```json\n{\n  \"conclusion\": \"Evidence is consistent with the stated mechanism: the local spool on the target host is full, adding I/O delay on the spool device, while elevated retries increase network traffic. All three aligned signals (filesystem_usage 3.941, device_latency 3.972, retry_rate 4.003) are abnormally elevated in the same window, supporting the full-spool -> I/O delay -> retries -> network-traffic chain.\",\n  \"root_location\": \"host-1 / worker-1, target service (target_pid 12345) local spool directory on the spool block device (filesystem/device layer); exact spool path unconfirmed because service/host/request_id dimensions are redacted\",\n  \"mechanism\": \"The local spool fills up, pushing filesystem usage high and the spool device into elevated latency; writes/reads to the full, slow spool delay request completion, which triggers retries; the resulting retry rate is elevated and adds extra network traffic, propagating the load outward.\",\n  \"confidence\": \"MEDIUM\",\n  \"confidence_reason\": \"The three signals are mutually consistent, temporally aligned (same T0..T1, 120 samples), and map 1:1 to the case-goal chain (spool usage, device latency, retry rate). However, all evidence is synthetic eval (trust SYNTHETIC_EVAL, UNREVIEWED, derived_trust_score 50), projections contain only aggregate values with no raw samples or explicit units, dimensions are redacted, and there is no direct network-traffic signal (retry_rate is a proxy).\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-23-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-23-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-23-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Direct network traffic/volume signal (only retry_rate proxy exists)\",\n    \"Attribution of the spool to target_pid 12345 / worker-1 (dimensions redacted)\",\n    \"Baseline comparison and explicit units/meaning of the 3.9-4.0 values (assumed sigma)\",\n    \"Raw samples/distribution and log error/timeout patterns confirming retry triggers\",\n    \"Spool path, capacity %, and whether device latency is spool-specific vs host-wide contention\"\n  ],\n  \"next_action\": \"READ_ONLY turn: no collection or mutation requested. Recommended for the next non-read-only cycle: register low-cost R1 probes (sys_metrics for disk/io + network, log_scan for retry/timeout patterns, network_discovery for retry endpoints) to resolve the missing direct network-traffic and spool-attribution facts.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-23-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-23-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-23-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:25:37.913267Z"
+    },
+    {
+      "event_id": 2398,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653510839",
+        "message_id": "amsg-3745acfbca50ac6a1ef086af"
+      },
+      "created_at": "2026-08-25T10:25:37.919652Z"
+    }
+  ]
+}

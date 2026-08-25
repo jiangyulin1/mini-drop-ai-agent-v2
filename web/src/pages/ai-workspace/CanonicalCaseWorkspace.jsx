@@ -5,6 +5,7 @@ import {
   ArrowRightOutlined,
   BulbOutlined,
   CheckOutlined,
+  ClusterOutlined,
   CloseOutlined,
   DatabaseOutlined,
   FileSearchOutlined,
@@ -12,6 +13,7 @@ import {
   ReloadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
+  ThunderboltOutlined,
   ToolOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
@@ -674,6 +676,10 @@ export default function CanonicalCaseWorkspace({ workspace, connected, caseId, f
       const status = String(item?.status || item?.conclusion || "").toLowerCase();
       return status === "partial" || status.startsWith("insufficient");
     });
+  const causalGraph = workspace.causal_graph || {};
+  const evidenceGaps = array(workspace.evidence_gaps);
+  const executionUnits = array(workspace.execution_units);
+  const fanoutRuns = array(workspace.fanout_runs);
   const conclusion = workspace.conclusion || null;
   const recommendations = array(workspace.recommendations);
   const informationGoals = array(workspace.information_goals);
@@ -698,8 +704,12 @@ export default function CanonicalCaseWorkspace({ workspace, connected, caseId, f
     { key: "collections", label: <Space><DatabaseOutlined />采集活动 <Badge count={Math.max(proposals.length, requests.length)} showZero /></Space>, children: <CollectionActivityTab proposals={proposals} requests={requests} evidence={evidence} showInternals={showInternals} caseId={caseId} revisions={revisions} onChanged={onRefresh} onOpenEvidence={openById} /> },
     { key: "evidence", label: <Space><FileSearchOutlined />Evidence <Badge count={evidence.length} showZero /></Space>, children: <EvidenceTab evidence={evidence} reviews={reviews} goals={informationGoals} hypothesisGraph={hypothesisGraph} error={loadErrors.reviews} onRetry={load} onOpen={setSelectedEvidence} onExplain={setExplainDecision} showInternals={showInternals} /> },
     { key: "dependencies", label: <Space><NodeIndexOutlined />依赖关系 <Badge count={dependencyEdges.length} showZero /></Space>, children: <DependencyGraphTab dependencyGraph={dependencyGraph} evidence={evidence} onOpenEvidence={openById} /> },
+    { key: "causal", label: <Space><ClusterOutlined />因果图 <Badge count={array(causalGraph.nodes).length} showZero /></Space>, children: <CausalGraphTab graph={causalGraph} onOpenEvidence={openById} /> },
+    { key: "hypotheses", label: <Space><BulbOutlined />假设 <Badge count={array(hypothesisGraph.hypotheses).length} showZero /></Space>, children: <HypothesesTab graph={hypothesisGraph} conclusion={conclusion} onOpenEvidence={openById} onExplain={setExplainDecision} /> },
     { key: "analyses", label: <Space><RobotOutlined />受引用分析 <Badge count={analyses.length} showZero /></Space>, children: <AnalysisTab analyses={analyses} evidence={evidence} onOpenEvidence={openById} onOpenCitation={openCitation} onNavigate={setActiveTab} /> },
     { key: "conclusion", label: <Space><SafetyCertificateOutlined />结论修订 <Badge count={array(workspace.conclusion_history).length || (conclusion ? 1 : 0)} showZero /></Space>, children: <ConclusionTab conclusion={conclusion} history={workspace.conclusion_history} onOpenEvidence={openById} onExplain={setExplainDecision} /> },
+    { key: "gaps", label: <Space><WarningOutlined />Evidence 缺口 <Badge count={evidenceGaps.length} showZero /></Space>, children: <GapsTab gaps={evidenceGaps} onOpenEvidence={openById} /> },
+    { key: "execution", label: <Space><ThunderboltOutlined />采集执行 <Badge count={executionUnits.length + fanoutRuns.length} showZero /></Space>, children: <ExecutionTab units={executionUnits} fanoutRuns={fanoutRuns} requests={requests} /> },
     { key: "recommendations", label: <Space><ToolOutlined />恢复建议 <Badge count={recommendations.length} showZero /></Space>, children: <RecommendationsTab recommendations={recommendations} onDiscuss={onDiscussRecommendation} onCreateRecovery={onCreateRecovery} /> },
   ];
   const goalItems = informationGoals.length ? informationGoals : array(plan?.steps);
@@ -712,8 +722,12 @@ export default function CanonicalCaseWorkspace({ workspace, connected, caseId, f
     { key: "collections", label: "采集活动", shortLabel: "采集", icon: <DatabaseOutlined />, count: collectionItems.length, state: stageState({ count: collectionItems.length, attention: collectionStatuses.some(isCollectionFailure) || proposals.some((item) => item.status === "PROPOSED" && item.validation_result?.awaiting_execution_authority), active: collectionStatuses.some((status) => ["PROPOSED", "ACCEPTED", "DISPATCHED", "RUNNING"].includes(status)), ready: collectionStatuses.every((status) => ["COMPLETED", "DONE", "SUCCEEDED"].includes(status)), available: true }) },
     { key: "evidence", label: "Evidence", shortLabel: "Evidence", icon: <FileSearchOutlined />, count: evidence.length, state: stageState({ count: evidence.length, attention: evidence.some((item) => ["EXCLUDED", "LOW_TRUST", "STALE"].includes(String(item.status || item.trust_status || "").toUpperCase())) || [...latestReviews.values()].some((item) => ["EXCLUDED", "LOW_TRUST"].includes(String(item.decision || "").toUpperCase())), ready: evidence.length > 0 }) },
     { key: "dependencies", label: "依赖关系", shortLabel: "依赖", icon: <NodeIndexOutlined />, count: dependencyEdges.length, state: !dependencyNodes.length && !dependencyEdges.length ? "empty" : dependencyPartial ? "partial" : "ready" },
+    { key: "causal", label: "因果图", shortLabel: "因果", icon: <ClusterOutlined />, count: array(causalGraph.nodes).length, state: !array(causalGraph.nodes).length ? "empty" : "ready" },
+    { key: "hypotheses", label: "假设", shortLabel: "假设", icon: <BulbOutlined />, count: array(hypothesisGraph.hypotheses).length, state: stageState({ count: array(hypothesisGraph.hypotheses).length, attention: array(hypothesisGraph.hypotheses).some((h) => h.status === "WEAKENED"), ready: array(hypothesisGraph.hypotheses).some((h) => h.status === "CONFIRMED") }) },
     { key: "analyses", label: "受引用分析", shortLabel: "分析", icon: <RobotOutlined />, count: analyses.length, state: stageState({ count: analyses.length, attention: analyses.some((item) => item.status === "FAILED" || (item.input_state && item.input_state !== "CURRENT")), active: analysisStatuses.some((status) => ["QUEUED", "RUNNING"].includes(status)), ready: analyses.some((item) => item.status === "COMPLETED" && (!item.input_state || item.input_state === "CURRENT")) }) },
     { key: "conclusion", label: "结论修订", shortLabel: "结论", icon: <SafetyCertificateOutlined />, count: conclusion ? 1 : 0, state: stageState({ count: conclusion ? 1 : 0, attention: ["INSUFFICIENT_EVIDENCE", "PARTIALLY_CONFIRMED", "RECHECK_REQUIRED"].includes(conclusion?.state), active: conclusion && !["CONFIRMED", "INSUFFICIENT_EVIDENCE", "PARTIALLY_CONFIRMED", "RECHECK_REQUIRED"].includes(conclusion.state), ready: conclusion?.state === "CONFIRMED", available: Boolean(conclusion) }) },
+    { key: "gaps", label: "Evidence 缺口", shortLabel: "缺口", icon: <WarningOutlined />, count: evidenceGaps.length, state: stageState({ count: evidenceGaps.length, attention: evidenceGaps.some((g) => g.status === "BLOCKING") }) },
+    { key: "execution", label: "采集执行", shortLabel: "执行", icon: <ThunderboltOutlined />, count: executionUnits.length + fanoutRuns.length, state: stageState({ count: executionUnits.length + fanoutRuns.length, active: executionUnits.some((u) => u.status === "RUNNING") }) },
     { key: "recommendations", label: "恢复建议", shortLabel: "恢复", icon: <ToolOutlined />, count: recommendations.length, state: stageState({ count: recommendations.length, available: recommendations.length > 0 }) },
   ];
   const activeItem = items.find((item) => item.key === activeTab) || items[0];

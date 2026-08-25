@@ -1,0 +1,65 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-28",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "A plausible cache hypothesis is challenged by a dependency queue projection.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-28-01",
+      "kind": "cache_health",
+      "summary": "Bounded cache health projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:20f4e64d79f5daa42fb65f54644f25670e32e66c49e5d7505d27e0c32d8b766b",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-28-02",
+      "kind": "dependency_queue",
+      "summary": "Bounded dependency queue projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:060e5bd915a5811aa45a37d752f98568d1a50d2e7e72c5a05089a1295745f0e5",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-28-03",
+      "kind": "request_latency",
+      "summary": "Bounded request latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:84d9182d962123f09c02a50ca70671dceb2f0b15180d1694bbf7e57ac825f532",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

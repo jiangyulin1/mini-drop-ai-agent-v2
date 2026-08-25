@@ -1,0 +1,372 @@
+{
+  "case_id": "case-04",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2503,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:36:24.907628Z"
+    },
+    {
+      "event_id": 2504,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-04-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "d11526c45f7c11bbad1b1ad5210dc2ae13ec82aa1da1303983499f2106cf0089",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:36:24.984623Z"
+    },
+    {
+      "event_id": 2505,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-04-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "da4a52bb9bf8b817d8d5875cf93259688e72dd1dbbdc1b4051e95825a1ed6fc4",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:36:25.044943Z"
+    },
+    {
+      "event_id": 2506,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-04-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "970b6d934a2e6b45d54045c01f224745251b3cff0370aec7f9c5bb8489fe3cb2",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:36:25.110048Z"
+    },
+    {
+      "event_id": 2507,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:36:25.184000Z"
+    },
+    {
+      "event_id": 2508,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_b39d8eaa9e5f4ea8bd1ca083b57ec57b",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "9bfb8183afb6b0cc9ce796ccd3c97804a7c3e3147693703433b72b2244a7702f"
+      },
+      "created_at": "2026-08-25T10:36:25.206417Z"
+    },
+    {
+      "event_id": 2509,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654185234",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654185234"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654185234",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:36:25.251454Z"
+    },
+    {
+      "event_id": 2510,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-792f954fd68ebd165adff326",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654185234",
+        "content": "Based on the evidence review, here is my analysis:\n\n**Findings from evidence (all lifecycle=ACTIVE, UNREVIEWED synthetic eval):**\n- `ev-04-01` (rss_timeseries, T0..T1, 120 samples, value 0.711) — observations: capacity, reachable, **\"not proof of leak\"**\n- `ev-04-02` (capacity_snapshot, T0..T1, 120 samples, value 0.742) — observations: capacity, reachable, **\"not proof of leak\"**\n- `ev-04-03` (object_liveness, T0..T1, 120 samples, value 0.773) — observations: capacity, reachable, **\"not proof of leak\"**\n\nAll three projections explicitly record that the signal is *not proof of a leak*. They describe capacity/reachability/liveness — not monotonic growth of unreachable retained memory. No causal graph, gaps, hypotheses, or counterevidence exist yet.\n\n```json\n{\n  \"conclusion\": \"The available evidence does NOT prove a memory leak. RSS remaining high after a cache shrink is consistent with allocator/runtime retention (e.g., heap memory not returned to the OS, lazy decommit, fragmentation) and reachable in-use capacity, not with a true leak. All three projections (rss_timeseries, capacity_snapshot, object_liveness) explicitly carry the observation 'not proof of leak'.\",\n  \"root_location\": \"No leak root cause evidenced; elevated memory is consistent with allocator/runtime retention in the target process (target_pid 12345, worker-1) rather than a defect location. No specific code path implicated.\",\n  \"mechanism\": \"Cache shrink frees logical entries, but RSS stays high because freed heap pages are retained by the allocator (arena/glibc caching, lazy decommit, or GC not returning memory to OS). Evidence signals indicate memory remains reachable/within capacity over window T0..T1 (120 samples), which is the opposite of a leak signature (monotonic growth of unreachable retained objects).\",\n  \"confidence\": 0.62,\n  \"confidence_reason\": \"All three ACTIVE evidence projections independently and explicitly record 'not proof of leak' with aligned windows and COMPLETE quality, giving directional consistency. However, the evidence is UNREVIEWED, synthetic (github_pr_SOURCE_DERIVED, trust_level SYNTHETIC_EVAL), has redacted dimensions (service/host/request_id), and lacks allocator-level data (heap vs RSS gap, GC stats, multi-cycle trend), so certainty is limited to moderate.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-04-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-04-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-04-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Per-process heap vs RSS gap and allocator retention stats (e.g., malloc arenas, mmap threshold) for target_pid 12345 after the shrink\",\n    \"GC/collection statistics and whether a forced GC or trim reduces RSS\",\n    \"RSS trajectory across multiple shrink/grow cycles to rule out monotonic unreachable growth\",\n    \"Heap dump or object-retention analysis proving unreachable-but-retained objects\",\n    \"Native (non-heap) memory attribution for the worker\"\n  ],\n  \"next_action\": \"READ_ONLY turn: no collection requested. On a future cycle, propose a low-risk registered probe (R1) collecting per-process heap vs RSS and allocator/GC metrics across repeated cache-shrink cycles, and only if RSS grows monotonically with unreachable objects, escalate leak hypothesis.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-04-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-04-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-04-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:36:47.372084Z"
+    },
+    {
+      "event_id": 2511,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654185234",
+        "message_id": "amsg-792f954fd68ebd165adff326"
+      },
+      "created_at": "2026-08-25T10:36:47.376392Z"
+    },
+    {
+      "event_id": 2512,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type SCOPE_CORRECTION has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:36:48.208594Z"
+    },
+    {
+      "event_id": 2513,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_6c5553c4d67a4b08b32909fefa4a2b99",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "af3df0a6bb3ad062d6d23fb353d4895b96a126f49aab18b2ef925ce45cc0241a"
+      },
+      "created_at": "2026-08-25T10:36:48.230141Z"
+    },
+    {
+      "event_id": 2514,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654208246",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654208246"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654208246",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:36:48.262378Z"
+    },
+    {
+      "event_id": 2515,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-bb75ca39e31795041b8542ad",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654208246",
+        "content": "The SCOPE_CORRECTION intervention did not change the active evidence set — all three projections retain identical content (rss_timeseries 0.711, capacity_snapshot 0.742, object_liveness 0.773; all with observations `[\"capacity\",\"reachable\",\"not proof of leak\"]`). Per the answer-stability skill, with no new evidence and no factual correction, I defend the prior conclusion with the same evidence IDs and wording.\n\n```json\n{\n  \"conclusion\": \"The available evidence does NOT prove a memory leak. RSS remaining high after a cache shrink is consistent with allocator/runtime retention (heap memory not returned to the OS, lazy decommit, fragmentation) and reachable in-use capacity, not with a true leak. The SCOPE_CORRECTION intervention did not add or alter any evidence, so this conclusion is unchanged: all three active projections (rss_timeseries, capacity_snapshot, object_liveness) explicitly carry the observation 'not proof of leak'.\",\n  \"root_location\": \"No leak root cause evidenced; elevated memory is consistent with allocator/runtime retention in the target process (target_pid 12345, worker-1, redacted-service) rather than a defect location. No specific code path implicated by the active evidence.\",\n  \"mechanism\": \"Cache shrink frees logical entries, but RSS stays high because freed heap pages are retained by the allocator (arena/glibc caching, lazy decommit, or GC not returning memory to OS). Evidence signals indicate memory remains within capacity and reachable over window T0..T1 (120 samples), which is the opposite of a leak signature (monotonic growth of unreachable retained objects).\",\n  \"confidence\": 0.62,\n  \"confidence_reason\": \"All three ACTIVE evidence projections independently and explicitly record 'not proof of leak' with aligned T0..T1 windows and COMPLETE quality, and their projection hashes are unchanged after the scope correction, giving directional consistency. However, the evidence remains UNREVIEWED, synthetic (github_pr_SOURCE_DERIVED, trust_level SYNTHETIC_EVAL), with redacted dimensions (service/host/request_id) and no allocator-level detail (heap vs RSS gap, GC stats, multi-cycle trend), limiting certainty to moderate.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-04-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-04-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-04-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Per-process heap vs RSS gap and allocator retention stats (e.g., malloc arenas, mmap threshold) for target_pid 12345 after the shrink\",\n    \"GC/collection statistics and whether a forced GC or trim reduces RSS\",\n    \"RSS trajectory across multiple shrink/grow cycles to rule out monotonic unreachable growth\",\n    \"Heap dump or object-retention analysis proving unreachable-but-retained objects\",\n    \"Native (non-heap) memory attribution for worker-1\"\n  ],\n  \"next_action\": \"READ_ONLY turn: no collection requested. On a future cycle, propose a low-risk registered probe (R1) collecting per-process heap vs RSS and allocator/GC metrics across repeated cache-shrink cycles for target_pid 12345; escalate the leak hypothesis only if RSS grows monotonically with unreachable objects.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-04-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-04-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-04-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:37:02.712112Z"
+    },
+    {
+      "event_id": 2516,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654208246",
+        "message_id": "amsg-bb75ca39e31795041b8542ad"
+      },
+      "created_at": "2026-08-25T10:37:02.718254Z"
+    }
+  ]
+}

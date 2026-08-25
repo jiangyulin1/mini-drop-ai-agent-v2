@@ -1,0 +1,65 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-09",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "Checkout latency rises with cache command wait and downstream saturation.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-09-01",
+      "kind": "dependency_latency",
+      "summary": "Bounded dependency latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:708b88aba346aac6fd05ee24b5570a7292d41f2f9d5391c20dbc1f719caf7e20",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-09-02",
+      "kind": "redis_queue",
+      "summary": "Bounded redis queue projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:b1ed4d715b8d3d574a9986b15ee31f8e098bf1d2d172104050ace6355068f15a",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-09-03",
+      "kind": "client_errors",
+      "summary": "Bounded client errors projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:030f84151b33f0785f8fcdd3d650e35d583ea3730f1f7a984194741e1e8782a3",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

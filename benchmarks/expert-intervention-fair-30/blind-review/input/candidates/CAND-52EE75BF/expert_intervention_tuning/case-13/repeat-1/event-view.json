@@ -1,0 +1,418 @@
+{
+  "case_id": "case-13",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2632,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:43:24.783658Z"
+    },
+    {
+      "event_id": 2633,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "1b5e82bc192c237d7620b7620479fba1b18f21a8672a9b31f842a8a2918f01b6",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:43:24.852818Z"
+    },
+    {
+      "event_id": 2634,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e4f4ba42f0d80f26a80b743b217cc79c9f50106987647cc5395268a26e7fed87",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:43:24.915549Z"
+    },
+    {
+      "event_id": 2635,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "2501d4ea3c424fd47d60acb8acff01fd8f8b82aa4f0f174804ad7b957e64b260",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:43:24.974772Z"
+    },
+    {
+      "event_id": 2636,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:43:25.032113Z"
+    },
+    {
+      "event_id": 2637,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_965b79bfb4d44d82b1b23f7fad295814",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "0bf06bc8d3cf2a72f744bbce84360f53b4330f9b2284e725d933009605f822fb"
+      },
+      "created_at": "2026-08-25T10:43:25.054226Z"
+    },
+    {
+      "event_id": 2638,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654605085",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654605085"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654605085",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:43:25.104079Z"
+    },
+    {
+      "event_id": 2639,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-f9db6de85d5de10e54a0a304",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654605085",
+        "content": "```json\n{\n  \"conclusion\": \"Write latency on the target service rose because of host-wide storage-queue contention on host-1, not a defect inside the target process. Three aligned signals over the same window (T0..T1, 120 samples each) all show elevated, contention-flagged values: block device latency (ev-13-01, normalized 2.241), host IO queue (ev-13-02, normalized 2.272), and target write rate (ev-13-03, normalized 2.303). This is consistent with the stated mechanism: a host-wide storage queue spike congested the shared block device, so the target service's writes queued behind other host I/O and experienced elevated device latency. The dependency/causal graphs are empty, so this is a correlation-based preliminary conclusion, not a proven causal chain.\",\n  \"root_location\": \"host-1 shared block-device / storage queue layer (host-wide I/O contention), external to the target service process (target_pid 12345); the target service is the affected writer, not the root cause\",\n  \"mechanism\": \"A host-wide storage queue spike (io_queue elevated, ev-13-02) occurred on host-1 while target write activity was elevated (target_write_rate, ev-13-03). The shared block device became contended (device_latency elevated, ev-13-01, observations tagged device/queue/contention), causing the target service's write I/O to wait in the congested queue behind other host processes, thereby raising observed write latency during the spike window.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"All three ACTIVE evaluation projections are mutually aligned over the identical window and consistently flag device/queue/contention, strongly supporting a host-storage-contention driver. Confidence is capped at medium because the evidence is UNREVIEWED synthetic evaluation data (trust 50), values are normalized without absolute baselines, no causal graph or dependency graph has been built, and no evidence directly measures the target service's write-latency metric itself (the goal symptom is inferred from device latency, not measured at the target).\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-13-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-13-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-13-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Direct target-service write-latency time series (e.g., P50/P95/P99 write latency) over T0..T1 to confirm the goal symptom at the process level\",\n    \"Per-process I/O attribution on host-1 to identify which tenants/processes generated the host-wide queue load\",\n    \"Absolute device metrics (queue depth, device util, IOPS, await) with baseline comparison rather than normalized values\",\n    \"Temporal ordering/precedence between io_queue and device_latency to establish causality direction\",\n    \"Confirmation the target process was actually performing writes during the spike (target_write_rate is a rate, not proof of write-path blocking)\"\n  ],\n  \"next_action\": \"Propose (READ_ONLY turn; no collection executed) low-risk R1 collection: sys_metrics on host-1 and target_pid 12345 for IO/queue baselines, process_scan for host-wide process inventory to attribute the queue load, and ebpf_io (R2, requires approval) for block-device latency histogram and slow-I/O distribution to confirm the target's writes contend on the shared device. Optionally correlate log_scan of the target for write-timeout/error patterns.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-13-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-13-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-13-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:44:03.041245Z"
+    },
+    {
+      "event_id": 2640,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654605085",
+        "message_id": "amsg-f9db6de85d5de10e54a0a304"
+      },
+      "created_at": "2026-08-25T10:44:03.050752Z"
+    },
+    {
+      "event_id": 2641,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "evidence_reviewed",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-01",
+        "decision": "EXCLUDED",
+        "review_revision": 1,
+        "previous_status": "ACTIVE",
+        "lifecycle_status": "EXCLUDED",
+        "trust_state": "UNREVIEWED",
+        "invalidated_analysis_runs": 0,
+        "held_recovery_plan_ids": [],
+        "resumed_recovery_plan_ids": [],
+        "propagation": {
+          "edge_status": "INVALIDATED",
+          "invalidated_hypotheses": [],
+          "affected_hypotheses": [],
+          "invalidated_claims": [],
+          "affected_claims": [],
+          "remaining_active_support": {}
+        },
+        "tree_propagation": {
+          "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-01",
+          "invalidated_nodes": [],
+          "abandoned_nodes": [],
+          "reason": "EVIDENCE_REVIEW_EXCLUDED"
+        },
+        "chain_impact": "WEAKENED",
+        "reopen_policy": "AUTO_RECALIBRATE",
+        "blocked_reason": null,
+        "restart_approval_required": false,
+        "runtime_fence": {
+          "affected_cycle_ids": [],
+          "affected_model_request_ids": [],
+          "affected_turn_ids": [],
+          "affected_proposal_ids": [],
+          "affected_task_ids": [],
+          "affected_plan_step_ids": [],
+          "runtime_generation": 2
+        }
+      },
+      "created_at": "2026-08-25T10:44:03.600133Z"
+    },
+    {
+      "event_id": 2642,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type EVIDENCE_REVIEW has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:44:03.720372Z"
+    },
+    {
+      "event_id": 2643,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_325279a0d5a649ebaad5dfdc021a1677",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "10ed36a64bf1b24fe15aaf3b0e90c124311b8cb0b4fa68e1dcb173b15acaf6e9"
+      },
+      "created_at": "2026-08-25T10:44:03.780986Z"
+    },
+    {
+      "event_id": 2644,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654643842",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654643842"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654643842",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:44:03.866808Z"
+    },
+    {
+      "event_id": 2645,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-648c79793f71fb6f3ff92132",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654643842",
+        "content": "## EVIDENCE_REVIEW — Case `CASE_INTERNAL_REDACTED`\n\nRe-read current evidence state. Active evidence: only `ev-13-02` (io_queue) and `ev-13-03` (target_write_rate) remain; `ev-13-01` is EXCLUDED (review_revision 1). No causal graph, no evidence gaps, no hypotheses are recorded.\n\n**What the active evidence actually shows:**\n- `ev-13-02` — signal `io_queue`, window T0..T1, 120 samples, fold value **2.272**, alignment `aligned`, observations `[device, queue, contention]` (dimensions service/host/request_id redacted).\n- `ev-13-03` — signal `target_write_rate`, window T0..T1, 120 samples, fold value **2.303**, alignment `aligned`, observations `[device, queue, contention]`.\n\nBoth are UNREVIEWED, synthetic eval projections; they are correlated but there is **zero evidence about write latency itself**, the stated target metric of the case goal. Two co-moving, co-windowed signals cannot establish causal direction: the elevated target write rate (2.30x) is equally compatible with the target *driving* the queue spike as with an exogenous host-wide queue spike *causing* latency — and latency is not even measured yet.\n\n```json\n{\n  \"case_id\": \"CASE_INTERNAL_REDACTED\",\n  \"answer_revision\": 2,\n  \"intervention\": \"EVIDENCE_REVIEW\",\n  \"conclusion\": {\n    \"status\": \"CORRELATION_ONLY\",\n    \"primary\": \"Temporally aligned elevation of host storage queue depth (~2.27x) and target write rate (~2.30x) in window T0..T1, with device/queue/contention observations flagged in both signals.\",\n    \"causality\": \"NOT_ESTABLISHED\",\n    \"reason\": \"Two aligned co-windowed fold-changes cannot distinguish (a) exogenous host-wide queue spike causing elevated latency, from (b) target write-rate increase driving the queue spike. No write-latency signal exists in the evidence set, so the case goal's outcome metric is unmeasured.\",\n    \"confidence\": \"LOW\"\n  },\n  \"evidence_basis\": [\n    {\n      \"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-13-02\",\n      \"signal\": \"io_queue\",\n      \"value\": 2.272,\n      \"window\": \"T0..T1\",\n      \"samples\": 120,\n      \"observations\": [\"device\", \"queue\", \"contention\"],\n      \"role\": \"supports existence of the host storage queue spike\"\n    },\n    {\n      \"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-13-03\",\n      \"signal\": \"target_write_rate\",\n      \"value\": 2.303,\n      \"window\": \"T0..T1\",\n      \"samples\": 120,\n      \"observations\": [\"device\", \"queue\", \"contention\"],\n      \"role\": \"supports elevated target write activity aligned with the queue spike\"\n    },\n    {\n      \"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-13-01\",\n      \"status\": \"EXCLUDED\",\n      \"role\": \"not used\"\n    }\n  ],\n  \"missing_facts\": [\n    \"Write-latency measurement for target (service worker-1, pid 12345) during T0..T1 — the goal's outcome metric is absent\",\n    \"Causal direction: target-driven queue growth vs exogenous host-wide queue spike (needs per-worker vs host-level breakdown)\",\n    \"Absolute/baseline values and per-device granularity (device dimension redacted; fold-changes only)\",\n    \"Ordering/lead-lag within T0..T1 to establish precedence between io_queue and target_write_rate\"\n  ],\n  \"next_steps\": [\n    \"Collect write-latency evidence (p50/p99) for target pid 12345 / worker-1 over T0..T1 aligned to the same window\",\n    \"Collect per-device and per-worker queue-depth breakdown to test whether the spike is host-wide-exogenous or target-driven\",\n    \"Establish lead-lag between io_queue and target_write_rate before asserting causality\"\n  ],\n  \"abstain\": {\n    \"claim\": \"Storage queue spike causes write latency rise\",\n    \"reason\": \"No latency evidence exists; only an aligned correlation between io_queue and target_write_rate is currently supported\"\n  }\n}\n```\n\n**Bottom line:** I defend only the correlation claim (aligned queue-spike + elevated target write rate). I abstain on the causal claim \"queue spike → write latency,\" because the case-goal outcome metric (write latency) has no active evidence, and the direction of causality is unresolved.",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-13-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-13-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:44:27.063046Z"
+    },
+    {
+      "event_id": 2646,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 15,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654643842",
+        "message_id": "amsg-648c79793f71fb6f3ff92132"
+      },
+      "created_at": "2026-08-25T10:44:27.067200Z"
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "case_id": "case-20",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2363,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:23:52.081429Z"
+    },
+    {
+      "event_id": 2364,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-20-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "2b63b83fa30d19b15c5a2bdb688a25999ae62d8309a4d5f2407df7b4317b8bce",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:23:52.150525Z"
+    },
+    {
+      "event_id": 2365,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-20-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "d7e3c1780e97733002958f61b66fbe5c833e5b2337b9b0cb92d95e3f77ea714c",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:23:52.217224Z"
+    },
+    {
+      "event_id": 2366,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-20-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "981972317b6f7fb9693dedef62c45b9b9d31eb2da590c28a74828e3ea161b8cf",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:23:52.284678Z"
+    },
+    {
+      "event_id": 2367,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:23:52.373843Z"
+    },
+    {
+      "event_id": 2368,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_c46534ac6bb8496692037915a0d25740",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "afbbaf74a80a1f510397b0e16cef2858520a8087432962a464c2a067a583fbcc"
+      },
+      "created_at": "2026-08-25T10:23:52.414263Z"
+    },
+    {
+      "event_id": 2369,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653432448",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653432448"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653432448",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:23:52.465932Z"
+    },
+    {
+      "event_id": 2370,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-0ba1b33c056a4b8349b2a741",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653432448",
+        "content": "Based on the investigation, here is my analysis:\n\n**Evidence read:**\n- **ev-20-01** (`post_change_rss`, T0..T1, n=120, value=3.431, observations: `cleanup`, `retained`, `verify`) — post-change RSS signal\n- **ev-20-02** (`heap_retainers`, T0..T1, n=120, value=3.462, observations: `cleanup`, `retained`, `verify`) — post-change heap retainer signal\n- **ev-20-03** (`operator_note`, T0..T1, n=120, value=3.493, observations: `cleanup`, `retained`, `verify`) — operator's claim note\n\nAll three are aligned on the same post-change window and share the observation keywords `cleanup`/`retained`/`verify`. The `post_change_rss` and `heap_retainers` signals still flag \"retained\" in the post-change window, directly contradicting the operator's claim that the cleanup fixed memory.\n\n```json\n{\n  \"conclusion\": \"The operator's claim that the cleanup fixed memory is NOT supported by post-change evidence. Post-change retention evidence shows memory is still retained: post-change RSS remains elevated and heap retainers are still present in the post-change window (observations marked 'retained'), indicating the cleanup did not release the retained memory.\",\n  \"root_location\": \"redacted-service worker-1 (target_pid 12345) on host-1 — lingering heap retainers holding references; cleanup did not eliminate the retention source\",\n  \"mechanism\": \"A cleanup change was applied, but post-change heap retainers continue to hold references, keeping RSS elevated after the change (post_change_rss and heap_retainers signals both register 'retained' in the T0..T1 window). The cleanup removed some memory but the retention root was not released, so memory usage persists.\",\n  \"confidence\": 0.55,\n  \"confidence_reason\": \"All three evidence items are aligned on the same post-change window with consistent 'retained' observations, and two independent signals (post_change_rss, heap_retainers) agree that memory is retained after the cleanup. However, confidence is capped because there is no pre-change baseline for comparison, no retainer backtrace/object detail, and the evidence is synthetic, historical and UNREVIEWED.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-20-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-20-02\"\n  ],\n  \"counter_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-20-03\"\n  ],\n  \"missing_evidence\": [\n    \"pre-change baseline RSS/heap-usage values to quantify the delta and confirm no improvement\",\n    \"heap retainer backtraces or object-level retention details identifying which references still hold memory\",\n    \"confirmation that the cleanup code path actually executed and removed the intended references\",\n    \"operator note content (currently redacted to observations only)\"\n  ],\n  \"next_action\": \"Request collection of a heap retainer snapshot/backtrace and a pre-change vs post-change RSS comparison for target_pid 12345 to identify the specific retained objects and verify whether the cleanup actually executed; re-evaluate the operator claim once baseline and retainer detail are available.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-20-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-20-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-20-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:24:13.059644Z"
+    },
+    {
+      "event_id": 2371,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653432448",
+        "message_id": "amsg-0ba1b33c056a4b8349b2a741"
+      },
+      "created_at": "2026-08-25T10:24:13.066038Z"
+    }
+  ]
+}

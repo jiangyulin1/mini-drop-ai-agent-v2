@@ -1,0 +1,65 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-05",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "Throughput falls as concurrency rises although CPU is available.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-05-01",
+      "kind": "runtime_wait_profile",
+      "summary": "Bounded runtime wait profile projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:a6cb411d1e768617b51cd15e404aab304d5e776bea52a5643d236e0c572b844a",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_profile_topn"
+      ]
+    },
+    {
+      "evidence_id": "ev-05-02",
+      "kind": "throughput_context",
+      "summary": "Bounded throughput context projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:7af6a60e463ad38ee12b4110dc5f280b3f895de7413621678cf733125784027e",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-05-03",
+      "kind": "cpu_utilization",
+      "summary": "Bounded cpu utilization projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:f69ccb8061ec2a8ed1361f2ec95bf025e4797de12fff3a79129354b298aa621e",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

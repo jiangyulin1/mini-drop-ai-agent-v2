@@ -1,0 +1,372 @@
+{
+  "case_id": "case-16",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2676,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:45:48.419464Z"
+    },
+    {
+      "event_id": 2677,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-16-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "68b6c38abd18d3424dfa873102b70d0fb8de71887be61de4954af968495e2f8b",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:45:48.494508Z"
+    },
+    {
+      "event_id": 2678,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-16-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "749b77a7b78a93b1bbdc2e6ee8c62d7bcd8c9b714147f55a45f23646c4f11413",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:45:48.555074Z"
+    },
+    {
+      "event_id": 2679,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-16-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "48922b2e92f5e132428abbf7777bbe1a3369e9fc2f8f8d710a142ad298c013d3",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:45:48.632918Z"
+    },
+    {
+      "event_id": 2680,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:45:48.702139Z"
+    },
+    {
+      "event_id": 2681,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_17d31004009349a1ae08db3f13144301",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "b37d2d9cfc763f20d2a7b1b2459ed7926dd55f3b31fad853937b523e626fc29d"
+      },
+      "created_at": "2026-08-25T10:45:48.724403Z"
+    },
+    {
+      "event_id": 2682,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654748747",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654748747"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654748747",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:45:48.764671Z"
+    },
+    {
+      "event_id": 2683,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-8ec94dd8f36731d42708cd45",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654748747",
+        "content": "Based on the case snapshot, evidence inventory, and projection expansion, here is my investigation result.\n\n**What I found:**\n- The case has exactly 3 ACTIVE evidence items, all `github_pr_SOURCE_DERIVED` evaluation projections over the same aligned window T0..T1 (120 samples):\n  - `ev-16-01`: signal `scheduler_ticks`, value 2.751, observations `[\"periodic\",\"scheduler\",\"jitter\"]`\n  - `ev-16-02`: signal `deadline_misses`, value 2.782, observations `[\"periodic\",\"scheduler\",\"jitter\"]`\n  - `ev-16-03`: signal `run_queue`, value 2.813, observations `[\"periodic\",\"scheduler\",\"jitter\"]`\n- Causal graph empty, dependency graph has zero coverage, no evidence gaps registered, no collection requests, no evidence analyses.\n- No `sys_metrics`, `perf_cpu`, `process_scan`, or `runtime_snapshot` evidence exists; the `linux_cpu_diagnosis` skill's required evidence set is unmet.\n- Knowledge search returned only unrelated operator notes (`checkout-api`), explicitly `knowledge_is_evidence=false` — not usable as evidence.\n\n```json\n{\n  \"conclusion\": \"Periodic reconciliation (redacted-service, worker-1, pid 12345) misses its deadline in window T0..T1 in association with scheduler-layer jitter, not sustained CPU saturation. All three aligned evaluation signals — scheduler_ticks (ev-16-01), deadline_misses (ev-16-02), and run_queue (ev-16-03) — carry the identical observation pattern {periodic, scheduler, jitter} in the same window, and no CPU-saturation signal is present anywhere in the evidence set.\",\n  \"root_location\": \"host-1 / worker-1 thread-scheduling layer (kernel run-queue / scheduler tick path) of redacted-service pid 12345, not a CPU-bound code hot path\",\n  \"mechanism\": \"Scheduler tick jitter and run-queue variation intermittently delay the periodic reconciliation worker past its deadline. The task is late due to scheduling latency (wake-up/tick delay, queueing) rather than CPU starvation or a CPU hot function: no profile, metric, or process evidence shows sustained CPU saturation.\",\n  \"confidence\": \"low\",\n  \"confidence_reason\": \"The three supporting projections are aligned in window and observation tags (periodic/scheduler/jitter), which is a coherent single-direction signal; however they are synthetic evaluation projections with redacted dimensions (service, host, request_id), no raw samples or stack data, and the linux_cpu_diagnosis skill's required evidence (sys_metrics, perf_cpu, process_scan) is entirely absent, so I cannot verify CPU state, quantify jitter severity, or identify the delaying subsystem.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-16-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-16-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-16-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"sys_metrics on pid 12345 (host/process CPU, load, threads, io) to confirm absence of CPU saturation and check load/steal\",\n    \"process_scan to verify pid 12345 identity and thread/CPU state\",\n    \"runtime_snapshot to inspect thread states, futex/lock waits, and scheduler-blocking behavior\",\n    \"perf_cpu or continuous_perf profile to rule out a CPU hot path and localize the jitter source\",\n    \"log_scan timeline to correlate deadline misses with deployment/change events\"\n  ],\n  \"next_action\": \"READ_ONLY policy: no collection can be executed this turn. Next cycle, propose low-risk (R1) collection of sys_metrics + process_scan + runtime_snapshot on pid 12345, then (if approved, R2) perf_cpu sampling, to confirm the scheduler-jitter hypothesis and conclusively rule out a CPU-bound hot path before any conclusion is upgraded.\",\n  \"abstain\": false\n}\n```\n\n**Key caveat:** this is a preliminary single-direction hypothesis consistent with the aligned evidence; confidence is intentionally low because the CPU-diagnosis skill's required evidence set is missing. The conclusion should not be upgraded or changed until runtime `sys_metrics`/`perf_cpu` evidence is collected.",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-16-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-16-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-16-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:46:24.032252Z"
+    },
+    {
+      "event_id": 2684,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654748747",
+        "message_id": "amsg-8ec94dd8f36731d42708cd45"
+      },
+      "created_at": "2026-08-25T10:46:24.035831Z"
+    },
+    {
+      "event_id": 2685,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type HYPOTHESIS_CHALLENGE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:46:24.292131Z"
+    },
+    {
+      "event_id": 2686,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_89ea0ea5f8c84a5fa0c50b4e0fa4a850",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "9e582345124f5eaf544f7ffb468ca2bf7543913ae72a1e2bbcda08a9659136c6"
+      },
+      "created_at": "2026-08-25T10:46:24.324928Z"
+    },
+    {
+      "event_id": 2687,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654784341",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654784341"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654784341",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:46:24.352496Z"
+    },
+    {
+      "event_id": 2688,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-f0bf792b54c9816764a5b1a5",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654784341",
+        "content": "The evidence state is unchanged: same 3 ACTIVE evidence items (`ev-16-01`, `ev-16-02`, `ev-16-03`), `evidence_watermark` still 3, no new evidence, no evidence gaps, no hypothesis-graph or causal-graph changes, and no collection activity. The HYPOTHESIS_CHALLENGE introduced no new facts.\n\nPer the `answer_stability` skill (no new evidence or user correction ⇒ conclusions must not change; repeat questions must cite the same Evidence IDs and same conclusion wording), I defend the existing hypothesis unchanged rather than revise it.\n\n```json\n{\n  \"conclusion\": \"Periodic reconciliation (redacted-service, worker-1, pid 12345) misses its deadline in window T0..T1 in association with scheduler-layer jitter, not sustained CPU saturation. All three aligned evaluation signals — scheduler_ticks (ev-16-01), deadline_misses (ev-16-02), and run_queue (ev-16-03) — carry the identical observation pattern {periodic, scheduler, jitter} in the same window, and no CPU-saturation signal is present anywhere in the evidence set. The HYPOTHESIS_CHALLENGE added no new evidence, so this hypothesis is defended unchanged.\",\n  \"root_location\": \"host-1 / worker-1 thread-scheduling layer (kernel run-queue / scheduler tick path) of redacted-service pid 12345, not a CPU-bound code hot path\",\n  \"mechanism\": \"Scheduler tick jitter and run-queue variation intermittently delay the periodic reconciliation worker past its deadline. The task is late due to scheduling latency (wake-up/tick delay, queueing) rather than CPU starvation or a CPU hot function: no profile, metric, or process evidence shows sustained CPU saturation. The challenge provides no alternative active evidence to overturn this single-direction, evidence-aligned reading.\",\n  \"confidence\": \"low\",\n  \"confidence_reason\": \"The three supporting projections are aligned in window and observation tags (periodic/scheduler/jitter), a coherent single-direction signal; however they are synthetic evaluation projections with redacted dimensions (service, host, request_id), no raw samples or stack data, and the linux_cpu_diagnosis skill's required evidence (sys_metrics, perf_cpu, process_scan) is entirely absent, so I cannot verify CPU state, quantify jitter severity, or identify the delaying subsystem. Challenge did not change this evidence situation.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-16-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-16-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-16-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"sys_metrics on pid 12345 (host/process CPU, load, threads, io) to confirm absence of CPU saturation and check load/steal\",\n    \"process_scan to verify pid 12345 identity and thread/CPU state\",\n    \"runtime_snapshot to inspect thread states, futex/lock waits, and scheduler-blocking behavior\",\n    \"perf_cpu or continuous_perf profile to rule out a CPU hot path and localize the jitter source\",\n    \"log_scan timeline to correlate deadline misses with deployment/change events\"\n  ],\n  \"next_action\": \"READ_ONLY policy: no collection can be executed this turn. Next cycle, propose low-risk (R1) collection of sys_metrics + process_scan + runtime_snapshot on pid 12345, then (if approved, R2) perf_cpu sampling, to confirm the scheduler-jitter hypothesis and conclusively rule out a CPU-bound hot path before any conclusion is upgraded.\",\n  \"abstain\": false\n}\n```\n\n**Defense rationale:** The challenge supplies no new evidence, so under the stability rule the conclusion is retained verbatim (same Evidence IDs, same wording). It remains a low-confidence single hypothesis pending runtime `sys_metrics`/`perf_cpu`/`process_scan` collection; the alternative (CPU-bound hot path) is not supported by any active evidence and is explicitly contradicted by the case goal framing (\"without sustained CPU saturation\"), but cannot be definitively ruled out without a profile — hence low confidence rather than higher.",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-16-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-16-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-16-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:46:35.815363Z"
+    },
+    {
+      "event_id": 2689,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654784341",
+        "message_id": "amsg-f0bf792b54c9816764a5b1a5"
+      },
+      "created_at": "2026-08-25T10:46:35.834366Z"
+    }
+  ]
+}

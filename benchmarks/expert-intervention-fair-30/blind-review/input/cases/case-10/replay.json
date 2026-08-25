@@ -1,0 +1,101 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-10",
+  "evidence": [
+    {
+      "evidence_id": "ev-10-01",
+      "kind": "dependency_latency",
+      "summary": "Bounded dependency latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "dependency_latency",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.731,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "payment",
+          "timeout",
+          "remote"
+        ]
+      },
+      "integrity_hash": "sha256:bfcc1968474d2ec72e8e52bcafa37f0af78973de26ff4f5ff1419149ffdb189a"
+    },
+    {
+      "evidence_id": "ev-10-02",
+      "kind": "timeout_logs",
+      "summary": "Bounded timeout logs projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "search_logs"
+      ],
+      "projection": {
+        "signal": "timeout_logs",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.762,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "payment",
+          "timeout",
+          "remote"
+        ]
+      },
+      "integrity_hash": "sha256:bc1176ec014ac49411c30528e3abbe086eee8fce73394f1357255d0ce31e6aeb"
+    },
+    {
+      "evidence_id": "ev-10-03",
+      "kind": "local_cpu",
+      "summary": "Bounded local cpu projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "local_cpu",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.793,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "payment",
+          "timeout",
+          "remote"
+        ]
+      },
+      "integrity_hash": "sha256:26adc88e92dbccd6b178e6c7727d0b82667c3a50d030c8fc366dc25d12be31b0"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

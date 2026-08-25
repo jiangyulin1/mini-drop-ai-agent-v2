@@ -1,0 +1,65 @@
+{
+  "schema": "benchmark-agent.public-case.v1",
+  "case_id": "case-27",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "One profile sample is mis-scoped; the remaining aligned metrics point to a local CPU path.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-27-01",
+      "kind": "mis_scoped_profile",
+      "summary": "Bounded mis scoped profile projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:15b8a0e8a240fd97a336795f640e7f5a582855057d7bae001590b6a999bda9d2",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_profile_topn"
+      ]
+    },
+    {
+      "evidence_id": "ev-27-02",
+      "kind": "aligned_profile",
+      "summary": "Bounded aligned profile projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:d135171be8dd05f107b3de7ddfe43342de1e8981ab265c9df33283409ff0e8d2",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_profile_topn"
+      ]
+    },
+    {
+      "evidence_id": "ev-27-03",
+      "kind": "latency_context",
+      "summary": "Bounded latency context projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:bdd959076e39cd164bcb216cc4732e415cdd5ecc743229ce4b687590298b93e6",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

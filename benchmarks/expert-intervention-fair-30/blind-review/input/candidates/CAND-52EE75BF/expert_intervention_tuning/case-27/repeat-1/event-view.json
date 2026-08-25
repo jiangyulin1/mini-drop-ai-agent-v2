@@ -1,0 +1,370 @@
+{
+  "case_id": "case-27",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2832,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:54:29.765898Z"
+    },
+    {
+      "event_id": 2833,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-27-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "a3639f0e81af0370d4aff9054cd8281c92f9186bb5acc5af87db02c484a11065",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:54:29.840818Z"
+    },
+    {
+      "event_id": 2834,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-27-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "dec1dff5bb7c309c3a2558d7e4851e1c917f15a8289a916494c3719c8c3fca00",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:54:29.924522Z"
+    },
+    {
+      "event_id": 2835,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-27-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "03f8a994c133755b59183ccce3c4995734d22dc4dfa37e0882277eb758c2b10f",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:54:29.989544Z"
+    },
+    {
+      "event_id": 2836,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:54:30.046308Z"
+    },
+    {
+      "event_id": 2837,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_fe7b621561e4479eaf96575fa6b875a7",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "194fada57c11affe8687261b61af7b35355d40ada4a69e5c288c4590d80ef3bb"
+      },
+      "created_at": "2026-08-25T10:54:30.067753Z"
+    },
+    {
+      "event_id": 2838,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655270097",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655270097"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655270097",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:54:30.115671Z"
+    },
+    {
+      "event_id": 2839,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-35155e658b13ecae138ea31e",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655270097",
+        "content": "Evidence collected and analyzed. Summary of what the three ACTIVE projections show (all `github_pr_SOURCE_DERIVED`, `COMPLETE`, window T0..T1, sample_count=120):\n\n- **ev-27-01** `mis_scoped_profile` value 4.621 — the one mis-scoped profile sample (scope not aligned to target pid 12345/worker-1)\n- **ev-27-02** `aligned_profile` value 4.652 — aligned, observations `[\"scope\",\"aligned\",\"local\"]`\n- **ev-27-03** `latency_context` value 4.683 — aligned, observations `[\"scope\",\"aligned\",\"local\"]`\n\nThe aligned pair (4.652 / 4.683) is mutually consistent and scope-aligned to the target; the mis-scoped sample deviates (4.621) and its scope is not the target's. No causal graph, dependency graph, or gaps exist yet. Knowledge confirms method-only guidance (no runtime facts).\n\n```json\n{\n  \"conclusion\": \"The root cause is a local (in-process) CPU path on the target process (host-1, pid 12345, worker-1): the aligned profile and latency-context metrics are mutually consistent (4.652 / 4.683) and both carry observations scope=aligned, local, while the single mis-scoped profile sample ev-27-01 (4.621) is scope-misaligned and must be excluded from attribution; the remaining aligned metrics point to local CPU consumption rather than remote/network dependency.\",\n  \"root_location\": \"host-1 / service redacted-service / pid 12345 / worker-1, local in-process CPU path (code-level location unknown; no stack frames in evidence)\",\n  \"mechanism\": \"Target process 12345 on worker-1 spends CPU on a local code path, observed consistently by an aligned profile sample (ev-27-02, value 4.652) and latency context (ev-27-03, value 4.683) over window T0..T1 (120 samples). ev-27-01 is labeled mis_scoped_profile (value 4.621, slight deviation from the aligned pair), indicating its scope does not match the target pid/host/request dimensions, so it is an artifact rather than counter-evidence to the local CPU conclusion.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"Two independent scope-aligned evidence items (ev-27-02, ev-27-03) agree on a local CPU path with consistent magnitude and matching window, and the goal statement corroborates that only one sample is mis-scoped. However, all evidence is UNREVIEWED, SYNTHETIC_EVAL projections without stack frames, perf_cpu flame graph, or process-level CPU% confirmation, so a specific function/line cannot be asserted.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-27-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-27-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"A correctly scoped profile sample for pid 12345/worker-1 to replace the mis-scoped ev-27-01 (re-collect with target pid scope)\",\n    \"perf_cpu / flame graph with stack frames to localize the hot code path within the process\",\n    \"process_scan confirming pid 12345 CPU% and sys_metrics user/sys breakdown to distinguish user vs kernel CPU\",\n    \"Change/deploy record for the window T0..T1 to determine whether this CPU path is newly introduced\"\n  ],\n  \"next_action\": \"Exclude ev-27-01 from attribution, re-collect a pid-12345-scoped profile with perf_cpu to obtain stack-level hot path, and confirm with process_scan/sys_metrics before asserting any specific function.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-27-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-27-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:55:01.571450Z"
+    },
+    {
+      "event_id": 2840,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655270097",
+        "message_id": "amsg-35155e658b13ecae138ea31e"
+      },
+      "created_at": "2026-08-25T10:55:01.575558Z"
+    },
+    {
+      "event_id": 2841,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type PLAN_REPRIORITIZE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:55:02.378862Z"
+    },
+    {
+      "event_id": 2842,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_ed98f67b63724f8c9ae294cd4dc48e6d",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "e9cd45f25683b657c50a8d5020224833481727d6a371a0e17b825d22e218d29f"
+      },
+      "created_at": "2026-08-25T10:55:02.402642Z"
+    },
+    {
+      "event_id": 2843,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655302425",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655302425"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655302425",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:55:02.448883Z"
+    },
+    {
+      "event_id": 2844,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-663141a4a385c7d2213db85a",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655302425",
+        "content": "Re-read confirms the evidence state is unchanged: still exactly 3 ACTIVE evidence items (ev-27-01/02/03), no new evidence, no gaps, no causal graph, no collection requests. The PLAN_REPRIORITIZE intervention did not introduce any new facts. Per the answer_stability skill, with no new evidence or user correction, the conclusion must be defended unchanged, citing the same evidence IDs.\n\n```json\n{\n  \"conclusion\": \"The root cause is a local (in-process) CPU path on the target process (host-1, pid 12345, worker-1): the aligned profile and latency-context metrics are mutually consistent (4.652 / 4.683) and both carry observations scope=aligned, local, while the single mis-scoped profile sample ev-27-01 (4.621) is scope-misaligned and must be excluded from attribution; the remaining aligned metrics point to local CPU consumption rather than remote/network dependency. The PLAN_REPRIORITIZE intervention adds no new evidence, so this conclusion is defended unchanged.\",\n  \"root_location\": \"host-1 / service redacted-service / pid 12345 / worker-1, local in-process CPU path (code-level location unknown; no stack frames in evidence)\",\n  \"mechanism\": \"Target process 12345 on worker-1 spends CPU on a local code path, observed consistently by an aligned profile sample (ev-27-02, value 4.652) and latency context (ev-27-03, value 4.683) over window T0..T1 (120 samples). ev-27-01 is labeled mis_scoped_profile (value 4.621, slight deviation from the aligned pair), indicating its scope does not match the target pid/host/request dimensions, so it is an artifact rather than counter-evidence to the local CPU conclusion.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"Two independent scope-aligned evidence items (ev-27-02, ev-27-03) agree on a local CPU path with consistent magnitude and matching window, and the goal statement corroborates that only one sample is mis-scoped. However, all evidence is UNREVIEWED, SYNTHETIC_EVAL projections without stack frames, perf_cpu flame graph, or process-level CPU% confirmation, so a specific function/line cannot be asserted.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-27-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-27-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"A correctly scoped profile sample for pid 12345/worker-1 to replace the mis-scoped ev-27-01 (re-collect with target pid scope)\",\n    \"perf_cpu / flame graph with stack frames to localize the hot code path within the process\",\n    \"process_scan confirming pid 12345 CPU% and sys_metrics user/sys breakdown to distinguish user vs kernel CPU\",\n    \"Change/deploy record for the window T0..T1 to determine whether this CPU path is newly introduced\"\n  ],\n  \"next_action\": \"Honoring the reprioritized plan, the highest information gain step remains a pid-12345-scoped perf_cpu profile (R2, approval-gated) to obtain stack-level hot path, plus process_scan/sys_metrics to confirm process-level CPU; ev-27-01 stays excluded from attribution. No collection requested this READ_ONLY turn.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-27-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-27-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:55:13.511487Z"
+    },
+    {
+      "event_id": 2845,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655302425",
+        "message_id": "amsg-663141a4a385c7d2213db85a"
+      },
+      "created_at": "2026-08-25T10:55:13.516578Z"
+    }
+  ]
+}

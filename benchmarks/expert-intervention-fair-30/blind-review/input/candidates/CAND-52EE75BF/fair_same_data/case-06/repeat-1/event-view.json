@@ -1,0 +1,219 @@
+{
+  "case_id": "case-06",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2239,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:17:08.063175Z"
+    },
+    {
+      "event_id": 2240,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-06-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "4e286ff37484954d1eeb836260573903c995dff2cb033ae3c049eae6a4052643",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:17:08.122763Z"
+    },
+    {
+      "event_id": 2241,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-06-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "a83055d6b003a2d6379cc2736ae50785539cecff53b77a528dbc9be241a6fb0c",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:17:08.190962Z"
+    },
+    {
+      "event_id": 2242,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-06-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "0c53d87398c3a97f639a1afd3ecf82db9e0a90a08a23e031404cc5a2227f8421",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:17:08.264119Z"
+    },
+    {
+      "event_id": 2243,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:17:08.359442Z"
+    },
+    {
+      "event_id": 2244,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_6c9983d59ae944aa9f07237b0e710bac",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "d097127d1db5d4ce346caadc61bdcbc9255f18faf55b93a5ef24880465650bb6"
+      },
+      "created_at": "2026-08-25T10:17:08.399139Z"
+    },
+    {
+      "event_id": 2245,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653028440",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653028440"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653028440",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:17:08.461677Z"
+    },
+    {
+      "event_id": 2246,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-f0b0f0c773fe2618f0b01e42",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653028440",
+        "content": "## Investigation Summary\n\n**Evidence reviewed (all ACTIVE, all aligned to the same window T0..T1, 120 samples, same observations [\"pool\",\"queue\",\"critical section\"]):**\n\n- `eval:...:ev-06-01` — signal `pool_queue`, value 1.051\n- `eval:...:ev-06-02` — signal `runtime_wait_profile`, value 1.082\n- `eval:...:ev-06-03` — signal `request_latency`, value 1.113\n\nAll three normalized elevation scores are >1.0 and increase monotonically (pool queue → runtime wait → request latency), forming a coherent causal chain: burst → blocked pool acquisition (critical section) → elevated runtime wait → elevated request latency. Dependency graph, causal graph, and evidence gaps are all empty; no counter-evidence exists. Note: all evidence is `UNREVIEWED`/`SYNTHETIC_EVAL` with redacted dimensions and no baseline values.\n\n```json\n{\n  \"conclusion\": \"The observed incident is consistent with the case goal: during a traffic burst, incoming requests exceed the availability of the shared connection pool; requests block inside the pool/queue critical section while acquiring a connection, producing elevated pool-queue, runtime-wait, and request-latency signals in the same window (T0..T1, 120 samples).\",\n  \"root_location\": \"redacted-service (worker-1, pid 12345) shared connection pool acquire path — the pool/queue critical section where requests wait for a free connection.\",\n  \"mechanism\": \"A burst of concurrent requests saturates the shared connection pool. Worker threads enter the pool's critical section, find no free connection, and block on the pool queue (semaphore/lock). The queue backlog inflates pool_queue (1.051), manifests as elevated runtime wait profile for blocked threads (1.082), and propagates to end-to-end request latency (1.113). The monotonic signal ordering is consistent with queueing delay propagating up to user-visible latency.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"Three aligned signals (pool_queue, runtime_wait_profile, request_latency) from the same window T0..T1 with identical observations (pool, queue, critical section) are mutually consistent and directly match the case goal; no counter-evidence exists. Confidence is capped at medium because all evidence is UNREVIEWED, synthetic-eval derived, normalized scores without raw baselines, pool-size/concurrency facts, or downstream dependency state — so pool exhaustion due to slow downstream (rather than burst volume) cannot yet be excluded.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-06-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-06-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-06-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Raw pool metrics: active/max connections, db_pool_wait_ms distribution, queue depth over T0..T1\",\n    \"Baseline comparison: pre-burst vs during-burst P50/P95/P99 latency and pool wait percentiles\",\n    \"Burst magnitude: request rate / concurrency at T0..T1\",\n    \"Downstream health: whether the DB/upstream is slow, which would cause pool exhaustion rather than burst volume\",\n    \"Thread/process-level lock-wait confirmation (e.g., thread states blocked on pool acquire) for pid 12345\"\n  ],\n  \"next_action\": \"Read-only: continue with low-cost breadth confirmation by evaluating runtime_snapshot (thread states/lock waits) and sys_metrics on target_pid 12345 to confirm pool-acquire blocking and quantify queue depth; in a later writable cycle, propose a collection request for those probes to resolve the pool-exhaustion-vs-downstream-slow distinction.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-06-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-06-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-06-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:17:30.744643Z"
+    },
+    {
+      "event_id": 2247,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653028440",
+        "message_id": "amsg-f0b0f0c773fe2618f0b01e42"
+      },
+      "created_at": "2026-08-25T10:17:30.752758Z"
+    }
+  ]
+}

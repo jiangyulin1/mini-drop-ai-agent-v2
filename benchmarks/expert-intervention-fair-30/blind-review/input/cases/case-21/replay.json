@@ -1,0 +1,101 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-21",
+  "evidence": [
+    {
+      "evidence_id": "ev-21-01",
+      "kind": "scope_candidates",
+      "summary": "Bounded scope candidates projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "scope_candidates",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.601,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "scope",
+          "remote",
+          "edge"
+        ]
+      },
+      "integrity_hash": "sha256:ec61a077c8d977f9739fe29a73609c8421c71d406c058a8b33eebb01345317eb"
+    },
+    {
+      "evidence_id": "ev-21-02",
+      "kind": "span_edges",
+      "summary": "Bounded span edges projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "span_edges",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.632,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "scope",
+          "remote",
+          "edge"
+        ]
+      },
+      "integrity_hash": "sha256:fd400cf9de673278cddb45b8563df66c28f7560d0473cc1685136a7542a5f1b5"
+    },
+    {
+      "evidence_id": "ev-21-03",
+      "kind": "dependency_latency",
+      "summary": "Bounded dependency latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "dependency_latency",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.663,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "scope",
+          "remote",
+          "edge"
+        ]
+      },
+      "integrity_hash": "sha256:1280781b02c307f7035ad59d23a2df284afb8c8596a776b4c8e3208d53008940"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

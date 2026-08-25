@@ -1,0 +1,103 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-19",
+  "evidence": [
+    {
+      "evidence_id": "ev-19-01",
+      "kind": "source_a",
+      "summary": "Bounded source a projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "source_a",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.261,
+        "alignment": "partial",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "conflict",
+          "disagree",
+          "abstain"
+        ]
+      },
+      "integrity_hash": "sha256:ff387536c69f8ac5e6993276c53b68d5c4f7a970dd3aa4d203033cb5e5d2e116"
+    },
+    {
+      "evidence_id": "ev-19-02",
+      "kind": "source_b",
+      "summary": "Bounded source b projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "source_b",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.292,
+        "alignment": "partial",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "conflict",
+          "disagree",
+          "abstain"
+        ],
+        "claim": "downstream",
+        "conflicts_with": "ev-19-01"
+      },
+      "integrity_hash": "sha256:6329105240e75e3fa2a5b374d61d421e5ac4597dabcbdb89441711447c108043"
+    },
+    {
+      "evidence_id": "ev-19-03",
+      "kind": "quality_summary",
+      "summary": "Bounded quality summary projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "quality_summary",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.323,
+        "alignment": "partial",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "conflict",
+          "disagree",
+          "abstain"
+        ]
+      },
+      "integrity_hash": "sha256:a7b4c2888a4691b48e4c9bff7938886b1816c93f5d1d9612f208d62d7fb4f525"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

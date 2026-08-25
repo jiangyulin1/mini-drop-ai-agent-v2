@@ -1,0 +1,73 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-30",
+  "evidence": [
+    {
+      "evidence_id": "ev-30-01",
+      "kind": "baseline_comparison",
+      "summary": "Bounded baseline comparison projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "baseline_comparison",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 5.131,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "baseline",
+          "healthy",
+          "no incident"
+        ],
+        "baseline_delta": 0.02
+      },
+      "integrity_hash": "sha256:b6d542fa55db81e9a0f5e835fec042c9239896ef767a5fe879a2d386ee921237"
+    },
+    {
+      "evidence_id": "ev-30-02",
+      "kind": "quality_summary",
+      "summary": "Bounded quality summary projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "quality_summary",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 5.162,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "baseline",
+          "healthy",
+          "no incident"
+        ],
+        "baseline_delta": 0.02
+      },
+      "integrity_hash": "sha256:f26d5965119e20c913d1cd51a3718d935afb6a2a5f8af2a91b87fa3d289aee96"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

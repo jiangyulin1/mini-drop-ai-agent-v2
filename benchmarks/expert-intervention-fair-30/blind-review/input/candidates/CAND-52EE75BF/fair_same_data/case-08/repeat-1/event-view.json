@@ -1,0 +1,219 @@
+{
+  "case_id": "case-08",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2257,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:17:58.192943Z"
+    },
+    {
+      "event_id": 2258,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "7dcba95b43162d8af9a0dae759ef9229a9191b3ee830a571952342d5b3677cc0",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:17:58.264197Z"
+    },
+    {
+      "event_id": 2259,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "183e24433aa8754a9c6eca998acc6f0a53aa38efc5af300373b4809a4c0ee579",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:17:58.331381Z"
+    },
+    {
+      "event_id": 2260,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "cf55082712431ffc7800bc2fa72fd071c94ed3babdd7fb12f26c0896a4c68fec",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:17:58.402826Z"
+    },
+    {
+      "event_id": 2261,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:17:58.462509Z"
+    },
+    {
+      "event_id": 2262,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_6acfed8536904d4d8ca368ecc6a3fc04",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "99c02994446a09aa7be052de920036be198da4d7f9d536d503b7186b9825e1ea"
+      },
+      "created_at": "2026-08-25T10:17:58.483458Z"
+    },
+    {
+      "event_id": 2263,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653078509",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653078509"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653078509",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:17:58.527533Z"
+    },
+    {
+      "event_id": 2264,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-82c412f8ddfa1ebe0f533bc7",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653078509",
+        "content": "```json\n{\n  \"conclusion\": \"Elevated network errors, retry rate, and degraded route health are simultaneously present in window T0..T1, consistent with packet loss on a single route driving transport-level loss/retransmits, subsequent request failures, increased retries, and higher tail latency. All three aligned signals (network_errors=1.391, retry_rate=1.422, route_health=1.453, each above baseline, 120 samples) point to the same loss/retransmit/route mechanism.\",\n  \"root_location\": \"A single network route in the target environment (service/host/request_id redacted in evidence); the affected route is the location of the packet-loss fault that cascades into retries and tail latency. Route-level identifiers are not yet exposed in evidence.\",\n  \"mechanism\": \"Packet loss on one route -> transport-level loss and retransmits -> network errors -> failed/retried requests -> elevated retry_rate and tail latency; route health degrades concurrently. Evidence supports the loss -> retransmit -> route degradation path described in the case goal, but a verified causal chain is not yet established (causal/dependency graphs are empty).\",\n  \"confidence\": \"MEDIUM\",\n  \"confidence_reason\": \"Three evidence items (ev-08-01/02/03) are mutually consistent and time-aligned (same T0..T1 window, 120 samples, identical observations of loss/retransmit/route), and each signal value is above the 1.0 baseline, supporting the stated mechanism. However, the evidence is synthetic evaluation projection data (trust_level=SYNTHETIC_EVAL, UNREVIEWED, derived_trust_score=50), dimensions are redacted, no direct tail-latency percentile or per-route packet-loss/retransmit counters are present, and the causal/dependency graphs have no nodes/edges, so the causal ordering and route identity are not yet verified.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-08-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-08-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-08-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Route-level packet loss and retransmit counters for the affected route (which route/endpoint)\",\n    \"Tail-latency percentiles (P50/P95/P99) on the affected route to directly confirm the tail-latency increase\",\n    \"Per-route retry success/failure breakdown and whether retry budgets were exhausted\",\n    \"Baseline (pre-window) values for network_errors, retry_rate, route_health for comparison\",\n    \"Causal/dependency graph nodes or service.connection / system.metrics evidence linking loss to retries causally\",\n    \"Identification of the affected service/host (currently redacted)\"\n  ],\n  \"next_action\": \"READ_ONLY: continue analysis by seeking route-level telemetry (packet loss/retransmit counters, connection-level metrics, latency percentiles) among existing evidence via query operations system.metrics/service.connection; no collection or mutation requested under READ_ONLY policy.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-08-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-08-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-08-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:18:19.523265Z"
+    },
+    {
+      "event_id": 2265,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653078509",
+        "message_id": "amsg-82c412f8ddfa1ebe0f533bc7"
+      },
+      "created_at": "2026-08-25T10:18:19.527760Z"
+    }
+  ]
+}

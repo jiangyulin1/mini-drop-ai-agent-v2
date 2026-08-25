@@ -1,0 +1,101 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-23",
+  "evidence": [
+    {
+      "evidence_id": "ev-23-01",
+      "kind": "filesystem_usage",
+      "summary": "Bounded filesystem usage projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "filesystem_usage",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.941,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "spool",
+          "disk",
+          "retries"
+        ]
+      },
+      "integrity_hash": "sha256:38bc72c134ae90d6214a9f42de1bacb66ab7b649810d54f81ae30a99e8399efe"
+    },
+    {
+      "evidence_id": "ev-23-02",
+      "kind": "device_latency",
+      "summary": "Bounded device latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "device_latency",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 3.972,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "spool",
+          "disk",
+          "retries"
+        ]
+      },
+      "integrity_hash": "sha256:170388c36685c197e39643e8c28fa124435dc0714b2f975e4bd48ff0dab382cc"
+    },
+    {
+      "evidence_id": "ev-23-03",
+      "kind": "retry_rate",
+      "summary": "Bounded retry rate projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "retry_rate",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 4.003,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "spool",
+          "disk",
+          "retries"
+        ]
+      },
+      "integrity_hash": "sha256:e6add62b61021e303a628eb158424ae79777a7f5be445ddfa3a3c2b4c3a6c357"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

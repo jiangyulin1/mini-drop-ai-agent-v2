@@ -1,0 +1,219 @@
+{
+  "case_id": "case-24",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2399,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:25:40.017956Z"
+    },
+    {
+      "event_id": 2400,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-24-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "835e361beb347c024d9172b36d5c9cb9ab467eacae3a3a27f6bf3810d68c8723",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:25:40.093681Z"
+    },
+    {
+      "event_id": 2401,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-24-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "7a2938e62fe4a3340896aac47e71a1e9bca57218ea34e695f5cc4f75e3ad9774",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:25:40.164131Z"
+    },
+    {
+      "event_id": 2402,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-24-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "4e28d4a94b68b5b396e2243a6cf3b75760aeb5f1f3847448b85ab467eb31cde1",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:25:40.241837Z"
+    },
+    {
+      "event_id": 2403,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:25:40.314624Z"
+    },
+    {
+      "event_id": 2404,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_21e6ad5cd06c4816b5227389ebb5917f",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "d9189cbf7402beb57051c9ae321f862da2d1fc4fa283c65c58b9d64988c64b4a"
+      },
+      "created_at": "2026-08-25T10:25:40.337051Z"
+    },
+    {
+      "event_id": 2405,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653540505",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653540505"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653540505",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:25:40.522993Z"
+    },
+    {
+      "event_id": 2406,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-94192b31567e6815bf5a9c82",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653540505",
+        "content": "## Investigation Summary\n\nI reviewed the case evidence. All three available evidence items (`ev-24-01`, `ev-24-02`, `ev-24-03`) are ACTIVE, COMPLETE, aligned over the same T0..T1 window (120 samples each), and consistently tagged with observations `[\"neighbor\",\"downstream\",\"two contributors\"]` — matching the case goal (host neighbor CPU consumption + downstream saturation). Causal graph and dependency graph are empty/insufficient coverage; no gaps registered; no profile or process-level evidence exists yet.\n\n```json\n{\n  \"conclusion\": \"The incident is a host-level CPU contention event on host-1: a host neighbor process consumes CPU (host_cpu_by_process, ev-24-01, value 4.111, contributor 'neighbor'), and the downstream dependency shows saturation (dependency_latency, ev-24-02, value 4.142) with the target service latency also elevated in the same window (target_latency, ev-24-03, value 4.173). All three signals are aligned over the identical T0..T1 window with consistent observation tags identifying two contributors ('neighbor', 'downstream'). The target process pid 12345 is not indicated as the primary CPU consumer; the anomaly is attributed to a neighbor on the shared host.\",\n  \"root_location\": \"host-1 (shared host) - neighbor process consuming CPU; downstream dependency on the same saturation path; not the target pid 12345 itself\",\n  \"mechanism\": \"A neighbor process on host-1 consumes significant CPU, driving host-level CPU saturation. The co-located target service and its downstream dependency are affected by the contention/starvation, producing simultaneous saturation in dependency_latency and target_latency within the same window. Observation tags indicate two contributors (neighbor + downstream) to the correlated anomaly; causal ordering (host contention -> downstream saturation -> target latency) is the leading mechanism but is not yet proven at process level.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"Three signals (host_cpu_by_process, dependency_latency, target_latency) are aligned on the same window with near-equal magnitudes (4.111/4.142/4.173) and consistent observations ('neighbor','downstream','two contributors'), corroborating the case goal's attribution. However, all evidence is UNREVIEWED synthetic evaluation projections with redacted service/host/request_id dimensions; there is no process-level identification of the neighbor PID, no host saturation/steal metrics, no CPU profile, and no dependency topology, so the exact mechanism and ordering are not fully proven.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-24-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-24-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-24-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"process_scan inventory on host-1 to identify the neighbor PID and confirm it is distinct from target pid 12345\",\n    \"sys_metrics for host-1 showing CPU saturation / steal / load within T0..T1\",\n    \"perf_cpu profile of the neighbor (and target) to prove the CPU hotspot location\",\n    \"dependency graph / network topology confirming the target->downstream relationship and whether the downstream shares host-1\",\n    \"baseline latency percentiles to confirm regression vs normal state\"\n  ],\n  \"next_action\": \"In the next cycle, register low-cost R1 collectors (process_scan + sys_metrics on host-1, network_discovery from pid 12345) to resolve the neighbor PID and downstream topology, then propose perf_cpu on the confirmed neighbor to prove the hotspot.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-24-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-24-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-24-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:26:27.493087Z"
+    },
+    {
+      "event_id": 2407,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653540505",
+        "message_id": "amsg-94192b31567e6815bf5a9c82"
+      },
+      "created_at": "2026-08-25T10:26:27.496819Z"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "schema": "benchmark-agent.public-case.v1",
+  "case_id": "case-16",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "Periodic reconciliation misses its deadline without sustained CPU saturation.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-16-01",
+      "kind": "scheduler_ticks",
+      "summary": "Bounded scheduler ticks projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:fa6d1f5663d881711f636798a69424dc10c86362b146b9799d5e43f7c23afe0d",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-16-02",
+      "kind": "deadline_misses",
+      "summary": "Bounded deadline misses projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:e37c0decaa0703f96177b1958393fa9ae90c33028d9c7ebb1f360892a28b9139",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-16-03",
+      "kind": "run_queue",
+      "summary": "Bounded run queue projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:8457df24a20e6d8ea12620343ac795861189451b67b8a886630df72c096b1652",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

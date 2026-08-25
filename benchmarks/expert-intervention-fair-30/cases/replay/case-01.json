@@ -1,0 +1,71 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-01",
+  "evidence": [
+    {
+      "evidence_id": "ev-01-01",
+      "kind": "cpu_profile_topn",
+      "summary": "Bounded cpu profile topn projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_profile_topn"
+      ],
+      "projection": {
+        "signal": "cpu_profile_topn",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 0.201,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "cpu hotspot",
+          "self time",
+          "bounded path"
+        ]
+      },
+      "integrity_hash": "sha256:ffca677be9ffc61cea09691eff3d0dd7913bc8be00837007b62063016166a1d5"
+    },
+    {
+      "evidence_id": "ev-01-02",
+      "kind": "latency_context",
+      "summary": "Bounded latency context projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "latency_context",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 0.232,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "cpu hotspot",
+          "self time",
+          "bounded path"
+        ]
+      },
+      "integrity_hash": "sha256:82d5770f43c04de8aba59149a6d65553cf08b648e64973045739fa3089751482"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

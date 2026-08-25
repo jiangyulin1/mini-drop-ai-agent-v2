@@ -142,7 +142,11 @@ describe("CanonicalCaseWorkspace", () => {
     expect(screen.getByRole("tab", { name: "依赖关系，覆盖有限，1 项" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "受引用分析，需处理，3 项" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "恢复建议，可查看，1 项" })).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(7);
+    expect(screen.getByRole("tab", { name: "因果图，暂无数据，0 项" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "假设，暂无数据，0 项" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Evidence 缺口，暂无数据，0 项" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "采集执行，暂无数据，0 项" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tab")).toHaveLength(11);
     expect(container.querySelector(".ccw-stagebar .is-done")).toBeNull();
   });
 

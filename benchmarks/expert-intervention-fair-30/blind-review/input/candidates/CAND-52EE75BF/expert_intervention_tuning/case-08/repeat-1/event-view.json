@@ -1,0 +1,418 @@
+{
+  "case_id": "case-08",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2560,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:39:25.026674Z"
+    },
+    {
+      "event_id": 2561,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "7dcba95b43162d8af9a0dae759ef9229a9191b3ee830a571952342d5b3677cc0",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:39:25.096688Z"
+    },
+    {
+      "event_id": 2562,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "183e24433aa8754a9c6eca998acc6f0a53aa38efc5af300373b4809a4c0ee579",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:39:25.154483Z"
+    },
+    {
+      "event_id": 2563,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "cf55082712431ffc7800bc2fa72fd071c94ed3babdd7fb12f26c0896a4c68fec",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:39:25.223651Z"
+    },
+    {
+      "event_id": 2564,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:39:25.289720Z"
+    },
+    {
+      "event_id": 2565,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_f1fd28b89e49489ca331631ec4c8dae2",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "f840c9e2daadb4b74f5e9e06bbd43816a94eb694cc409594426f66b2ee5c7fa4"
+      },
+      "created_at": "2026-08-25T10:39:25.311579Z"
+    },
+    {
+      "event_id": 2566,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654365338",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654365338"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654365338",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:39:25.352738Z"
+    },
+    {
+      "event_id": 2567,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-7e9c3708a4d8082aa86d6bff",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654365338",
+        "content": "All three evidence projections carry aligned content (I already have the projection bodies from `get_evidence_projection`; the `compare_evidence` summary view exposes only empty signal maps, while the projection content confirms the values). The investigation tree endpoint returned HTTP 500 and there are no hypotheses, causal/dependency edges, gaps, or collection requests yet.\n\nAnalysis of the evidence:\n- `ev-08-01` network_errors = 1.391, 120 samples, window T0..T1, observations [loss, retransmit, route]\n- `ev-08-02` retry_rate = 1.422, 120 samples, same window, same observations\n- `ev-08-03` route_health = 1.453, 120 samples, same window, same observations\n\nThree independently-derived signals are aligned on the same window with the same loss/retransmit/route observations, consistent with the case goal. Route identity and latency percentiles are not directly evidenced.\n\n```json\n{\n  \"conclusion\": \"Packet loss on a single network route is the primary driver: during window T0..T1 the target service (redacted-service, host-1, worker-1, pid 12345) shows concurrently elevated network errors (1.391x), elevated retry rate (1.422x), and degraded route health (1.453x), all with matching observations of 'loss'/'retransmit'/'route'. This is consistent with the goal that loss on one route inflates retries and tail latency. The route is the fault location; the service's retry/latency degradation is a downstream effect rather than the root cause.\",\n  \"root_location\": \"One specific network route used by redacted-service (host-1/worker-1, pid 12345); the route/host/request dimensions are redacted in the evidence, so the exact route/endpoint identity is not yet resolved.\",\n  \"mechanism\": \"Packet loss on the affected route causes transport-level retransmits ('loss','retransmit' observations), which manifest as elevated network_error and degraded route_health signals; errors/timeouts on that route trigger the service's retry logic (retry_rate elevated in the same window), and the added retransmission plus retry delay increases observed tail latency. The three aligned signals (ev-08-01/02/03) support this chain but do not by themselves prove the tail-latency magnitude.\",\n  \"confidence\": \"MEDIUM (0.55)\",\n  \"confidence_reason\": \"Three distinct signals (network_errors, retry_rate, route_health) are mutually consistent, time-aligned, and share the same loss/retransmit/route observations, which strongly supports loss-on-one-route as the driver. Confidence is capped because the evidence is synthetic evaluation projection (SYNTHETIC_EVAL, UNREVIEWED, trust 50), dimensions are redacted (no route/endpoint identity, no request-level data), and there is no direct evidence of latency percentiles, retransmit rate, or baseline comparison.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-08-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-08-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-08-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Route identity / topology for the affected route (which route, which peer/endpoint)\",\n    \"P50/P95/P99 latency percentiles for T0..T1 vs baseline to quantify tail-latency impact\",\n    \"Per-route packet loss % and TCP retransmit rate (to confirm loss is on one route only)\",\n    \"Retry counts by endpoint/error type (to distinguish transport retransmit vs application-level retry)\",\n    \"Baseline values for the three signals to confirm the ~1.4x elevations are abnormal\"\n  ],\n  \"next_action\": \"READ_ONLY turn: no collection or mutation performed. On the next authorized cycle, propose an R1 collection request for route-level telemetry via system.metrics/service.connection (per-route loss %, retransmit rate, P50/P95/P99 latency, retry count by endpoint) to resolve the redacted route identity and quantify the tail-latency effect; re-evaluate this conclusion only with that new evidence.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-08-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-08-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-08-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:39:57.101634Z"
+    },
+    {
+      "event_id": 2568,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654365338",
+        "message_id": "amsg-7e9c3708a4d8082aa86d6bff"
+      },
+      "created_at": "2026-08-25T10:39:57.105446Z"
+    },
+    {
+      "event_id": 2569,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "evidence_reviewed",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-01",
+        "decision": "EXCLUDED",
+        "review_revision": 1,
+        "previous_status": "ACTIVE",
+        "lifecycle_status": "EXCLUDED",
+        "trust_state": "UNREVIEWED",
+        "invalidated_analysis_runs": 0,
+        "held_recovery_plan_ids": [],
+        "resumed_recovery_plan_ids": [],
+        "propagation": {
+          "edge_status": "INVALIDATED",
+          "invalidated_hypotheses": [],
+          "affected_hypotheses": [],
+          "invalidated_claims": [],
+          "affected_claims": [],
+          "remaining_active_support": {}
+        },
+        "tree_propagation": {
+          "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-08-01",
+          "invalidated_nodes": [],
+          "abandoned_nodes": [],
+          "reason": "EVIDENCE_REVIEW_EXCLUDED"
+        },
+        "chain_impact": "WEAKENED",
+        "reopen_policy": "AUTO_RECALIBRATE",
+        "blocked_reason": null,
+        "restart_approval_required": false,
+        "runtime_fence": {
+          "affected_cycle_ids": [],
+          "affected_model_request_ids": [],
+          "affected_turn_ids": [],
+          "affected_proposal_ids": [],
+          "affected_task_ids": [],
+          "affected_plan_step_ids": [],
+          "runtime_generation": 2
+        }
+      },
+      "created_at": "2026-08-25T10:39:58.714320Z"
+    },
+    {
+      "event_id": 2570,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type EVIDENCE_REVIEW has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:39:58.815281Z"
+    },
+    {
+      "event_id": 2571,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_9d77084f6bd847e6a63aeb6f28f289bc",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "6fb119807bd91cdfa3401ccea15c7b0ed61c2d529a3a462ac88e61b4c975e30a"
+      },
+      "created_at": "2026-08-25T10:39:58.845730Z"
+    },
+    {
+      "event_id": 2572,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654398872",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654398872"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654398872",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:39:58.893072Z"
+    },
+    {
+      "event_id": 2573,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-0dafc8c6cac81ea428013fe7",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654398872",
+        "content": "## 结论 / 证据依据 / 仍缺失的事实 / 下一步\n\n**EVIDENCE_REVIEW 处理结果**：已重新读取 Case Snapshot 与 Evidence 列表（watermark=3，2 条 ACTIVE、1 条 EXCLUDED），并展开两条 evaluation_projection 的内容。\n\n### 结论\n\n**Primary（与 Case Goal 对齐，假设级支持，未到因果确认）：** 单一路由上的丢包（observations 含 `loss`/`retransmit`/`route`）导致重传与重试增加，在窗口 T0..T1 内表现为 `retry_rate` 抬升至 1.422、`route_health` 恶化至 1.453（均 >1.0 基线，120 样本、aligned），与\"重试和尾部延迟随单路由丢包上升\"的目标一致。**无 Counterevidence。**\n\n**明确 abstain 的部分：** ① 尾部延迟（P99 等）在本轮无直接信号，仅能作为重试的推断后果；② 受影响路由/端点的具体身份因 `redacted_dimensions`（service/host/request_id）无法确认；③ 丢包根因（网络层 vs 服务层、路由切换/拥塞）未证实；④ 因果方向为推断（causal_graph 为空，仅依赖两条时间对齐投影）。\n\n### 证据依据（仅使用 ACTIVE Evidence）\n\n| Evidence ID | 信号 | 窗口 | 样本 | 值 | 观测关键词 | 状态 |\n|---|---|---|---|---|---|---|\n| `eval:case_...:ev-08-02` | `retry_rate` | T0..T1 | 120 | **1.422** | loss, retransmit, route | ACTIVE / UNREVIEWED / COMPLETE |\n| `eval:case_...:ev-08-03` | `route_health` | T0..T1 | 120 | **1.453** | loss, retransmit, route | ACTIVE / UNREVIEWED / COMPLETE |\n\n- `ev-08-01` 为 EXCLUDED，不纳入论证。\n- 两条投影为 `github_pr_SOURCE_DERIVED` 合成评估数据（trust_level=SYNTHETIC_EVAL），仅支持\"现象一致\"级别结论；`compare_evidence` 的 signals 为空，无法做更多维度对比。\n- 检索到的 operator knowledge 明确 `knowledge_is_evidence=false`，仅作调查背景，不作为事实依据。\n\n### 仍缺失的事实（Gap）\n\n1. 直接尾部延迟信号（P50/P95/P99 或 tail latency）——目前仅有 retry_rate/route_health 两个代理信号。\n2. 受影响路由/对端端点身份（维度被 redact）。\n3. 丢包层定位（网络层丢包/重传计数 vs 服务层超时重试）与根因（路由拥塞、切换、抖动）。\n4. 两条信号与目标进程/服务的绑定确认（无 dependency/causal graph，coverage=insufficient_coverage）。\n\n### 下一步\n\n- 本回合为 READ_ONLY，**不发起任何 CollectionRequest**。\n- 下一周期按 strategy_guidance 选择信息增益最高的已注册探针，建议：`service.logs` 或 `system.metrics`（如丢包/重传计数、路由级 RTT、P99 延迟）来填补上述 Gap 1–2；预算充足（8 个 collection requests / 240s 未用）。\n- 若后续出现新证据推翻或补充，将按 answer_stability 复用本文 Evidence ID 与措辞更新，否则保持本结论不变。\n\n```json\n{\n  \"answer_version\": 1,\n  \"case_id\": \"CASE_INTERNAL_REDACTED\",\n  \"intervention\": \"EVIDENCE_REVIEW\",\n  \"conclusion\": {\n    \"primary\": {\n      \"claim\": \"单一路由丢包导致重传/重试增加，推高 retry_rate(1.422) 与 route_health(1.453)，与重试与尾部延迟上升现象一致\",\n      \"confidence\": \"ALIGNED_HYPOTHESIS_NOT_CAUSALLY_CONFIRMED\",\n      \"supporting_evidence\": [\n        \"eval:CASE_INTERNAL_REDACTED:ev-08-02\",\n        \"eval:CASE_INTERNAL_REDACTED:ev-08-03\"\n      ],\n      \"counterevidence\": []\n    },\n    \"abstentions\": [\n      \"尾部延迟(P99)无直接证据，仅为重试的推断后果\",\n      \"受影响路由/端点身份被 redact，无法定位\",\n      \"丢包根因层(网络 vs 服务)未证实\",\n      \"因果方向为推断(causal_graph 为空)\"\n    ]\n  },\n  \"evidence_basis\": {\n    \"active\": [\n      {\"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-08-02\", \"signal\": \"retry_rate\", \"value\": 1.422, \"samples\": 120, \"window\": \"T0..T1\", \"observations\": [\"loss\", \"retransmit\", \"route\"], \"status\": \"ACTIVE_UNREVIEWED_COMPLETE\"},\n      {\"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-08-03\", \"signal\": \"route_health\", \"value\": 1.453, \"samples\": 120, \"window\": \"T0..T1\", \"observations\": [\"loss\", \"retransmit\", \"route\"], \"status\": \"ACTIVE_UNREVIEWED_COMPLETE\"}\n    ],\n    \"excluded\": [\"eval:CASE_INTERNAL_REDACTED:ev-08-01\"]\n  },\n  \"missing_facts\": [\n    \"直接尾部延迟信号(P50/P95/P99)\",\n    \"受影响路由/端点身份(redacted)\",\n    \"丢包层定位与根因(网络 vs 服务)\",\n    \"信号与服务/进程的绑定确认\"\n  ],\n  \"next_steps\": [\n    \"READ_ONLY 回合：不发起数据采集\",\n    \"下一周期：对注册探针按信息增益选择 service.logs 或 system.metrics，采集路由级丢包/重传计数与 P99 延迟\",\n    \"沿用固定结论结构，无新证据不改写结论\"\n  ],\n  \"side_effect_policy\": \"READ_ONLY\"\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-08-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-08-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:40:30.637201Z"
+    },
+    {
+      "event_id": 2574,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 15,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654398872",
+        "message_id": "amsg-0dafc8c6cac81ea428013fe7"
+      },
+      "created_at": "2026-08-25T10:40:30.641132Z"
+    }
+  ]
+}

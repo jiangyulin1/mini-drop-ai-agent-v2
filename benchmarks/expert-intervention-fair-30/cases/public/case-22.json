@@ -1,0 +1,65 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-22",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "A retention increase amplifies lock wait and causes a concurrency collapse.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-22-01",
+      "kind": "heap_retainers",
+      "summary": "Bounded heap retainers projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:0b05df1057a8dc21d69a4bf2db5f2de0acef81aa2a94bf214fb69f5bfa0c57a9",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-22-02",
+      "kind": "runtime_wait_profile",
+      "summary": "Bounded runtime wait profile projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:b3cc499ca30d491b60c00292d52d1b8fbc9747282e34b43266992eedc76acab1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_profile_topn"
+      ]
+    },
+    {
+      "evidence_id": "ev-22-03",
+      "kind": "throughput_context",
+      "summary": "Bounded throughput context projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:042c369abae6938932a579a89963a7a006e09efb7fd3076e6447e21b1fa355aa",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

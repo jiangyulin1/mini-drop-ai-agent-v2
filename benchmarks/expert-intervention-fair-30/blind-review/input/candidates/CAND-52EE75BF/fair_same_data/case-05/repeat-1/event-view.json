@@ -1,0 +1,219 @@
+{
+  "case_id": "case-05",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2230,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:16:24.161044Z"
+    },
+    {
+      "event_id": 2231,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-05-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "c9288168cecd377e6280c1650417930c739ba2c91245311e27c69f462a8d0961",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:16:24.225582Z"
+    },
+    {
+      "event_id": 2232,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-05-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "d21d4b29f50d2ed7b0096fb49b402800ea8c48599b8c75c5dbef76cbf99d96af",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:16:24.296754Z"
+    },
+    {
+      "event_id": 2233,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-05-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "a9f19682e18b7f36fce2b3fe1cd744b466b204f4ad679a42f2d1a5343d860207",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:16:24.370539Z"
+    },
+    {
+      "event_id": 2234,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:16:24.444344Z"
+    },
+    {
+      "event_id": 2235,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_d2fb514ccc3647a0986f8a35f5955ab3",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "566c6b5efd9c1cad4fae38d2fd1f5591a55dbb7a4ae43179e52930feb13d5c18"
+      },
+      "created_at": "2026-08-25T10:16:24.467369Z"
+    },
+    {
+      "event_id": 2236,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787652984498",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787652984498"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787652984498",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:16:24.512102Z"
+    },
+    {
+      "event_id": 2237,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-78bb0cc5399ba159296499ac",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787652984498",
+        "content": "Based on my reads of the case state, all three active evidence items (`ev-05-01` runtime_wait_profile=0.881, `ev-05-02` throughput_context=0.912, `ev-05-03` cpu_utilization=0.943) are aligned over the same T0..T1 window with observations `[\"mutex\",\"wait\",\"owner\"]`, forming a consistent lock-contention signature for the stated problem (throughput falls as concurrency rises while CPU stays available).\n\n```json\n{\n  \"conclusion\": \"吞吐量随并发升高而下降、CPU 却有空闲，主因是服务热路径上的共享互斥锁（mutex/futex）竞争：并发线程在锁上串行化并阻塞等待，运行时等待占比极高（runtime_wait_profile≈0.88，观测均为 mutex/wait/owner），吞吐随并发上升反而下降（throughput_context≈0.91），而等待线程处于 parked/阻塞状态不消耗 CPU，因此 CPU 表现为可用。属典型粗粒度锁/单一共享临界区导致的扩展性瓶颈，而非 CPU 或 I/O 饱和。\",\n  \"root_location\": \"redacted-service (worker-1, pid 12345) 请求处理热路径中的被竞争共享 mutex 及其保护临界区；证据只能定位到 mutex/wait/owner 这一锁竞争层级，无法定位到具体代码行（无火焰图/调用栈采样）。\",\n  \"mechanism\": \"随着并发升高，更多线程争抢同一把互斥锁：持锁线程在临界区内串行执行，其余线程在 futex 上阻塞等待（observations=['mutex','wait','owner'] 在三个对齐信号中一致出现）。等待线程不占用 CPU，故主机 CPU 仍显示可用/未饱和；但请求完成率受锁持有时间×争抢次数限制，表现为吞吐随并发上升反而下降。三个信号（runtime_wait_profile=0.881、throughput_context=0.912、cpu_utilization=0.943）在同一 T0..T1 窗口内对齐，佐证等待事件与吞吐退化、CPU 行为同源。\",\n  \"confidence\": 0.65,\n  \"confidence_reason\": \"三条 ACTIVE 证据（ev-05-01/02/03）在相同时间窗内对齐且观测一致指向 mutex/wait/owner，机制层面（锁竞争导致串行化与吞吐退化）证据强；但证据为 SYNTHETIC_EVAL、UNREVIEWED（derived_trust_score=50），且缺少调用栈/火焰图定位具体锁点、缺少 sys_metrics 验证 CPU 空闲与线程态占比、缺少并发-吞吐扫描曲线，因此根因位置的置信度下调。\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"定位被竞争互斥锁具体代码位置的调用栈采样（perf_cpu 火焰图 / runtime_snapshot 线程状态与锁等待）\",\n    \"主机与进程级 sys_metrics（CPU 空闲/饱和、线程阻塞 vs 运行占比、FD/负载基线）以证实 CPU 确实可用而非被自旋消耗\",\n    \"并发度→吞吐曲线与对应锁等待占比的扫描数据（证明随并发升高等待占比单调上升）\",\n    \"该锁/临界区是否为近期变更引入的变更记录（PR/deploy 时间线，case 目标即 github_pr_SOURCE_DERIVED）\",\n    \"process_scan 对 pid 12345 的运行时/进程身份确认\"\n  ],\n  \"next_action\": \"本 turn 为 READ_ONLY，禁止发起采集；建议在下一个可写 cycle 对 pid 12345 请求已注册的只读采集器：runtime_snapshot（R1，锁等待/线程态）、perf_cpu（R2，调用栈定位锁点）、sys_metrics（R1，CPU 空闲验证），以将根因从‘共享互斥锁竞争’收敛到具体临界区代码。\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-05-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-05-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-05-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:17:05.950277Z"
+    },
+    {
+      "event_id": 2238,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787652984498",
+        "message_id": "amsg-78bb0cc5399ba159296499ac"
+      },
+      "created_at": "2026-08-25T10:17:05.958283Z"
+    }
+  ]
+}

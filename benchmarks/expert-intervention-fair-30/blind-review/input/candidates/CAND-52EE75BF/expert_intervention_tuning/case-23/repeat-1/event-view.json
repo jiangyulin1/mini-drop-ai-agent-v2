@@ -1,0 +1,418 @@
+{
+  "case_id": "case-23",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2774,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:50:42.217943Z"
+    },
+    {
+      "event_id": 2775,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "0a6b42db96fbaf2ff20a1bfe7d6508866a9c50d76b0343f72f4fb1007088b7a3",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:50:42.285330Z"
+    },
+    {
+      "event_id": 2776,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "35aa40ce7697e8dacb5a246706e470f74444a0a104d82cee0d63f61b9a612d1c",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:50:42.368371Z"
+    },
+    {
+      "event_id": 2777,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "b3a2ca2c7253ef3f128f18facb9ac6eac128274fc2e9086bb2af863df284f6eb",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:50:42.460013Z"
+    },
+    {
+      "event_id": 2778,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:50:42.528290Z"
+    },
+    {
+      "event_id": 2779,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_b23a7ab2175641fc877f1ddafb0185f7",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "e8d46414b2405e9fa1f66063199942855b3ee8a12475cc42b77b776692166c5b"
+      },
+      "created_at": "2026-08-25T10:50:42.563391Z"
+    },
+    {
+      "event_id": 2780,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655042603",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655042603"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655042603",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:50:42.628090Z"
+    },
+    {
+      "event_id": 2781,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-6bd1dcbf7887676c3429e2d5",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655042603",
+        "content": "All evidence inspected. Three aligned, same-window evaluation projections all reference `spool/disk/retries`; knowledge search returned only unrelated background (explicitly non-evidence). No causal graph, hypotheses, or gaps exist yet. Evidence is synthetic/historical/unreviewed, so I'll answer with moderate confidence and explicit gaps.\n\n```json\n{\n  \"conclusion\": \"The incident is consistent with the stated mechanism: the service's local spool (host-1, redacted-service, worker-1) is at full capacity, adding disk I/O delay, and the resulting timeouts drive retries that increase network traffic. All three aligned signals in window T0..T1 are elevated together and share the observations [spool, disk, retries], matching the case goal.\",\n  \"root_location\": \"Local spool/disk I/O path on host-1 used by redacted-service (target_pid 12345, worker-1); exact device/spool path is redacted in the evidence.\",\n  \"mechanism\": \"Spool capacity becomes full -> device/disk I/O latency increases (ev-23-02, elevated) as writes/reads to the full spool queue and block -> operations exceed timeouts -> retry logic re-transmits -> retry rate and network traffic rise (ev-23-03, elevated), with filesystem_usage also elevated (ev-23-01). The three signals are co-occurring in the same aligned window, consistent with spool-full causing I/O delay and retries amplifying network traffic.\",\n  \"confidence\": 0.55,\n  \"confidence_reason\": \"All three ACTIVE evidence items (ev-23-01 filesystem_usage=3.941, ev-23-02 device_latency=3.972, ev-23-03 retry_rate=4.003) are elevated in the same aligned window T0..T1 and uniformly reference spool/disk/retries, directly matching the case goal. However, the evidence is SYNTHETIC_EVAL, HISTORICAL, UNREVIEWED (derived_trust_score=50) with redacted service/host/request_id dimensions, normalized values without raw units, no causal graph edges or per-request correlation, and no verified temporal ordering (spool-full -> latency -> retries) from current runtime data.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-23-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-23-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-23-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Current-runtime (production-like, target_pid 12345 on host-1) raw metrics: spool fill %, filesystem usage in bytes, device latency percentiles (P50/P95/P99) and I/O queue depth\",\n    \"Retry/network evidence: retry count, timeout/error rate, and network bytes over T0..T1\",\n    \"Confirmed temporal/causal ordering that spool-full precedes latency and that latency precedes retries (no causal graph exists)\",\n    \"Unredacted identification of the spool device/path and confirmation worker-1 writes through it\"\n  ],\n  \"next_action\": \"READ_ONLY cycle: no collection or mutation requested. Next step is to request (in a future non-read-only cycle) low-cost runtime collection via registered operations (system.metrics, process.list, service.connection) for host-1/pid 12345 to obtain raw spool usage, device latency percentiles, and retry/network rates, then verify temporal ordering to upgrade this from correlation to causality.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-23-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-23-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-23-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:51:08.760310Z"
+    },
+    {
+      "event_id": 2782,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655042603",
+        "message_id": "amsg-6bd1dcbf7887676c3429e2d5"
+      },
+      "created_at": "2026-08-25T10:51:08.764008Z"
+    },
+    {
+      "event_id": 2783,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "evidence_reviewed",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-01",
+        "decision": "EXCLUDED",
+        "review_revision": 1,
+        "previous_status": "ACTIVE",
+        "lifecycle_status": "EXCLUDED",
+        "trust_state": "UNREVIEWED",
+        "invalidated_analysis_runs": 0,
+        "held_recovery_plan_ids": [],
+        "resumed_recovery_plan_ids": [],
+        "propagation": {
+          "edge_status": "INVALIDATED",
+          "invalidated_hypotheses": [],
+          "affected_hypotheses": [],
+          "invalidated_claims": [],
+          "affected_claims": [],
+          "remaining_active_support": {}
+        },
+        "tree_propagation": {
+          "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-23-01",
+          "invalidated_nodes": [],
+          "abandoned_nodes": [],
+          "reason": "EVIDENCE_REVIEW_EXCLUDED"
+        },
+        "chain_impact": "WEAKENED",
+        "reopen_policy": "AUTO_RECALIBRATE",
+        "blocked_reason": null,
+        "restart_approval_required": false,
+        "runtime_fence": {
+          "affected_cycle_ids": [],
+          "affected_model_request_ids": [],
+          "affected_turn_ids": [],
+          "affected_proposal_ids": [],
+          "affected_task_ids": [],
+          "affected_plan_step_ids": [],
+          "runtime_generation": 2
+        }
+      },
+      "created_at": "2026-08-25T10:51:10.622600Z"
+    },
+    {
+      "event_id": 2784,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type EVIDENCE_REVIEW has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:51:10.708432Z"
+    },
+    {
+      "event_id": 2785,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_4f2843e3dee04b21b77e0ac977ce1d6b",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "21926a77f46f943a19aba216b1c0c57f91128119c93314c7dd16853b134ea810"
+      },
+      "created_at": "2026-08-25T10:51:10.728746Z"
+    },
+    {
+      "event_id": 2786,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655070752",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655070752"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655070752",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:51:10.768152Z"
+    },
+    {
+      "event_id": 2787,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-5b58c4bf84931f3f699e928f",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655070752",
+        "content": "已按要求先重读 Case Snapshot 与 Evidence 清单（`get_case_snapshot` + `list_case_evidence`），并展开两条 ACTIVE 投影内容、比对信号、检查 gaps/causal graph，另以 `search_knowledge` 确认无可用基准知识（知识检索结果仅作背景、非 Evidence）。\n\n关键状态：\n- **EVIDENCE_REVIEW 已生效**：`ev-23-01` 被排除（EXCLUDED, review_revision=1），不再参与结论。\n- 仍 ACTIVE 仅两条：`ev-23-02`（device_latency=3.972, T0..T1, 120 samples, observations=[spool,disk,retries]）与 `ev-23-03`（retry_rate=4.003, 同窗口/同维度）。\n- 无既有 hypotheses、无 causal graph、无 gaps 记录，故本轮为**依据 ACTIVE 证据辩护假设**而非修订既有结论。\n\n```json\n{\n  \"case_id\": \"CASE_INTERNAL_REDACTED\",\n  \"answer_type\": \"EVIDENCE_REVIEW_RESPONSE\",\n  \"revision_action\": \"defend_hypothesis_using_active_evidence_only\",\n  \"intervention_ack\": \"EVIDENCE_REVIEW 已排除 eval:...ev-23-01（EXCLUDED, review_revision=1），结论仅基于仍 ACTIVE 的 ev-23-02 与 ev-23-03。\",\n  \"conclusion\": {\n    \"summary\": \"假设与案例目标一致且可由 ACTIVE 证据辩护，但置信度为 MEDIUM：full local spool 造成 I/O 延迟上升（device_latency 信号），同时 retry 造成网络流量上升（retry_rate 信号）；两条信号在同一窗口 T0..T1 对齐且观测维度均为 spool/disk/retries，支持同一根因（local spool 写满）的解释。\",\n    \"confidence\": \"MEDIUM\",\n    \"primary_hypothesis\": \"A full local spool adds I/O delay while retries increase network traffic.\",\n    \"status\": \"DEFENDED_CONSISTENT_WITH_EVIDENCE\",\n    \"evidence_sufficient\": false\n  },\n  \"evidence_basis\": [\n    {\n      \"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-23-02\",\n      \"projection_hash\": \"35aa40ce7697e8dacb5a246706e470f74444a0a104d82cee0d63f61b9a612d1c\",\n      \"signal\": \"device_latency\",\n      \"value\": 3.972,\n      \"window\": \"T0..T1\",\n      \"sample_count\": 120,\n      \"alignment\": \"aligned\",\n      \"observations\": [\"spool\", \"disk\", \"retries\"],\n      \"role\": \"支持 'full local spool adds I/O delay' 的观测信号\",\n      \"quality\": \"COMPLETE\",\n      \"trust_state\": \"UNREVIEWED\",\n      \"trust_level\": \"SYNTHETIC_EVAL\"\n    },\n    {\n      \"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-23-03\",\n      \"projection_hash\": \"b3a2ca2c7253ef3f128f18facb9ac6eac128274fc2e9086bb2af863df284f6eb\",\n      \"signal\": \"retry_rate\",\n      \"value\": 4.003,\n      \"window\": \"T0..T1\",\n      \"sample_count\": 120,\n      \"alignment\": \"aligned\",\n      \"observations\": [\"spool\", \"disk\", \"retries\"],\n      \"role\": \"支持 'retries increase network traffic' 的观测信号\",\n      \"quality\": \"COMPLETE\",\n      \"trust_state\": \"UNREVIEWED\",\n      \"trust_level\": \"SYNTHETIC_EVAL\"\n    }\n  ],\n  \"cross_signal_read\": \"ev-23-02 与 ev-23-03 窗口（T0..T1）、样本数（120）、对齐方式（aligned）及观测维度（spool/disk/retries）完全一致，支持两信号同源关联，而非相互独立的偶发现象。\",\n  \"counterevidence_or_caveats\": [\n    \"两条证据均 UNREVIEWED（review_revision=0, derived_trust_score=50）且为 SYNTHETIC_EVAL，尚未经人工复核。\",\n    \"无基线/对照数值：3.972 与 4.003 的相对异常程度无法独立判定（缺少 T0 之前或健康窗口参考值）。\",\n    \"未直接观测 spool 是否 'full'（无 spool 占用率/磁盘容量指标）与 retry 事件日志/网络字节数。\",\n    \"因果方向（spool full → I/O delay → retries → network traffic）为推断，缺时序先后与 causal graph 支撑。\",\n    \"service/host/request_id 维度被 redacted，无法定位具体进程或请求；PR 变更归属信息未提供。\"\n  ],\n  \"missing_facts\": [\n    \"spool 占用率/磁盘容量（验证 'full' 前提）\",\n    \"device_latency 与 retry_rate 的基线/健康窗口对照值\",\n    \"retry 事件日志与网络出口流量字节数（验证网络流量增量）\",\n    \"两信号的时间先后顺序（验证因果方向）\",\n    \"PR/变更归属 attribution（github_pr_SOURCE_DERIVED 但未含具体归属结论）\"\n  ],\n  \"next_steps\": [\n    \"本回合为 READ_ONLY，不发起任何采集；后续回合建议提议 collection：spool/disk 利用率指标、I/O 延迟与 retry 率基线对比、重试事件日志。\",\n    \"待采集到基线后，将 confidence 升级或降级，并用固定结构引用相同 Evidence ID。\",\n    \"在证据不足时保持 abstain 于具体根因定位（如具体磁盘/进程/PR），不生成多方向猜测。\"\n  ]\n}\n```\n\n**一句话结论**：EVIDENCE_REVIEW 排除 ev-23-01 后，假设仍可由 ev-23-02 + ev-23-03 辩护（两信号同窗口对齐、同维度、与目标一一对应），但缺基线、spool-full 直接证据与因果时序，故结论为 MEDIUM 置信、证据尚不充分，下一步应采集 spool/磁盘利用率与重试日志基线。",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-23-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-23-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:51:52.739632Z"
+    },
+    {
+      "event_id": 2788,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 15,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655070752",
+        "message_id": "amsg-5b58c4bf84931f3f699e928f"
+      },
+      "created_at": "2026-08-25T10:51:52.744032Z"
+    }
+  ]
+}

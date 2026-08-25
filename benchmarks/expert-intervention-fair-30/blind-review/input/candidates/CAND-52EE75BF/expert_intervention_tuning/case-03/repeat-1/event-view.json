@@ -1,0 +1,418 @@
+{
+  "case_id": "case-03",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2488,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:35:11.457752Z"
+    },
+    {
+      "event_id": 2489,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-03-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "525beaabbd03938a7d0c2ec53065f13140f660552eacfd0e828e88a0432ee6e6",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:35:11.546163Z"
+    },
+    {
+      "event_id": 2490,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-03-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "cbdc9e63e07a3e294ccbd4728edd07328f86ab8cff796cf25609017edeeef589",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:35:11.631112Z"
+    },
+    {
+      "event_id": 2491,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-03-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "974c1deec86b7216f4be7895cd558300eb44e2a3198304b09d3469bd243291e9",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:35:11.711685Z"
+    },
+    {
+      "event_id": 2492,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:35:11.779416Z"
+    },
+    {
+      "event_id": 2493,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_9fe2edcc473842cfb80b59b15fb3f302",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "67e4c37e1fc8e376cf7344b0ea2357d68ba1889d88a7c41dda335604a16860f6"
+      },
+      "created_at": "2026-08-25T10:35:11.801163Z"
+    },
+    {
+      "event_id": 2494,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654111829",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654111829"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654111829",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:35:11.849049Z"
+    },
+    {
+      "event_id": 2495,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-190cf6763ee61489da39d181",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654111829",
+        "content": "Based on my investigation, here is the synthesized assessment:\n\n**What the evidence shows:** All three ACTIVE evidence items are evaluation projections (github_pr_SOURCE_DERIVED, SYNTHETIC_EVAL, trust_state UNREVIEWED) sharing identical observation keywords — `[\"retained\",\"dominator\",\"growth\"]` — across aligned signals over 120 samples in window T0..T1:\n- ev-03-01: `rss_timeseries` (value 0.541)\n- ev-03-02: `heap_retainers` (value 0.572)\n- ev-03-03: `gc_context` (value 0.603)\n\nThese three signals are mutually consistent with a heap-retention leak: RSS time series grows across equal work units, heap dominators hold a retained set, and GC context shows memory not returned after collection. No counterevidence, causal graph, or evidence gaps exist yet; dependency graph has zero coverage; service/host/request_id dimensions are redacted, so no code-level location is exposed.\n\n```json\n{\n  \"conclusion\": \"Target process (worker-1, pid 12345) exhibits a heap-retention/memory-leak pattern: resident memory grows monotonically across equal work units and is not reclaimed after garbage collection. All three aligned signals (rss_timeseries, heap_retainers, gc_context) carry the same observation signature ['retained','dominator','growth'] over 120 samples, consistent with a long-lived dominator chain accumulating per-work-unit objects.\",\n  \"root_location\": \"undetermined_at_code_level — evidence dimensions (service, host, request_id) are redacted and projections expose no class, stack, or allocation site; root location cannot be pinpointed from current evidence.\",\n  \"mechanism\": \"Each equal work unit allocates objects that become reachable from a long-lived retained root (dominator path). The retained set grows in proportion to the number of units processed; garbage collection only reclaims unreachable objects, so the dominator-reachable portion survives every collection cycle. Result: RSS/PSS grows stepwise per work unit and never returns to baseline after collection.\",\n  \"confidence\": \"moderate\",\n  \"confidence_reason\": \"Three independently-typed signals (RSS time series, heap retainers, GC context) are aligned (120 samples, window T0..T1) and unanimously carry the retained/dominator/growth signature, giving convergent support for the leak mechanism. However, evidence is SYNTHETIC_EVAL, trust_state UNREVIEWED (derived_trust_score 50), signal values are only moderate (0.541–0.603), and all location dimensions are redacted, so mechanism-level confidence is moderate while root-location confidence is low.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-03-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-03-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-03-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Dominator/retainer class names, call stacks or allocation sites (root location) — heap dump or retainer profile for pid 12345\",\n    \"Numeric RSS/PSS/Swap values and per-work-unit growth rate (e.g., memory_smaps trend)\",\n    \"GC collection counts and free-after-GC deltas confirming non-reclamation (gc_context detail)\",\n    \"Runtime type (JVM/Python/Go) to select the correct heap profiler\",\n    \"Source/PR attribution: which code change introduced the retention (evidence is github_pr-derived but attribution is redacted)\",\n    \"Long-lived root identity (e.g., cache, thread-local, static/global holder, connection pool)\"\n  ],\n  \"next_action\": \"READ_ONLY turn — no collection requested. On next cycle, propose low-cost R1 collectors on pid 12345 (memory_smaps for RSS/PSS/Swap trend, runtime_snapshot to identify runtime and thread state, log_scan for error/warning timeline), then a runtime-appropriate heap/retainer profile (java_async/pyspy/go_pprof or heap dump) to localize the dominator chain, and PR-diff attribution to identify the introducing change.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-03-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-03-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-03-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:35:39.575329Z"
+    },
+    {
+      "event_id": 2496,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654111829",
+        "message_id": "amsg-190cf6763ee61489da39d181"
+      },
+      "created_at": "2026-08-25T10:35:39.579421Z"
+    },
+    {
+      "event_id": 2497,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "evidence_reviewed",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-03-01",
+        "decision": "EXCLUDED",
+        "review_revision": 1,
+        "previous_status": "ACTIVE",
+        "lifecycle_status": "EXCLUDED",
+        "trust_state": "UNREVIEWED",
+        "invalidated_analysis_runs": 0,
+        "held_recovery_plan_ids": [],
+        "resumed_recovery_plan_ids": [],
+        "propagation": {
+          "edge_status": "INVALIDATED",
+          "invalidated_hypotheses": [],
+          "affected_hypotheses": [],
+          "invalidated_claims": [],
+          "affected_claims": [],
+          "remaining_active_support": {}
+        },
+        "tree_propagation": {
+          "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-03-01",
+          "invalidated_nodes": [],
+          "abandoned_nodes": [],
+          "reason": "EVIDENCE_REVIEW_EXCLUDED"
+        },
+        "chain_impact": "WEAKENED",
+        "reopen_policy": "AUTO_RECALIBRATE",
+        "blocked_reason": null,
+        "restart_approval_required": false,
+        "runtime_fence": {
+          "affected_cycle_ids": [],
+          "affected_model_request_ids": [],
+          "affected_turn_ids": [],
+          "affected_proposal_ids": [],
+          "affected_task_ids": [],
+          "affected_plan_step_ids": [],
+          "runtime_generation": 2
+        }
+      },
+      "created_at": "2026-08-25T10:35:40.973525Z"
+    },
+    {
+      "event_id": 2498,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type EVIDENCE_REVIEW has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:35:41.093001Z"
+    },
+    {
+      "event_id": 2499,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_688fd35f6ce74ca5b48ba7f028f003da",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "63fc4def2d118b3e84129deec1bd9531a7fedbc449a9641a443ba4ceeca10d25"
+      },
+      "created_at": "2026-08-25T10:35:41.113405Z"
+    },
+    {
+      "event_id": 2500,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654141140",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654141140"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654141140",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:35:41.154632Z"
+    },
+    {
+      "event_id": 2501,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-b68dc37addabdac8a020a76b",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654141140",
+        "content": "Evidence state re-read. Active evidence: only `ev-03-02` (`heap_retainers`, value 0.572) and `ev-03-03` (`gc_context`, value 0.603), both ACTIVE/UNREVIEWED, same window T0..T1, 120 samples, observation tags `[retained, dominator, growth]`, dimensions redacted (`service`, `host`, `request_id`). `ev-03-01` is EXCLUDED. No hypotheses, causal graph, gaps, analyses, or collection requests exist yet. `compare_evidence` returned no additional signal-level comparison. Dependency graph has insufficient coverage.\n\nBased only on active evidence, the signals are mutually consistent and support a *retention-with-dominator* mechanism, but they cannot identify the root object/class or the responsible PR.\n\n```json\n{\n  \"answer_version\": 1,\n  \"intervention\": \"EVIDENCE_REVIEW\",\n  \"case_id\": \"CASE_INTERNAL_REDACTED\",\n  \"answer_structure\": \"conclusion/evidence_basis/missing_facts/next_steps\",\n  \"conclusion\": {\n    \"status\": \"provisional\",\n    \"confidence\": \"LOW_MEDIUM\",\n    \"confidence_reason\": \"Only two ACTIVE synthetic eval projections (UNREVIEWED, derived_trust_score 50, trust_level SYNTHETIC_EVAL); dimensions redacted; no heap dump/GC log/PR diff content; no corroborating runtime metrics for target_pid 12345.\",\n    \"primary\": \"Resident memory grows across equal work units and does not return after collection because a portion of the managed heap remains reachable after GC — a retained set anchored to a dominant reference path (dominator) that accumulates per work unit. GC context alone does not release it.\",\n    \"supporting_claims\": [\n      \"Heap retention is the operative mechanism: ev-03-02 (heap_retainers, value 0.572) tags observations retained/dominator/growth in window T0..T1, indicating a large retained fraction with a dominating reference chain and growth across the window.\",\n      \"GC does not return the memory: ev-03-03 (gc_context, value 0.603) in the same aligned window is consistent with GC activity while retained memory persists; both projections share identical observation tags (retained, dominator, growth).\",\n      \"The growth pattern (equal work units, monotonic retention) is consistent with a long-lived root that is appended to per work unit (e.g., unbounded cache/registry/listener/thread-local or pooled object referenced by a static/application-scoped root) rather than a one-time fixed-size leak.\"\n    ],\n    \"counterevidence\": [],\n    \"excluded_evidence_note\": \"ev-03-01 is EXCLUDED (review_revision 1) and was not used.\",\n    \"attribution_limitation\": \"Attribution to a specific retainer class, root object, or GitHub PR is NOT supported by active evidence: artifact_type is github_pr_SOURCE_DERIVED but projections carry no PR identity or diff; redacted_dimensions = [service, host, request_id]; no stack/heap-dump detail is present.\"\n  },\n  \"evidence_basis\": [\n    {\n      \"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-03-02\",\n      \"projection_hash\": \"cbdc9e63e07a3e294ccbd4728edd07328f86ab8cff796cf25609017edeeef589\",\n      \"signal\": \"heap_retainers\",\n      \"window\": \"T0..T1\",\n      \"value\": 0.572,\n      \"sample_count\": 120,\n      \"observations\": [\"retained\", \"dominator\", \"growth\"],\n      \"quality\": \"COMPLETE\",\n      \"trust_state\": \"UNREVIEWED\"\n    },\n    {\n      \"evidence_id\": \"eval:CASE_INTERNAL_REDACTED:ev-03-03\",\n      \"projection_hash\": \"974c1deec86b7216f4be7895cd558300eb44e2a3198304b09d3469bd243291e9\",\n      \"signal\": \"gc_context\",\n      \"window\": \"T0..T1\",\n      \"value\": 0.603,\n      \"sample_count\": 120,\n      \"observations\": [\"retained\", \"dominator\", \"growth\"],\n      \"quality\": \"COMPLETE\",\n      \"trust_state\": \"UNREVIEWED\"\n    }\n  ],\n  \"missing_facts\": [\n    \"Identity of the dominator root (object type/class, allocation site, owning reference) — required to convert mechanism into a fix.\",\n    \"Whether retention is unbounded-collection growth (cache/registry/listener), thread-local accumulation, or allocator-level fragmentation — gc_context and heap_retainers signals alone cannot distinguish these.\",\n    \"Per-worker vs global attribution: signals are window-aligned but cannot confirm worker-1 (target worker_id) is the sole contributor.\",\n    \"RSS/committed-memory trend and heap dump at T1 for target_pid 12345 to confirm that the non-returning memory is managed-heap resident set vs native/off-heap.\",\n    \"Associated GitHub PR identity/diff, since evidence is github_pr_SOURCE_DERIVED — needed to attribute the regression to a code change.\",\n    \"Evidence gap registry is currently empty; no formal gap has been recorded.\"\n  ],\n  \"next_steps\": [\n    \"READ_ONLY respected: no collection request, plan execution, or mutation issued this turn.\",\n    \"Record the dominator-root identity and PR attribution as explicit evidence gaps in a later cycle.\",\n    \"On a subsequent non-READ_ONLY cycle, the highest-information-gain probe would be a heap-dump/GC-log collector scoped to target_pid 12345 (worker-1) across two equal work units to extract the dominator path, followed by PR-diff retrieval for attribution.\",\n    \"Re-run this review once new active evidence (heap dump root paths, GC logs, RSS trend) is available; per answer_stability, conclusions must not change without new evidence or user correction.\"\n  ],\n  \"abstention\": \"no\",\n  \"abstention_reason\": null\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-03-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-03-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:36:23.154325Z"
+    },
+    {
+      "event_id": 2502,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 15,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654141140",
+        "message_id": "amsg-b68dc37addabdac8a020a76b"
+      },
+      "created_at": "2026-08-25T10:36:23.164160Z"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-11",
+  "evidence": [
+    {
+      "evidence_id": "ev-11-01",
+      "kind": "host_cpu_by_process",
+      "summary": "Bounded host cpu by process projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "host_cpu_by_process",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.901,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "noisy neighbor",
+          "host",
+          "unrelated process"
+        ]
+      },
+      "integrity_hash": "sha256:999fa53fdb565fbee58347b7feaf7d754a2b06057152b957b6fe76dec5c5783f"
+    },
+    {
+      "evidence_id": "ev-11-02",
+      "kind": "target_latency",
+      "summary": "Bounded target latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "target_latency",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.932,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "noisy neighbor",
+          "host",
+          "unrelated process"
+        ]
+      },
+      "integrity_hash": "sha256:8b89133d7f492156891730b22b78175498ab5e52ce85ae1960c7bc6245c47ae5"
+    },
+    {
+      "evidence_id": "ev-11-03",
+      "kind": "cgroup_cpu",
+      "summary": "Bounded cgroup cpu projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "cgroup_cpu",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.963,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "noisy neighbor",
+          "host",
+          "unrelated process"
+        ]
+      },
+      "integrity_hash": "sha256:24bb593a0b9ff0eaab0711c2f5d02eb80ddc7781967ff73de6ba10b6e446c76a"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

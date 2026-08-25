@@ -1,0 +1,385 @@
+{
+  "case_id": "case-05",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2517,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:37:03.002938Z"
+    },
+    {
+      "event_id": 2518,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-05-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "c9288168cecd377e6280c1650417930c739ba2c91245311e27c69f462a8d0961",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:37:03.075222Z"
+    },
+    {
+      "event_id": 2519,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-05-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "d21d4b29f50d2ed7b0096fb49b402800ea8c48599b8c75c5dbef76cbf99d96af",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:37:03.141324Z"
+    },
+    {
+      "event_id": 2520,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-05-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "a9f19682e18b7f36fce2b3fe1cd744b466b204f4ad679a42f2d1a5343d860207",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:37:03.218852Z"
+    },
+    {
+      "event_id": 2521,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:37:03.286004Z"
+    },
+    {
+      "event_id": 2522,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_9fc29b73134a417db9347c8590dc80c5",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "1eb983983911e3050afb6c911047197fd6bdf9feaa2d804d0c9d5b5742b8a159"
+      },
+      "created_at": "2026-08-25T10:37:03.307941Z"
+    },
+    {
+      "event_id": 2523,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654223336",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654223336"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654223336",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:37:03.355376Z"
+    },
+    {
+      "event_id": 2524,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-1580d8bf8fae3b929ece85de",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654223336",
+        "content": "Investigation complete. I've reviewed the case snapshot, listed and expanded all 3 active evidence items, compared them, queried knowledge, and checked causal graph/collection status.\n\n**Evidence analysis:**\n- `ev-05-01` (runtime_wait_profile, value 0.881, obs=[mutex,wait,owner]): ~88% of runtime samples show threads blocked in mutex wait with a lock owner — strong lock-contention signature.\n- `ev-05-02` (throughput_context, value 0.912, obs=[mutex,wait,owner]): throughput degradation context aligned with the wait profile.\n- `ev-05-03` (cpu_utilization, value 0.943, obs=[mutex,wait,owner]): CPU not saturated/consumed as expected — consistent with the \"CPU available\" premise.\n- Knowledge search returned only historical operator notes (caveat: not evidence). No causal graph, gaps, or collection requests exist yet.\n\n```json\n{\n  \"conclusion\": \"Throughput collapse under rising concurrency with available CPU is caused by mutex/lock contention (convoy effect): as worker concurrency rises, more threads queue on a shared mutex held by a single owner thread; threads spend their time blocked in mutex wait instead of executing, so CPU stays under-utilized while throughput degrades.\",\n  \"root_location\": \"The redacted-service process (target_pid 12345, worker-1): the contended mutex critical section whose owner thread serializes concurrent workers. Exact code location cannot be asserted without a profile (per linux_cpu_diagnosis).\",\n  \"mechanism\": \"Rising concurrency → increasing contention on a shared mutex with a single owner → queued threads block (futex/mutex wait) rather than run → effective parallelism collapses (convoy/serialization) → throughput falls while CPU remains available because blocked threads consume no CPU.\",\n  \"confidence\": 0.62,\n  \"confidence_reason\": \"All three ACTIVE evidence projections (ev-05-01 runtime_wait_profile=0.881, ev-05-02 throughput_context=0.912, ev-05-03 cpu_utilization=0.943) consistently carry observations [mutex, wait, owner] and align with the incident premise (CPU available, throughput degrading). However, all evidence is SYNTHETIC_EVAL, UNREVIEWED (derived_trust_score 50), redacted (service/host/request_id), and no profile/flamegraph or thread-state evidence identifies the specific lock or code path; the numeric semantics of the signal values are partially ambiguous.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Per-stack profile (perf_cpu/pyspy flamegraph) of target_pid 12345 to pinpoint the contended mutex and code path\",\n    \"runtime_snapshot thread states / lock_waits (futex, park) confirming blocked-on-owner threads\",\n    \"sys_metrics CPU breakdown (user/sys/iowait) and context-switch/thread counts to quantify idle CPU vs waiting threads\",\n    \"Data isolating whether the mutex is application-internal vs external (e.g., DB connection pool lock, downstream dependency)\"\n  ],\n  \"next_action\": \"Propose READ_ONLY collection (pending approval): runtime_snapshot (R1) on target_pid 12345 followed by perf_cpu flamegraph (R2, highest information gain for the remaining gap) to identify the contended mutex owner and hot lock site, plus sys_metrics to confirm CPU availability.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-05-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-05-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-05-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:37:38.863626Z"
+    },
+    {
+      "event_id": 2525,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654223336",
+        "message_id": "amsg-1580d8bf8fae3b929ece85de"
+      },
+      "created_at": "2026-08-25T10:37:38.872175Z"
+    },
+    {
+      "event_id": 2526,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "message",
+        "content": "Expert intervention for case-05: re-evaluate the active evidence before the second answer."
+      },
+      "created_at": "2026-08-25T10:37:40.886392Z"
+    },
+    {
+      "event_id": 2527,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type OPERATOR_HINT_UNVERIFIED has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:37:40.943800Z"
+    },
+    {
+      "event_id": 2528,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_d25e7990a5b746fc917488cf49173d4b",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "720d0bee605d3d3e93d85f18fde99dd27f816feb3054536c61cc1ddc98ceb444"
+      },
+      "created_at": "2026-08-25T10:37:40.977858Z"
+    },
+    {
+      "event_id": 2529,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654261005",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654261005"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654261005",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:37:41.028111Z"
+    },
+    {
+      "event_id": 2530,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-402053ab3e1a55f559ae4d27",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654261005",
+        "content": "Evidence state re-read: unchanged — same 3 ACTIVE evidence items (`ev-05-01`, `ev-05-02`, `ev-05-03`) with identical projection hashes, no new evidence, no causal graph, no gaps. The applied intervention is `OPERATOR_HINT_UNVERIFIED`; its content is not exposed as verifiable evidence and adds no new facts, so per the answer-stability skill I keep the existing conclusion and wording rather than generating new speculation.\n\n```json\n{\n  \"conclusion\": \"Throughput collapse under rising concurrency with available CPU is caused by mutex/lock contention (convoy effect): as worker concurrency rises, more threads queue on a shared mutex held by a single owner thread; threads spend their time blocked in mutex wait instead of executing, so CPU stays under-utilized while throughput degrades.\",\n  \"root_location\": \"The redacted-service process (target_pid 12345, worker-1): the contended mutex critical section whose owner thread serializes concurrent workers. Exact code location cannot be asserted without a profile (per linux_cpu_diagnosis).\",\n  \"mechanism\": \"Rising concurrency → increasing contention on a shared mutex with a single owner → queued threads block (futex/mutex wait) rather than run → effective parallelism collapses (convoy/serialization) → throughput falls while CPU remains available because blocked threads consume no CPU.\",\n  \"confidence\": 0.62,\n  \"confidence_reason\": \"Conclusion is retained unchanged because re-reading the case state shows no new evidence: the same three ACTIVE, UNREVIEWED synthetic projections (ev-05-01 runtime_wait_profile=0.881, ev-05-02 throughput_context=0.912, ev-05-03 cpu_utilization=0.943) all carry observations [mutex, wait, owner] and align with the incident premise. The OPERATOR_HINT_UNVERIFIED intervention is not verifiable evidence (no content, no new facts, evidence_watermark still 3), so it neither strengthens nor overturns the conclusion. Confidence remains capped by the absence of a profile/flamegraph pinpointing the lock site and by redacted dimensions.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-05-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Per-stack profile (perf_cpu/pyspy flamegraph) of target_pid 12345 to pinpoint the contended mutex and code path\",\n    \"runtime_snapshot thread states / lock_waits (futex, park) confirming blocked-on-owner threads\",\n    \"sys_metrics CPU breakdown (user/sys/iowait) and context-switch/thread counts to quantify idle CPU vs waiting threads\",\n    \"Data isolating whether the mutex is application-internal vs external (e.g., DB connection pool lock, downstream dependency)\"\n  ],\n  \"next_action\": \"Do not change conclusions based on the UNVERIFIED hint. Propose READ_ONLY collection (pending approval): runtime_snapshot (R1) on target_pid 12345 followed by perf_cpu flamegraph (R2, highest information gain for the remaining gap) to identify the contended mutex owner and hot lock site, plus sys_metrics to confirm CPU availability.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-05-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-05-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-05-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:37:51.341264Z"
+    },
+    {
+      "event_id": 2531,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 15,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654261005",
+        "message_id": "amsg-402053ab3e1a55f559ae4d27"
+      },
+      "created_at": "2026-08-25T10:37:51.347597Z"
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "case_id": "case-15",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2320,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:21:27.611947Z"
+    },
+    {
+      "event_id": 2321,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-15-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "4da2b9be184a530f4f429b591b9545c63b43b164d1641fafc14334e42f6bb976",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:21:27.673744Z"
+    },
+    {
+      "event_id": 2322,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-15-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "f99cada02f6249801c22f321d9d5d88d09aa615fa7a9856a976c69ad03707cb8",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:21:27.846816Z"
+    },
+    {
+      "event_id": 2323,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-15-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "89b0386b6fb23cd6b12572b1244cb00d0319dc0f47b8084bbae21a5ce02a0d41",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:21:27.920989Z"
+    },
+    {
+      "event_id": 2324,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:21:27.990778Z"
+    },
+    {
+      "event_id": 2325,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_ce228af5f6cb4c839776fee7a92e94c8",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "e6863a6539cbe639830254eb1ecedef30bbfcd60dd25ac65143b0caeb35d9f28"
+      },
+      "created_at": "2026-08-25T10:21:28.014185Z"
+    },
+    {
+      "event_id": 2326,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653288038",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653288038"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653288038",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:21:28.053308Z"
+    },
+    {
+      "event_id": 2327,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-d7404e90184581bdd45d2426",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653288038",
+        "content": "All three evidence projections are expanded. Here is my analysis and the required single JSON answer.\n\n**Analysis:**\n- `ev-15-01` (gc_pause, 120 samples, alignment=\"aligned\"): GC pauses observed over window T0..T1 with observations [gc, pause, allocation].\n- `ev-15-02` (latency_timeseries, 120 samples, alignment=\"aligned\"): latency series aligned with the same window/observations.\n- `ev-15-03` (allocation_rate, 120 samples, alignment=\"aligned\"): allocation rate aligned as well.\n- All three signals share the same window, sample count, and alignment flag — consistent with the case goal (sawtooth tail-latency pauses aligned with stop-the-world GC). No counter-evidence, no causal graph, and no evidence gaps are recorded yet. All evidence is UNREVIEWED synthetic eval data, so confidence stays medium and a strict causal (vs. correlational) claim is not yet supported.\n\n```json\n{\n  \"conclusion\": \"The sawtooth tail-latency pauses in redacted-service (worker-1, pid 12345) are aligned with stop-the-world garbage collection pauses driven by sustained allocation pressure. GC pause, latency timeseries, and allocation-rate signals are all time-aligned over window T0..T1, consistent with the stated incident hypothesis.\",\n  \"root_location\": \"redacted-service / worker-1 (host-1, pid 12345) process heap: garbage collector stop-the-world phase triggered by allocation pressure\",\n  \"mechanism\": \"High allocation rate (ev-15-03) drives heap pressure; when the heap threshold is reached the runtime executes stop-the-world garbage collection, suspending application threads (ev-15-01); in-flight requests during the pause experience latency spikes, and repeated GC cycles produce the sawtooth pattern in the latency timeseries (ev-15-02). All three signals are marked aligned over the same window, supporting the alignment claim.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"All three evaluation projections (gc_pause, latency_timeseries, allocation_rate) report alignment=aligned with identical window/sample count, and every projection lists observations [gc, pause, allocation], consistently supporting the hypothesis. However, the evidence is UNREVIEWED synthetic eval data (derived_trust_score 50), dimensions are redacted, no raw timeseries or pause durations are present, and no counter-evidence or established causal edges exist yet — so correlation is demonstrated, not strict causality.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-15-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-15-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-15-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"GC log with per-pause duration and STW vs concurrent phase breakdown for T0..T1 on worker-1\",\n    \"Heap size and GC trigger threshold values for pid 12345\",\n    \"Actual tail latency percentile values (e.g., p99) correlated per GC cycle\",\n    \"Exact GC-pause timestamps vs latency-spike timestamps to confirm alignment at event level\",\n    \"Review/trust elevation of the UNREVIEWED eval evidence\"\n  ],\n  \"next_action\": \"Read-only follow-up: query service.logs and system.metrics for worker-1 (pid 12345) over T0..T1 to correlate exact GC pause timestamps/durations with latency-spike timestamps, and confirm heap threshold behavior; on a later non-read-only cycle, register a collector probe for GC/heap metrics with the highest information gain for this gap.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-15-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-15-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-15-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:21:52.600652Z"
+    },
+    {
+      "event_id": 2328,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653288038",
+        "message_id": "amsg-d7404e90184581bdd45d2426"
+      },
+      "created_at": "2026-08-25T10:21:52.604346Z"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "blind-review.product-jury-packet.v1",
+  "jury_id": "product-CAND-52EE75BF-jury-3",
+  "track": "product",
+  "candidate_id": "CAND-52EE75BF",
+  "allowed_root": "candidates/CAND-52EE75BF",
+  "allowed_case_material": "cases",
+  "oracle_access": false,
+  "prior_scores_access": false,
+  "protocol_note": "B2 interaction types must be described and not forced into one cross-type ranking."
+}

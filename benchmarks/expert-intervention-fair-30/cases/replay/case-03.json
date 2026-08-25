@@ -1,0 +1,101 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-03",
+  "evidence": [
+    {
+      "evidence_id": "ev-03-01",
+      "kind": "rss_timeseries",
+      "summary": "Bounded rss timeseries projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "rss_timeseries",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 0.541,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "retained",
+          "dominator",
+          "growth"
+        ]
+      },
+      "integrity_hash": "sha256:2edd4ba7c36a7d3dbba9140a978443f1489547b6a69b49e27dbe7db3fd4e2b3e"
+    },
+    {
+      "evidence_id": "ev-03-02",
+      "kind": "heap_retainers",
+      "summary": "Bounded heap retainers projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "heap_retainers",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 0.572,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "retained",
+          "dominator",
+          "growth"
+        ]
+      },
+      "integrity_hash": "sha256:7e75b90b73fec4298703986fe00fcfe90e9b2f88170fff558b884cf001cf584c"
+    },
+    {
+      "evidence_id": "ev-03-03",
+      "kind": "gc_context",
+      "summary": "Bounded gc context projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "gc_context",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 0.603,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "retained",
+          "dominator",
+          "growth"
+        ]
+      },
+      "integrity_hash": "sha256:094533f7cf59863355b920688829704e7bae14d99129d011d8ec26a12d239ddc"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}
