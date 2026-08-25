@@ -98,7 +98,7 @@ Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分�
 - `GET /api/v1/cases/{case_id}/investigation-summary` 汇总当前 focus、revision、活跃 Task、当前 Evidence、Evidence watermark、开放 Gap、结论、可切换服务/进程/依赖边和 `dependency_only_not_causal` 语义。
 - `POST /api/v1/cases/{case_id}/focus` 是非聊天客户端的同一 focus 契约；Workspace 及 Runtime `CaseContextSnapshot` 暴露相同 `focus`。
 
-验收测试为 `tests/test_expert_intervention.py`，覆盖：对话暂停零 Runtime Turn、服务聚焦 revision、未知进程拒绝、focus CAS 冲突；与 Runtime/拓扑回归合计 `24 passed`。该测试验证控制链和状态一致性，不宣称模型能从任意自然语言自动识别正确服务或 PID。
+验收测试为 `tests/test_expert_intervention.py`，覆盖：对话暂停零 Runtime Turn、服务聚焦 revision、未知进程拒绝、focus CAS 冲突和 `PID` 聊天解析；与 Runtime/拓扑回归合计 `25 passed`。该测试验证控制链和状态一致性，不宣称模型能从任意自然语言自动识别正确服务或 PID。
 
 当前仍未实现“通过聊天即时切换 deterministic/pi 部署模式”；这仍是部署/环境配置级操作。专家可以在对话中控制 Case、聚焦链路、要求解释、纠正上下文、补充或排除 Evidence，但模型不得绕过 Tool Gateway 或直接写入因果结论。
 
