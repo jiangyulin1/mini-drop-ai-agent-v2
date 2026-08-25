@@ -1,0 +1,219 @@
+{
+  "case_id": "case-29",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2444,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:28:39.955938Z"
+    },
+    {
+      "event_id": 2445,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-29-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "0faecc14f6ce5dd4064671dd9bb45fc4414f92fb0f4ec53f34d61a11f76feb71",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:28:40.025579Z"
+    },
+    {
+      "event_id": 2446,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-29-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "b54870b5f7285f49a85b8c0014b804451be9bced51e46d07916868599e8a0062",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:28:40.096235Z"
+    },
+    {
+      "event_id": 2447,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-29-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "f127cb88d4eb60bb552d1122e2dc847500b87ecadb72d6841efc40fe56c7b879",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:28:40.168134Z"
+    },
+    {
+      "event_id": 2448,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:28:40.235347Z"
+    },
+    {
+      "event_id": 2449,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_bf7195c379fe4454846e61bce7c3413c",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "2f2168dfe5d196e086668edf22f430d64fdb30ae46128416ec40e3a7c6bce662"
+      },
+      "created_at": "2026-08-25T10:28:40.257122Z"
+    },
+    {
+      "event_id": 2450,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653720283",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653720283"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653720283",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:28:40.297288Z"
+    },
+    {
+      "event_id": 2451,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-d26f9f4e026021abc51dc900",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653720283",
+        "content": "Investigation complete. All available signals point to storage, not CPU.\n\n**Key findings:**\n- `ev-29-01` (filesystem_usage=4.961, 120 samples), `ev-29-02` (error_logs=4.992, 120 samples), `ev-29-03` (cpu_profile_topn=5.023, 120 samples) — all three ACTIVE signals carry identical observations `[\"capacity\",\"write error\",\"reprioritize\"]`.\n- No causal graph, no dependency graph coverage, no collection requests/proposals, no gaps recorded.\n- Collector catalog confirms no dedicated filesystem-capacity collector; nearest is `sys_metrics`/`ebpf_io`/`log_scan`.\n- Knowledge search returned only unrelated historical case context (explicitly non-evidence).\n\n```json\n{\n  \"conclusion\": \"The incident is primarily a storage-capacity problem (filesystem usage + write errors) on host-1/worker-1, not a CPU problem. The first remediation plan targeting CPU is misdirected and must be reprioritized to storage triage, per the shared observations 'capacity', 'write error', 'reprioritize' across all three signals.\",\n  \"root_location\": \"Storage/filesystem layer of host-1 (service redacted-service, worker-1, pid 12345) — the volume/dataset the service writes to, capacity-saturated such that writes fail\",\n  \"mechanism\": \"Filesystem capacity exhaustion (filesystem_usage elevated, value 4.961) drives write failures (error_logs elevated, value 4.992). The CPU profile (cpu_profile_topn value 5.023) is secondary and likely reflects retry/backlog churn caused by failed writes, which misled the initial CPU-targeted remediation plan. Evidence observations consistently indicate reprioritization to storage triage.\",\n  \"confidence\": 0.55,\n  \"confidence_reason\": \"Three independent ACTIVE evaluation signals (filesystem_usage, error_logs, cpu_profile_topn) are mutually consistent and all carry capacity/write-error/reprioritize observations, matching the case goal. Confidence is capped at medium because all evidence is SYNTHETIC_EVAL/UNREVIEWED replay with values only (~5.0 scale) and no concrete capacity percentages, error messages, process-level confirmation of pid 12345, or causal graph to prove the CPU-to-storage linkage.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Filesystem capacity metrics (used/free %, inode usage, mount point, growth rate over T0..T1)\",\n    \"Actual write error messages (ENOSPC vs EIO vs permission) and their timestamps\",\n    \"Storage device/volume identity and per-device I/O (sys_metrics io, ebpf_io)\",\n    \"Process-level confirmation of pid 12345 (process_scan) and runtime state\",\n    \"Causal graph / dependency edges linking failed writes to observed CPU profile\"\n  ],\n  \"next_action\": \"Reprioritize the remediation plan from CPU to storage triage. In the next (non-READ_ONLY) cycle, collect low-cost sys_metrics (io), log_scan (write error patterns), ebpf_io (device latency), and process_scan to quantify capacity and identify the failing volume; hold the CPU plan until storage evidence is confirmed.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-29-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-29-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-29-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:29:12.349310Z"
+    },
+    {
+      "event_id": 2452,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653720283",
+        "message_id": "amsg-d26f9f4e026021abc51dc900"
+      },
+      "created_at": "2026-08-25T10:29:12.353151Z"
+    }
+  ]
+}

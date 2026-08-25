@@ -1,0 +1,203 @@
+{
+  "case_id": "case-18",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2346,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:23:05.593353Z"
+    },
+    {
+      "event_id": 2347,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-18-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "199fb00c8691a0d7d331bd7c76c903f9d5cddd928a43661a6cfa8831cab0b8c4",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:23:05.668998Z"
+    },
+    {
+      "event_id": 2348,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-18-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "da20a4f90159755cc4d11bfac4347bef768f7023913012c02ef9c958c962c294",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:23:05.747864Z"
+    },
+    {
+      "event_id": 2349,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:23:05.810886Z"
+    },
+    {
+      "event_id": 2350,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_1b05a56292bb4fc9812f43023e4abfcb",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "cc6a40e8b5024ceb25c8d92c1cfcd94859a44692792ab4607976b88dcfc8c8ba"
+      },
+      "created_at": "2026-08-25T10:23:05.832893Z"
+    },
+    {
+      "event_id": 2351,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653385869",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653385869"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653385869",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:23:05.891550Z"
+    },
+    {
+      "event_id": 2352,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-bbb8e43ffa9e93a5e01b50f7",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653385869",
+        "content": "## Analysis\n\n**Evidence reviewed (both ACTIVE lifecycle):**\n- `eval:CASE_INTERNAL_REDACTED:ev-18-01` — evaluation_projection, `github_pr_SOURCE_DERIVED`, freshness **HISTORICAL**, signal `stale_metric` (value 3.091, 120 samples), alignment `stale`, observations: `[\"stale\",\"window\",\"cannot establish\"]`\n- `eval:CASE_INTERNAL_REDACTED:ev-18-02` — evaluation_projection, `github_pr_SOURCE_DERIVED`, freshness **HISTORICAL**, signal `current_symptom` (value 3.122, 120 samples), alignment `stale`, observations: `[\"stale\",\"window\",\"cannot establish\"]`\n\n**Query tools used:** `get_evidence_projection`, `compare_evidence`, `search_knowledge` (retrieved knowledge confirms stale/historical material is background only and cannot substitute for current runtime evidence).\n\nBoth evidence items are explicitly flagged stale/out-of-window, the case goal itself states evidence cannot establish the current cause, and there is no fresh in-window runtime evidence for the target (redacted-service, pid 12345). Per the `answer_stability` skill, insufficient evidence ⇒ output a gap, not a guess ⇒ **abstain** on root cause.\n\n```json\n{\n  \"conclusion\": \"Abstain: the only available evidence (ev-18-01, ev-18-02) is HISTORICAL/stale (alignment=stale, observations 'stale','window','cannot establish') and lies outside the active window for target redacted-service (pid 12345, worker-1). It cannot establish the current root cause. No causal attribution is made.\",\n  \"root_location\": null,\n  \"mechanism\": null,\n  \"confidence\": 0.15,\n  \"confidence_reason\": \"Both evidence projections explicitly report stale alignment and 'cannot establish'; the case goal confirms evidence is outside the active window. Confidence in the abstention/insufficiency determination is high, but confidence in any specific root cause is negligible (no fresh in-window runtime evidence exists).\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-18-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-18-02\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Current-window (active-window) service metrics for redacted-service/pid 12345 (e.g., the 'current_symptom' and related signals measured at incident time, not T0..T1 historical replay)\",\n    \"Current-window process/thread state for target_pid 12345 on host-1\",\n    \"Current-window service logs or error samples from redacted-service within the active window\",\n    \"Clock/timeline alignment data confirming observed_at vs. incident active window\"\n  ],\n  \"next_action\": \"READ_ONLY turn: do not execute. Propose (for approval) low-cost breadth collection of fresh in-window evidence for the target scope (service.logs, system.metrics, process.list for pid 12345), per strategy guidance to start with low-cost breadth; re-evaluate only once fresh ACTIVE-window evidence is available.\",\n  \"abstain\": true\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-18-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-18-02"
+        ]
+      },
+      "created_at": "2026-08-25T10:23:26.480901Z"
+    },
+    {
+      "event_id": 2353,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653385869",
+        "message_id": "amsg-bbb8e43ffa9e93a5e01b50f7"
+      },
+      "created_at": "2026-08-25T10:23:26.486084Z"
+    }
+  ]
+}

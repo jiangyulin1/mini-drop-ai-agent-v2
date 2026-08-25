@@ -1,0 +1,10 @@
+{
+  "schema": "blind-review.private-candidate-registry.v1",
+  "candidates": [
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "agent_id": "mini-drop",
+      "source_sha": "651c450867c4d6db26cc78de5928bb14f7b3c3b9"
+    }
+  ]
+}

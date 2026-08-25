@@ -1,0 +1,485 @@
+{
+  "schema": "blind-review.run-index.v1",
+  "runs": [
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-01",
+      "repeat": "repeat-1",
+      "event_count": 8,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-02",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-03",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-04",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-05",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-06",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-07",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-08",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-09",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-10",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-11",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-12",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-13",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-14",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-15",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-16",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-17",
+      "repeat": "repeat-1",
+      "event_count": 8,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-18",
+      "repeat": "repeat-1",
+      "event_count": 8,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-19",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-20",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-21",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-22",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-23",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-24",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-25",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-26",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-27",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-28",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-29",
+      "repeat": "repeat-1",
+      "event_count": 9,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "fair_same_data",
+      "case_id": "case-30",
+      "repeat": "repeat-1",
+      "event_count": 8,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-01",
+      "repeat": "repeat-1",
+      "event_count": 13,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-02",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-03",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-04",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-05",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-06",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-07",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-08",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-09",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-10",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-11",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-12",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-13",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-14",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-15",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-16",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-17",
+      "repeat": "repeat-1",
+      "event_count": 13,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-18",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-19",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-20",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-21",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-22",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-23",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-24",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-25",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-26",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-27",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-28",
+      "repeat": "repeat-1",
+      "event_count": 15,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-29",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    },
+    {
+      "candidate_id": "CAND-52EE75BF",
+      "track": "expert_intervention_tuning",
+      "case_id": "case-30",
+      "repeat": "repeat-1",
+      "event_count": 14,
+      "execution_status": "completed"
+    }
+  ]
+}

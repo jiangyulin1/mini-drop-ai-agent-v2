@@ -1,0 +1,355 @@
+{
+  "case_id": "case-01",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2461,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:33:39.919557Z"
+    },
+    {
+      "event_id": 2462,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-01-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "361a7f2564966f9c7d160e49bd7dfcbe65a4dcf6346db3a3a8902e6e7fd45cc4",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:33:39.980943Z"
+    },
+    {
+      "event_id": 2463,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-01-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "6c72c8c5f30cb21653b2493bba32dd09c308ee300ba7e67edbe245a4220a2d85",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:33:40.044967Z"
+    },
+    {
+      "event_id": 2464,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:33:40.120495Z"
+    },
+    {
+      "event_id": 2465,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_4a00530eb0394523bf9ea100efd8dffb",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "0644c6ea35d0fe41593ff9a18573dd941813c31507fe1ec269a0b77d68fade40"
+      },
+      "created_at": "2026-08-25T10:33:40.142210Z"
+    },
+    {
+      "event_id": 2466,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654020173",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654020173"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654020173",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:33:40.181876Z"
+    },
+    {
+      "event_id": 2467,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-2ae69126ef3776d004cac78e",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654020173",
+        "content": "Both evidence items are present and ACTIVE. I expanded their projections and cross-checked causal/dependency graphs, gaps, collection status, and knowledge. Analysis:\n\n- **ev-01-01** (`cpu_profile_topn`, value 0.201): top-of-profile CPU hotspot, observations \"cpu hotspot / self time / bounded path\"; 120 aligned samples over T0..T1.\n- **ev-01-02** (`latency_context`, value 0.232): latency context aligned to the same window, same observations.\n- Both redact service/host/request_id and contain **no symbols, line numbers, or stack frames**. No causal graph, no gaps, no collection requests yet. Knowledge search returned only background (not runtime evidence) — no additional facts.\n\n```json\n{\n  \"conclusion\": \"The request handler slowdown while traffic is stable is caused by a CPU-bound hotspot inside a bounded code path of the request handler: both the CPU top-N profile (ev-01-01, cpu_profile_topn=0.201) and the aligned latency context (ev-01-02, latency_context=0.232) flag 'cpu hotspot / self time / bounded path' over the same T0..T1 window with 120 samples. The dominant cost is self time (compute in the hot function itself) rather than external blocking (I/O, lock/queue waits), and the path is characterized as bounded (e.g., a finite loop/iterative segment), matching a stable-traffic, CPU-bound slowdown.\",\n  \"root_location\": \"worker-1 (pid 12345) of the target service, inside the request handler's bounded CPU hot path; exact function/symbol cannot be pinned because both projections redact service/host/request_id and contain no stack frames or symbols.\",\n  \"mechanism\": \"A bounded code path in the request handler accumulates high CPU self time (~20% of profile/latency samples), shifting handler latency upward while request rate remains stable. High self time indicates compute inside the hot function (tight bounded iteration/repeated computation), not wait time on external resources.\",\n  \"confidence\": 0.55,\n  \"confidence_reason\": \"Both ACTIVE evidence items are mutually consistent and aligned on the same window (same observations, same 120-sample alignment), so the mechanism (CPU-bound bounded hot path with high self time) is well supported. Confidence is capped because the evidence is SYNTHETIC/UNREVIEWED, dimensions are redacted, no function-level symbols are available to localize the exact root location, and there is no before/after latency baseline or causal graph to confirm the hotspot is the direct cause of the regression.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-01-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-01-02\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Unredacted CPU top-N profile with function symbols/line numbers (and flame graph or per-symbol self time) for worker-1/pid 12345 to pin the exact hot function\",\n    \"Baseline comparison: handler latency (P50/P95/P99) and CPU% before vs. during the slowdown window at stable traffic, to confirm the hotspot is the regression cause\",\n    \"Call-stack context confirming the hot frame is inside the request handler (bounded path) and not a shared runtime/library routine\",\n    \"Confirmation that traffic volume/QPS was truly flat across T0..T1 (goal asserts stable traffic)\"\n  ],\n  \"next_action\": \"In the next (non-read-only) cycle, submit a collection request for a function-level CPU profile (top-N by self time with symbols and stack context) on the target service/worker-1 pid 12345 over T0..T1, plus a latency baseline comparison; use the result to name the exact bounded hot function.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-01-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-01-02"
+        ]
+      },
+      "created_at": "2026-08-25T10:34:06.648182Z"
+    },
+    {
+      "event_id": 2468,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654020173",
+        "message_id": "amsg-2ae69126ef3776d004cac78e"
+      },
+      "created_at": "2026-08-25T10:34:06.652086Z"
+    },
+    {
+      "event_id": 2469,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type HYPOTHESIS_CHALLENGE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:34:07.218746Z"
+    },
+    {
+      "event_id": 2470,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_65dd2090441e4d4b984f6cc7d56535a0",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "3d893f8a93357f75cf21527771655d2cb5c143f815e1e696cffb48e37ff7f899"
+      },
+      "created_at": "2026-08-25T10:34:07.242749Z"
+    },
+    {
+      "event_id": 2471,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654047259",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654047259"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654047259",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:34:07.271999Z"
+    },
+    {
+      "event_id": 2472,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-401a398675e53265bf4a6a38",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654047259",
+        "content": "Evidence state re-read: unchanged (watermark 2, same two ACTIVE items; no new gaps/hypotheses/causal graph). Projection contents are identical to the prior cycle — no new facts since the challenge. Per answer_stability, I defend the core hypothesis using the same ACTIVE evidence, while narrowing the confidence claim.\n\n**Hypothesis challenge response (defended with revision):**\n- **Supported:** Both ACTIVE evidence items consistently tag a CPU hotspot with high self time on a bounded path over the same aligned window (ev-01-01 `cpu_profile_topn`=0.201; ev-01-02 `latency_context`=0.232; 120 samples, same observations). This is the only mechanism with any support and matches the case goal.\n- **What the challenge correctly weakens:** (1) The two items share the same observation tags, so agreement is label-consistency, not independent verification. (2) \"Bounded path\" and \"self time\" are asserted by the synthetic observation tags — there are no stack samples, symbols, or counters, so hot-frame attribution to handler code vs. runtime/GC/allocator, and CPU-spin vs. genuine compute (e.g., lock contention), are not distinguishable. (3) No pre-slowdown baseline or QPS/error-rate evidence exists, so causal linkage to the latency regression is inferred, not proven. Hence root_location remains unidentified and confidence is lowered.\n\n```json\n{\n  \"conclusion\": \"Under the HYPOTHESIS_CHALLENGE, the hypothesis is retained as the leading (but not confirmed) explanation: the request handler slowdown under stable traffic is most consistent with a CPU-bound hotspot in a bounded code path with high self time. Both ACTIVE evidence items — ev-01-01 (cpu_profile_topn=0.201) and ev-01-02 (latency_context=0.232) — are aligned on the same T0..T1 window (120 samples) and carry identical observations ['cpu hotspot','self time','bounded path']. No active evidence contradicts this, but none proves it either: the tags are observation-level and no stack/symbol-level proof exists.\",\n  \"root_location\": \"Not identifiable from active evidence: worker-1 (pid 12345) on the target service is the scope, but the exact bounded hot function/line cannot be located because both projections redact service/host/request_id and contain no call stacks or symbols.\",\n  \"mechanism\": \"A bounded (finite, non-blocking) code path inside the request handler consumes CPU self time (~20% of profile/latency samples), increasing handler latency while traffic stays flat. High self time points to compute inside the hot frame rather than external I/O or queue waits; however, CPU-spin variants (lock contention, allocator/GC or runtime overhead) are not excluded because the evidence has no stack samples or cpu_mode decomposition.\",\n  \"confidence\": 0.45,\n  \"confidence_reason\": \"Confidence lowered from the prior cycle in response to the challenge. The two ACTIVE items agree on the same window and same tags, supporting the mechanism as the leading hypothesis. But: (a) both items are synthetic evaluation projections (UNREVIEWED) sharing identical observation labels, so agreement is not independent corroboration; (b) the 'bounded path' and 'self time' are asserted tags, not stack-verified facts; (c) no baseline, QPS, error-rate, or counter-evidence exists to prove the hotspot causes the regression; (d) no symbol-level root_location can be established.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-01-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-01-02\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Stack-sample / hot-function evidence for pid 12345 to verify the bounded path and locate the exact function (the registered perf_cpu collector distinguishes user/kernel hotspots and lock contention)\",\n    \"CPU mode decomposition (user vs kernel vs spin) to rule out lock contention/GC/allocator as the CPU consumer\",\n    \"Pre-slowdown vs. slowdown baseline of handler P50/P95/P99 latency and CPU% at confirmed flat QPS, to establish causation\",\n    \"Error-rate and log timeline to exclude concurrent non-CPU contributors\",\n    \"Runtime/thread-state snapshot to exclude lock waits or parked/blocked threads masquerading as compute\"\n  ],\n  \"next_action\": \"In the next non-read-only cycle, request the registered probe with the highest information gain for the remaining gap: perf_cpu (CPU flamegraph + TopN, R2, target_pid=12345) to obtain hot-function stack samples and user/kernel/lock-contention decomposition, paired with sys_metrics baseline and runtime_snapshot (R1) to rule out lock/blocked-thread alternatives; use the resulting stack samples to name the exact bounded hot path.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-01-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-01-02"
+        ]
+      },
+      "created_at": "2026-08-25T10:34:33.236224Z"
+    },
+    {
+      "event_id": 2473,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654047259",
+        "message_id": "amsg-401a398675e53265bf4a6a38"
+      },
+      "created_at": "2026-08-25T10:34:33.240673Z"
+    }
+  ]
+}

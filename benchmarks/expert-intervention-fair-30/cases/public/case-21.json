@@ -1,0 +1,65 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-21",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "The initial service scope is broad; a trace edge narrows the fault to a remote dependency.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-21-01",
+      "kind": "scope_candidates",
+      "summary": "Bounded scope candidates projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:ec61a077c8d977f9739fe29a73609c8421c71d406c058a8b33eebb01345317eb",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-21-02",
+      "kind": "span_edges",
+      "summary": "Bounded span edges projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:fd400cf9de673278cddb45b8563df66c28f7560d0473cc1685136a7542a5f1b5",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-21-03",
+      "kind": "dependency_latency",
+      "summary": "Bounded dependency latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:1280781b02c307f7035ad59d23a2df284afb8c8596a776b4c8e3208d53008940",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

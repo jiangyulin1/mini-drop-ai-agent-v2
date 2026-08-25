@@ -1,0 +1,33 @@
+{
+  "schema": "benchmark-agent.agent-data-injection.v1",
+  "agent_id": "benchmark-agent",
+  "track": "fair_same_data",
+  "case_id": "case-30",
+  "records": [
+    {
+      "agent_id": "benchmark-agent",
+      "method": "POST /api/v1/cases/{case_id}/evidence/import",
+      "evidence_id": "ev-30-01",
+      "canonical_evidence_id": "eval:case_20260825_102913_c2d9847e01:ev-30-01",
+      "source_id": "benchmark-case_20260825_102913_c2d9847e01-ev-30-01",
+      "projection_hash": "8077ed32aed9accb3b8c7384689c62b816cd87b6e5996d60567423e705068195",
+      "content_hash": "b6d542fa55db81e9a0f5e835fec042c9239896ef767a5fe879a2d386ee921237",
+      "request_bytes": 711,
+      "response_status": "ok",
+      "response_hash": "007a0e29eef49a94155f9bf5c2ba7a6c8ffed8347eb1007edf7306204c00c0c0"
+    },
+    {
+      "agent_id": "benchmark-agent",
+      "method": "POST /api/v1/cases/{case_id}/evidence/import",
+      "evidence_id": "ev-30-02",
+      "canonical_evidence_id": "eval:case_20260825_102913_c2d9847e01:ev-30-02",
+      "source_id": "benchmark-case_20260825_102913_c2d9847e01-ev-30-02",
+      "projection_hash": "a56cc41f6bb5b3d9eac8a19c7a3bd5007f80e8e01a98493913b10c704b47a54e",
+      "content_hash": "f26d5965119e20c913d1cd51a3718d935afb6a2a5f8af2a91b87fa3d289aee96",
+      "request_bytes": 707,
+      "response_status": "ok",
+      "response_hash": "7c7483c703c5bfb5383d506808344ca79e81189992002b6a6fbcdf6102a26fa3"
+    }
+  ],
+  "total_request_bytes": 1418
+}

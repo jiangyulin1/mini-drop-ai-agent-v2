@@ -1,0 +1,65 @@
+{
+  "schema": "benchmark-agent.public-case.v1",
+  "case_id": "case-14",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "New connections fail after file descriptor usage approaches the process limit.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-14-01",
+      "kind": "fd_usage",
+      "summary": "Bounded fd usage projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:b4169eeef49349317ec079549c1e0999370f2186391d65ed4f0eb50e0a03c954",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-14-02",
+      "kind": "error_logs",
+      "summary": "Bounded error logs projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:8bcc56abe0957f043b724dc847783cdbd09bc0def690e34cda0b5a84aebe9ada",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "search_logs"
+      ]
+    },
+    {
+      "evidence_id": "ev-14-03",
+      "kind": "connection_rate",
+      "summary": "Bounded connection rate projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:b969b09b2d35e10d278bab9ff166b379f105349f8ed11bb1d681e8d810a46a2f",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

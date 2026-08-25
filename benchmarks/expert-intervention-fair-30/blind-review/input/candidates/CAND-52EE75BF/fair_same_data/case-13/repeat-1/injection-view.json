@@ -1,0 +1,45 @@
+{
+  "schema": "benchmark-agent.agent-data-injection.v1",
+  "agent_id": "benchmark-agent",
+  "track": "fair_same_data",
+  "case_id": "case-13",
+  "records": [
+    {
+      "agent_id": "benchmark-agent",
+      "method": "POST /api/v1/cases/{case_id}/evidence/import",
+      "evidence_id": "ev-13-01",
+      "canonical_evidence_id": "eval:case_20260825_102015_ec7000fc29:ev-13-01",
+      "source_id": "benchmark-case_20260825_102015_ec7000fc29-ev-13-01",
+      "projection_hash": "1b5e82bc192c237d7620b7620479fba1b18f21a8672a9b31f842a8a2918f01b6",
+      "content_hash": "b6f46f359d01e9c19ca3db8a2698057dd814d8fbeb0801ee8e98fcef2d262376",
+      "request_bytes": 677,
+      "response_status": "ok",
+      "response_hash": "f53530506d1ffbece5b45463c0337166783b73799918e70474b691e71ea6e847"
+    },
+    {
+      "agent_id": "benchmark-agent",
+      "method": "POST /api/v1/cases/{case_id}/evidence/import",
+      "evidence_id": "ev-13-02",
+      "canonical_evidence_id": "eval:case_20260825_102015_ec7000fc29:ev-13-02",
+      "source_id": "benchmark-case_20260825_102015_ec7000fc29-ev-13-02",
+      "projection_hash": "e4f4ba42f0d80f26a80b743b217cc79c9f50106987647cc5395268a26e7fed87",
+      "content_hash": "65c6642e0659c3a6ed6ee162a1a8c44da73869848fd7a4ad635667d5e89cce10",
+      "request_bytes": 671,
+      "response_status": "ok",
+      "response_hash": "fdd59201a8557239d2a1a8f65e90c30d1f7a5c54768895437cb4996ed2dc33c4"
+    },
+    {
+      "agent_id": "benchmark-agent",
+      "method": "POST /api/v1/cases/{case_id}/evidence/import",
+      "evidence_id": "ev-13-03",
+      "canonical_evidence_id": "eval:case_20260825_102015_ec7000fc29:ev-13-03",
+      "source_id": "benchmark-case_20260825_102015_ec7000fc29-ev-13-03",
+      "projection_hash": "2501d4ea3c424fd47d60acb8acff01fd8f8b82aa4f0f174804ad7b957e64b260",
+      "content_hash": "11d21412a7ad376e96c89e3c24b4ed104957fc06d1f816ed709ec8602174c732",
+      "request_bytes": 680,
+      "response_status": "ok",
+      "response_hash": "117731f41875bcfe889c81e9dce0db2b113bafe62d29698cc3f1e139e6356985"
+    }
+  ],
+  "total_request_bytes": 2028
+}

@@ -1,0 +1,219 @@
+{
+  "case_id": "case-02",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2203,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:14:14.549747Z"
+    },
+    {
+      "event_id": 2204,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-02-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e330f274336fec5fc5f454b676c2bee7e7587c705074a1088fbc8f4449f33fef",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:14:14.620883Z"
+    },
+    {
+      "event_id": 2205,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-02-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "8b509975be956f253e4680b102fa43ec71f003136a1847b1b7241b0e52544e70",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:14:14.690509Z"
+    },
+    {
+      "event_id": 2206,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-02-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e0731bca99e1169c7ab6240e5224f1e1ccea496ddd91cf61e7ec5c38046a7a42",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:14:14.768327Z"
+    },
+    {
+      "event_id": 2207,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:14:14.850373Z"
+    },
+    {
+      "event_id": 2208,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_b24fa2a796c9479a93c4cca5a5f9d9e0",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "48747fe53894fc9e811e2495bff8aa2e9a209eddc46aa0be0e6e8f61ddfa440e"
+      },
+      "created_at": "2026-08-25T10:14:14.885800Z"
+    },
+    {
+      "event_id": 2209,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787652854914",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787652854914"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787652854914",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:14:14.927886Z"
+    },
+    {
+      "event_id": 2210,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-9070dffa0a5e2e9e68f35d75",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787652854914",
+        "content": "Based on the evidence gathered, here is my analysis and conclusion.\n\n**What I found:**\n- Only 3 evidence items exist (all `github_pr_SOURCE_DERIVED`, `SYNTHETIC_EVAL`, UNREVIEWED, lifecycle=ACTIVE): `ev-02-01` (cpu_profile_topn), `ev-02-02` (release_comparison), `ev-02-03` (latency_context).\n- All three projections consistently carry observations `[\"regression\",\"new symbol\",\"endpoint\"]` with aligned signal values (0.371/0.402/0.433), but all concrete dimensions (`service`, `host`, `request_id`) are redacted — no symbol name, no endpoint name, no CPU numbers.\n- No runtime evidence exists: no `sys_metrics`, `perf_cpu` profile, `process_scan`, release diff, or endpoint p99 percentiles. Causal graph, dependency graph, gaps, and collection status are all empty.\n\n```json\n{\n  \"conclusion\": \"CPU 上升与单一 endpoint 的 p99 增加与本次 release 引入的新代码路径（new symbol）方向一致：cpu_profile_topn、release_comparison、latency_context 三个评估投影均标记 regression+new symbol+endpoint。但所有具体维度（service/host/request_id）被 redacted，且本 case 无任何运行时证据（sys_metrics/perf_cpu/process_scan/release diff），无法定位具体符号或代码行，因此该结论仅为低置信度的方向性假设，未经 Profile 证实。\",\n  \"root_location\": \"未解析：release 引入的 new symbol（具体函数/文件/端点因 redacted 不可见），疑似位于受影响单一 endpoint 的请求热路径上\",\n  \"mechanism\": \"假设机制：新发布版本在受影响 endpoint 的请求热路径中新增执行路径（new symbol），每次请求增加额外 CPU 开销，导致进程 CPU 上升；由于该开销仅在该 endpoint 的路径上执行，故仅该 endpoint 的 p99 上升。属于相关性推理，机制未被证实。\",\n  \"confidence\": 0.3,\n  \"confidence_reason\": \"三条证据均为 SYNTHETIC_EVAL/UNREVIEWED 的 github_pr 评估投影，只含信号级标签（regression/new symbol/endpoint）且维度被 redacted，无符号名、无 CPU 用户态/内核态分解、无发布前后对比数据；按 linux_cpu_diagnosis 技能，无 Profile 不得断言具体代码行，故置信度低。\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-02-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-02-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-02-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"sys_metrics：目标进程/主机 CPU 用户态-内核态分解与基线（skill 必需）\",\n    \"perf_cpu 火焰图：热点符号与调用栈（skill 必需，证明 new symbol 热点）\",\n    \"process_scan：确认 target_pid 12345 对应进程与 CPU 占用\",\n    \"release diff / PR 变更集：识别 new symbol 对应的具体代码\",\n    \"endpoint 级发布前后 P50/P95/P99 与错误率对比\",\n    \"log_scan：错误/超时时间线\"\n  ],\n  \"next_action\": \"READ_ONLY 下仅提案（不执行）：注册 R1 级 sys_metrics 与 R2 级 perf_cpu（target_pid=12345）获取热点符号，并获取本次 release 变更集，将 new symbol 映射到受影响 endpoint 的热路径，再用发布前后 p99 对比验证；当前证据不足，不进行任何变更/恢复动作。\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-02-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-02-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-02-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:15:04.740996Z"
+    },
+    {
+      "event_id": 2211,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787652854914",
+        "message_id": "amsg-9070dffa0a5e2e9e68f35d75"
+      },
+      "created_at": "2026-08-25T10:15:04.744678Z"
+    }
+  ]
+}

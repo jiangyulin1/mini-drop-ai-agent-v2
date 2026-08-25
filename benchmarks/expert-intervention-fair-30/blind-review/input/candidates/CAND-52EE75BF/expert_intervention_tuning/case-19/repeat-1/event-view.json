@@ -1,0 +1,372 @@
+{
+  "case_id": "case-19",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2717,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:47:58.472888Z"
+    },
+    {
+      "event_id": 2718,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-19-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "ca6e701275a4d4dd79d80ba99bc6774fbeeae07549fac0aaa0249999187aa16b",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:47:58.554684Z"
+    },
+    {
+      "event_id": 2719,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-19-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "998029a2285997d48f50573933ce61ec819be2f22c708afd0999f4db660f1878",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:47:58.642093Z"
+    },
+    {
+      "event_id": 2720,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-19-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e5d135b6943a1ec03423d75685ae2af5095d10f09087ae8bb4ee004f32759bb0",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:47:58.713335Z"
+    },
+    {
+      "event_id": 2721,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:47:58.781899Z"
+    },
+    {
+      "event_id": 2722,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_c0bbdcdb1ca84684badda17bd01e359a",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "efa481b20c4af21267bc714587ca2922a632c8976c84b61c9d0731f24321d2f0"
+      },
+      "created_at": "2026-08-25T10:47:58.820025Z"
+    },
+    {
+      "event_id": 2723,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654878854",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654878854"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654878854",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:47:58.871161Z"
+    },
+    {
+      "event_id": 2724,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-fa17621e346e443b22ec894c",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654878854",
+        "content": "Based on my investigation, I have enough to answer. Summary of findings:\n\n- **ev-19-01** (`source_a`): one trusted source's signal (value 3.261), observations include `conflict`/`disagree`/`abstain`, no explicit claim field.\n- **ev-19-02** (`source_b`): second trusted source (value 3.292), **explicitly claims `downstream`** and declares `conflicts_with: ev-19-01`.\n- **ev-19-03** (`quality_summary`): summary signal (value 3.323) also flagged `conflict`/`disagree`/`abstain`.\n- No runtime evidence exists: dependency graph has 0 nodes (`insufficient_coverage`), no evidence gaps/analyses, no collection requests, and no reusable runtime evidence. All three items are HISTORICAL synthetic eval projections with redacted `service`/`host`/`request_id` dimensions.\n\nThe evidence confirms the disagreement (source_b says downstream; source_a conflicts, i.e., local) but provides **no adjudicating runtime data** for target pid 12345. Per the answer-stability skill, I abstain on root location rather than guess.\n\n```json\n{\n  \"conclusion\": \"The evidence confirms the case premise: two trusted sources disagree on whether the bottleneck is local or downstream. Source B (ev-19-02) explicitly claims the bottleneck is 'downstream' and marks itself as conflicting with Source A (ev-19-01); the quality summary (ev-19-03) independently flags the same conflict/disagree/abstain pattern. However, no runtime evidence exists to adjudicate which source is correct: the dependency graph is empty (insufficient coverage), no system metrics, runtime snapshot, connection probe, or log evidence is available for target pid 12345, and all three evidence items are HISTORICAL synthetic eval projections with redacted service/host/request_id dimensions. The disagreement itself is established; the true bottleneck location is undetermined.\",\n  \"root_location\": \"UNKNOWN — cannot be determined from current evidence (no adjudicating runtime data; source_a and source_b conflict, source_b claims downstream)\",\n  \"mechanism\": \"Disagreement between two trusted evaluation sources: source_b asserts a downstream bottleneck while source_a's signal conflicts with that assertion (implying a local bottleneck). No runtime measurement (CPU/thread/lock contention on pid 12345 vs downstream dependency latency) exists to resolve the conflict; the quality_summary signal confirms the sources disagreed and abstained.\",\n  \"confidence\": \"low\",\n  \"confidence_reason\": \"The only available evidence (ev-19-01, ev-19-02, ev-19-03) is HISTORICAL, UNREVIEWED, synthetic github_pr eval projections with redacted target dimensions; ev-19-02's 'downstream' claim and ev-19-01's conflicting signal are mutually exclusive and neither is corroborated by live runtime data. Dependency graph coverage is insufficient and no evidence analyses or collection results exist, so no independent fact breaks the tie.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-03\"\n  ],\n  \"counter_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-01\"\n  ],\n  \"missing_evidence\": [\n    \"runtime resource saturation for target pid 12345 (CPU, load, threads, FD, I/O) — sys_metrics collector\",\n    \"thread state / lock wait / futex analysis for pid 12345 — runtime_snapshot collector\",\n    \"downstream endpoint connectivity and latency (TCP/HTTP status, response latency) — connection_probe collector\",\n    \"one-hop TCP dependency topology from pid 12345 — network_discovery collector\",\n    \"target service recent error/timeout log timeline — log_scan collector\",\n    \"perf/profile hotspot data distinguishing local user/kernel CPU contention from blocking on downstream calls\"\n  ],\n  \"next_action\": \"Propose R1 collection on target pid 12345 to adjudicate local-vs-downstream: sys_metrics (CPU/load/threads) + runtime_snapshot (lock/thread waits) to test local contention, and connection_probe + network_discovery to test downstream dependency latency; use log_scan for the incident timeline. This is a proposal only — READ_ONLY turn, no collection dispatched.\",\n  \"abstain\": true\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-19-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-19-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-19-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:48:37.171458Z"
+    },
+    {
+      "event_id": 2725,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654878854",
+        "message_id": "amsg-fa17621e346e443b22ec894c"
+      },
+      "created_at": "2026-08-25T10:48:37.176131Z"
+    },
+    {
+      "event_id": 2726,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type SCOPE_CORRECTION has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:48:38.276675Z"
+    },
+    {
+      "event_id": 2727,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_bb2e495f1b6f456ab6c4f5f3ed69f4a8",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "83768763766d9ef0a3a351e3fd6f961b4df214f6df2bdd3d6ace9a571cfb1d0b"
+      },
+      "created_at": "2026-08-25T10:48:38.314315Z"
+    },
+    {
+      "event_id": 2728,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654918339",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654918339"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654918339",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:48:38.362138Z"
+    },
+    {
+      "event_id": 2729,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-e3b2a46298bd3ccde8f69050",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654918339",
+        "content": "The re-read confirms the evidence state is unchanged by the SCOPE_CORRECTION intervention: same 3 ACTIVE evidence items (ev-19-01, ev-19-02, ev-19-03), same projection contents, evidence_watermark still 3, and target scope still `target_pid 12345 / worker-1 / host-1`. No new evidence, no invalidated claims, and no scope fields changed. Per the answer-stability skill, I defend the prior conclusion with identical evidence IDs and wording rather than generating new hypotheses.\n\n```json\n{\n  \"conclusion\": \"The evidence confirms the case premise: two trusted sources disagree on whether the bottleneck is local or downstream. Source B (ev-19-02) explicitly claims the bottleneck is 'downstream' and marks itself as conflicting with Source A (ev-19-01); the quality summary (ev-19-03) independently flags the same conflict/disagree/abstain pattern. The SCOPE_CORRECTION intervention did not alter the evidence state (re-read confirms watermark 3, same ACTIVE evidence, unchanged target_scope of pid 12345/worker-1/host-1), so the conclusion is defended unchanged: the disagreement itself is established, but the true bottleneck location remains undetermined because no runtime evidence exists to adjudicate local vs downstream.\",\n  \"root_location\": \"UNKNOWN — cannot be determined from current evidence (no adjudicating runtime data; source_a and source_b conflict, source_b claims downstream)\",\n  \"mechanism\": \"Disagreement between two trusted evaluation sources: source_b asserts a downstream bottleneck while source_a's signal conflicts with that assertion (implying a local bottleneck). No runtime measurement (CPU/thread/lock contention on pid 12345 vs downstream dependency latency) exists to resolve the conflict; the quality_summary signal confirms the sources disagreed and abstained.\",\n  \"confidence\": \"low\",\n  \"confidence_reason\": \"The only available evidence (ev-19-01, ev-19-02, ev-19-03) is HISTORICAL, UNREVIEWED, synthetic github_pr eval projections with redacted target dimensions; ev-19-02's 'downstream' claim and ev-19-01's conflicting signal are mutually exclusive and neither is corroborated by live runtime data. The intervention re-read showed no new evidence, no invalidations, and no scope change that would break the tie, so confidence stays low.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-03\"\n  ],\n  \"counter_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-19-01\"\n  ],\n  \"missing_evidence\": [\n    \"runtime resource saturation for target pid 12345 (CPU, load, threads, FD, I/O) — sys_metrics collector\",\n    \"thread state / lock wait / futex analysis for pid 12345 — runtime_snapshot collector\",\n    \"downstream endpoint connectivity and latency (TCP/HTTP status, response latency) — connection_probe collector\",\n    \"one-hop TCP dependency topology from pid 12345 — network_discovery collector\",\n    \"target service recent error/timeout log timeline — log_scan collector\",\n    \"perf/profile hotspot data distinguishing local user/kernel CPU contention from blocking on downstream calls\"\n  ],\n  \"next_action\": \"Propose R1 collection on target pid 12345 to adjudicate local-vs-downstream: sys_metrics (CPU/load/threads) + runtime_snapshot (lock/thread waits) to test local contention, and connection_probe + network_discovery to test downstream dependency latency; use log_scan for the incident timeline. This is a proposal only — READ_ONLY turn, no collection dispatched.\",\n  \"abstain\": true\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-19-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-19-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-19-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:48:49.739264Z"
+    },
+    {
+      "event_id": 2730,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654918339",
+        "message_id": "amsg-e3b2a46298bd3ccde8f69050"
+      },
+      "created_at": "2026-08-25T10:48:49.746870Z"
+    }
+  ]
+}

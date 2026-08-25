@@ -1,0 +1,219 @@
+{
+  "case_id": "case-13",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2302,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:20:15.329757Z"
+    },
+    {
+      "event_id": 2303,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "1b5e82bc192c237d7620b7620479fba1b18f21a8672a9b31f842a8a2918f01b6",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:20:15.396843Z"
+    },
+    {
+      "event_id": 2304,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e4f4ba42f0d80f26a80b743b217cc79c9f50106987647cc5395268a26e7fed87",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:20:15.464884Z"
+    },
+    {
+      "event_id": 2305,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-13-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "2501d4ea3c424fd47d60acb8acff01fd8f8b82aa4f0f174804ad7b957e64b260",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:20:15.539032Z"
+    },
+    {
+      "event_id": 2306,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:20:15.610246Z"
+    },
+    {
+      "event_id": 2307,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_ffeb5f759fd74b6b868e4560e2134399",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "8a6b7245d159cc5bd85a8a66489042309356578735b97eaaac270094386cdbf3"
+      },
+      "created_at": "2026-08-25T10:20:15.632820Z"
+    },
+    {
+      "event_id": 2308,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653215668",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653215668"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653215668",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:20:15.687400Z"
+    },
+    {
+      "event_id": 2309,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-a172d466310cf9db20828f7e",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653215668",
+        "content": "```json\n{\n  \"conclusion\": \"目标服务(worker-1, pid 12345)写延迟上升与宿主机级存储队列尖峰在时间窗口 T0..T1 内对齐：设备延迟、I/O 队列与目标写速率三个信号同步升高，观测标记均为 device/queue/contention。最可能机制是宿主机存储设备争用(host-wide storage queue/contention)导致设备延迟上升，进而抬高目标写延迟；但现有证据仅含归一化评估信号，尚无法排除目标自身写速率上升是队列尖峰的触发/放大器之一。\",\n  \"root_location\": \"host-1 存储设备/块设备队列(host-wide storage device queue)；目标进程 worker-1 (pid 12345) 位于该设备之上，作为受影响方\",\n  \"mechanism\": \"宿主机存储设备队列尖峰/争用 → I/O 队列深度上升(ev-13-02) → 设备延迟上升(ev-13-01) → 目标写延迟随之上升；目标写速率在同时窗同步升高(ev-13-03)，可能为放大器或并发触发源，但先后顺序与因果方向未经证实。\",\n  \"confidence\": \"low\",\n  \"confidence_reason\": \"三条证据均为对齐窗口 T0..T1 的归一化评估投影(SYNTHETIC_EVAL, UNREVIEWED, quality=COMPLETE)，观测一致(device/queue/contention)且与 case_goal 吻合，但缺少基线值、原始样本、队列归属(哪些进程驱动队列)、信号先后顺序与目标自身 I/O 细节；无法区分目标是被动受害方还是主动贡献者，故仅给出低置信度方向性结论。\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-13-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-13-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-13-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"队列尖峰期间 host-1 各进程/租户的 I/O 归属(谁驱动了队列)\",\n    \"目标写延迟、设备延迟、队列深度的基线值与变化幅度(原始样本而非归一化信号)\",\n    \"信号先后顺序(目标写速率上升先于还是晚于队列尖峰)\",\n    \"目标服务日志中的超时/重试/IO 错误模式\",\n    \"块设备延迟分布直方图(区分延迟分布形态与争用来源)\"\n  ],\n  \"next_action\": \"建议注册最高信息增益探针组合(READ_ONLY 许可，需后续授权执行)：sys_metrics(R1, 主机+进程 I/O/负载基线) + process_scan(R1, 定位 host-1 其他高 I/O 进程) + ebpf_io(R2, 块设备延迟直方图与争用确认) + log_scan(R1, 目标进程错误/超时模式)，以归因队列来源并验证设备争用机制。\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-13-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-13-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-13-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:20:49.329425Z"
+    },
+    {
+      "event_id": 2310,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653215668",
+        "message_id": "amsg-a172d466310cf9db20828f7e"
+      },
+      "created_at": "2026-08-25T10:20:49.334171Z"
+    }
+  ]
+}

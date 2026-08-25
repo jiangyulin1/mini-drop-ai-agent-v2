@@ -1,0 +1,385 @@
+{
+  "case_id": "case-25",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2803,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:52:46.062230Z"
+    },
+    {
+      "event_id": 2804,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-25-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "89a8926f9669978a00349389388dafa455d66ed7a3d0b6dddccfbefe6d171822",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:52:46.132731Z"
+    },
+    {
+      "event_id": 2805,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-25-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "a11edc1460808876cdad8238e4e71f3d2a725f62bac22ea3239946fe3cb34463",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:52:46.200152Z"
+    },
+    {
+      "event_id": 2806,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-25-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "01e0fcd9ee05a9fe7cb890cc6fb3d3256f5ed6d28be74ca44f3c39fd5ce6c31b",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:52:46.269373Z"
+    },
+    {
+      "event_id": 2807,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:52:46.341889Z"
+    },
+    {
+      "event_id": 2808,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_70378d53170f446aaf130964886d88e8",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "41cb7717a930534e6d114abd6f750f5b31b3cb5f26546aaaf9212497f197efe2"
+      },
+      "created_at": "2026-08-25T10:52:46.364041Z"
+    },
+    {
+      "event_id": 2809,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655166388",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655166388"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655166388",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:52:46.405736Z"
+    },
+    {
+      "event_id": 2810,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-40c795d012aac3ba21ea4558",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655166388",
+        "content": "I have enough to form a bounded assessment. Summary of what the read-only investigation found:\n\n- **ev-25-01** (`fd_usage`, value 4.281), **ev-25-02** (`dependency_latency`, value 4.312), **ev-25-03** (`error_logs`, value 4.343) — all ACTIVE/COMPLETE, aligned windows T0..T1, all tagged with observations `[\"descriptor\",\"downstream\",\"amplifier\"]`. The monotonic ordering (FD usage → dependency latency → error logs) is consistent with the goal's mechanism chain.\n- No counter-evidence, no causal/dependency graph, no evidence gaps, no prior collection requests.\n- Knowledge search returned only an unrelated checkout-api review, explicitly flagged `knowledge_is_evidence=false` — not usable as evidence.\n\n```json\n{\n  \"conclusion\": \"The evidence supports the stated mechanism: a connection leak in redacted-service (worker-1, pid 12345) exhausts file descriptors, and a downstream slowdown acts as the amplifier that turns the leak into local failures. All three aligned signals are elevated (fd_usage 4.281, dependency_latency 4.312, error_logs 4.343) with identical observation tags (descriptor/downstream/amplifier), matching the goal narrative of descriptor exhaustion amplified by slow downstream responses. However, the evidence base is thin (synthetic eval scores only, UNREVIEWED, no raw samples), so the leak site is inferred rather than proven.\",\n  \"root_location\": \"redacted-service (target_pid 12345, worker-1, host-1) outbound connection-management path: connections acquired toward the downstream dependency are not reliably released/closed (leak on slow or error completion paths), causing monotonic FD growth.\",\n  \"mechanism\": \"Downstream dependency slows down → in-flight connections to it are held open longer → the service's connection pool (leaky: missing release/close on completion or error paths, or unbounded pool growth without checkout timeout) never returns those descriptors → file descriptor count climbs toward the process/host limit → new connection/accept attempts fail (EMFILE/ENFILE, 'too many open files') → local error_logs rise even though the original trigger was downstream latency. The downstream slowdown is the amplifier; the descriptor leak is the primary local fault.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"All three signals (fd_usage, dependency_latency, error_logs) are consistently elevated over the same aligned window and share the same observation tags as the case goal's mechanism, with no counter-evidence. But the evidence is UNREVIEWED synthetic eval projections (score + keywords only, no log lines, no FD time series, no stack trace), the causal graph and dependency graph are empty, and the leak site is not directly observed — hence medium rather than high confidence.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-25-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-25-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-25-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"FD/connection count time series for pid 12345 showing monotonic growth toward the limit (and the actual ulimit -n vs. peak FD count)\",\n    \"Raw error log lines confirming EMFILE/ENFILE/'too many open files' as the local failure type\",\n    \"Outbound connection inventory (network_discovery) showing unbounded ESTABLISHED connections to the downstream endpoint\",\n    \"Code-path confirmation of the leak site (where connections are acquired but not released on slow/error paths)\",\n    \"Downstream latency source/status to separate the amplifier from the primary leak\"\n  ],\n  \"next_action\": \"READ_ONLY turn: propose (do not execute) R1 collection for the highest information gain on the remaining gap — sys_metrics on pid 12345 (fd + network trend) and log_scan on pid 12345 (error patterns, EMFILE strings) to confirm descriptor exhaustion, plus network_discovery/connection_probe to quantify outbound connection growth to the downstream; await gateway validation before any collection runs.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-25-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-25-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-25-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:53:23.333951Z"
+    },
+    {
+      "event_id": 2811,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655166388",
+        "message_id": "amsg-40c795d012aac3ba21ea4558"
+      },
+      "created_at": "2026-08-25T10:53:23.346449Z"
+    },
+    {
+      "event_id": 2812,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "message",
+        "content": "Expert intervention for case-25: re-evaluate the active evidence before the second answer."
+      },
+      "created_at": "2026-08-25T10:53:24.096086Z"
+    },
+    {
+      "event_id": 2813,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type OPERATOR_HINT_UNVERIFIED has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:53:24.171474Z"
+    },
+    {
+      "event_id": 2814,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_53d422962b7448d1bd6b6c7f02e370a9",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "05f01080f039767f0345b852f00c3a9efa2df37fdfb79db7604680daa578664d"
+      },
+      "created_at": "2026-08-25T10:53:24.194590Z"
+    },
+    {
+      "event_id": 2815,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655204214",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655204214"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655204214",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:53:24.228161Z"
+    },
+    {
+      "event_id": 2816,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-0ca0d5e5e446caedfef1dad1",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655204214",
+        "content": "Evidence state re-read: unchanged — still exactly 3 ACTIVE evidence items (ev-25-01/02/03), same projection hashes (89a8926f…, a11edc14…, 01e0fcd9…), watermark still 3, no new evidence, no counter-evidence, causal/dependency graphs still empty. The `OPERATOR_HINT_UNVERIFIED` intervention carried no visible content or counter-facts in this context, and per the answer-stability skill I must not alter conclusions without new active evidence. I therefore **defend** the existing hypothesis with identical evidence citations.\n\n```json\n{\n  \"conclusion\": \"The evidence still supports the stated mechanism: a connection leak in redacted-service (worker-1, pid 12345) exhausts file descriptors, and a downstream slowdown acts as the amplifier that turns the leak into local failures. All three aligned signals remain elevated (fd_usage 4.281, dependency_latency 4.312, error_logs 4.343) with identical observation tags (descriptor/downstream/amplifier), matching the goal narrative of descriptor exhaustion amplified by slow downstream responses. The OPERATOR_HINT_UNVERIFIED intervention was reviewed but is unverified and introduced no new active evidence, so the hypothesis is defended unchanged; the leak site remains inferred rather than proven.\",\n  \"root_location\": \"redacted-service (target_pid 12345, worker-1, host-1) outbound connection-management path: connections acquired toward the downstream dependency are not reliably released/closed (leak on slow or error completion paths), causing monotonic FD growth.\",\n  \"mechanism\": \"Downstream dependency slows down → in-flight connections to it are held open longer → the service's connection pool (leaky: missing release/close on completion or error paths, or unbounded pool growth without checkout timeout) never returns those descriptors → file descriptor count climbs toward the process/host limit → new connection/accept attempts fail (EMFILE/ENFILE, 'too many open files') → local error_logs rise even though the original trigger was downstream latency. The downstream slowdown is the amplifier; the descriptor leak is the primary local fault.\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"Evidence state is unchanged from the prior cycle (watermark 3, identical projection hashes): all three signals remain consistently elevated over the same aligned window with the same observation tags as the case goal's mechanism, and no counter-evidence exists. The confidence is capped at medium because the evidence is still UNREVIEWED synthetic eval projections (score + keywords only, no log lines, no FD time series, no stack trace), the causal and dependency graphs remain empty, the leak site is not directly observed, and the applied intervention is UNVERIFIED with no substantiating content.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-25-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-25-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-25-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"FD/connection count time series for pid 12345 showing monotonic growth toward the limit (and actual ulimit -n vs. peak FD count)\",\n    \"Raw error log lines confirming EMFILE/ENFILE/'too many open files' as the local failure type\",\n    \"Outbound connection inventory (network_discovery) showing unbounded ESTABLISHED connections to the downstream endpoint\",\n    \"Code-path confirmation of the leak site (where connections are acquired but not released on slow/error paths)\",\n    \"Downstream latency source/status to separate the amplifier from the primary leak\"\n  ],\n  \"next_action\": \"READ_ONLY turn: defend the unchanged hypothesis and propose (do not execute) R1 collection for the highest information gain on the remaining gap — sys_metrics on pid 12345 (fd + network trend) and log_scan on pid 12345 (error patterns, EMFILE strings) to confirm descriptor exhaustion, plus network_discovery/connection_probe to quantify outbound connection growth to the downstream; await gateway validation before any collection runs.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-25-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-25-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-25-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:53:35.163060Z"
+    },
+    {
+      "event_id": 2817,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 15,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655204214",
+        "message_id": "amsg-0ca0d5e5e446caedfef1dad1"
+      },
+      "created_at": "2026-08-25T10:53:35.169494Z"
+    }
+  ]
+}

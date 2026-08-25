@@ -1,0 +1,219 @@
+{
+  "case_id": "case-10",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2275,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:18:43.675152Z"
+    },
+    {
+      "event_id": 2276,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-10-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "f8737194b692b6968464377d6484abefe1e73de7e0314f295beaaedf9c8d9135",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:18:43.745498Z"
+    },
+    {
+      "event_id": 2277,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-10-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "40dd9e5893cb46a0b01328fffce649cacf355d57e097ab3d6775ddc337bb97b3",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:18:43.816122Z"
+    },
+    {
+      "event_id": 2278,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-10-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "77a9a287d32528b312759fde2e48a82793c5e7cc2909635dbda78eee0e38f693",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:18:43.902996Z"
+    },
+    {
+      "event_id": 2279,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:18:43.983747Z"
+    },
+    {
+      "event_id": 2280,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_5e0c424ece4b47079d767a0455f1b35e",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "84cddcef6f3ca9a2e5c26a3948fc28b1c67c24c92fc08277226324a1a789e6a7"
+      },
+      "created_at": "2026-08-25T10:18:44.007769Z"
+    },
+    {
+      "event_id": 2281,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653124035",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653124035"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653124035",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:18:44.053436Z"
+    },
+    {
+      "event_id": 2282,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-834534fd4b5f331abbfaf5dc",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653124035",
+        "content": "All three evidence projections are now expanded, plus knowledge and graph context retrieved. Here is my analysis and the required single JSON answer.\n\n**Analysis summary:**\n- `ev-10-01` (`dependency_latency`): 120 samples, elevated value 1.731, observations `[payment, timeout, remote]` — remote payment dependency latency is elevated.\n- `ev-10-02` (`timeout_logs`): 120 samples, elevated value 1.762, observations `[payment, timeout, remote]` — timeout log events align with the payment/remote path.\n- `ev-10-03` (`local_cpu`): 120 samples, value 1.793, observations `[payment, timeout, remote]` — local CPU signal present at comparable magnitude; case goal asserts local processing remains healthy, so this is ambiguous without a baseline/threshold.\n- No causal graph, dependency graph coverage, or evidence gaps are registered yet; knowledge search returned only background (non-evidence) context.\n\nThe two timeout-relevant signals both point at the remote payment dependency path, while the case goal frames local processing as healthy — pointing the root cause to the outbound/remote path rather than local resource exhaustion.\n\n```json\n{\n  \"conclusion\": \"Payment calls time out due to elevated latency on the outbound/remote payment dependency path; the local service's request processing remains healthy, so this is a remote-side (dependency/network) problem rather than local resource exhaustion.\",\n  \"root_location\": \"Remote payment dependency / outbound network path (payment provider endpoint reachable from redacted-service on host-1/worker-1), not the local host or worker resources.\",\n  \"mechanism\": \"Outbound payment requests to the remote dependency exceed the client-side timeout because remote dependency latency is elevated (dependency_latency signal at 1.731 with payment/timeout/remote observations) and corresponding timeout log events are emitted (timeout_logs at 1.762); the local service continues processing requests normally, so the bottleneck is upstream of the local process (PID 12345).\",\n  \"confidence\": \"medium\",\n  \"confidence_reason\": \"Two independent signals (dependency_latency ev-10-01, timeout_logs ev-10-02) align on the same payment/timeout/remote observations over the same 120-sample window, and the case goal states local processing remains healthy. Confidence is capped at medium because the local_cpu signal (ev-10-03, 1.793) has comparable magnitude and cannot be ruled in/out without a baseline or threshold, and there is no direct egress/connectivity or remote dependency health evidence, no causal graph, and no dependency graph coverage.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-10-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-10-02\"\n  ],\n  \"counter_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-10-03\"\n  ],\n  \"missing_evidence\": [\n    \"Baseline and threshold for local_cpu to confirm whether 1.793 is normal or elevated (ev-10-03 is ambiguous)\",\n    \"Direct egress/connectivity metrics to the remote payment provider (e.g., service.connection, topology.discover outputs)\",\n    \"Remote payment dependency health/status signals (remote latency percentiles, error rates, provider-side degradation)\",\n    \"Client timeout configuration values for payment calls\",\n    \"Per-request traces for payment calls (request_id/service/host are redacted in current projections)\"\n  ],\n  \"next_action\": \"Collect connectivity/egress metrics to the remote payment dependency and remote dependency latency health (registered query operations include service.connection and topology.discover), plus a local CPU baseline comparison, to confirm the remote-side root cause and rule out local resource exhaustion.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-10-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-10-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-10-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:19:18.137183Z"
+    },
+    {
+      "event_id": 2283,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653124035",
+        "message_id": "amsg-834534fd4b5f331abbfaf5dc"
+      },
+      "created_at": "2026-08-25T10:19:18.140751Z"
+    }
+  ]
+}

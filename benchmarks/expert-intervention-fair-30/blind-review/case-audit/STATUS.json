@@ -1,0 +1,7 @@
+{
+  "schema": "blind-review.case-evidence-ceilings-status.v1",
+  "status": "PENDING",
+  "case_count": 30,
+  "required_output": "case-evidence-ceilings.json",
+  "rule": "Oracle claims not derivable from public replay evidence must become null/not_comparable, not a failure."
+}

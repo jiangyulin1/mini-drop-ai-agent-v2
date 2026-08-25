@@ -1,0 +1,219 @@
+{
+  "case_id": "case-09",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2266,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:18:21.421466Z"
+    },
+    {
+      "event_id": 2267,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-09-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "3593c141f1b9ad82b8caf40f582039252acfd0a19167f5168388a702c2b675a4",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:18:21.494814Z"
+    },
+    {
+      "event_id": 2268,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-09-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e192f6fd84e1ac99b2159610dd8ce709d39ea5d4c8a6cbef6b08d84632219692",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:18:21.562737Z"
+    },
+    {
+      "event_id": 2269,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-09-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "fb95fa7f4b66bb8eee23ce1c3eb0fbbf3184f3710f73f51f57be14931617d138",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:18:21.624830Z"
+    },
+    {
+      "event_id": 2270,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:18:21.694980Z"
+    },
+    {
+      "event_id": 2271,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_ab6e7ae5b52442c088fee9e69b154239",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "46d85fcc453890a06ccbfe910b137f1a1332dc9ee4799c7f2e4a5983b97c1bb9"
+      },
+      "created_at": "2026-08-25T10:18:21.716315Z"
+    },
+    {
+      "event_id": 2272,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653101741",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653101741"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653101741",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:18:21.752330Z"
+    },
+    {
+      "event_id": 2273,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-3d1d75bb79df3fd6c4aa5e4c",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653101741",
+        "content": "All query tools have been exercised. Here is my analysis and answer.\n\n**Analysis:** All 3 ACTIVE evidence items are aligned evaluation projections over window T0..T1 (120 samples):\n- `ev-09-01`: dependency_latency = 1.561 (elevated), observations: redis, downstream, queue\n- `ev-09-02`: redis_queue = 1.592 (elevated), observations: redis, downstream, queue\n- `ev-09-03`: client_errors = 1.623 (elevated), observations: redis, downstream, queue\n\nThe signals corroborate the case goal (cache command wait → redis queue backlog → dependency latency → client-visible errors). Causal/dependency graphs are empty; no hypotheses or gaps exist yet; all evidence is UNREVIEWED/synthetic with redacted dimensions, so confidence is moderate.\n\n```json\n{\n  \"conclusion\": \"Checkout latency is elevated and driven by cache (redis) command wait that builds a queue backlog, compounded by downstream saturation; the elevated redis_queue and dependency_latency signals co-occur with rising client_errors, matching the stated incident.\",\n  \"root_location\": \"cache/redis layer: cache command wait (redis command processing latency) is the primary suspect, with downstream saturation as a contributing factor; the checkout service path (worker-1 / redacted-service on host-1) is the affected surface\",\n  \"mechanism\": \"Cache command wait rises (dependency_latency=1.561, redis_queue=1.592 over T0..T1, 120 samples), causing requests to queue behind slow/blocked redis commands; downstream saturation compounds the backlog, so checkout requests experience longer wait and eventually fail, producing elevated client_errors (1.623). The three signals are aligned and reference redis/downstream/queue, consistent with a cache-wait-first, downstream-saturation-amplified chain.\",\n  \"confidence\": \"moderate\",\n  \"confidence_reason\": \"All three ACTIVE signals (dependency_latency, redis_queue, client_errors) are elevated in the same aligned window and their observations (redis, downstream, queue) match the goal's stated mechanism; however, evidence is UNREVIEWED, synthetic (trust 50), dimension-redacted (service/host/request_id), with no causal graph, dependency graph, or baseline comparison to establish ordering or magnitude significance.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-09-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-09-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-09-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Per-component breakdown separating redis cache wait from downstream saturation within the dependency_latency signal\",\n    \"Baseline (pre-T0) values to confirm the elevation ratios (1.56-1.62) are significant versus normal\",\n    \"Temporal ordering/correlation between redis_queue, dependency_latency, and client_errors to establish which leads\",\n    \"Cache hit/miss rates and redis command latency percentiles (p50/p99) to pinpoint the wait cause\",\n    \"Client error types/status codes to distinguish timeouts from saturation-induced failures\",\n    \"Causal attribution (hypothesis/causal-graph edges) linking the signals to the checkout path\"\n  ],\n  \"next_action\": \"On the next writable cycle, propose a low-cost collection request for cache command latency percentiles and per-component (redis vs downstream) wait breakdown for checkout traffic, then verify elevation against baseline before forming causal edges; no collection or mutation is requested in this READ_ONLY turn.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-09-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-09-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-09-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:18:43.291672Z"
+    },
+    {
+      "event_id": 2274,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653101741",
+        "message_id": "amsg-3d1d75bb79df3fd6c4aa5e4c"
+      },
+      "created_at": "2026-08-25T10:18:43.295271Z"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-24",
+  "evidence": [
+    {
+      "evidence_id": "ev-24-01",
+      "kind": "host_cpu_by_process",
+      "summary": "Bounded host cpu by process projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "host_cpu_by_process",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 4.111,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "neighbor",
+          "downstream",
+          "two contributors"
+        ]
+      },
+      "integrity_hash": "sha256:d387b7dfc360787e40e84dfeffb0c37c959179cd0a7c18122eebe31543e2dc3b"
+    },
+    {
+      "evidence_id": "ev-24-02",
+      "kind": "dependency_latency",
+      "summary": "Bounded dependency latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "dependency_latency",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 4.142,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "neighbor",
+          "downstream",
+          "two contributors"
+        ]
+      },
+      "integrity_hash": "sha256:4b703aca44c5a8f7ce5e52eba51acf7d58d2a9cf335dbd1ee8eb21708187b569"
+    },
+    {
+      "evidence_id": "ev-24-03",
+      "kind": "target_latency",
+      "summary": "Bounded target latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "target_latency",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 4.173,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "neighbor",
+          "downstream",
+          "two contributors"
+        ]
+      },
+      "integrity_hash": "sha256:1dbd6932d373d7f18c29e78d156038f21d6cdac59fa7723580b0ca38a519063e"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

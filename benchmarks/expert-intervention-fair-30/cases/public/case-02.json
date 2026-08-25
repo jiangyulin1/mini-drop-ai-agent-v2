@@ -1,0 +1,65 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-02",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "CPU rises after a release and p99 increases only on one endpoint.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-02-01",
+      "kind": "cpu_profile_topn",
+      "summary": "Bounded cpu profile topn projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:ead866285741f311e48f6ca23b37cf438275a598cba0ab37ae4bb6a8ef044045",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_profile_topn"
+      ]
+    },
+    {
+      "evidence_id": "ev-02-02",
+      "kind": "release_comparison",
+      "summary": "Bounded release comparison projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:b746679d41d0e5631c3ffae9babf74fcd2ee82a6bfe8dad02241dbff45e2aeac",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-02-03",
+      "kind": "latency_context",
+      "summary": "Bounded latency context projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:f1f5b793e100e965f6a342a77c154b089711253b2715d363d22f2c0a2460e91d",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

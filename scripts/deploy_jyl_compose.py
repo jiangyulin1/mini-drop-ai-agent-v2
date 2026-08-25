@@ -13,6 +13,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NODES = ("control", "worker1", "worker2")
+SSH_KEEPALIVE = (
+    "-o", "ServerAliveInterval=30",
+    "-o", "ServerAliveCountMax=120",
+    "-o", "TCPKeepAlive=yes",
+)
 
 
 def run(args: list[str], timeout: int = 1800) -> str:
@@ -23,11 +28,17 @@ def run(args: list[str], timeout: int = 1800) -> str:
 
 
 def ssh(node: str, command: str, config: Path, timeout: int = 1800) -> str:
-    return run(["ssh", "-F", str(config), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", node, command], timeout)
+    return run([
+        "ssh", "-F", str(config), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        *SSH_KEEPALIVE, node, command,
+    ], timeout)
 
 
 def scp(local: Path, node: str, remote: str, config: Path) -> None:
-    run(["scp", "-F", str(config), "-o", "BatchMode=yes", str(local), f"{node}:{remote}"])
+    run([
+        "scp", "-F", str(config), "-o", "BatchMode=yes", *SSH_KEEPALIVE,
+        str(local), f"{node}:{remote}",
+    ])
 
 
 def manifest(archive: Path) -> dict:
@@ -75,7 +86,7 @@ def main() -> int:
                 raise RuntimeError(f"unexpected active link on {node}: {previous[node]!r}")
             remote_archive = f"{root}/{release}.tar.gz"
             scp(archive, node, remote_archive, args.ssh_config)
-            ssh(node, f"set -eu; test ! -e {release_path}; mkdir -p {release_path}; tar -xzf {remote_archive} -C {release_path}; cp {active}/.env {release_path}/.env; mkdir -p {release_path}/deploy/certs; for f in ca.crt server.crt server.key; do test -e {active}/deploy/certs/$f && cp {active}/deploy/certs/$f {release_path}/deploy/certs/$f; done", args.ssh_config)
+            ssh(node, f"set -eu; test ! -e {release_path}; mkdir -p {release_path}; tar -xzf {remote_archive} -C {release_path}; cp {active}/.env {release_path}/.env; mkdir -p {release_path}/deploy/certs; for f in ca.crt server.crt server.key; do if test -e {active}/deploy/certs/$f; then cp {active}/deploy/certs/$f {release_path}/deploy/certs/$f; fi; done", args.ssh_config)
             cmd = compose(root, release, node)
             services = "server analyzer pi-sidecar web" if node == "control" else "agent"
             ssh(node, f"{cmd} config --quiet && {cmd} build {services}", args.ssh_config, timeout=2400)

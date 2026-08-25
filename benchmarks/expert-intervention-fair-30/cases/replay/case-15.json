@@ -1,0 +1,101 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-15",
+  "evidence": [
+    {
+      "evidence_id": "ev-15-01",
+      "kind": "gc_pause",
+      "summary": "Bounded gc pause projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "gc_pause",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.581,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "gc",
+          "pause",
+          "allocation"
+        ]
+      },
+      "integrity_hash": "sha256:0c8fd1f87427d4d8a4754c5345b10bbec366756960635970bb176c1a6381fd39"
+    },
+    {
+      "evidence_id": "ev-15-02",
+      "kind": "latency_timeseries",
+      "summary": "Bounded latency timeseries projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "latency_timeseries",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.612,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "gc",
+          "pause",
+          "allocation"
+        ]
+      },
+      "integrity_hash": "sha256:5bd40aca36e4d1a03490c065feeafbfe4c9944b8d486e300bb4ba9e199198a9a"
+    },
+    {
+      "evidence_id": "ev-15-03",
+      "kind": "allocation_rate",
+      "summary": "Bounded allocation rate projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "allocation_rate",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.643,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "gc",
+          "pause",
+          "allocation"
+        ]
+      },
+      "integrity_hash": "sha256:a61fe9e9a189bc09bd284daf6eadc6077283b3095b394576b8edfb0b34621b9f"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

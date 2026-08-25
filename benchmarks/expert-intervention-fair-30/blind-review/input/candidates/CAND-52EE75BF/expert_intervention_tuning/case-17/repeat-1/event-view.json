@@ -1,0 +1,355 @@
+{
+  "case_id": "case-17",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2690,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:46:37.039982Z"
+    },
+    {
+      "event_id": 2691,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-17-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "ed21f2eeb7dff980bee2b1d9847efe4812e822708bff2fb7b7ad9eee420151b6",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:46:37.115600Z"
+    },
+    {
+      "event_id": 2692,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-17-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "25b460c7ae68b2e1377c258444c92adb90860ddeaded84f4669a6a9fc71f280b",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:46:37.181946Z"
+    },
+    {
+      "event_id": 2693,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:46:37.251176Z"
+    },
+    {
+      "event_id": 2694,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_80f5d00edd9d4c04b5d93ce0d9c1e46b",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "69daf7ae882bb04ec1e219b58829d8d5a0c443c0a945f43b07cf829622b4f7db"
+      },
+      "created_at": "2026-08-25T10:46:37.272648Z"
+    },
+    {
+      "event_id": 2695,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654797295",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654797295"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654797295",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:46:37.309606Z"
+    },
+    {
+      "event_id": 2696,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-76e00f9ec16adc5707f58b2d",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654797295",
+        "content": "Investigation complete. Both evidence projections were examined (via `list_case_evidence` + `get_evidence_projection`, plus `search_knowledge`, `compare_evidence`, `get_evidence_gaps`), and neither identifies scope or mechanism.\n\nKey findings:\n- **ev-17-01** (`quality_summary`): window T0..T1, 120 samples, value 2.921, alignment `partial`, observations `[\"insufficient\",\"unknown\",\"missing\"]`, dimensions `service/host/request_id` **redacted**.\n- **ev-17-02** (`partial_timeline`): same window/sample count, value 2.952, alignment `partial`, same redactions and observations.\n- Both are `SYNTHETIC_EVAL` / `UNREVIEWED` (derived_trust_score 50) `github_pr_SOURCE_DERIVED` projections — they confirm an incident signal exists but carry no service/host/request attribution and no mechanism data.\n- No causal graph, hypotheses, dependency graph, or evidence gaps are registered; knowledge search returned only unrelated prior-case background (explicitly not evidence).\n\n```json\n{\n  \"conclusion\": \"An incident is confirmed real (evaluation pack signals quality_summary=2.921 and partial_timeline=2.952 over 120 samples in window T0..T1, both with partial alignment), but the available projections do not identify scope or mechanism: service/host/request_id dimensions are redacted and observations are 'insufficient/unknown/missing'.\",\n  \"root_location\": \"unknown — cannot attribute to a host, service, process, or request; all scope dimensions (service, host, request_id) are redacted in both projections\",\n  \"mechanism\": \"unknown — no metrics, logs, traces, or causal signals present; projections carry only aggregate quality/alignment scores with no mechanism data\",\n  \"confidence\": 0.15,\n  \"confidence_reason\": \"Both evidence items are synthetic evaluation projections (trust_level=SYNTHETIC_EVAL, UNREVIEWED, derived_trust_score=50) with partial alignment, redacted scope dimensions, and observations 'insufficient/unknown/missing'. They corroborate that an incident exists but contain zero data for scope or mechanism; no runtime evidence, causal graph, or hypotheses support further attribution.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-17-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-17-02\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"runtime service metrics for target_scope (pid 12345, worker-1, host-1): latency percentiles, error rate, saturation\",\n    \"process-level data confirming target_pid 12345 state/role and its link to the redacted service\",\n    \"service logs / connection data during window T0..T1 (scope resolution for service, host, request_id)\",\n    \"topology/discovery data correlating worker-1 to the affected service and any dependency edges\",\n    \"unredacted evaluation projection content (current projections only expose aggregate scores)\"\n  ],\n  \"next_action\": \"Propose low-cost breadth collection targeting the registered scope (system.metrics, process.list, topology.discover, service.logs, service.connection for pid 12345 / worker-1 / host-1) to resolve the redacted dimensions and obtain scope/mechanism data; per READ_ONLY policy this remains a proposal only, pending gateway approval in a later cycle.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-17-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-17-02"
+        ]
+      },
+      "created_at": "2026-08-25T10:46:55.231928Z"
+    },
+    {
+      "event_id": 2697,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654797295",
+        "message_id": "amsg-76e00f9ec16adc5707f58b2d"
+      },
+      "created_at": "2026-08-25T10:46:55.236012Z"
+    },
+    {
+      "event_id": 2698,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type PLAN_REPRIORITIZE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:46:56.114678Z"
+    },
+    {
+      "event_id": 2699,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_8235dae034ae4996b5a3e92612d72aff",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "264b78317bb13d337f471a66cab204bc42faf2e2dc9929bf4762e9076313f332"
+      },
+      "created_at": "2026-08-25T10:46:56.142946Z"
+    },
+    {
+      "event_id": 2700,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654816158",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654816158"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654816158",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:46:56.174197Z"
+    },
+    {
+      "event_id": 2701,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-92182d0c72cf039e088dab0c",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654816158",
+        "content": "State re-read via `list_case_evidence`, `get_case_snapshot`, `get_collection_status`, `list_collectors`: **no change in evidence** — still exactly ev-17-01 and ev-17-02 (ACTIVE/UNREVIEWED, SYNTHETIC_EVAL, redacted scope, observations `insufficient/unknown/missing`), no hypotheses, no gaps, no causal graph, no collection proposals/requests, and `plan_revision` remains 0 (the PLAN_REPRIORITIZE intervention did not materialize into new plan steps or evidence). Per `answer_stability`, with no new facts the prior conclusion is defended unchanged; the only actionable delta is that the collector catalog now confirms which low-cost R1 collectors fit the re-prioritized breadth-first strategy within the R0/R1 permission boundary.\n\n```json\n{\n  \"conclusion\": \"An incident is confirmed real (evaluation pack signals quality_summary=2.921 and partial_timeline=2.952 over 120 samples in window T0..T1, both partial alignment), but the available projections still do not identify scope or mechanism: service/host/request_id dimensions are redacted and observations are 'insufficient/unknown/missing'. The PLAN_REPRIORITIZE intervention added no new evidence, so this conclusion is defended unchanged.\",\n  \"root_location\": \"unknown — cannot attribute to a host, service, process, or request; all scope dimensions (service, host, request_id) are redacted in both projections, and target_pid 12345 / worker-1 / host-1 have no runtime association evidence\",\n  \"mechanism\": \"unknown — no metrics, logs, traces, profiler data, or causal signals present; projections carry only aggregate quality/alignment scores with no mechanism data\",\n  \"confidence\": 0.15,\n  \"confidence_reason\": \"Evidence set is unchanged since the prior answer: both items are synthetic evaluation projections (trust_level=SYNTHETIC_EVAL, UNREVIEWED, derived_trust_score=50) with partial alignment, redacted scope dimensions, and observations 'insufficient/unknown/missing'. They corroborate incident existence but contain zero data for scope or mechanism; no runtime evidence, causal graph, hypotheses, or collection results exist to refine attribution. The PLAN_REPRIORITIZE intervention did not alter evidence state (plan_revision still 0, empty plan steps).\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-17-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-17-02\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"process inventory resolving target_pid 12345 (and worker-1/host-1) to a concrete Linux process and confirming it is the redacted service\",\n    \"runtime service metrics for the resolved process: latency percentiles, error rate, CPU/load/threads/FD/network saturation\",\n    \"service logs for the resolved process during window T0..T1 (error/warning patterns, failure timeline)\",\n    \"network/topology snapshot mapping the process to TCP listeners and one-hop downstream dependencies\",\n    \"runtime snapshot (thread states, lock waits, runtime type) and downstream connectivity status\",\n    \"unredacted evaluation projection content (current projections expose only aggregate scores)\"\n  ],\n  \"next_action\": \"Propose low-cost R1 breadth collection (within the R0/R1 permission boundary, READ_ONLY proposals only) ordered by information gain for the scope/mechanism gap: process_scan (resolve pid 12345 -> process identity) -> sys_metrics (resource saturation baseline) -> network_discovery (one-hop topology) -> log_scan (failure timeline) -> runtime_snapshot + connection_probe (mechanism discrimination). Hold R2 profilers (perf_cpu/pyspy/continuous_perf) until scope is resolved and approval is granted; re-check on the next cycle whether the reprioritized plan adds collectors.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-17-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-17-02"
+        ]
+      },
+      "created_at": "2026-08-25T10:47:09.725297Z"
+    },
+    {
+      "event_id": 2702,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654816158",
+        "message_id": "amsg-92182d0c72cf039e088dab0c"
+      },
+      "created_at": "2026-08-25T10:47:09.734831Z"
+    }
+  ]
+}

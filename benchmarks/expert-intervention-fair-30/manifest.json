@@ -1,0 +1,320 @@
+{
+  "schema": "mini-drop.expert-intervention-fair-suite.v1",
+  "suite_id": "expert-intervention-fair-30",
+  "version": "1.0.0",
+  "description": "Thirty deterministic, anonymous replay cases for fair same-data and expert-intervention tuning tracks.",
+  "repetitions": 1,
+  "rounds": 30,
+  "tracks": {
+    "fair_same_data": {
+      "cases": [
+        "case-01",
+        "case-02",
+        "case-03",
+        "case-04",
+        "case-05",
+        "case-06",
+        "case-07",
+        "case-08",
+        "case-09",
+        "case-10",
+        "case-11",
+        "case-12",
+        "case-13",
+        "case-14",
+        "case-15",
+        "case-16",
+        "case-17",
+        "case-18",
+        "case-19",
+        "case-20",
+        "case-21",
+        "case-22",
+        "case-23",
+        "case-24",
+        "case-25",
+        "case-26",
+        "case-27",
+        "case-28",
+        "case-29",
+        "case-30"
+      ],
+      "same_evidence_snapshot": true,
+      "same_tool_contract": true,
+      "interventions": false,
+      "api_only": true
+    },
+    "expert_intervention_tuning": {
+      "cases": [
+        "case-01",
+        "case-02",
+        "case-03",
+        "case-04",
+        "case-05",
+        "case-06",
+        "case-07",
+        "case-08",
+        "case-09",
+        "case-10",
+        "case-11",
+        "case-12",
+        "case-13",
+        "case-14",
+        "case-15",
+        "case-16",
+        "case-17",
+        "case-18",
+        "case-19",
+        "case-20",
+        "case-21",
+        "case-22",
+        "case-23",
+        "case-24",
+        "case-25",
+        "case-26",
+        "case-27",
+        "case-28",
+        "case-29",
+        "case-30"
+      ],
+      "same_evidence_snapshot": true,
+      "same_tool_contract": true,
+      "interventions": true,
+      "api_only": true,
+      "second_turn_required": true
+    }
+  },
+  "data_policy": {
+    "raw_source_upload": false,
+    "payload_type": "compact_projection_only",
+    "oracle_private": true,
+    "max_upload_bytes_per_case": 524288,
+    "evidence_hash_algorithm": "sha256"
+  },
+  "metrics": [
+    "root_location_match",
+    "domain_match",
+    "classification_match",
+    "mechanism_keyword_match",
+    "valid_evidence_refs",
+    "correct_abstention",
+    "evidence_gap_detection",
+    "intervention_recall",
+    "blind_expert_obedience",
+    "tool_calls",
+    "tool_result_bytes",
+    "unsafe_actions"
+  ],
+  "cases": [
+    {
+      "case_id": "case-01",
+      "public": "cases/public/case-01.json",
+      "replay": "cases/replay/case-01.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-01.json"
+    },
+    {
+      "case_id": "case-02",
+      "public": "cases/public/case-02.json",
+      "replay": "cases/replay/case-02.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-02.json"
+    },
+    {
+      "case_id": "case-03",
+      "public": "cases/public/case-03.json",
+      "replay": "cases/replay/case-03.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-03.json"
+    },
+    {
+      "case_id": "case-04",
+      "public": "cases/public/case-04.json",
+      "replay": "cases/replay/case-04.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-04.json"
+    },
+    {
+      "case_id": "case-05",
+      "public": "cases/public/case-05.json",
+      "replay": "cases/replay/case-05.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-05.json"
+    },
+    {
+      "case_id": "case-06",
+      "public": "cases/public/case-06.json",
+      "replay": "cases/replay/case-06.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-06.json"
+    },
+    {
+      "case_id": "case-07",
+      "public": "cases/public/case-07.json",
+      "replay": "cases/replay/case-07.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-07.json"
+    },
+    {
+      "case_id": "case-08",
+      "public": "cases/public/case-08.json",
+      "replay": "cases/replay/case-08.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-08.json"
+    },
+    {
+      "case_id": "case-09",
+      "public": "cases/public/case-09.json",
+      "replay": "cases/replay/case-09.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-09.json"
+    },
+    {
+      "case_id": "case-10",
+      "public": "cases/public/case-10.json",
+      "replay": "cases/replay/case-10.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-10.json"
+    },
+    {
+      "case_id": "case-11",
+      "public": "cases/public/case-11.json",
+      "replay": "cases/replay/case-11.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-11.json"
+    },
+    {
+      "case_id": "case-12",
+      "public": "cases/public/case-12.json",
+      "replay": "cases/replay/case-12.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-12.json"
+    },
+    {
+      "case_id": "case-13",
+      "public": "cases/public/case-13.json",
+      "replay": "cases/replay/case-13.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-13.json"
+    },
+    {
+      "case_id": "case-14",
+      "public": "cases/public/case-14.json",
+      "replay": "cases/replay/case-14.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-14.json"
+    },
+    {
+      "case_id": "case-15",
+      "public": "cases/public/case-15.json",
+      "replay": "cases/replay/case-15.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-15.json"
+    },
+    {
+      "case_id": "case-16",
+      "public": "cases/public/case-16.json",
+      "replay": "cases/replay/case-16.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-16.json"
+    },
+    {
+      "case_id": "case-17",
+      "public": "cases/public/case-17.json",
+      "replay": "cases/replay/case-17.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-17.json"
+    },
+    {
+      "case_id": "case-18",
+      "public": "cases/public/case-18.json",
+      "replay": "cases/replay/case-18.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-18.json"
+    },
+    {
+      "case_id": "case-19",
+      "public": "cases/public/case-19.json",
+      "replay": "cases/replay/case-19.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-19.json"
+    },
+    {
+      "case_id": "case-20",
+      "public": "cases/public/case-20.json",
+      "replay": "cases/replay/case-20.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-20.json"
+    },
+    {
+      "case_id": "case-21",
+      "public": "cases/public/case-21.json",
+      "replay": "cases/replay/case-21.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-21.json"
+    },
+    {
+      "case_id": "case-22",
+      "public": "cases/public/case-22.json",
+      "replay": "cases/replay/case-22.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-22.json"
+    },
+    {
+      "case_id": "case-23",
+      "public": "cases/public/case-23.json",
+      "replay": "cases/replay/case-23.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-23.json"
+    },
+    {
+      "case_id": "case-24",
+      "public": "cases/public/case-24.json",
+      "replay": "cases/replay/case-24.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-24.json"
+    },
+    {
+      "case_id": "case-25",
+      "public": "cases/public/case-25.json",
+      "replay": "cases/replay/case-25.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-25.json"
+    },
+    {
+      "case_id": "case-26",
+      "public": "cases/public/case-26.json",
+      "replay": "cases/replay/case-26.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-26.json"
+    },
+    {
+      "case_id": "case-27",
+      "public": "cases/public/case-27.json",
+      "replay": "cases/replay/case-27.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-27.json"
+    },
+    {
+      "case_id": "case-28",
+      "public": "cases/public/case-28.json",
+      "replay": "cases/replay/case-28.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-28.json"
+    },
+    {
+      "case_id": "case-29",
+      "public": "cases/public/case-29.json",
+      "replay": "cases/replay/case-29.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-29.json"
+    },
+    {
+      "case_id": "case-30",
+      "public": "cases/public/case-30.json",
+      "replay": "cases/replay/case-30.json",
+      "oracle": "private/oracles.json",
+      "intervention": "interventions/case-30.json"
+    }
+  ]
+}

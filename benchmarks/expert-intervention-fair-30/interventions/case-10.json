@@ -1,0 +1,24 @@
+{
+  "schema": "mini-drop.intervention.v1",
+  "case_id": "case-10",
+  "trigger": {
+    "event": "after_first_supported_answer",
+    "type": "state_based"
+  },
+  "events": [
+    {
+      "event_id": "i-10-1",
+      "type": "OPERATOR_HINT_UNVERIFIED",
+      "trigger": "after_first_supported_answer",
+      "trust": "UNVERIFIED",
+      "content": "Expert intervention for case-10: re-evaluate the active evidence before the second answer."
+    }
+  ],
+  "expected_post_state": {
+    "must": [
+      "re_read_active_evidence",
+      "revise_or_confirm_hypothesis"
+    ],
+    "must_not": "blindly_accept_operator_claim"
+  }
+}

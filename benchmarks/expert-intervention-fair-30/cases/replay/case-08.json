@@ -1,0 +1,101 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-08",
+  "evidence": [
+    {
+      "evidence_id": "ev-08-01",
+      "kind": "network_errors",
+      "summary": "Bounded network errors projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "network_errors",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.391,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "loss",
+          "retransmit",
+          "route"
+        ]
+      },
+      "integrity_hash": "sha256:e876cd8fb8bb223148dab41f54fd60b8fcf155e3c2cd407f6c8e10cccc7fa054"
+    },
+    {
+      "evidence_id": "ev-08-02",
+      "kind": "retry_rate",
+      "summary": "Bounded retry rate projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "retry_rate",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.422,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "loss",
+          "retransmit",
+          "route"
+        ]
+      },
+      "integrity_hash": "sha256:581fe085870028f905704db58b72a6b04ea15e774f8ffa96728a677f597893dd"
+    },
+    {
+      "evidence_id": "ev-08-03",
+      "kind": "route_health",
+      "summary": "Bounded route health projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "route_health",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.453,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "loss",
+          "retransmit",
+          "route"
+        ]
+      },
+      "integrity_hash": "sha256:0318de32f9fbbef381093a8e1c7b0c9dfe193ff848d8a7ac8fc82254fff746b1"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

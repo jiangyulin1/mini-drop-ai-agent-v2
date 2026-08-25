@@ -1,0 +1,101 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-14",
+  "evidence": [
+    {
+      "evidence_id": "ev-14-01",
+      "kind": "fd_usage",
+      "summary": "Bounded fd usage projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "fd_usage",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.411,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "file descriptor",
+          "limit",
+          "leak"
+        ]
+      },
+      "integrity_hash": "sha256:b4169eeef49349317ec079549c1e0999370f2186391d65ed4f0eb50e0a03c954"
+    },
+    {
+      "evidence_id": "ev-14-02",
+      "kind": "error_logs",
+      "summary": "Bounded error logs projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "search_logs"
+      ],
+      "projection": {
+        "signal": "error_logs",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.442,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "file descriptor",
+          "limit",
+          "leak"
+        ]
+      },
+      "integrity_hash": "sha256:8bcc56abe0957f043b724dc847783cdbd09bc0def690e34cda0b5a84aebe9ada"
+    },
+    {
+      "evidence_id": "ev-14-03",
+      "kind": "connection_rate",
+      "summary": "Bounded connection rate projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "connection_rate",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.473,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "file descriptor",
+          "limit",
+          "leak"
+        ]
+      },
+      "integrity_hash": "sha256:b969b09b2d35e10d278bab9ff166b379f105349f8ed11bb1d681e8d810a46a2f"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

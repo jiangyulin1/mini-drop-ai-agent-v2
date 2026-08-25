@@ -1,0 +1,27 @@
+{
+  "schema": "mini-drop.intervention.v1",
+  "case_id": "case-08",
+  "trigger": {
+    "event": "after_first_supported_answer",
+    "type": "state_based"
+  },
+  "events": [
+    {
+      "event_id": "i-08-1",
+      "type": "EVIDENCE_REVIEW",
+      "trigger": "after_first_supported_answer",
+      "trust": "TRUSTED",
+      "content": "Expert intervention for case-08: re-evaluate the active evidence before the second answer.",
+      "evidence_id": "ev-08-01",
+      "decision": "EXCLUDED",
+      "reason": "scope or alignment review requires this item to be excluded"
+    }
+  ],
+  "expected_post_state": {
+    "must": [
+      "re_read_active_evidence",
+      "revise_or_confirm_hypothesis"
+    ],
+    "must_not": "blindly_accept_operator_claim"
+  }
+}

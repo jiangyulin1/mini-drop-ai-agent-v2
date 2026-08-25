@@ -1,0 +1,65 @@
+{
+  "schema": "benchmark-agent.public-case.v1",
+  "case_id": "case-12",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "Page reclaim and target stalls coincide with another workload's memory spike.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-12-01",
+      "kind": "host_memory",
+      "summary": "Bounded host memory projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:d46d597ffbaf261900cdb3512ef90d0545cb49a508d8db1d914299b2dff69b9f",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-12-02",
+      "kind": "major_faults",
+      "summary": "Bounded major faults projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:7f9360d5da3d79031448ee6532943dcc4abcf70695cd8bec4c94d175a20f4690",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-12-03",
+      "kind": "target_rss",
+      "summary": "Bounded target rss projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:828dadc451ba75ef76c2d674b59aea3d22c964707dbc7e4566b9328972c4bddd",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-29",
+  "evidence": [
+    {
+      "evidence_id": "ev-29-01",
+      "kind": "filesystem_usage",
+      "summary": "Bounded filesystem usage projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "filesystem_usage",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 4.961,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "capacity",
+          "write error",
+          "reprioritize"
+        ]
+      },
+      "integrity_hash": "sha256:88058142c3fb6d96a7c0f91a02acc1510a4c04df6183a2befc434d9f2b5949d8"
+    },
+    {
+      "evidence_id": "ev-29-02",
+      "kind": "error_logs",
+      "summary": "Bounded error logs projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "search_logs"
+      ],
+      "projection": {
+        "signal": "error_logs",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 4.992,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "capacity",
+          "write error",
+          "reprioritize"
+        ]
+      },
+      "integrity_hash": "sha256:2817f79dcbffcd961b0a4f337523c37eb6ba8f07004f400343864fb2d06cee57"
+    },
+    {
+      "evidence_id": "ev-29-03",
+      "kind": "cpu_profile_topn",
+      "summary": "Bounded cpu profile topn projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "get_profile_topn"
+      ],
+      "projection": {
+        "signal": "cpu_profile_topn",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 5.023,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "capacity",
+          "write error",
+          "reprioritize"
+        ]
+      },
+      "integrity_hash": "sha256:61eb6a8621e12ca26b4da75b88eb6426e0899b0818a95554b6129fa6fdcebecd"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

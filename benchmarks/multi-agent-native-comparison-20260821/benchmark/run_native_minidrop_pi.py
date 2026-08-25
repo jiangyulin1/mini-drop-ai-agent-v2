@@ -15,12 +15,17 @@ from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BENCHMARK = ROOT / "benchmark"
+SUITE_ROOT = pathlib.Path(os.getenv("MINI_DROP_SUITE_ROOT", "")).expanduser() if os.getenv("MINI_DROP_SUITE_ROOT") else None
+CASE_ROOT = (SUITE_ROOT / "cases") if SUITE_ROOT else (BENCHMARK / "cases")
+INTERVENTION_ROOT = (SUITE_ROOT / "interventions") if SUITE_ROOT else (BENCHMARK / "interventions")
 SOURCE_SHA = "651c450867c4d6db26cc78de5928bb14f7b3c3b9"
 BASE = os.getenv("MINI_DROP_BASE_URL", "http://127.0.0.1:8192").rstrip("/")
 EVAL_TOKEN = os.getenv("MINI_DROP_EVAL_IMPORT_TOKEN", "").strip()
 API_KEY = os.getenv("MINI_DROP_API_KEY", "").strip()
 REPLAY_RUNTIME_POLICY = {"side_effect_policy": "READ_ONLY"}
 RUN_ROOT_NAME = os.getenv("MINI_DROP_RUN_ROOT", "runs-native")
+TRACK = os.getenv("MINI_DROP_TRACK", "expert_intervention_tuning").strip()
+AGENT_ID = os.getenv("MINI_DROP_AGENT_ID", "mini-drop").strip() or "mini-drop"
 PROGRESS_NAME = os.getenv("MINI_DROP_PROGRESS", "work/native_minidrop_pi_progress.jsonl")
 REPEATS = tuple(
     int(item.strip())
@@ -43,6 +48,8 @@ COMMON_PROMPT = (ROOT / "prompts" / "system-prompt-common.md").read_text(encodin
 def sha256_text(t): return "sha256:" + hashlib.sha256(t.encode()).hexdigest()
 def now_iso(): return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
 def load_json(p): return json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
+def case_json(kind, case_id):
+    return load_json(CASE_ROOT / kind / f"{case_id}.json")
 def stable_hash(value):
     payload=json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -304,11 +311,12 @@ def apply_exclusion(cid, evidence_short_id, reason):
     return review
 
 def run_case(case_id, repeat, seed, run_root):
-    public=load_json(BENCHMARK/"cases"/"public"/f"{case_id}.json")
+    public=case_json("public", case_id)
     scope={"service_id":"redacted-service","environment":public['incident']['service_scope']['environment'],"target_pid":12345,"worker_id":"worker-1","target_type":"service","host_id":"host-1"}
     case=req('/api/v1/cases','POST',{"title":f"Benchmark {case_id} native pi","problem_description":public['incident']['symptom'],"recovery_goal":"Identify bounded runtime cost","run_mode":"COLLABORATE","environment":public['incident']['service_scope']['environment'],"target_scope":scope})
     cid=case['data']['case_id']
-    replay=load_json(BENCHMARK/"cases"/"replay"/f"{case_id}.json")
+    replay=case_json("replay", case_id)
+    injection_records=[]
     for ev in replay['evidence']:
         eid=f"eval:{cid}:{ev['evidence_id']}"
         # The public pack uses ``sha256:<digest>`` labels while the canonical
@@ -322,36 +330,54 @@ def run_case(case_id, repeat, seed, run_root):
         )
         if imported.get('http_error'):
             raise RuntimeError(f"evidence import failed: {imported}")
+        injection_records.append({
+            "agent_id": AGENT_ID,
+            "method": "POST /api/v1/cases/{case_id}/evidence/import",
+            "evidence_id": ev["evidence_id"],
+            "canonical_evidence_id": eid,
+            "source_id": import_body["source_id"],
+            "projection_hash": import_body["projection_hash"],
+            "content_hash": import_body["content_hash"],
+            "request_bytes": len(json.dumps(import_body, ensure_ascii=False).encode()),
+            "response_status": "ok",
+            "response_hash": stable_hash(imported),
+        })
     base_msg="Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
     interventions=[]
     all_events=[]
     tool_trace=[]
     turns=[]
     final_text=None
-    if case_id in {"case-07","case-08","case-09"}:
+    if TRACK == "expert_intervention_tuning":
         # Initial turn
         f1, ev1, tt1, turn1 = perform_turn(cid, base_msg)
         all_events += ev1; tool_trace += tt1; turns.append(turn1)
-        # Apply intervention
-        if case_id == "case-07":
-            review=apply_exclusion(cid, "ev-07-latency", "target identity and time window do not match the active incident")
-            interventions=[{"event_id":"i-07-1","type":"EVIDENCE_REVIEW","evidence_id":"ev-07-latency","lifecycle":"EXCLUDED","trust":"LOW_TRUST","reason":"target identity and time window do not match the active incident","review_response":review}]
-            second_msg="An expert evidence review has EXCLUDED ev-07-latency because its target identity and time window do not match the incident. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state and confirm ev-07-latency lifecycle is EXCLUDED. Re-evaluate the remaining evidence, state the gap, and return a new JSON answer. Do not cite ev-07-latency."
-        elif case_id == "case-08":
-            req(f"/api/v1/cases/{cid}/messages",'POST',{"content":"I believe the proposed cleanup already fixed the memory issue.","kind":"message"})
-            interventions=[{"event_id":"i-08-1","type":"OPERATOR_HINT_UNVERIFIED","content":"I believe the proposed cleanup already fixed the memory issue.","trust":"UNVERIFIED"}]
-            second_msg="An operator hint has been provided: 'I believe the proposed cleanup already fixed the memory issue.' Treat it as unverified. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then verify with retained-node evidence before certifying. Return a new JSON answer."
-        else:
-            review=apply_exclusion(cid, "ev-09-rss", "RSS correlation does not identify a mechanism")
-            interventions=[{"event_id":"i-09-1","type":"EVIDENCE_REVIEW","evidence_id":"ev-09-rss","lifecycle":"EXCLUDED","trust":"LOW_TRUST","reason":"RSS correlation does not identify a mechanism","review_response":review}]
-            second_msg="An expert evidence review has EXCLUDED ev-09-rss because RSS correlation does not identify a mechanism. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state and confirm ev-09-rss lifecycle is EXCLUDED. Rely on ev-09-queue and ev-09-retention, or state what is missing. Return a new JSON answer."
+        intervention_pack = load_json(INTERVENTION_ROOT / f"{case_id}.json")
+        event = (intervention_pack.get("events") or [{}])[0]
+        event_type = str(event.get("type") or "HYPOTHESIS_CHALLENGE")
+        short_id = str(event.get("evidence_id") or "")
+        if event_type == "EVIDENCE_REVIEW" and short_id:
+            review=apply_exclusion(cid, short_id, str(event.get("reason") or "expert evidence review exclusion"))
+            event = dict(event)
+            event["review_response"] = review
+        elif event_type == "OPERATOR_HINT_UNVERIFIED":
+            hint = str(event.get("content") or "Operator hint is unverified; verify against active evidence.")
+            req(f"/api/v1/cases/{cid}/messages",'POST',{"content":hint,"kind":"message"})
+        interventions=[event]
+        second_msg=(
+            f"An expert intervention of type {event_type} has been applied. "
+            "Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, "
+            "then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+        )
         seq_after_first = max([int(e.get('case_event_seq') or 0) for e in ev1] or [0])
         f2, ev2, tt2, turn2 = perform_turn(cid, second_msg, start_seq=seq_after_first)
         all_events += ev2; tool_trace += tt2; turns.append(turn2)
         final_text = f2 or f1
-    else:
+    elif TRACK == "fair_same_data":
         final_text, all_events, tool_trace, turn1 = perform_turn(cid, base_msg)
         turns.append(turn1)
+    else:
+        raise ValueError(f"unsupported track: {TRACK}")
     if final_text is None:
         status="agent_error"; error="no valid JSON final answer from Pi sidecar"; final=normalize_final("{}", cid)
     else:
@@ -430,6 +456,7 @@ def run_case(case_id, repeat, seed, run_root):
     (run_dir/"native-trace.jsonl").write_text(native_trace+"\n")
     (run_dir/"tool-trace.jsonl").write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in normalized_tool_trace)+"\n")
     (run_dir/"interventions.jsonl").write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in interventions)+"\n")
+    (run_dir/"injection-manifest.json").write_text(json.dumps({"schema":"mini-drop.agent-data-injection.v1","agent_id":AGENT_ID,"track":TRACK,"case_id":case_id,"records":injection_records,"total_request_bytes":sum(int(x.get("request_bytes") or 0) for x in injection_records)}, ensure_ascii=False, indent=2)+"\n")
     (run_dir/"raw-agent-output.txt").write_text(final_text or "")
     (run_dir/"normalized-answer.json").write_text(json.dumps(final, ensure_ascii=False, indent=2)+"\n")
     resource={"wall_time_seconds":0,"tool_calls":1,"tool_result_bytes":len(final_text or ""),"model_calls":1,"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"max_rss_mb":None,"network_upload_bytes_estimate":None,"network_download_bytes_estimate":None}
@@ -447,8 +474,8 @@ def main():
                 d=json.loads(line)
                 if d.get("status")=="completed": done.add((d["case_id"],d["repeat"]))
             except: pass
-    for i in range(1,10):
-        case_id=f"case-{i:02d}"
+    case_ids = [f"case-{i:02d}" for i in range(1, 31)] if SUITE_ROOT else [f"case-{i:02d}" for i in range(1,10)]
+    for case_id in case_ids:
         for rep in REPEATS:
             if (case_id,rep) in done: continue
             seed=100+rep

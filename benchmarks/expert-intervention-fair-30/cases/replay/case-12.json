@@ -1,0 +1,101 @@
+{
+  "schema": "mini-drop.replay-pack.v1",
+  "case_id": "case-12",
+  "evidence": [
+    {
+      "evidence_id": "ev-12-01",
+      "kind": "host_memory",
+      "summary": "Bounded host memory projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "host_memory",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.071,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "reclaim",
+          "host pressure",
+          "neighbor"
+        ]
+      },
+      "integrity_hash": "sha256:d46d597ffbaf261900cdb3512ef90d0545cb49a508d8db1d914299b2dff69b9f"
+    },
+    {
+      "evidence_id": "ev-12-02",
+      "kind": "major_faults",
+      "summary": "Bounded major faults projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "major_faults",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.102,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "reclaim",
+          "host pressure",
+          "neighbor"
+        ]
+      },
+      "integrity_hash": "sha256:7f9360d5da3d79031448ee6532943dcc4abcf70695cd8bec4c94d175a20f4690"
+    },
+    {
+      "evidence_id": "ev-12-03",
+      "kind": "target_rss",
+      "summary": "Bounded target rss projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "target_rss",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.133,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "reclaim",
+          "host pressure",
+          "neighbor"
+        ]
+      },
+      "integrity_hash": "sha256:828dadc451ba75ef76c2d674b59aea3d22c964707dbc7e4566b9328972c4bddd"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

@@ -1,0 +1,372 @@
+{
+  "case_id": "case-14",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2647,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:44:27.999415Z"
+    },
+    {
+      "event_id": 2648,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-14-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "b533f61ad72dcba2af5ef07cb1e14ee766bf4f1e18b620b8b5a0e34a179cd592",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:44:28.070799Z"
+    },
+    {
+      "event_id": 2649,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-14-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "f264f05863cab4d3b5c74bd42b1bef27dbec98812adb5a0d412f6cba106416b8",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:44:28.147761Z"
+    },
+    {
+      "event_id": 2650,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-14-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "bd0cf7d0ea629f0e502b973275f5fe9f31152b021a0666ada682fa6c87975e3f",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:44:28.219484Z"
+    },
+    {
+      "event_id": 2651,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:44:28.295223Z"
+    },
+    {
+      "event_id": 2652,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_09796d3d437949519f166390f8fe3686",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "cf592fc45a4c2f512eb39608eccc4638414be0fa2e85a48b1caa3e4676189647"
+      },
+      "created_at": "2026-08-25T10:44:28.316019Z"
+    },
+    {
+      "event_id": 2653,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654668340",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654668340"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654668340",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:44:28.356082Z"
+    },
+    {
+      "event_id": 2654,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-a47d2cbd2bdf378cc4ed2d65",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654668340",
+        "content": "Investigation complete. Evidence analysis summary:\n\n- **ev-14-01** (ACTIVE, `github_pr_SOURCE_DERIVED`): `signal=fd_usage`, value 2.411, observations `[\"file descriptor\",\"limit\",\"leak\"]`, 120 samples, window T0..T1\n- **ev-14-02** (ACTIVE, same source): `signal=error_logs`, value 2.442, observations `[\"file descriptor\",\"limit\",\"leak\"]`, 120 samples\n- **ev-14-03** (ACTIVE, same source): `signal=connection_rate`, value 2.473, observations `[\"file descriptor\",\"limit\",\"leak\"]`, 120 samples\n\nAll three signals are aligned in the same window and converge on an FD-pressure story: fd usage rising, error logs referencing file descriptor/limit/leak, and connection rate degrading. No counter-evidence; dependency graph has insufficient coverage; no prior conclusions to reuse.\n\n```json\n{\n  \"conclusion\": \"New connections fail because the service leaks file descriptors: fd_usage climbs toward the process limit (RLIMIT_NOFILE) until the kernel refuses new descriptor allocation, so accept()/connect() for new connections fails (EMFILE/'Too many open files'-type errors) while existing connections keep working. The failure originates from a code change (github_pr source-derived artifact) in redacted-service worker-1 (pid 12345) that leaks descriptors on some connection lifecycle path.\",\n  \"root_location\": \"redacted-service (target_pid 12345, worker-1) — a file descriptor leak introduced by a code change (github_pr_SOURCE_DERIVED); exact leaking code path not yet localized. Redacted dimensions (service/host/request_id) prevent PR/diff-level attribution from current evidence.\",\n  \"mechanism\": \"A code path in the service fails to close file descriptors (e.g., sockets/connections) after use, so leaked FDs accumulate monotonically. As fd_usage approaches the process limit, the kernel returns EMFILE (and possibly ENFILE) on new socket()/accept()/connect() calls, causing new connections to fail even though established connections and the rest of the process remain healthy. fd_usage (ev-14-01), error_logs referencing 'file descriptor/limit/leak' (ev-14-02), and connection_rate degradation (ev-14-03) all align in the same T0..T1 window (120 samples each).\",\n  \"confidence\": 0.5,\n  \"confidence_reason\": \"Three evaluation signals (fd_usage, error_logs, connection_rate) are aligned in time and consistently reference 'file descriptor/limit/leak', supporting the FD-leak/EMFILE mechanism consistent with the case goal. However, all evidence is UNREVIEWED synthetic evaluation projections (trust_score 50, no runtime data), there is no direct runtime fd-count-vs-limit measurement, no actual error log lines or stack traces, and no PR/diff attribution — so causality and the exact leaking code path are unconfirmed.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-14-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-14-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-14-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Runtime fd metrics for pid 12345: open-fd count vs RLIMIT_NOFILE, fd trend (sys_metrics collector)\",\n    \"Actual error log lines from the service (log_scan) confirming EMFILE/'Too many open files' and timestamps\",\n    \"FD/connection inventory (network_discovery/procfs) to identify which connection lifecycle path leaks descriptors\",\n    \"PR diff / code attribution linking the leak to a specific change (github_pr artifact content is redacted/aggregated)\",\n    \"Dependency/topology snapshot to correlate connection failures with upstream/downstream peers\"\n  ],\n  \"next_action\": \"In the next (writable) cycle, propose low-cost R1 collection on target_pid 12345 — sys_metrics (fd/threads/network), log_scan (EMFILE error lines), and network_discovery (FD/socket inventory) — to confirm fd usage vs process limit and localize the leaking code path; no recovery/change actions until runtime evidence confirms the leak site.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-14-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-14-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-14-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:44:59.275052Z"
+    },
+    {
+      "event_id": 2655,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654668340",
+        "message_id": "amsg-a47d2cbd2bdf378cc4ed2d65"
+      },
+      "created_at": "2026-08-25T10:44:59.278925Z"
+    },
+    {
+      "event_id": 2656,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type SCOPE_CORRECTION has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:45:00.643430Z"
+    },
+    {
+      "event_id": 2657,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_1ac328abf0ed4fc5834f582b95706d52",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "879a66e74bcde38d5055501c83b6b461c39d6caf784389906fc5f0cbc92202b9"
+      },
+      "created_at": "2026-08-25T10:45:00.665996Z"
+    },
+    {
+      "event_id": 2658,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654700683",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654700683"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654700683",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:45:00.701458Z"
+    },
+    {
+      "event_id": 2659,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-b010edeeab85106d49bec0b1",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654700683",
+        "content": "Re-read the case state: evidence watermark is unchanged (3 items), all still `ACTIVE`/`UNREVIEWED` synthetic eval projections (ev-14-01: fd_usage, ev-14-02: error_logs, ev-14-03: connection_rate — all referencing `[\"file descriptor\",\"limit\",\"leak\"]`), no gaps, no hypotheses, no collection requests, and the target scope is unchanged (service `redacted-service`, pid 12345, worker-1). The SCOPE_CORRECTION intervention introduced no new or altered evidence, so per the answer-stability skill I defend the previously stated conclusion with identical evidence IDs and wording.\n\n```json\n{\n  \"conclusion\": \"New connections fail because the service leaks file descriptors: fd_usage climbs toward the process limit (RLIMIT_NOFILE) until the kernel refuses new descriptor allocation, so accept()/connect() for new connections fails (EMFILE/'Too many open files'-type errors) while existing connections keep working. The failure originates from a code change (github_pr source-derived artifact) in redacted-service worker-1 (pid 12345) that leaks descriptors on some connection lifecycle path. A SCOPE_CORRECTION intervention was applied, but the re-read evidence state is unchanged (watermark 3, same target scope), so this conclusion is retained.\",\n  \"root_location\": \"redacted-service (target_pid 12345, worker-1) — a file descriptor leak introduced by a code change (github_pr_SOURCE_DERIVED); exact leaking code path not yet localized. Redacted dimensions (service/host/request_id) prevent PR/diff-level attribution from current evidence.\",\n  \"mechanism\": \"A code path in the service fails to close file descriptors (e.g., sockets/connections) after use, so leaked FDs accumulate monotonically. As fd_usage approaches the process limit, the kernel returns EMFILE (and possibly ENFILE) on new socket()/accept()/connect() calls, causing new connections to fail even though established connections and the rest of the process remain healthy. fd_usage (ev-14-01), error_logs referencing 'file descriptor/limit/leak' (ev-14-02), and connection_rate degradation (ev-14-03) all align in the same T0..T1 window (120 samples each).\",\n  \"confidence\": 0.5,\n  \"confidence_reason\": \"Three evaluation signals (fd_usage, error_logs, connection_rate) are aligned in time and consistently reference 'file descriptor/limit/leak', supporting the FD-leak/EMFILE mechanism consistent with the case goal. However, all evidence is UNREVIEWED synthetic evaluation projections (trust_score 50, no runtime data), there is no direct runtime fd-count-vs-limit measurement, no actual error log lines or stack traces, and no PR/diff attribution — so causality and the exact leaking code path remain unconfirmed. The SCOPE_CORRECTION intervention did not add or change evidence, so confidence is unchanged.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-14-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-14-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-14-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Runtime fd metrics for pid 12345: open-fd count vs RLIMIT_NOFILE, fd trend (sys_metrics collector)\",\n    \"Actual error log lines from the service (log_scan) confirming EMFILE/'Too many open files' and timestamps\",\n    \"FD/connection inventory (network_discovery/procfs) to identify which connection lifecycle path leaks descriptors\",\n    \"PR diff / code attribution linking the leak to a specific change (github_pr artifact content is redacted/aggregated)\",\n    \"Dependency/topology snapshot to correlate connection failures with upstream/downstream peers\"\n  ],\n  \"next_action\": \"In the next (writable) cycle, propose low-cost R1 collection on target_pid 12345 — sys_metrics (fd/threads/network), log_scan (EMFILE error lines), and network_discovery (FD/socket inventory) — to confirm fd usage vs process limit and localize the leaking code path; no recovery/change actions until runtime evidence confirms the leak site.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-14-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-14-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-14-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:45:12.577765Z"
+    },
+    {
+      "event_id": 2660,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654700683",
+        "message_id": "amsg-b010edeeab85106d49bec0b1"
+      },
+      "created_at": "2026-08-25T10:45:12.584742Z"
+    }
+  ]
+}

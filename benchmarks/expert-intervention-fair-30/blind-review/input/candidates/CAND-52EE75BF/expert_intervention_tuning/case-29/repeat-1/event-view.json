@@ -1,0 +1,372 @@
+{
+  "case_id": "case-29",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2861,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:56:33.755093Z"
+    },
+    {
+      "event_id": 2862,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-29-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "0faecc14f6ce5dd4064671dd9bb45fc4414f92fb0f4ec53f34d61a11f76feb71",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:56:33.838739Z"
+    },
+    {
+      "event_id": 2863,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-29-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "b54870b5f7285f49a85b8c0014b804451be9bced51e46d07916868599e8a0062",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:56:33.897487Z"
+    },
+    {
+      "event_id": 2864,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-29-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "f127cb88d4eb60bb552d1122e2dc847500b87ecadb72d6841efc40fe56c7b879",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:56:33.972919Z"
+    },
+    {
+      "event_id": 2865,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:56:34.048618Z"
+    },
+    {
+      "event_id": 2866,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_2e8a84d77f3a48609d138ffdd27f8962",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "139aeb8d0ff233aefe58c1822e5b5c1206d365b364aea29d2194e3f7c6ada80f"
+      },
+      "created_at": "2026-08-25T10:56:34.075304Z"
+    },
+    {
+      "event_id": 2867,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655394117",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655394117"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655394117",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:56:34.136115Z"
+    },
+    {
+      "event_id": 2868,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-155413cb96d455e71bb9acbe",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655394117",
+        "content": "Investigation complete. Here is the synthesized read-only assessment.\n\n**Findings from available evidence:**\n- All 3 evidence items are `lifecycle_status=ACTIVE` (synthetic eval, unreviewed) and share aligned observations: `[\"capacity\", \"write error\", \"reprioritize\"]`.\n- `ev-29-01` (`filesystem_usage`, value 4.961, n=120) signals filesystem capacity saturation.\n- `ev-29-02` (`error_logs`, value 4.992, n=120) signals write-error patterns in service logs.\n- `ev-29-03` (`cpu_profile_topn`, value 5.023, n=120) shows CPU profile activity — consistent with the already-targeted CPU plan.\n- No causal/dependency graph, no gaps, and no collection requests exist yet; the only knowledge retrieved is unrelated RAG-retrieval background (not evidence, per caveat).\n\n```json\n{\n  \"conclusion\": \"The observed filesystem capacity saturation and write errors indicate the root cause lies in storage capacity on host-1, not in CPU itself; the elevated CPU profile is best explained as secondary pressure (write-error retries / I/O backpressure) on the target service (pid 12345, worker-1). The first remediation plan's CPU focus should be reprioritized toward storage triage.\",\n  \"root_location\": \"Storage/filesystem capacity on host-1 (worker-1) serving the target service (pid 12345); specifically the filesystem backing the service's data/log volumes, which is producing write errors under capacity pressure.\",\n  \"mechanism\": \"Filesystem capacity exhaustion on host-1 → write errors (capacity-related) in service error logs → retry/I/O-backpressure activity surfaces as elevated CPU in the cpu_profile_topn signal → a CPU-only remediation plan was generated, but capacity + write-error observations require storage triage instead (observations label: reprioritize).\",\n  \"confidence\": 0.5,\n  \"confidence_reason\": \"All three ACTIVE evidence items (filesystem_usage, error_logs, cpu_profile_topn) are aligned on the same observations (capacity, write error, reprioritize), providing consistent triangulation toward a storage-capacity root cause. However, all evidence is SYNTHETIC_EVAL and UNREVIEWED, with redacted dimensions (service/host/request_id), no raw ENOSPC/write-error strings, no absolute capacity/utilization numbers, and no CPU breakdown (user/sys/iowait) proving the CPU signal is secondary.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Absolute filesystem capacity/usage numbers and affected mount points on host-1\",\n    \"Raw write-error log lines (e.g., ENOSPC codes, failing paths) from target service logs\",\n    \"CPU decomposition (user/sys/iowait/steal) proving CPU elevation is secondary to I/O/storage pressure\",\n    \"Host-level I/O latency/contention data (e.g., ebpf_io histogram) and whether other services share the saturated filesystem\",\n    \"Change/release window correlation to determine if capacity pressure is newly introduced\"\n  ],\n  \"next_action\": \"READ_ONLY turn: no collection requested. On the next writable cycle, dispatch low-cost R1 probes (sys_metrics for filesystem/CPU/iowait breakdown, log_scan for ENOSPC/write-error lines, process_scan to confirm target identity), and if storage contention is confirmed, reprioritize the remediation plan from CPU tuning to storage capacity triage (e.g., reclaim/expand the saturated volume).\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-29-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-29-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-29-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:57:07.704854Z"
+    },
+    {
+      "event_id": 2869,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655394117",
+        "message_id": "amsg-155413cb96d455e71bb9acbe"
+      },
+      "created_at": "2026-08-25T10:57:07.708568Z"
+    },
+    {
+      "event_id": 2870,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type SCOPE_CORRECTION has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:57:09.516165Z"
+    },
+    {
+      "event_id": 2871,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_e9a227b82d0a4e10b274c24c99e8189b",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "43a75b7a018c5609d753c860db74972821d91e7f1f5d90d80cb3a7bb7b2d5722"
+      },
+      "created_at": "2026-08-25T10:57:09.539468Z"
+    },
+    {
+      "event_id": 2872,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655429557",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787655429557"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655429557",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:57:09.568899Z"
+    },
+    {
+      "event_id": 2873,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-d3aaea0812ea0d2f2a755e69",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787655429557",
+        "content": "Re-read the current state: `get_case_snapshot` and `list_case_evidence` confirm no change — same 3 ACTIVE evidence items (`ev-29-01/02/03`, same projection hashes), `scope_revision` unchanged, no new evidence, no gaps, no causal graph, empty conclusion. The SCOPE_CORRECTION intervention did not alter any visible scope field (service `redacted-service`, `host-1`, `worker-1`, pid 12345) or the evidence set. Per the stability skill, I maintain the prior conclusion with identical evidence citations.\n\n```json\n{\n  \"conclusion\": \"The observed filesystem capacity saturation and write errors indicate the root cause lies in storage capacity on host-1, not in CPU itself; the elevated CPU profile is best explained as secondary pressure (write-error retries / I/O backpressure) on the target service (pid 12345, worker-1). The first remediation plan's CPU focus should be reprioritized toward storage triage.\",\n  \"root_location\": \"Storage/filesystem capacity on host-1 (worker-1) serving the target service (pid 12345); specifically the filesystem backing the service's data/log volumes, which is producing write errors under capacity pressure.\",\n  \"mechanism\": \"Filesystem capacity exhaustion on host-1 → write errors (capacity-related) in service error logs → retry/I/O-backpressure activity surfaces as elevated CPU in the cpu_profile_topn signal → a CPU-only remediation plan was generated, but capacity + write-error observations require storage triage instead (observations label: reprioritize).\",\n  \"confidence\": 0.5,\n  \"confidence_reason\": \"Re-verified after the SCOPE_CORRECTION intervention: snapshot shows scope_revision unchanged (service redacted-service, host-1, worker-1, pid 12345) and the same 3 ACTIVE evidence items with identical projection hashes; no new or corrected facts were introduced. All three ACTIVE evidence projections (filesystem_usage, error_logs, cpu_profile_topn) remain aligned on the same observations (capacity, write error, reprioritize), triangulating to a storage-capacity root cause. Confidence is capped at 0.5 because all evidence is SYNTHETIC_EVAL and UNREVIEWED, with redacted dimensions (service/host/request_id), no raw ENOSPC/write-error strings, no absolute capacity numbers, and no CPU decomposition (user/sys/iowait) proving the CPU signal is secondary.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-29-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Absolute filesystem capacity/usage numbers and affected mount points on host-1\",\n    \"Raw write-error log lines (e.g., ENOSPC codes, failing paths) from target service logs\",\n    \"CPU decomposition (user/sys/iowait/steal) proving CPU elevation is secondary to I/O/storage pressure\",\n    \"Host-level I/O latency/contention data (e.g., ebpf_io histogram) and whether other services share the saturated filesystem\",\n    \"Change/release window correlation to determine if capacity pressure is newly introduced\"\n  ],\n  \"next_action\": \"READ_ONLY turn: no collection requested. On the next writable cycle, dispatch low-cost R1 probes (sys_metrics for filesystem/CPU/iowait breakdown, log_scan for ENOSPC/write-error lines, process_scan to confirm target identity), and if storage contention is confirmed, reprioritize the remediation plan from CPU tuning to storage capacity triage (e.g., reclaim/expand the saturated volume).\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-29-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-29-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-29-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:57:20.230492Z"
+    },
+    {
+      "event_id": 2874,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787655429557",
+        "message_id": "amsg-d3aaea0812ea0d2f2a755e69"
+      },
+      "created_at": "2026-08-25T10:57:20.234537Z"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "schema": "mini-drop.public-case.v1",
+  "case_id": "case-17",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "The incident is real but the available projections do not identify scope or mechanism.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-17-01",
+      "kind": "quality_summary",
+      "summary": "Bounded quality summary projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:b39f5216d17ae95c6f7b3983bfeca4c2cf2c463e0c0564e3e03178d70cb3e276",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-17-02",
+      "kind": "partial_timeline",
+      "summary": "Bounded partial timeline projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:4051a6311953218671d4fb949f9035d1f0bf7dd0025288d8103bfd069941f244",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

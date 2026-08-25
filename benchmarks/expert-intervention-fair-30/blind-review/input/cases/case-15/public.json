@@ -1,0 +1,65 @@
+{
+  "schema": "benchmark-agent.public-case.v1",
+  "case_id": "case-15",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "Tail latency has sawtooth pauses aligned with stop-the-world collection.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-15-01",
+      "kind": "gc_pause",
+      "summary": "Bounded gc pause projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:0c8fd1f87427d4d8a4754c5345b10bbec366756960635970bb176c1a6381fd39",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-15-02",
+      "kind": "latency_timeseries",
+      "summary": "Bounded latency timeseries projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:5bd40aca36e4d1a03490c065feeafbfe4c9944b8d486e300bb4ba9e199198a9a",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-15-03",
+      "kind": "allocation_rate",
+      "summary": "Bounded allocation rate projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:a61fe9e9a189bc09bd284daf6eadc6077283b3095b394576b8edfb0b34621b9f",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

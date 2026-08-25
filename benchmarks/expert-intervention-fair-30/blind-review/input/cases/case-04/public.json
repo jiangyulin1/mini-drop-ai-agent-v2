@@ -1,0 +1,65 @@
+{
+  "schema": "benchmark-agent.public-case.v1",
+  "case_id": "case-04",
+  "suite": "expert-intervention-fair-30",
+  "incident": {
+    "symptom": "Memory remains high after a cache shrinks; decide whether this proves a leak.",
+    "service_scope": {
+      "service": "redacted-service",
+      "environment": "production-like"
+    },
+    "time_window": {
+      "start": "T0",
+      "end": "T1"
+    }
+  },
+  "evidence_index": [
+    {
+      "evidence_id": "ev-04-01",
+      "kind": "rss_timeseries",
+      "summary": "Bounded rss timeseries projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:0ee43ffafc80619c6b0f710a3f9f02a8305025117a175f02b3baad08e235a9cc",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-04-02",
+      "kind": "capacity_snapshot",
+      "summary": "Bounded capacity snapshot projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:4220a00ab6cf9e8842b01bf12202bff0a70ca137c1bbda7f8e2fcb02002bc1fa",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    },
+    {
+      "evidence_id": "ev-04-03",
+      "kind": "object_liveness",
+      "summary": "Bounded object liveness projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "integrity_hash": "sha256:a5c318fd695f0702032c8ec0015ce94d864bd305fa85961b1d3a0878c0abf374",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ]
+    }
+  ],
+  "tracks": [
+    "fair_same_data",
+    "expert_intervention_tuning"
+  ],
+  "budget": {
+    "max_tool_calls": 16,
+    "max_return_bytes": 65536
+  }
+}

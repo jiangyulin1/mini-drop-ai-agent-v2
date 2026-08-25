@@ -1,0 +1,372 @@
+{
+  "case_id": "case-12",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2618,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:42:32.128223Z"
+    },
+    {
+      "event_id": 2619,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-12-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "6269b359277cbd8fa892ad14d75ffaf28f82f433bec9e1665d59efdad0c403b1",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:42:32.199217Z"
+    },
+    {
+      "event_id": 2620,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-12-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "1db65f21235e8548adb014829da77aedaa31c8b65467a85ddb0f03273e2b6d25",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:42:32.271344Z"
+    },
+    {
+      "event_id": 2621,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-12-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "d49918c41b9b63b126d60625307752b76d9481b7582d7a22aebed80c37c7a11f",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:42:32.347719Z"
+    },
+    {
+      "event_id": 2622,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:42:32.421519Z"
+    },
+    {
+      "event_id": 2623,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_878c29e9662f4d669e8e00fc410dba81",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "cbd9ba647134326708cd2881d498598c577552363ca51758566e3a7e8f10d579"
+      },
+      "created_at": "2026-08-25T10:42:32.450170Z"
+    },
+    {
+      "event_id": 2624,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654552507",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654552507"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654552507",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:42:32.523016Z"
+    },
+    {
+      "event_id": 2625,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-a1d816e154c284d478725fbd",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654552507",
+        "content": "All evidence and state reviewed. Summary of findings:\n\n- **ev-12-01** — `host_memory` elevated **2.071**× in window T0..T1 (120 samples), tagged `reclaim` / `host pressure` / `neighbor`\n- **ev-12-02** — `major_faults` elevated **2.102**× in the same window, same tags → active page reclaim\n- **ev-12-03** — `target_rss` elevated **2.133**× in the same window, same tags\n- No causal/dependency graph, no analyses, no collection proposals, no reusable evidence beyond the above; knowledge search returned no relevant operational knowledge for this mechanism.\n\nThe three aligned metrics consistently describe host-level memory pressure with kernel page reclaim and a \"neighbor\" workload tag — matching the case goal. Confidence is tempered by the evidence being UNREVIEWED synthetic eval data with no direct stall metric, no neighbor process identity, and no spike→stall causal ordering.\n\n```json\n{\n  \"conclusion\": \"The target stalls coincide with host-level memory pressure on host-1: another (neighbor) workload's memory spike drove kernel page reclaim, elevating major page faults for the target, with host memory and target RSS all elevated ~2.07-2.13x in the same window T0..T1. The evidence supports a noisy-neighbor / host memory contention mechanism rather than a target-internal defect, but the neighbor workload and direct stall metrics are not yet evidenced.\",\n  \"root_location\": \"host-1 (host-level memory pressure originating from an unidentified neighbor workload on the same host; not the target service's own code path)\",\n  \"mechanism\": \"Neighbor workload memory spike on host-1 -> host memory pressure (host_memory ~2.07x) -> kernel page reclaim, visible as elevated major_faults (~2.10x) for target pid 12345 -> target stalls; target_rss (~2.13x) also rose in the same aligned window, consistent with memory-contention-induced reclaim latency rather than an isolated target leak.\",\n  \"confidence\": 0.6,\n  \"confidence_reason\": \"Medium confidence: all three ACTIVE evidence projections (ev-12-01 host_memory, ev-12-02 major_faults, ev-12-03 target_rss) are internally consistent — same window T0..T1, same 120-sample alignment, same observations tags (reclaim, host pressure, neighbor), and similar ~2.1x elevations — which directly matches the stated incident mechanism. Confidence is capped because the evidence is UNREVIEWED synthetic eval data, there is no direct target stall/latency metric, the specific neighbor workload is unidentified, and no spike-before-stall causal ordering is established.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-12-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-12-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-12-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Identity (pid/container/command) of the neighbor workload that spiked memory on host-1\",\n    \"Direct target stall/latency metric (e.g., p99, stall duration) for pid 12345 during T0..T1\",\n    \"Causal ordering: neighbor spike onset vs target stall onset timestamps\",\n    \"Absolute memory values, swap usage, and page-scan/reclaim rate (not just ratios)\",\n    \"Baseline values for host_memory, major_faults, target_rss to interpret the ~2.1x ratios\"\n  ],\n  \"next_action\": \"READ_ONLY turn, so no collection is requested now. On the next cycle, propose low-risk (R1) collectors: process_scan on host-1 to identify the neighbor memory consumer, sys_metrics for host memory/swap pressure, memory_smaps on pid 12345 for RSS/PSS/swap composition, and runtime_snapshot on pid 12345 to correlate stall/thread states; then compare neighbor-spike onset vs target-stall onset to confirm causal ordering.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-12-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-12-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-12-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:43:10.792157Z"
+    },
+    {
+      "event_id": 2626,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654552507",
+        "message_id": "amsg-a1d816e154c284d478725fbd"
+      },
+      "created_at": "2026-08-25T10:43:10.802678Z"
+    },
+    {
+      "event_id": 2627,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type PLAN_REPRIORITIZE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:43:12.185226Z"
+    },
+    {
+      "event_id": 2628,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_4deb8190fba5479cbe5e583883a3c9c0",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "beb92e4cd0a7da258b228a5f7565d321c6ba93f92b523b158e039dc6e48867d6"
+      },
+      "created_at": "2026-08-25T10:43:12.210254Z"
+    },
+    {
+      "event_id": 2629,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654592225",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654592225"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654592225",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:43:12.245135Z"
+    },
+    {
+      "event_id": 2630,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-e182ad8e9b3141ce2bbe7900",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654592225",
+        "content": "Evidence state re-read: unchanged — still 3 ACTIVE evidence items (ev-12-01, ev-12-02, ev-12-03), watermark 3, no gaps, no hypotheses, no causal graph, no new counterevidence. The PLAN_REPRIORITIZE intervention affects plan priority only and introduces no new evidence, so per the answer-stability skill the evidence-backed conclusion is **defended unchanged** (same evidence IDs, same wording).\n\n```json\n{\n  \"conclusion\": \"The target stalls coincide with host-level memory pressure on host-1: another (neighbor) workload's memory spike drove kernel page reclaim, elevating major page faults for the target, with host memory and target RSS all elevated ~2.07-2.13x in the same window T0..T1. The evidence supports a noisy-neighbor / host memory contention mechanism rather than a target-internal defect, but the neighbor workload and direct stall metrics are not yet evidenced. The PLAN_REPRIORITIZE intervention changes only plan priorities and adds no evidence, so this conclusion is maintained unchanged.\",\n  \"root_location\": \"host-1 (host-level memory pressure originating from an unidentified neighbor workload on the same host; not the target service's own code path)\",\n  \"mechanism\": \"Neighbor workload memory spike on host-1 -> host memory pressure (host_memory ~2.07x) -> kernel page reclaim, visible as elevated major_faults (~2.10x) for target pid 12345 -> target stalls; target_rss (~2.13x) also rose in the same aligned window, consistent with memory-contention-induced reclaim latency rather than an isolated target leak.\",\n  \"confidence\": 0.6,\n  \"confidence_reason\": \"Medium confidence, unchanged from the prior cycle: all three ACTIVE evidence projections (ev-12-01 host_memory, ev-12-02 major_faults, ev-12-03 target_rss) are internally consistent — same window T0..T1, same 120-sample alignment, same observations tags (reclaim, host pressure, neighbor), and similar ~2.1x elevations — which directly matches the stated incident mechanism. Confidence is capped because the evidence is UNREVIEWED synthetic eval data, there is no direct target stall/latency metric, the specific neighbor workload is unidentified, and no spike-before-stall causal ordering is established. Re-reading evidence (list_case_evidence, get_case_snapshot, get_evidence_gaps) confirms no new evidence, no invalidations, and no resolved gaps after the PLAN_REPRIORITIZE intervention.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-12-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-12-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-12-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Identity (pid/container/command) of the neighbor workload that spiked memory on host-1\",\n    \"Direct target stall/latency metric (e.g., p99, stall duration) for pid 12345 during T0..T1\",\n    \"Causal ordering: neighbor spike onset vs target stall onset timestamps\",\n    \"Absolute memory values, swap usage, and page-scan/reclaim rate (not just ratios)\",\n    \"Baseline values for host_memory, major_faults, target_rss to interpret the ~2.1x ratios\"\n  ],\n  \"next_action\": \"Honoring the PLAN_REPRIORITIZE intervention but still READ_ONLY, no collection is requested this turn. On the next cycle, reprioritize the registered low-risk (R1) probes toward the highest-information-gap facts: process_scan on host-1 (identify the neighbor memory consumer), sys_metrics (host memory/swap pressure), memory_smaps on pid 12345 (RSS/PSS/swap composition), and runtime_snapshot on pid 12345 (correlate stall/thread states); then compare neighbor-spike onset vs target-stall onset to confirm causal ordering.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-12-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-12-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-12-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:43:23.285906Z"
+    },
+    {
+      "event_id": 2631,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654592225",
+        "message_id": "amsg-e182ad8e9b3141ce2bbe7900"
+      },
+      "created_at": "2026-08-25T10:43:23.289894Z"
+    }
+  ]
+}

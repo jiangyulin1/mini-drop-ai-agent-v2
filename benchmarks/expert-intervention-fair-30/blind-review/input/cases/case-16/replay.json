@@ -1,0 +1,101 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-16",
+  "evidence": [
+    {
+      "evidence_id": "ev-16-01",
+      "kind": "scheduler_ticks",
+      "summary": "Bounded scheduler ticks projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "scheduler_ticks",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.751,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "periodic",
+          "scheduler",
+          "jitter"
+        ]
+      },
+      "integrity_hash": "sha256:fa6d1f5663d881711f636798a69424dc10c86362b146b9799d5e43f7c23afe0d"
+    },
+    {
+      "evidence_id": "ev-16-02",
+      "kind": "deadline_misses",
+      "summary": "Bounded deadline misses projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "deadline_misses",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.782,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "periodic",
+          "scheduler",
+          "jitter"
+        ]
+      },
+      "integrity_hash": "sha256:e37c0decaa0703f96177b1958393fa9ae90c33028d9c7ebb1f360892a28b9139"
+    },
+    {
+      "evidence_id": "ev-16-03",
+      "kind": "run_queue",
+      "summary": "Bounded run queue projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "run_queue",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 2.813,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "periodic",
+          "scheduler",
+          "jitter"
+        ]
+      },
+      "integrity_hash": "sha256:8457df24a20e6d8ea12620343ac795861189451b67b8a886630df72c096b1652"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

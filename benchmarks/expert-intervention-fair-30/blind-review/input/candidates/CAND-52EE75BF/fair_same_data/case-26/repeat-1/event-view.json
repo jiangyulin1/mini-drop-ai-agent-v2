@@ -1,0 +1,219 @@
+{
+  "case_id": "case-26",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2417,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:26:56.739804Z"
+    },
+    {
+      "event_id": 2418,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-26-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "c13f9c93dcfde18691e79dcb0f07030ec3f4d0e78a3276e1b5cd926702a2c63f",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:26:56.821345Z"
+    },
+    {
+      "event_id": 2419,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-26-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "024d00c645d0403501b160b2a5da4e06ba8eb9c2097772246bfaa1c14d0e1f9a",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:26:56.908852Z"
+    },
+    {
+      "event_id": 2420,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-26-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "eabcbc1582ad0d4048118cc2e257fc60dde5d504afb03f320df55e9c9e1d2781",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:26:56.990361Z"
+    },
+    {
+      "event_id": 2421,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:26:57.070247Z"
+    },
+    {
+      "event_id": 2422,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_3db6fedb2bdd4341b08efb600b99b07a",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "f55b5404a2a3e7bc398037f4aa1af1fa764a3fcb778129229d5c0d62163e4f5d"
+      },
+      "created_at": "2026-08-25T10:26:57.106298Z"
+    },
+    {
+      "event_id": 2423,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653617162",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653617162"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653617162",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:26:57.179453Z"
+    },
+    {
+      "event_id": 2424,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-502ab7d0a0c9e3a98080e214",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653617162",
+        "content": "## Investigation Summary\n\n**Evidence reviewed (3 items, all ACTIVE):**\n\n| Evidence | Signal | Value | Observations |\n|---|---|---|---|\n| ev-26-01 | cpu_profile_topn (120 samples, T0..T1) | 4.451 | serialization, allocation, pause |\n| ev-26-02 | allocation_rate (120 samples, T0..T1) | 4.482 | serialization, allocation, pause |\n| ev-26-03 | gc_pause (120 samples, T0..T1) | 4.513 | serialization, allocation, pause |\n\nAll three signals are aligned on the same window (T0..T1, n=120) and consistently tagged. No causal graph, dependency graph, evidence gaps, or hypotheses exist yet; no collectors have been run. The evidence is `SYNTHETIC_EVAL`/`UNREVIEWED` (trust 50), HISTORICAL, with service/host/request_id redacted and no function-level stack detail.\n\n```json\n{\n  \"conclusion\": \"A CPU-heavy serialization code path in the target process (pid 12345, worker-1) is the primary suspect: it shows as the top CPU profile hot spot, drives an elevated allocation rate, and the resulting allocation pressure produces periodic GC pauses. The causal chain (serialization → allocation → GC pause) is consistent with the three aligned signals, but function-level attribution is not yet proven.\",\n  \"root_location\": \"Serialization code path inside target process pid 12345 (worker-1); exact function/source line not determinable from available evidence (stack detail redacted/absent, no flamegraph)\",\n  \"mechanism\": \"The serialization path dominates CPU time (cpu_profile_topn elevated, ev-26-01). Per-call serialization allocates heavily, raising the process allocation rate (ev-26-02). The sustained allocation rate increases GC/collector pressure, surfacing as periodic pauses (ev-26-03). Values 4.45–4.51 indicate a moderate, correlated elevation across all three signals over the same 120-sample window.\",\n  \"confidence\": 0.55,\n  \"confidence_reason\": \"Three signals (cpu_profile_topn, allocation_rate, gc_pause) are mutually aligned over the same window and share the serialization/allocation/pause signature, matching the stated goal. However, evidence is SYNTHETIC_EVAL, UNREVIEWED (derived trust 50), HISTORICAL, redacted on service/host/request_id, lacks function-level stack samples, baseline (pre-T0) comparison, and raw pause/allocation values, so root location cannot be narrowed and no specific code line is asserted.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-26-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-26-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-26-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Function-level CPU profile/flamegraph (perf_cpu) with stack samples naming the exact serialization functions in pid 12345\",\n    \"Process-level baseline (sys_metrics/process_scan) confirming CPU/allocation elevation and ruling out other load on host-1\",\n    \"Baseline window before T0 to establish that the elevation is new/regressed vs. steady-state\",\n    \"Raw gc_pause histogram and allocation-rate values with timestamps to verify pause periodicity and correlation with allocation bursts\",\n    \"Deploy/PR or change record linking the serialization path to a recent code change\",\n    \"Dependency/communication evidence (network_discovery) to rule out downstream-driven retry/load amplification\"\n  ],\n  \"next_action\": \"READ_ONLY turn: no collection dispatched. On next cycle, propose the highest-information-gain registered probes for the remaining gap: perf_cpu (R2, flamegraph to pin the serialization hot functions) plus low-cost sys_metrics (R1) and process_scan (R1) for process-level baseline, and log_scan (R1) for the pause timeline; then re-evaluate attribution before any code-level claim.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-26-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-26-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-26-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:27:29.695549Z"
+    },
+    {
+      "event_id": 2425,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653617162",
+        "message_id": "amsg-502ab7d0a0c9e3a98080e214"
+      },
+      "created_at": "2026-08-25T10:27:29.700886Z"
+    }
+  ]
+}

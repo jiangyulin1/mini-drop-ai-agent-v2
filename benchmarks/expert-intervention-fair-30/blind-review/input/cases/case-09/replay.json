@@ -1,0 +1,101 @@
+{
+  "schema": "benchmark-agent.replay-pack.v1",
+  "case_id": "case-09",
+  "evidence": [
+    {
+      "evidence_id": "ev-09-01",
+      "kind": "dependency_latency",
+      "summary": "Bounded dependency latency projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "dependency_latency",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.561,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "redis",
+          "downstream",
+          "queue"
+        ]
+      },
+      "integrity_hash": "sha256:708b88aba346aac6fd05ee24b5570a7292d41f2f9d5391c20dbc1f719caf7e20"
+    },
+    {
+      "evidence_id": "ev-09-02",
+      "kind": "redis_queue",
+      "summary": "Bounded redis queue projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "redis_queue",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.592,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "redis",
+          "downstream",
+          "queue"
+        ]
+      },
+      "integrity_hash": "sha256:b1ed4d715b8d3d574a9986b15ee31f8e098bf1d2d172104050ace6355068f15a"
+    },
+    {
+      "evidence_id": "ev-09-03",
+      "kind": "client_errors",
+      "summary": "Bounded client errors projection for the active window.",
+      "source_class": "SOURCE_DERIVED",
+      "observed_at": "T1",
+      "lifecycle": "ACTIVE",
+      "trust": "TRUSTED",
+      "query_capabilities": [
+        "query_metrics"
+      ],
+      "projection": {
+        "signal": "client_errors",
+        "window": "T0..T1",
+        "sample_count": 120,
+        "value": 1.623,
+        "alignment": "aligned",
+        "redacted_dimensions": [
+          "service",
+          "host",
+          "request_id"
+        ],
+        "observations": [
+          "redis",
+          "downstream",
+          "queue"
+        ]
+      },
+      "integrity_hash": "sha256:030f84151b33f0785f8fcdd3d650e35d583ea3730f1f7a984194741e1e8782a3"
+    }
+  ],
+  "limits": {
+    "max_tool_calls": 16,
+    "max_single_result_bytes": 65536,
+    "max_total_result_bytes": 524288
+  }
+}

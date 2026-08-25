@@ -1,0 +1,219 @@
+{
+  "case_id": "case-22",
+  "track": "fair_same_data",
+  "events": [
+    {
+      "event_id": 2381,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:24:45.246100Z"
+    },
+    {
+      "event_id": 2382,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-22-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "e8e63033534359124831f67757f27ac13efab6003c0f257a5880809c9b7c487b",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:24:45.316125Z"
+    },
+    {
+      "event_id": 2383,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-22-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "368ae6ff016700674dfb8043f8ede1555692079479f13f0b0ee20a11e84ad077",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:24:45.379604Z"
+    },
+    {
+      "event_id": 2384,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-22-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "52b7369a57250e41d805c46e2e3dfa178c430c11ea9a6b6f6235fbd423896618",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:24:45.451691Z"
+    },
+    {
+      "event_id": 2385,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:24:45.518217Z"
+    },
+    {
+      "event_id": 2386,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_3f98c71b5c0348248dbd41698600dcf1",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "fb746ba46f4d8d8fd4907179d7d184eb04770ac66d1cc22272c75d719b029b68"
+      },
+      "created_at": "2026-08-25T10:24:45.540438Z"
+    },
+    {
+      "event_id": 2387,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653485569",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787653485569"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653485569",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:24:45.592036Z"
+    },
+    {
+      "event_id": 2388,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-49372c74d31d5e53e94d6077",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787653485569",
+        "content": "## Investigation Summary\n\n**Tools used:** `list_case_evidence`, `get_case_snapshot`, `get_evidence_projection`, `search_knowledge`, `compare_evidence`, `get_evidence_gaps`, `list_collectors`, `get_causal_graph`.\n\n**Findings:**\n- 3 ACTIVE evidence items (`ev-22-01/02/03`), all `github_pr_SOURCE_DERIVED` synthetic eval projections, `UNREVIEWED`, trust 50, `HISTORICAL`, COMPLETE.\n- Projections are extremely sparse: `heap_retainers` (3.771), `runtime_wait_profile` (3.802), `throughput_context` (3.833) over window T0..T1 with 120 samples each; no time series, units, baselines, deltas, stack traces, or config values. The `observations` lists only echo goal keywords (`retention`, `lock`, `amplifies`).\n- Causal graph is empty (`null`), no evidence gaps registered, no hypotheses.\n- Knowledge search returned only an unrelated checkout-api retrospective (explicitly `knowledge_is_evidence=false`), so it cannot be cited as evidence.\n\nThe evidence is directionally consistent with the goal (retention → lock wait → concurrency) but does not establish magnitude, temporal correlation, or causality. Per the answer-stability skill, I abstain from a strong root-cause claim.\n\n```json\n{\n  \"conclusion\": \"Evidence is directionally consistent with the stated mechanism (retention increase -> amplified lock wait -> concurrency collapse) but is insufficient to confirm it. The three evaluation projections (heap_retainers, runtime_wait_profile, throughput_context over T0..T1, 120 samples each) carry no baseline, no before/after delta, no lock-wait time series, and no throughput collapse magnitude, so a causal claim cannot be verified from current evidence.\",\n  \"root_location\": \"Candidate only: target scope redacted-service (host-1, worker-1, pid 12345). Unconfirmed - projections are redacted (service/host/request_id) and no process-level or lock-contention site is evidenced.\",\n  \"mechanism\": \"Hypothesized mechanism matching goal: a retention increase lengthens object/retainer lifetimes (heap_retainers 3.771), which prolongs critical-section hold time and amplifies lock wait (runtime_wait_profile 3.802), leading to a concurrency/throughput collapse (throughput_context 3.833). Consistent with evidence direction but not causally established.\",\n  \"confidence\": \"low\",\n  \"confidence_reason\": \"All 3 evidence items are sparse synthetic evaluation projections (value-only, no time series or units), UNREVIEWED with derived trust 50; causal graph and evidence-gap registry are empty; no counter-evidence; retrieved knowledge is explicitly non-evidence and unrelated. No data supports distinguishing retention-driven lock amplification from other causes of lock wait.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-22-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"Retention configuration value before vs after the change (config delta tying retention increase to incident start)\",\n    \"Lock wait distribution/count time series (futex/park waits, contention site stack) over T0..T1\",\n    \"Throughput/concurrency baseline vs collapse window (P50/P95/P99 latency, error rate, active workers/connections)\",\n    \"Temporal alignment: whether heap_retainers growth precedes lock-wait growth which precedes throughput collapse\",\n    \"Process-level confirmation (pid 12345 runtime snapshot, thread states, dependency/connection topology)\",\n    \"Regression or correlation analysis linking retention metric to lock-wait metric\"\n  ],\n  \"next_action\": \"READ_ONLY turn - no collection requested. Recommend on a future writable cycle: register low-cost R1 collectors (runtime_snapshot for thread/lock-wait states, sys_metrics for throughput baseline, log_scan for error timeline, process_scan to confirm pid 12345) to fill the gaps above before asserting root cause.\",\n  \"abstain\": true\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-22-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-22-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-22-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:25:10.139327Z"
+    },
+    {
+      "event_id": 2389,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787653485569",
+        "message_id": "amsg-49372c74d31d5e53e94d6077"
+      },
+      "created_at": "2026-08-25T10:25:10.149280Z"
+    }
+  ]
+}

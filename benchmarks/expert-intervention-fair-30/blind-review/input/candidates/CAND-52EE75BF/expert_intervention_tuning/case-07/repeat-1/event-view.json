@@ -1,0 +1,372 @@
+{
+  "case_id": "case-07",
+  "track": "expert_intervention_tuning",
+  "events": [
+    {
+      "event_id": 2546,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 1,
+      "event_type": "case_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "state": "OPEN",
+        "state_reason": "scope_established",
+        "run_mode": "COLLABORATE",
+        "scope_revision": 1
+      },
+      "created_at": "2026-08-25T10:38:37.728243Z"
+    },
+    {
+      "event_id": 2547,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 2,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-07-01",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "9e1a143bc8af28badfef4f77710d4df2361f353c716c5e74987b7289b9a2c82f",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:38:37.806618Z"
+    },
+    {
+      "event_id": 2548,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 3,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-07-02",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "30ff4299370cb6c43e2934c39c6c9f62cdf5ce421a4f2340847fe0a167a00545",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:38:37.877697Z"
+    },
+    {
+      "event_id": 2549,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 4,
+      "event_type": "evaluation_evidence_imported",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "evidence_id": "eval:CASE_INTERNAL_REDACTED:ev-07-03",
+        "pack_kind": "SOURCE_DERIVED",
+        "projection_hash": "51519b2f782e6ffca7203356696ed6cd70d80ee3fd2abe14355aae639d666ce3",
+        "synthetic": true
+      },
+      "created_at": "2026-08-25T10:38:37.946658Z"
+    },
+    {
+      "event_id": 2550,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 5,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "Investigate the incident using the available evidence. You MUST call at least list_evidence and one query tool before answering. Only cite evidence ids that exist and are lifecycle=ACTIVE in supporting_evidence/counter_evidence. Return exactly one JSON object with conclusion, root_location, mechanism, confidence, confidence_reason, supporting_evidence, counter_evidence, missing_evidence, next_action, abstain."
+      },
+      "created_at": "2026-08-25T10:38:38.032470Z"
+    },
+    {
+      "event_id": 2551,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 6,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_ca6913c12bcb4c029e02510a7bcc00f0",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "50b175eaf7adfb4e8d0ad256a1657c0041d78b1d653d47178ec1b547f2fa47cc"
+      },
+      "created_at": "2026-08-25T10:38:38.054891Z"
+    },
+    {
+      "event_id": 2552,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 7,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654318090",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654318090"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654318090",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:38:38.104207Z"
+    },
+    {
+      "event_id": 2553,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 8,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-9c7eafb8dbbec95720fd4c92",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654318090",
+        "content": "```json\n{\n  \"conclusion\": \"The service's end-to-end latency is dominated by a remote network hop, not by local CPU. Three aligned, same-window signals show end-to-end request_latency (1.283) ≈ span edge time across the hop (1.252) ≈ network RTT to the remote hop (1.221); local processing accounts for only ~0.06 of the budget (~5%), consistent with the case premise that the service meets its CPU targets. Latency 'follows' the remote hop's RTT.\",\n  \"root_location\": \"Remote network hop on the request path of redacted-service (worker-1/host-1, target pid 12345); remote dependency endpoint is not yet identified (dimensions redacted). Local host-1/pid 12345 CPU is NOT the root cause.\",\n  \"mechanism\": \"End-to-end latency ≈ network RTT across a remote hop + small local processing. Over the observed window (T0..T1, 120 aligned samples), request_latency (1.283) tracks span_edges (1.252) and network_rtt (1.221), so the remote-hop RTT contributes ~95% of the latency budget; the local service's CPU is not saturated and is not the pacing factor.\",\n  \"confidence\": 0.6,\n  \"confidence_reason\": \"MEDIUM. (a) The three projections are mutually consistent and time-aligned (network_rtt 1.221 < span_edges 1.252 < request_latency 1.283 over the same T0..T1 window with 120 samples), and each carries observations ['rtt','remote hop','latency']; (b) however, this evidence is SYNTHETIC_EVAL/UNREVIEWED (derived trust 50), the remote hop identity is redacted, there is no direct evidence in this case confirming local CPU stays within targets (the CPU-targets premise comes from the case goal, not from measurements), and there is no baseline/percentile or multi-window comparison.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-07-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-07-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-07-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"sys_metrics/process_scan for target pid 12345 to directly confirm CPU/load within targets (currently only asserted by case goal)\",\n    \"network_discovery/topology identity of the remote hop and its endpoint address\",\n    \"per-hop span breakdown and latency percentiles (P50/P95/P99) plus a baseline window for comparison\",\n    \"remote-hop error/retry rates and connection_probe latency to the downstream endpoint\"\n  ],\n  \"next_action\": \"In a subsequent (non-READ_ONLY) cycle, register the lowest-cost information-gain probes for the remaining gaps: sys_metrics (R1, target_pid 12345) to confirm local CPU saturation is absent, and network_discovery (R1, target_pid 12345) to identify the remote hop so the latency source can be attributed to a concrete endpoint.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-07-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-07-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-07-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:39:07.718515Z"
+    },
+    {
+      "event_id": 2554,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 9,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654318090",
+        "message_id": "amsg-9c7eafb8dbbec95720fd4c92"
+      },
+      "created_at": "2026-08-25T10:39:07.734906Z"
+    },
+    {
+      "event_id": 2555,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 10,
+      "event_type": "user_message",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "kind": "answer",
+        "content": "An expert intervention of type PLAN_REPRIORITIZE has been applied. Before answering, you MUST call list_evidence or get_case_snapshot to re-read the current evidence state, then revise or defend the hypothesis using only active evidence. Return a new JSON answer."
+      },
+      "created_at": "2026-08-25T10:39:09.344279Z"
+    },
+    {
+      "event_id": 2556,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 11,
+      "event_type": "context_packet_created",
+      "actor_id": "jyl-operator",
+      "payload": {
+        "context_packet_id": "ctx_56e3a7841767432ea6c85391f8b372de",
+        "schema_version": "case-context.v1",
+        "purpose": "runtime_turn",
+        "iteration_no": 0,
+        "content_hash": "b24ea87b1602eab65abec6b28712d316f66962f5cb19f8f24b94ce6609c3caa0"
+      },
+      "created_at": "2026-08-25T10:39:09.366404Z"
+    },
+    {
+      "event_id": 2557,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 12,
+      "event_type": "agent_runtime_turn_submitted",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "schema_version": "case-agent-turn.v1",
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654349384",
+        "intent": "investigate",
+        "status": "runtime_turn_accepted",
+        "assistant_message": "本轮已提交给 Agent Runtime 处理；具体回答与工具轨迹通过 Runtime Event 回传并持久化。",
+        "decision_summary": [
+          "runtime_mode=pi",
+          "runtime_turn_id=turn-CASE_INTERNAL_REDACTED-1787654349384"
+        ],
+        "evidence_chain": [],
+        "contradictions": [],
+        "limitations": [],
+        "next_actions": [
+          {
+            "type": "runtime_turn",
+            "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654349384",
+            "mode": "pi"
+          }
+        ],
+        "tool_calls": [],
+        "deployment_assessment": null,
+        "side_effect_delta": {},
+        "strategy_id": "hybrid",
+        "runtime_options": {
+          "strategy_id": "hybrid",
+          "strategy_params": {},
+          "reasoning_effort": "high",
+          "model": null,
+          "prompt_variant": "default",
+          "temperature": null,
+          "max_tokens": null,
+          "seed": null,
+          "capture_reasoning_trace": false,
+          "fresh_session": false,
+          "reasoning_persistence": "decision_summary_and_tool_sequence_only",
+          "runtime_support": {
+            "strategy": "applied",
+            "model": "applied",
+            "reasoning_effort": "applied",
+            "prompt_variant": "applied",
+            "temperature": "experiment_metadata_only",
+            "max_tokens": "experiment_metadata_only",
+            "seed": "experiment_metadata_only",
+            "fresh_session": "applied"
+          }
+        },
+        "policy_used": {
+          "side_effect_policy": "READ_ONLY",
+          "enabled_tools": null,
+          "disabled_tools": [],
+          "enabled_operations": null,
+          "allowed_risk_levels": [
+            "R0",
+            "R1"
+          ],
+          "execution_mode": "normal",
+          "auto_approve": false,
+          "require_approval_for": [
+            "R3",
+            "R2"
+          ],
+          "allow_arbitrary_command": false,
+          "max_collection_requests": 8,
+          "max_collection_duration_sec": 240,
+          "effective_tools": [
+            "compare_evidence",
+            "find_reusable_evidence",
+            "get_case_snapshot",
+            "get_causal_graph",
+            "get_collection_status",
+            "get_dependency_graph",
+            "get_evidence_analyses",
+            "get_evidence_gaps",
+            "get_evidence_projection",
+            "get_investigation_tree",
+            "list_case_evidence",
+            "list_collectors",
+            "search_knowledge"
+          ],
+          "permission_boundary": "request_may_only_reduce_code_owned_permissions"
+        }
+      },
+      "created_at": "2026-08-25T10:39:09.398486Z"
+    },
+    {
+      "event_id": 2558,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 13,
+      "event_type": "assistant.message",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "message_id": "amsg-165fb419e79718c283be3f82",
+        "trigger_turn_id": "turn-CASE_INTERNAL_REDACTED-1787654349384",
+        "content": "```json\n{\n  \"conclusion\": \"DEFENDED (unchanged): The service's end-to-end latency is dominated by a remote network hop, not by local CPU. The PLAN_REPRIORITIZE intervention introduced no new evidence or fact corrections — the active evidence set is identical (3 items, watermark 3, no gaps, empty plan), so per answer-stability the conclusion stands. Three aligned, same-window signals show end-to-end request_latency (1.283) ≈ span edge time across the hop (1.252) ≈ network RTT to the remote hop (1.221); local processing accounts for only ~0.06 of the budget (~5%), consistent with the case premise that the service meets its CPU targets. Latency 'follows' the remote hop's RTT.\",\n  \"root_location\": \"Remote network hop on the request path of redacted-service (worker-1/host-1, target pid 12345); remote dependency endpoint is not yet identified (dimensions redacted). Local host-1/pid 12345 CPU is NOT the root cause.\",\n  \"mechanism\": \"End-to-end latency ≈ network RTT across a remote hop + small local processing. Over the observed window (T0..T1, 120 aligned samples), request_latency (1.283) tracks span_edges (1.252) and network_rtt (1.221), so the remote-hop RTT contributes ~95% of the latency budget; the local service's CPU is not saturated and is not the pacing factor.\",\n  \"confidence\": 0.6,\n  \"confidence_reason\": \"MEDIUM, retained from prior cycle. (a) The three projections are mutually consistent and time-aligned (network_rtt 1.221 < span_edges 1.252 < request_latency 1.283 over the same T0..T1 window with 120 samples) and each carries observations ['rtt','remote hop','latency']; (b) the PLAN_REPRIORITIZE intervention did not change evidence state, so no basis exists to raise or lower confidence; (c) caveats persist: evidence is SYNTHETIC_EVAL/UNREVIEWED (derived trust 50), remote hop identity is redacted, no direct measurement in this case confirms local CPU stays within targets (premise from case goal only), and there is no baseline/percentile or multi-window comparison.\",\n  \"supporting_evidence\": [\n    \"eval:CASE_INTERNAL_REDACTED:ev-07-01\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-07-02\",\n    \"eval:CASE_INTERNAL_REDACTED:ev-07-03\"\n  ],\n  \"counter_evidence\": [],\n  \"missing_evidence\": [\n    \"sys_metrics/process_scan for target pid 12345 to directly confirm CPU/load within targets (currently only asserted by case goal)\",\n    \"network_discovery/topology identity of the remote hop and its endpoint address\",\n    \"per-hop span breakdown and latency percentiles (P50/P95/P99) plus a baseline window for comparison\",\n    \"remote-hop error/retry rates and connection_probe latency to the downstream endpoint\"\n  ],\n  \"next_action\": \"Given the reprioritized plan is still empty and evidence is unchanged, the next highest-information-gain step remains: in a subsequent (non-READ_ONLY) cycle register the two lowest-cost probes against the remaining gaps — sys_metrics (R1, target_pid 12345) to confirm local CPU saturation is absent, and network_discovery (R1, target_pid 12345) to identify the remote hop endpoint so the latency source can be attributed concretely.\",\n  \"abstain\": false\n}\n```",
+        "evidence_refs": [
+          "eval:CASE_INTERNAL_REDACTED:ev-07-01",
+          "eval:CASE_INTERNAL_REDACTED:ev-07-02",
+          "eval:CASE_INTERNAL_REDACTED:ev-07-03"
+        ]
+      },
+      "created_at": "2026-08-25T10:39:22.898272Z"
+    },
+    {
+      "event_id": 2559,
+      "case_id": "CASE_INTERNAL_REDACTED",
+      "tenant_id": "local-development",
+      "case_event_seq": 14,
+      "event_type": "turn.completed",
+      "actor_id": "benchmark-agent-agent-runtime",
+      "payload": {
+        "turn_id": "turn-CASE_INTERNAL_REDACTED-1787654349384",
+        "message_id": "amsg-165fb419e79718c283be3f82"
+      },
+      "created_at": "2026-08-25T10:39:22.909573Z"
+    }
+  ]
+}
