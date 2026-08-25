@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Card, Empty, Select, Skeleton, Space, Tag, Tooltip, Typography, message } from "antd";
+import { Alert, Badge, Button, Card, Empty, Modal, Select, Skeleton, Space, Tag, Tooltip, Typography, message } from "antd";
 import {
   AimOutlined,
   ArrowRightOutlined,
   BulbOutlined,
   CheckOutlined,
+  CloudUploadOutlined,
   ClusterOutlined,
   CloseOutlined,
   DatabaseOutlined,
+  DownloadOutlined,
   FileSearchOutlined,
   NodeIndexOutlined,
   ReloadOutlined,
@@ -17,7 +19,15 @@ import {
   ToolOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
-import { decideCaseCollectionProposal, getCaseInvestigationPlan, listCaseEvidenceReviews } from "../../api/client";
+import {
+  decideCaseCollectionProposal,
+  downloadCaseConclusionReport,
+  getCaseInvestigationPlan,
+  listCaseEvidenceReviews,
+  promoteCaseMemory,
+  refreshCaseMemory,
+} from "../../api/client";
+import AssistantMessageContent from "./AssistantMessageContent";
 import EvidenceDrawer from "../../components/EvidenceDrawer";
 import ExplainabilityDrawer from "../../components/ExplainabilityDrawer";
 import { conclusionStateMeta, evidenceTrust, planStatus, riskCode, riskLevel } from "../../utils/opsMappings";
@@ -599,7 +609,11 @@ function CausalGraphTab({ graph, onOpenEvidence }) {
   return <div className="ccw-causal"><div className="ccw-node-list">{nodes.map((node) => <div className="ccw-node" key={node.node_id}><div><strong>{node.mechanism || node.entity_ref}</strong><Tag color={node.verifier_role && node.verifier_role !== "UNVERIFIED" ? "green" : "default"}>{node.verifier_role || node.role}</Tag></div><small>{node.entity_ref}</small><Space wrap>{array(node.supporting_evidence_refs).map((id) => <Button type="link" size="small" key={id} onClick={() => onOpenEvidence(id)}>{id}</Button>)}</Space></div>)}</div><div className="ccw-edges">{edges.map((edge, index) => <div key={edge.edge_id || index}><strong>{labels.get(edge.source_node_id) || edge.source_node_id}</strong><NodeIndexOutlined /><strong>{labels.get(edge.target_node_id) || edge.target_node_id}</strong><Tag color={edge.verification_state === "SUPPORTED" ? "green" : "default"}>{edge.verification_state || edge.relation}</Tag></div>)}</div></div>;
 }
 
-function ConclusionTab({ conclusion, history, onOpenEvidence, onExplain }) {
+function ConclusionTab({ conclusion, history, caseId, onOpenEvidence, onExplain }) {
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportMarkdown, setReportMarkdown] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+  const [promoteLoading, setPromoteLoading] = useState(false);
   if (!conclusion) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未提交结论修订。" />;
   const groups = [
     ["主要原因", conclusion.primary_root_causes], ["促成因素", conclusion.contributing_factors],
@@ -608,7 +622,44 @@ function ConclusionTab({ conclusion, history, onOpenEvidence, onExplain }) {
   ];
   const priorRevisions = array(history).filter((item) => item.conclusion_id !== conclusion.conclusion_id);
   const stateMeta = conclusionStateMeta(conclusion.state);
-  return <div className="ccw-conclusion"><div className="ccw-conclusion-head"><div><Tag color={stateMeta.color}>{stateMeta.label}</Tag><strong>结论修订 r{conclusion.revision || 1}</strong></div><Button size="small" onClick={() => onExplain(conclusion)}>校验详情</Button></div><Typography.Paragraph>{conclusion.report_text || conclusion.abstention_reason || "-"}</Typography.Paragraph>{groups.map(([label, values]) => array(values).length > 0 && <div className="ccw-conclusion-group" key={label}><strong>{label}</strong>{array(values).map((value, index) => <Tag key={`${label}-${index}`}>{compact(value)}</Tag>)}</div>)}<div className="ccw-ref-row"><span>Claim bindings <Badge count={count(conclusion.claim_evidence_bindings)} showZero /></span><Space wrap>{array(conclusion.claim_evidence_bindings).slice(0, 4).map((binding) => <Button type="link" size="small" key={`${binding.claim_id}-${binding.evidence_id}`} onClick={() => onOpenEvidence(binding.evidence_id)}>{binding.evidence_id}</Button>)}</Space></div>{priorRevisions.length > 0 && <section className="ccw-conclusion-history" aria-label="历史结论修订"><header><strong>历史修订</strong><small>保留用于对照，不再作为当前依据</small></header>{priorRevisions.map((item) => <div className="ccw-conclusion-history-item" key={item.conclusion_id}><div><Tag color="default">{item.revision_status || "SUPERSEDED"}</Tag><strong>r{item.revision || "-"}</strong><Tag>{item.state || "-"}</Tag></div><Typography.Paragraph ellipsis={{ rows: 2 }}>{item.report_text || item.abstention_reason || "-"}</Typography.Paragraph><Space wrap>{array(item.claim_evidence_bindings).slice(0, 4).map((binding) => <Button type="link" size="small" key={`${item.conclusion_id}-${binding.claim_id}`} onClick={() => onOpenEvidence(binding.evidence_id)}>{binding.evidence_id}</Button>)}</Space></div>)}</section>}</div>;
+  async function openReportPreview() {
+    setReportLoading(true);
+    try {
+      const { blob } = await downloadCaseConclusionReport(caseId);
+      setReportMarkdown(await blob.text());
+      setReportOpen(true);
+    } catch (error) {
+      message.error(error?.message || "报告生成失败");
+    } finally {
+      setReportLoading(false);
+    }
+  }
+  async function downloadReport() {
+    try {
+      const { blob, filename } = await downloadCaseConclusionReport(caseId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      message.error(error?.message || "报告下载失败");
+    }
+  }
+  async function writeToKnowledgeBase() {
+    setPromoteLoading(true);
+    try {
+      await refreshCaseMemory(caseId);
+      await promoteCaseMemory(caseId);
+      message.success("已写入知识库");
+    } catch (error) {
+      message.error(error?.message || "写入知识库失败");
+    } finally {
+      setPromoteLoading(false);
+    }
+  }
+  return <div className="ccw-conclusion"><div className="ccw-conclusion-head"><div><Tag color={stateMeta.color}>{stateMeta.label}</Tag><strong>结论修订 r{conclusion.revision || 1}</strong></div><Space><Button size="small" icon={<DownloadOutlined />} loading={reportLoading} onClick={openReportPreview}>导出报告</Button><Button size="small" icon={<CloudUploadOutlined />} loading={promoteLoading} onClick={writeToKnowledgeBase}>写入知识库</Button><Button size="small" onClick={() => onExplain(conclusion)}>校验详情</Button></Space></div><Typography.Paragraph>{conclusion.report_text || conclusion.abstention_reason || "-"}</Typography.Paragraph>{groups.map(([label, values]) => array(values).length > 0 && <div className="ccw-conclusion-group" key={label}><strong>{label}</strong>{array(values).map((value, index) => <Tag key={`${label}-${index}`}>{compact(value)}</Tag>)}</div>)}<div className="ccw-ref-row"><span>Claim bindings <Badge count={count(conclusion.claim_evidence_bindings)} showZero /></span><Space wrap>{array(conclusion.claim_evidence_bindings).slice(0, 4).map((binding) => <Button type="link" size="small" key={`${binding.claim_id}-${binding.evidence_id}`} onClick={() => onOpenEvidence(binding.evidence_id)}>{binding.evidence_id}</Button>)}</Space></div>{priorRevisions.length > 0 && <section className="ccw-conclusion-history" aria-label="历史结论修订"><header><strong>历史修订</strong><small>保留用于对照，不再作为当前依据</small></header>{priorRevisions.map((item) => <div className="ccw-conclusion-history-item" key={item.conclusion_id}><div><Tag color="default">{item.revision_status || "SUPERSEDED"}</Tag><strong>r{item.revision || "-"}</strong><Tag>{item.state || "-"}</Tag></div><Typography.Paragraph ellipsis={{ rows: 2 }}>{item.report_text || item.abstention_reason || "-"}</Typography.Paragraph><Space wrap>{array(item.claim_evidence_bindings).slice(0, 4).map((binding) => <Button type="link" size="small" key={`${item.conclusion_id}-${binding.claim_id}`} onClick={() => onOpenEvidence(binding.evidence_id)}>{binding.evidence_id}</Button>)}</Space></div>)}</section>}<Modal open={reportOpen} onCancel={() => setReportOpen(false)} title="报告预览" width={720} footer={[<Button key="close" onClick={() => setReportOpen(false)}>关闭</Button>, <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={downloadReport}>下载 Markdown</Button>]}><AssistantMessageContent content={reportMarkdown} /></Modal></div>;
 }
 
 function ExecutionTab({ units, fanoutRuns, requests }) {
@@ -707,7 +758,7 @@ export default function CanonicalCaseWorkspace({ workspace, connected, caseId, f
     { key: "causal", label: <Space><ClusterOutlined />因果图 <Badge count={array(causalGraph.nodes).length} showZero /></Space>, children: <CausalGraphTab graph={causalGraph} onOpenEvidence={openById} /> },
     { key: "hypotheses", label: <Space><BulbOutlined />假设 <Badge count={array(hypothesisGraph.hypotheses).length} showZero /></Space>, children: <HypothesesTab graph={hypothesisGraph} conclusion={conclusion} onOpenEvidence={openById} onExplain={setExplainDecision} /> },
     { key: "analyses", label: <Space><RobotOutlined />受引用分析 <Badge count={analyses.length} showZero /></Space>, children: <AnalysisTab analyses={analyses} evidence={evidence} onOpenEvidence={openById} onOpenCitation={openCitation} onNavigate={setActiveTab} /> },
-    { key: "conclusion", label: <Space><SafetyCertificateOutlined />结论修订 <Badge count={array(workspace.conclusion_history).length || (conclusion ? 1 : 0)} showZero /></Space>, children: <ConclusionTab conclusion={conclusion} history={workspace.conclusion_history} onOpenEvidence={openById} onExplain={setExplainDecision} /> },
+    { key: "conclusion", label: <Space><SafetyCertificateOutlined />结论修订 <Badge count={array(workspace.conclusion_history).length || (conclusion ? 1 : 0)} showZero /></Space>, children: <ConclusionTab conclusion={conclusion} history={workspace.conclusion_history} caseId={caseId} onOpenEvidence={openById} onExplain={setExplainDecision} /> },
     { key: "gaps", label: <Space><WarningOutlined />Evidence 缺口 <Badge count={evidenceGaps.length} showZero /></Space>, children: <GapsTab gaps={evidenceGaps} onOpenEvidence={openById} /> },
     { key: "execution", label: <Space><ThunderboltOutlined />采集执行 <Badge count={executionUnits.length + fanoutRuns.length} showZero /></Space>, children: <ExecutionTab units={executionUnits} fanoutRuns={fanoutRuns} requests={requests} /> },
     { key: "recommendations", label: <Space><ToolOutlined />恢复建议 <Badge count={recommendations.length} showZero /></Space>, children: <RecommendationsTab recommendations={recommendations} onDiscuss={onDiscussRecommendation} onCreateRecovery={onCreateRecovery} /> },

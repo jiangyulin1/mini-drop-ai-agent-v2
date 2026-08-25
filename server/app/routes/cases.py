@@ -920,6 +920,91 @@ def download_case_evidence(
     )
 
 
+def _render_conclusion_report_markdown(
+    case: dict[str, Any], conclusion: dict[str, Any], recommendations: list[dict[str, Any]],
+) -> str:
+    lines: list[str] = []
+    title = case.get("title") or case.get("case_id") or "案例报告"
+    lines.append(f"# {title}")
+    lines.append("")
+    lines.append(f"- Case ID：{case.get('case_id') or '-'}")
+    lines.append(f"- 环境：{case.get('environment') or '-'}")
+    lines.append(f"- Case 状态：{case.get('state') or '-'}")
+    lines.append(f"- 结论状态：{conclusion.get('state') or '-'}（第 {conclusion.get('revision') or 1} 版）")
+    lines.append("")
+    lines.append("## 结论")
+    lines.append("")
+    lines.append(str(conclusion.get("report_text") or conclusion.get("abstention_reason") or "-"))
+    lines.append("")
+    groups = [
+        ("主要原因", conclusion.get("primary_root_causes")),
+        ("促成因素", conclusion.get("contributing_factors")),
+        ("放大因素", conclusion.get("amplifiers")),
+        ("传播影响", conclusion.get("propagated_effects")),
+        ("已排除", conclusion.get("ruled_out")),
+    ]
+    for label, values in groups:
+        if not values:
+            continue
+        lines.append(f"## {label}")
+        lines.append("")
+        for item in values:
+            lines.append(f"- {item}")
+        lines.append("")
+    bindings = conclusion.get("claim_evidence_bindings") or []
+    if bindings:
+        lines.append("## Claim 与 Evidence 的绑定")
+        lines.append("")
+        lines.append("| Claim | Evidence | 字段路径 |")
+        lines.append("| --- | --- | --- |")
+        for binding in bindings:
+            lines.append(
+                f"| {binding.get('claim_id') or '-'} | {binding.get('evidence_id') or '-'} "
+                f"| {binding.get('field_path') or '-'} |",
+            )
+        lines.append("")
+    if recommendations:
+        lines.append("## 恢复建议")
+        lines.append("")
+        for item in recommendations:
+            action = item.get("concrete_action") or item.get("title") or "-"
+            rationale = item.get("rationale")
+            risk = item.get("risk") or item.get("risk_level")
+            suffix = "".join(filter(None, [f"（风险：{risk}）" if risk else "", f" {rationale}" if rationale else ""]))
+            lines.append(f"- {action}{suffix}")
+        lines.append("")
+    limitations = conclusion.get("limitations") or []
+    if limitations:
+        lines.append("## 局限性")
+        lines.append("")
+        for item in limitations:
+            lines.append(f"- {item}")
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+@router.get("/api/v1/cases/{case_id}/conclusion/report")
+def download_case_conclusion_report(case_id: str, request: Request) -> Response:
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    conclusion = repo.get_conclusion(case_id, tenant_id) if hasattr(repo, "get_conclusion") else None
+    if conclusion is None:
+        raise HTTPException(status_code=409, detail="CONCLUSION_NOT_AVAILABLE")
+    recommendations = repo.list_repair_recommendations(case_id, tenant_id) if hasattr(
+        repo, "list_repair_recommendations",
+    ) else []
+    markdown = _render_conclusion_report_markdown(case, conclusion, recommendations)
+    filename = f"case-{case_id}-report.md"
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return Response(content=markdown.encode("utf-8"), media_type="text/markdown; charset=utf-8", headers=headers)
+
+
 @router.get("/api/v1/cases/{case_id}/evidence/{evidence_id}/analyses")
 def list_case_evidence_analyses(case_id: str, evidence_id: str, request: Request) -> APIResponse:
     _require_role(request, "operator")

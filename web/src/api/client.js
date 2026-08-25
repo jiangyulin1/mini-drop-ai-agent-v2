@@ -477,6 +477,20 @@ export async function downloadCaseEvidence(caseId, evidenceId, format = "raw") {
   return { blob: response.data, filename: safeDownloadFilename(disposition, fallback) };
 }
 
+export async function downloadCaseConclusionReport(caseId) {
+  const token = getStoredApiKey();
+  const response = await axios.get(
+    `/api/v1/cases/${encodeURIComponent(caseId)}/conclusion/report`,
+    {
+      responseType: "blob",
+      withCredentials: true,
+      headers: token ? { "X-API-Key": token } : {},
+    },
+  );
+  const disposition = response.headers["content-disposition"] || "";
+  return { blob: response.data, filename: safeDownloadFilename(disposition, `case-${caseId}-report.md`) };
+}
+
 /** G4：注册的低风险 Query 目录。 */
 export function listQueryOperations() {
   return api.get("/v1/query-operations");

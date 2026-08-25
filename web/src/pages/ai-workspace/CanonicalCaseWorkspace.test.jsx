@@ -2,12 +2,21 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CanonicalCaseWorkspace from "./CanonicalCaseWorkspace";
-import { getCaseInvestigationPlan, listCaseEvidenceReviews } from "../../api/client";
+import {
+  downloadCaseConclusionReport,
+  getCaseInvestigationPlan,
+  listCaseEvidenceReviews,
+  promoteCaseMemory,
+  refreshCaseMemory,
+} from "../../api/client";
 
 vi.mock("../../api/client", () => ({
   decideCaseCollectionProposal: vi.fn(),
   getCaseInvestigationPlan: vi.fn(),
   listCaseEvidenceReviews: vi.fn(),
+  downloadCaseConclusionReport: vi.fn(),
+  promoteCaseMemory: vi.fn(),
+  refreshCaseMemory: vi.fn(),
 }));
 
 vi.mock("../../components/EvidenceDrawer", () => ({
@@ -129,6 +138,12 @@ describe("CanonicalCaseWorkspace", () => {
     vi.clearAllMocks();
     getCaseInvestigationPlan.mockResolvedValue({ goal: "确认根因", steps: [] });
     listCaseEvidenceReviews.mockResolvedValue({ items: [] });
+    downloadCaseConclusionReport.mockResolvedValue({
+      blob: { text: () => Promise.resolve("# 报告\n\nCPU 饱和是主要诱因") },
+      filename: "case-case-1-report.md",
+    });
+    promoteCaseMemory.mockResolvedValue({});
+    refreshCaseMemory.mockResolvedValue({});
   });
 
   it("uses one state-aware workspace navigation without completion checks", async () => {
@@ -310,5 +325,22 @@ describe("CanonicalCaseWorkspace", () => {
     expect(collectionsTab).toHaveFocus();
     expect(collectionsTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "ccw-tab-collections");
+  });
+
+  it("previews and downloads the conclusion report, and writes the case to the knowledge base", async () => {
+    render(<CanonicalCaseWorkspace workspace={WORKSPACE} caseId="case-1" connected onRefresh={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /结论修订/ }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /导出报告/ }));
+    expect(downloadCaseConclusionReport).toHaveBeenCalledWith("case-1");
+    expect(await screen.findByText("报告预览")).toBeInTheDocument();
+    expect(await screen.findByText("CPU 饱和是主要诱因")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /下载 Markdown/ }));
+    await waitFor(() => expect(downloadCaseConclusionReport).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: /写入知识库/ }));
+    await waitFor(() => expect(refreshCaseMemory).toHaveBeenCalledWith("case-1"));
+    expect(promoteCaseMemory).toHaveBeenCalledWith("case-1");
   });
 });

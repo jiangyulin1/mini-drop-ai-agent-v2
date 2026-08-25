@@ -418,6 +418,39 @@ def test_conclusion_history_keeps_superseded_revision_visible(client: TestClient
     ]
 
 
+def test_conclusion_report_download_renders_markdown_with_recommendations(client: TestClient):
+    case, evidence_id = _case_and_evidence(client)
+    conclusion = repo.submit_conclusion_revision(
+        case_id=case["case_id"], tenant_id="tenant-a", investigation_run_id="run-1",
+        state="PARTIALLY_CONFIRMED", claims=[{
+            "claim_id": "claim-cpu", "evidence_id": evidence_id,
+            "projection_hash": repo.list_evidence_projections(case["case_id"], "tenant-a")[0]["projection_hash"],
+        }], report_text="CPU 饱和是主要诱因",
+        primary_root_causes=[{"description": "CPU 饱和"}],
+    )
+    repo.add_repair_recommendation(
+        case_id=case["case_id"], tenant_id="tenant-a", conclusion_id=conclusion["conclusion_id"],
+        cause_or_edge_ref="claim-cpu", concrete_action="扩容 CPU 配额", risk="LOW",
+    )
+
+    response = client.get(f"/api/v1/cases/{case['case_id']}/conclusion/report", headers=_headers())
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert "attachment" in response.headers["content-disposition"]
+    body = response.text
+    assert "CPU 饱和是主要诱因" in body
+    assert "扩容 CPU 配额" in body
+    assert "claim-cpu" in body
+    assert evidence_id in body
+
+
+def test_conclusion_report_download_requires_existing_conclusion(client: TestClient):
+    case, _ = _case_and_evidence(client)
+    response = client.get(f"/api/v1/cases/{case['case_id']}/conclusion/report", headers=_headers())
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "CONCLUSION_NOT_AVAILABLE"
+
+
 def test_finish_persists_evidence_bound_recommendation_in_workspace(client: TestClient):
     case, evidence_id = _case_and_evidence(client)
     response = client.post(
