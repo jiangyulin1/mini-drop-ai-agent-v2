@@ -88,6 +88,20 @@ Pi 报告通过以下门槛：Sidecar ready、真实 Provider completion、分�
 
 这项测试的结论是 `PASS`：服务端的隐藏事实隔离、缺证拒绝、补证、Evidence materialization、wakeup 和 revision fencing 状态链已具备可验收闭环。它仍是 deterministic integration test，不证明 DeepSeek 在真实对话中一定会主动识别正确缺口、选择正确 Collector 或解释新证据；下一步应在 JYL Pi 上用最多两轮、低 token 的真实模型 smoke 复现同一协议，并人工判定 Agent 是否自主提出 `runtime_snapshot`。
 
+## 专家介入与服务/进程切换验收
+
+本轮将旧版“对话干预、当前动作/下一动作、服务关系导航”交互接入 Evidence-native 确定性控制面：
+
+- 对话中的“暂停/停止/恢复”先提交 Case Command，再通知 Pi Runtime；不会等待模型理解，也不会把控制话术作为普通调查 Turn。
+- “改查/切换到/聚焦”会经过 scope/control revision CAS。服务只能切到 Case scope 或当前 Dependency Graph 已证明的节点；进程必须有 Discovery Evidence，未知 PID 会拒绝。
+- 聚焦变更会使旧 scope 下的调查失效、保留历史审计，并向 Runtime 发送 `abort` + `steer(FOCUS_CHANGED)`；Runtime 不可用时 Case 状态仍落库，返回 `pending` 供恢复。
+- `GET /api/v1/cases/{case_id}/investigation-summary` 汇总当前 focus、revision、活跃 Task、当前 Evidence、Evidence watermark、开放 Gap、结论、可切换服务/进程/依赖边和 `dependency_only_not_causal` 语义。
+- `POST /api/v1/cases/{case_id}/focus` 是非聊天客户端的同一 focus 契约；Workspace 及 Runtime `CaseContextSnapshot` 暴露相同 `focus`。
+
+验收测试为 `tests/test_expert_intervention.py`，覆盖：对话暂停零 Runtime Turn、服务聚焦 revision、未知进程拒绝、focus CAS 冲突；与 Runtime/拓扑回归合计 `24 passed`。该测试验证控制链和状态一致性，不宣称模型能从任意自然语言自动识别正确服务或 PID。
+
+当前仍未实现“通过聊天即时切换 deterministic/pi 部署模式”；这仍是部署/环境配置级操作。专家可以在对话中控制 Case、聚焦链路、要求解释、纠正上下文、补充或排除 Evidence，但模型不得绕过 Tool Gateway 或直接写入因果结论。
+
 ## 操作注意
 
 Candidate archive 不包含受保护的 Compose `.env` 和 TLS 证书。部署到 `/jyl` 时必须从当前 active release 复制 `.env`，并将 `deploy/certs/{ca.crt,server.crt,server.key}` 复制到新 release；否则 Server/Worker 会因证书缺失无法启动。API Key 和 DeepSeek Key 只由受保护 env 注入，不写入报告或仓库。

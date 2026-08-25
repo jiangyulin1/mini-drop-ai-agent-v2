@@ -390,7 +390,7 @@ Recommendation -> preflight/dry-run -> approval -> execute -> postcondition
 - `web/src/components/MultiAgentCollectionModal.jsx`：Fanout/多 Agent 采集。
 - `web/src/api/client.js`：REST 客户端和 SSE/Workspace 数据访问。
 
-当前 Web 已能展示 Case、Evidence、Dependency Graph、Plan、Proposal、Hypothesis、Gap、Causal Graph、Conclusion、Recovery 和事件流；长期 Target Session 的初始化配置和全量拓扑控制仍不如 Case 工作台完整。AI 调查页现有 Evidence 路径总览，会把范围、采集、Evidence、验证、结论和受控行动串成当前状态投影，并提示 Evidence review/分析输入失效后的回溯；它仍不是完整持久化调查树时间线，也没有独立成型的“干预中心”。审批/干预前端改造必须先对应已存在的后端 API、状态迁移和 revision 门禁。
+当前 Web 已能展示 Case、Evidence、Dependency Graph、Plan、Proposal、Hypothesis、Gap、Causal Graph、Conclusion、Recovery 和事件流；长期 Target Session 的初始化配置和全量拓扑控制仍不如 Case 工作台完整。AI 调查页现有 Evidence 路径总览，会把范围、采集、Evidence、验证、结论和受控行动串成当前状态投影，并提示 Evidence review/分析输入失效后的回溯。专家介入已具备后端确定性控制面：对话/`/commands` 的暂停、停止、恢复，以及服务/进程/依赖边 focus 和 `investigation-summary`；前端仍需把这些 API 接入统一的专家模式交互，且必须继续遵守 revision CAS 与 Discovery Evidence 门禁。
 
 ## 14. 持久化模型分组
 

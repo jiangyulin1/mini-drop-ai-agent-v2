@@ -72,6 +72,7 @@ class CaseContextSnapshot(StrictModel):
     # A durable operator/review intervention that must be acknowledged before
     # any write-capable tool can continue the investigation.
     intervention: dict[str, Any] = Field(default_factory=dict)
+    focus: dict[str, Any] = Field(default_factory=dict)
 
 
 class RuntimeBinding(StrictModel):
@@ -112,6 +113,7 @@ class RuntimeSteer(StrictModel):
     reason_code: str = "USER_DIRECTION"
     scope_revision: int = 0
     plan_revision: int = 0
+    focus: dict[str, Any] = Field(default_factory=dict)
 
 
 class RuntimeFollowUp(StrictModel):

@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 from fastapi.responses import Response, StreamingResponse
 
 from mini_drop_contracts import get_collector_spec
@@ -47,6 +48,11 @@ from server.app.diagnosis.network_discovery import (
     aggregate_dependency_graph,
     case_dependency_graph_snapshot,
 )
+from server.app.diagnosis.case_control import (
+    focus_from_case,
+    notify_runtime_abort,
+    notify_runtime_steer,
+)
 from server.app.diagnosis.reference_resolver import ResourceRef
 from server.app.event_bus import BUS
 from server.app.http.auth import (
@@ -77,6 +83,37 @@ from server.app.v6_routes import (
 
 
 router = APIRouter()
+
+
+class CaseFocusRequest(BaseModel):
+    focus_kind: str
+    focus_ref: str = Field(min_length=1, max_length=512)
+    reason: str = Field(default="operator focus change", max_length=1000)
+    expected_scope_revision: int | None = None
+    expected_control_revision: int | None = None
+
+
+def _focus_target_allowed(case: dict[str, Any], graph: dict[str, Any], kind: str, ref: str) -> bool:
+    scope = case.get("target_scope") or {}
+    nodes = graph.get("graph", {}).get("nodes") or []
+    edges = graph.get("graph", {}).get("edges") or []
+    if kind == "SERVICE":
+        if ref in {str(scope.get(key) or "") for key in ("service_id", "service", "service_name")}:
+            return True
+        return any(str(node.get("entity_id")) == ref and node.get("entity_type") in {"service", "instance"} for node in nodes)
+    if kind == "PROCESS":
+        return any(
+            str(node.get("entity_id")) == ref
+            and node.get("entity_type") == "process"
+            for node in nodes
+        ) or any(
+            str(ref).isdigit() and str(node.get("entity_id", "")).split(":")[-1] == str(ref)
+            and node.get("entity_type") == "process"
+            for node in nodes
+        )
+    if kind == "DEPENDENCY_EDGE":
+        return any(str(edge.get("edge_id")) == ref for edge in edges)
+    return False
 
 # ── AI Incident Case 协作层（v1）───────────────────────────────
 
@@ -1211,6 +1248,7 @@ def get_case_workspace(case_id: str, request: Request, branch_id: str = "") -> A
             "campaign": 0,
         },
         "case": case,
+        "focus": focus_from_case(case),
         "branch_id": branch_id,
         "branches": branches,
         "engine": {
@@ -1350,6 +1388,116 @@ def get_case_dependency_graph(case_id: str, request: Request) -> APIResponse:
     if repo.get_incident_case(case_id, tenant_id) is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
     return APIResponse(data=case_dependency_graph_snapshot(repo, case_id, tenant_id))
+
+
+@router.post("/api/v1/cases/{case_id}/focus")
+def set_case_focus(case_id: str, payload: CaseFocusRequest, request: Request) -> APIResponse:
+    """Change the operator's service/process/edge focus behind Case CAS."""
+    _require_role(request, "operator")
+    tenant_id = _request_tenant()
+    principal_id = _request_principal(request)
+    case = repo.get_incident_case(case_id, tenant_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    kind = str(payload.focus_kind or "").upper()
+    if kind not in {"SERVICE", "PROCESS", "DEPENDENCY_EDGE"}:
+        raise HTTPException(status_code=422, detail="INVALID_FOCUS_KIND")
+    for attr, expected in (
+        ("scope_revision", payload.expected_scope_revision),
+        ("control_revision", payload.expected_control_revision),
+    ):
+        if expected is not None and int(case.get(attr) or 0) != int(expected):
+            raise HTTPException(status_code=409, detail=f"{attr.upper()}_STALE")
+    graph = case_dependency_graph_snapshot(repo, case_id, tenant_id)
+    if not _focus_target_allowed(case, graph, kind, payload.focus_ref):
+        raise HTTPException(status_code=409, detail="FOCUS_TARGET_NOT_AUTHORIZED_BY_DISCOVERY")
+    focus = {
+        "focus_kind": kind,
+        "focus_ref": payload.focus_ref,
+        "reason": payload.reason,
+        "focus_revision": int(case.get("scope_revision") or 1) + 1,
+        "graph_digest": graph.get("graph_digest"),
+    }
+    scope = dict(case.get("target_scope") or {})
+    scope["active_focus"] = focus
+    try:
+        updated = repo.correct_incident_case(
+            case_id,
+            tenant_id,
+            actor_id=principal_id,
+            changes={"target_scope": scope},
+            reason=f"focus_changed:{kind}:{payload.focus_ref}:{payload.reason}",
+            expected_row_version=case.get("row_version"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Case 不存在")
+    focus["focus_revision"] = int(updated.get("scope_revision") or focus["focus_revision"])
+    runtime_abort = notify_runtime_abort(case_id, payload.reason)
+    runtime_steer = notify_runtime_steer(
+        case_id,
+        instruction=f"切换调查焦点到 {kind}:{payload.focus_ref}。原因：{payload.reason}",
+        reason_code="FOCUS_CHANGED",
+        scope_revision=int(updated.get("scope_revision") or 1),
+        plan_revision=int((investigation_plan_service.read_plan(case_id, tenant_id) or {}).get("plan_revision") or 0),
+        focus=focus,
+    )
+    repo.record_case_event(
+        case_id,
+        tenant_id,
+        event_type="focus_changed",
+        payload={"focus": focus, "runtime_abort": runtime_abort, "runtime_steer": runtime_steer},
+        actor_id=principal_id,
+    )
+    return APIResponse(data={
+        "focus": focus,
+        "case": updated,
+        "runtime": {"abort": runtime_abort, "steer": runtime_steer},
+    })
+
+
+@router.get("/api/v1/cases/{case_id}/investigation-summary")
+def get_investigation_summary(case_id: str, request: Request, branch_id: str = "") -> APIResponse:
+    """Compact operator view for conversational intervention and handoff."""
+    _require_role(request, "operator")
+    workspace_response = get_case_workspace(case_id, request, branch_id=branch_id)
+    workspace = workspace_response.data
+    active_tasks = [
+        item for item in workspace.get("collection_requests") or []
+        if str(item.get("status") or "").upper() in {"ACCEPTED", "DISPATCHED", "RUNNING"}
+    ]
+    active_evidence = [
+        item for item in workspace.get("evidence") or []
+        if str(item.get("lifecycle_status") or item.get("status") or "ACTIVE").upper()
+        not in {"EXCLUDED", "SUPERSEDED", "INVALID"}
+    ]
+    graph = workspace.get("dependency_graph") or {}
+    nodes = graph.get("graph", {}).get("nodes") or []
+    edges = graph.get("graph", {}).get("edges") or []
+    available_focus_targets = [
+        {"focus_kind": "SERVICE" if node.get("entity_type") in {"service", "instance"} else "PROCESS", "focus_ref": node.get("entity_id"), "label": node.get("display_name") or node.get("entity_id")}
+        for node in nodes if node.get("entity_type") in {"service", "instance", "process"}
+    ] + [
+        {"focus_kind": "DEPENDENCY_EDGE", "focus_ref": edge.get("edge_id"), "label": f"{edge.get('source_entity')} -> {edge.get('target_entity')}"}
+        for edge in edges
+    ]
+    case = workspace.get("case") or {}
+    return APIResponse(data={
+        "focus": focus_from_case(case),
+        "case_state": case.get("state"),
+        "revisions": workspace.get("revisions") or {},
+        "run": {"run_id": case.get("active_run_id") or case.get("investigation_run_id")},
+        "cycle": {"active_turn": workspace.get("active_turn")},
+        "active_tasks": active_tasks,
+        "active_evidence": active_evidence,
+        "evidence_watermark": len([p for item in active_evidence for p in item.get("projections") or []]),
+        "open_gaps": [item for item in workspace.get("evidence_gaps") or [] if item.get("status") in {"OPEN", "BLOCKING"}],
+        "current_conclusion": workspace.get("conclusion") or {},
+        "next_actions": [workspace.get("next_action")] if workspace.get("next_action") else [],
+        "available_focus_targets": available_focus_targets,
+        "dependency_semantics": graph.get("graph_semantics") or "dependency_only_not_causal",
+    })
 
 
 @router.post("/api/v1/cases/{case_id}/collection-proposals/{proposal_id}/decision")

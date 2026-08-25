@@ -53,7 +53,7 @@ def route_disposition(
         normalized = " ".join(str(message or "").lower().split())
         if any(marker in normalized for marker in ("为什么", "这张图", "这条证据", "解释", "说明什么", "判断证据", "只解释", "基于这些数据解释")):
             disposition = "ANSWER_ONLY"
-        elif any(marker in normalized for marker in ("暂停", "恢复", "停止", "取消", "重排", "禁用", "纠正", "改成", "排除", "降低")):
+        elif any(marker in normalized for marker in ("暂停", "恢复", "停止", "取消", "重排", "禁用", "纠正", "改成", "改查", "换查", "切换", "聚焦", "关注", "先查", "排除", "降低")):
             disposition = "CONTROL"
         elif any(marker in normalized for marker in ("部署", "容量", "承载", "扩容")):
             disposition = "DEPLOYMENT_ASSESSMENT"

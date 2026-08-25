@@ -35,6 +35,7 @@ from server.app.diagnosis.investigation_plan import PlanUpdateInput
 from server.app.diagnosis.knowledge import retrieve_knowledge
 from server.app.diagnosis.knowledge_memory import retrieve_case_memory, retrieve_user_knowledge
 from server.app.diagnosis.network_discovery import case_dependency_graph_snapshot
+from server.app.diagnosis.case_control import focus_from_case
 from server.app.diagnosis.query_registry import QUERY_REGISTRY
 from server.app.diagnosis.skill_registry import SKILL_REGISTRY
 from server.app.diagnosis.strategies.registry import get_strategy
@@ -616,6 +617,7 @@ def _build_runtime_case_context(
             "branch_tree": branch_tree,
         },
         intervention=intervention or {},
+        focus=focus_from_case(case),
         current_support=current_support[:30],
         counterevidence=counterevidence[:30],
     )

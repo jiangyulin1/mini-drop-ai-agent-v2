@@ -36,6 +36,7 @@ from server.app.diagnosis.authorization import (
 )
 from server.app.diagnosis.cluster_scope import EnvironmentProfile, MembershipSnapshot
 from server.app.diagnosis.fanout import FanoutCollectionRun
+from server.app.diagnosis.case_control import notify_runtime_abort
 from server.app.diagnosis.governance import (
     CAPABILITY_EPOCH,
     RED_BUTTON,
@@ -574,6 +575,7 @@ def apply_case_command(
     applied = False
     affected_task_ids: list[str] = []
     runtime_instruction = None
+    runtime_notification: dict[str, Any] | None = None
     if command in {"PAUSE", "RESUME", "STOP"}:
         transition_request = CaseTransitionRequest(
             reason=payload.reason,
@@ -583,11 +585,8 @@ def apply_case_command(
         _transition_case_from_api(case_id, transition_request, request, action)
         applied = True
         runtime_instruction = "abort" if command in {"PAUSE", "STOP"} else "resume"
-        if command == "PAUSE" and runtime_mode() in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
-            try:
-                get_runtime().abort(case_id, "case paused by user command")
-            except RuntimeError:
-                pass
+        if command in {"PAUSE", "STOP"}:
+            runtime_notification = notify_runtime_abort(case_id, payload.reason)
     elif command == "CANCEL_TASK":
         if not target_id:
             raise HTTPException(status_code=422, detail="CANCEL_TASK requires target_id")
@@ -609,22 +608,39 @@ def apply_case_command(
             repo.cancel_task(task_id, payload.reason, Actor.WEB)
         applied = True
     elif command in {"RETARGET_STEP", "REORDER_STEPS", "REMOVE_STEP", "LOCK_STEP", "UNLOCK_STEP", "DISABLE_OPERATION", "ENABLE_OPERATION", "REVIEW_EVIDENCE"}:
-        # Accepted for the control contract.  Detailed structural commands go
-        # through the existing Plan/CAS services; here we record the command as
-        # applied only after validating the target still exists.
-        if target_id:
+        if not target_id:
+            raise HTTPException(status_code=422, detail=f"{command} requires target_id")
+        try:
             if command == "REVIEW_EVIDENCE":
-                evidence = repo.get_case_evidence(case_id, tenant_id, target_id)
-                if evidence is None:
-                    raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
-            else:
-                step = next(
-                    (item for item in (investigation_plan_service.read_plan(case_id, tenant_id) or {}).get("steps") or []
-                     if item.get("step_id") == target_id), None,
+                if repo.get_case_evidence(case_id, tenant_id, target_id) is None:
+                    raise ValueError("EVIDENCE_NOT_FOUND")
+            elif command == "RETARGET_STEP":
+                investigation_plan_service.retarget_step(
+                    case_id, tenant_id, target_id,
+                    target_refs=[str(item) for item in (payload.payload.get("target_refs") or [])],
+                    collector_id=payload.payload.get("collector_id"),
+                    actor_id=principal_id,
                 )
-                if step is None:
-                    raise HTTPException(status_code=404, detail="STEP_NOT_FOUND")
-        applied = True
+            elif command == "REMOVE_STEP":
+                investigation_plan_service.remove_step(case_id, tenant_id, target_id, actor_id=principal_id)
+            elif command == "LOCK_STEP":
+                step = next(item for item in (investigation_plan_service.read_plan(case_id, tenant_id) or {}).get("steps") or [] if item.get("step_id") == target_id)
+                investigation_plan_service.reprioritize_step(case_id, tenant_id, target_id, int(step.get("priority") or 0), actor_id=principal_id, user_locked=True)
+            elif command == "UNLOCK_STEP":
+                step = next(item for item in (investigation_plan_service.read_plan(case_id, tenant_id) or {}).get("steps") or [] if item.get("step_id") == target_id)
+                investigation_plan_service.reprioritize_step(case_id, tenant_id, target_id, int(step.get("priority") or 0), actor_id=principal_id, user_locked=False)
+            elif command == "REORDER_STEPS":
+                priority = payload.payload.get("priority")
+                if priority is None:
+                    raise ValueError("REORDER_STEPS_REQUIRES_PRIORITY")
+                investigation_plan_service.reprioritize_step(case_id, tenant_id, target_id, int(priority), actor_id=principal_id)
+            elif command == "DISABLE_OPERATION":
+                investigation_plan_service.cancel_step(case_id, tenant_id, target_id, actor_id=principal_id)
+            elif command == "ENABLE_OPERATION":
+                repo.update_plan_step(case_id, tenant_id, target_id, {"status": "QUEUED"})
+            applied = True
+        except (ValueError, StopIteration) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     else:
         raise HTTPException(status_code=422, detail=f"UNSUPPORTED_COMMAND:{command}")
 
@@ -656,6 +672,7 @@ def apply_case_command(
         "affected_step_ids": [target_id] if target_id and command != "CANCEL_TASK" else [],
         "affected_task_ids": affected_task_ids,
         "runtime_instruction": runtime_instruction,
+        "runtime_notification": runtime_notification,
         "conflicts": [],
     })
 

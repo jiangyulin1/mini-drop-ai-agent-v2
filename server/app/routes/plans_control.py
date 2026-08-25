@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from fastapi.encoders import jsonable_encoder
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -55,6 +56,7 @@ from server.app.diagnosis.proposal_card import build_proposal_cards
 from server.app.diagnosis.reference_resolver import ResourceRef
 from server.app.diagnosis.schemas import CreateDiagnosisRequest, TERMINAL_DIAGNOSIS_STATUSES
 from server.app.diagnosis.v6_policy import route_disposition
+from server.app.diagnosis.case_control import apply_chat_control, parse_chat_control
 from server.app.diagnosis.strategies.registry import normalize_strategy_id
 from server.app.http.auth import (
     request_principal as _request_principal,
@@ -1155,6 +1157,78 @@ def run_incident_case_agent_turn(
     )
     case = repo.get_incident_case(case_id, tenant_id) or case
     deterministic_turn_id = f"turn_{secrets.token_hex(12)}"
+
+    # Controls expressed in chat are committed by the deterministic Case
+    # authority.  They never wait for a model turn to interpret them.
+    chat_control = (
+        parse_chat_control(payload.message)
+        if disposition in {"CONTROL", "CORRECT_CONTEXT"}
+        else None
+    )
+    if chat_control is not None:
+        try:
+            control_result = apply_chat_control(
+                repo,
+                case,
+                tenant_id=tenant_id,
+                actor_id=principal_id,
+                control=chat_control,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        updated_case = control_result.get("case") or case
+        runtime_result = control_result.get("runtime") or {}
+        command = control_result.get("command") or chat_control.get("kind")
+        focus = control_result.get("focus") or {}
+        assistant_message = (
+            f"已执行 {command}。"
+            + (f"当前调查焦点为 {focus.get('focus_kind')}:{focus.get('focus_ref')}。" if focus else "")
+            + "确定性 Case 状态已更新，运行时将按新 revision 继续。"
+        )
+        footprint_after = _case_investigation_footprint(case_id, tenant_id)
+        control_delta = {
+            key: footprint_after[key] - footprint_before[key]
+            for key in footprint_before
+        }
+        result = AgentTurnResult(
+            turn_id=deterministic_turn_id,
+            intent=intent,
+            status="answered",
+            assistant_message=assistant_message,
+            decision_summary=[
+                f"control={command}",
+                f"case_command_revision={updated_case.get('case_command_revision')}",
+                f"control_revision={updated_case.get('control_revision')}",
+                f"scope_revision={updated_case.get('scope_revision')}",
+            ],
+            limitations=[
+                f"runtime_{action}_{(value or {}).get('status')}"
+                for action, value in runtime_result.items()
+                if isinstance(value, dict) and value.get("status") in {"pending", "not_required"}
+            ],
+            next_actions=[{"type": "runtime_refresh", "description": "重新读取 Case Snapshot 和链路摘要"}],
+            side_effect_delta=control_delta,
+            strategy_id=strategy.strategy_id,
+            runtime_options=effective_options.audit_summary(),
+            policy_used=effective_policy.audit_summary(),
+        )
+        persisted_message = repo.add_assistant_message(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            content=assistant_message,
+            trigger_turn_id=deterministic_turn_id,
+            origin_turn_id=deterministic_turn_id,
+            limitation_refs=result.limitations,
+        )
+        repo.record_case_event(
+            case_id,
+            tenant_id,
+            event_type="agent_control_applied",
+            payload=jsonable_encoder({**result.model_dump(mode="json"), "control": control_result, "message_id": persisted_message["message_id"]}),
+            actor_id=principal_id,
+        )
+        return APIResponse(data=result.model_dump(mode="json"))
+
     if runtime_mode() not in {AgentRuntimeMode.PI, AgentRuntimeMode.PI_SHADOW}:
         if hasattr(repo, "record_agent_runtime_turn"):
             repo.record_agent_runtime_turn(
