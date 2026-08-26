@@ -686,6 +686,12 @@ def _tool_fence(
         return policy_error
     if tool_name not in read_only_tools and policy.execution_mode == "deny_write":
         return "WRITE_DENIED_BY_RUNTIME_POLICY"
+    branch_id = str(payload.get("branch_id") or "").strip() or None
+    binding = (
+        repo.get_agent_runtime_branch_binding(case_id, tenant_id, branch_id)
+        if branch_id and hasattr(repo, "get_agent_runtime_branch_binding")
+        else repo.get_agent_runtime_binding(case_id, tenant_id)
+    )
     # An intervention is a protocol barrier, not merely a write permission.
     # The first model action must acknowledge the exact intervention before it
     # can read or mutate through any other tool.

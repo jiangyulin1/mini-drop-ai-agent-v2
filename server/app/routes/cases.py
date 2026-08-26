@@ -1027,6 +1027,7 @@ def create_case_evidence_analysis(
     case = repo.get_incident_case(case_id, tenant_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case 不存在")
+    branch_id = str(payload.get("branch_id") or "").strip() or None
     try:
         run = evidence_analysis_service.create_run(
             case_id=case_id, tenant_id=tenant_id, evidence_ids=[evidence_id],
@@ -1588,10 +1589,6 @@ def get_investigation_summary(case_id: str, request: Request, branch_id: str = "
     ]
     case = workspace.get("case") or {}
     need_user = (case.get("summary") or {}).get("need_you") or {}
-    latest_review = next((
-        item for item in (workspace.get("messages") or [])
-        if item.get("event_type") == "evidence_reviewed"
-    ), None)
     return APIResponse(data={
         "focus": focus_from_case(case),
         "case_state": case.get("state"),
