@@ -25,7 +25,17 @@ JYL。回放 Evidence 的 `source_channel=EVALUATION`、`data_origin=REPLAY`，�
 5. 切换到 A 的 `branch_a51992d88ad30be0`，说明分支内容按 branch_id 隔离，主 Case Evidence 不会自动污染分支。
 6. 打开 Case B，讲解 Redis 驱逐是主因，后端负载是放大因素；不要把放大因素说成根因。
 7. 打开 Case C，展示 `TIME_WINDOW_CONFLICT` gap 和 Case 级知识笔记，说明冲突证据应触发复核而不是强行结论。
-8. 最后打开 Case D，发送一次“只读调查”请求。当前 JYL 版本的 Agent 写路径会在若干内部工具触发已知 `NameError/AttributeError`，UI 应展示 `INSUFFICIENT_EVIDENCE`/abstain；这是安全失败，不是成功根因分析。
+8. 最后打开 Case D，发送一次“只读调查”请求。当前版本已修复 Tool Fence 的 `NameError`；请求会进入真实采集调度，但目标 PID 已变化时会按范围门禁拒绝并保持 abstain，展示 fail-closed 的权限/身份边界。
+
+## 2026-08-26 复验结果
+
+Case A 已通过一次真实的内部 `finish` 验证，当前状态为 `WAITING_USER`，结论为
+`PARTIALLY_CONFIRMED`（revision 1）。结论包含 4 个带 `projection_hash`、字段路径和谓词的
+Claim Evidence Binding，并可下载 Markdown 报告。排除 `node_metrics` 的 review preview 已验证
+会把影响链标记为 `BROKEN`、要求重新核验和审批，而不是继续沿用旧结论。
+
+发布 Candidate：`cand-d6c8f6e51c33f069`，提交 `128fd83`。线上 active 已切换到该版本，
+`/api/readyz`、数据库、MinIO、Analyzer 和 Pi Sidecar 均健康。
 
 ## 已准备的功能入口
 
@@ -50,7 +60,7 @@ JYL 的临时 `MINI_DROP_EVAL_IMPORT_ENABLED` 和 token 已在导入完成后移
 ## 当前诚实边界
 
 - 回放 Case 可展示证据模型和确定性工作区状态，但不能宣称为真实生产采集。
-- Case D 的实时 AI 调查入口可展示权限、范围、预算和 abstain，但当前 Agent Runtime 写工具
-  的服务器错误会阻断自动采集/完成结论；不能在答辩中声称实时根因链路已全绿。
+- Case D 的实时 AI 调查入口可展示权限、范围、预算、采集调度和目标身份门禁；实时目标若已
+  发生 PID/身份变化，会安全地停在待补证据状态，不能将其当作已确认根因。
 - 结论报告下载和知识库 API 已存在；如果 Case 没有通过 verifier 的正式结论，报告端点会返回
   `CONCLUSION_NOT_AVAILABLE`，这是预期的 fail-closed 行为。
