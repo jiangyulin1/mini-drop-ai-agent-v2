@@ -43,6 +43,15 @@ const REOPEN_POLICY_META = {
   BLOCKED_NEEDS_APPROVAL: { label: "需要人工审批", color: "red" },
 };
 
+const ANALYSIS_STATUS_LABELS = {
+  QUEUED: "排队中", RUNNING: "分析中", COMPLETED: "已完成", FAILED: "分析失败",
+};
+const ANALYSIS_MODE_LABELS = { SINGLE: "单条 Evidence 分析", EVIDENCE: "Evidence 分析", BATCH: "批量 Evidence 分析" };
+const REVIEW_LABELS = { TRUSTED: "可信", VALID: "有效", LOW_TRUST: "低可信", EXCLUDED: "已排除", UNREVIEWED: "未人工复核", RESTORE_AS_TRUSTED: "恢复为可信", RESTORE_AS_LOW_TRUST: "恢复为低可信" };
+const COLLECTOR_LABELS = { runtime_snapshot: "运行时快照", process_scan: "进程扫描", sys_metrics: "系统指标", log_scan: "日志扫描", network_discovery: "网络拓扑快照", connection_probe: "下游连通性探针", perf_cpu: "CPU 热点采样", pyspy: "Python 热点采样" };
+function labelOf(map, value, fallback = "未标注") { const key = String(value || "").toUpperCase(); return map[key] || map[String(value || "")] || fallback; }
+function collectorLabel(value) { return COLLECTOR_LABELS[String(value || "")] || String(value || "未指定采集器"); }
+
 export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusCitation, onChanged, onExplain }) {
   const [form] = Form.useForm();
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -215,17 +224,17 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
           <Descriptions size="small" column={2} bordered>
             <Descriptions.Item label="Evidence ID" span={2}><Typography.Text copyable>{evidenceId}</Typography.Text></Descriptions.Item>
             <Descriptions.Item label="类型">{value(item, "evidence_type", "artifact_type", "type") || "—"}</Descriptions.Item>
-            <Descriptions.Item label="Collector">{value(item, "collector_id", "collector", "operation_id") || "—"}</Descriptions.Item>
+            <Descriptions.Item label="采集器">{collectorLabel(value(item, "collector_id", "collector", "operation_id"))}</Descriptions.Item>
             <Descriptions.Item label="来源节点">{value(item, "source_node", "agent_id", "hostname", "target_ref") || "—"}</Descriptions.Item>
             <Descriptions.Item label="Agent ID">{value(item, "agent_id") || "—"}</Descriptions.Item>
             <Descriptions.Item label="Task ID"><Typography.Text copyable>{value(item, "task_id") || "—"}</Typography.Text></Descriptions.Item>
             <Descriptions.Item label="时间范围">{stringify(value(item, "time_range", "window") || "—")}</Descriptions.Item>
             <Descriptions.Item label="采集时间">{value(item, "collected_at", "created_at", "observed_at") ? formatBeijingDateTime(value(item, "collected_at", "created_at", "observed_at")) : "—"}</Descriptions.Item>
-            <Descriptions.Item label="Scope Revision">r{value(item, "scope_revision") ?? "—"}</Descriptions.Item>
-            <Descriptions.Item label="Review Revision">r{value(item, "review_revision") ?? reviews.length}</Descriptions.Item>
+            <Descriptions.Item label="范围修订">r{value(item, "scope_revision") ?? "—"}</Descriptions.Item>
+            <Descriptions.Item label="审查修订">r{value(item, "review_revision") ?? reviews.length}</Descriptions.Item>
             <Descriptions.Item label="生命周期">{item.lifecycle_status || "ACTIVE"}</Descriptions.Item>
-            <Descriptions.Item label="人工信任">{item.review_trust_state || "UNREVIEWED"} · {item.derived_trust_score ?? 50}</Descriptions.Item>
-            <Descriptions.Item label="Artifact 大小">{formatArtifactSize(value(item, "size_bytes", "artifact_size"))}</Descriptions.Item>
+            <Descriptions.Item label="人工信任">{labelOf(REVIEW_LABELS, item.review_trust_state || "UNREVIEWED", "待人工复核")} · {item.derived_trust_score ?? 50} 分</Descriptions.Item>
+            <Descriptions.Item label="原始产物大小">{formatArtifactSize(value(item, "size_bytes", "artifact_size"))}</Descriptions.Item>
             <Descriptions.Item label="完整性">{value(item, "sha256", "content_hash", "integrity") ? <Tag color="success">已记录 Hash</Tag> : <Tag>未提供</Tag>}</Descriptions.Item>
             <Descriptions.Item label="是否被结论引用">{item.referenced_by_conclusion || item.claim_refs?.length ? <Tag color="purple">已引用</Tag> : <Tag>未引用</Tag>}</Descriptions.Item>
             <Descriptions.Item label="数据新鲜度">{value(item, "freshness", "freshness_status") || "由采集时间判断"}</Descriptions.Item>
@@ -245,9 +254,9 @@ export default function EvidenceDrawer({ open, onClose, caseId, evidence, focusC
           <Divider orientation="left">数据摘要 / 原始投影</Divider>
           {raw ? <pre className={styles.rawProjection}>{stringify(raw)}</pre> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Evidence 投影未包含可预览原始数据；可通过 Artifact 下载查看。" />}
           <Divider orientation="left"><RobotOutlined /> AI 分析记录</Divider>
-          <List size="small" bordered dataSource={analyses} locale={{ emptyText: "还没有 AI 分析记录" }} renderItem={(analysis) => <List.Item><List.Item.Meta title={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : analysis.status === "FAILED" ? "red" : "processing"}>{analysis.status}</Tag><span>{analysis.mode}</span>{analysis.input_state !== "CURRENT" && <Tag color="warning">{analysis.input_state}</Tag>}</Space>} description={(analysis.facts || []).map((fact) => fact.claim).filter(Boolean).join("；") || (analysis.limitations || []).join("；") || analysis.analysis_run_id} /><time>{analysis.created_at ? formatBeijingDateTime(analysis.created_at) : "—"}</time></List.Item>} />
-          <Divider orientation="left"><HistoryOutlined /> Review 历史</Divider>
-          <List size="small" bordered dataSource={reviews} locale={{ emptyText: "还没有人工审查记录" }} renderItem={(review) => <List.Item><List.Item.Meta title={<Space><Tag color={evidenceTrust(review.decision).color}>{review.decision}</Tag><span>Revision {review.review_revision || "—"}</span></Space>} description={`${review.reason_code || "NO_REASON_CODE"} · ${review.reason || "未填写说明"}`} /><time>{review.created_at ? formatBeijingDateTime(review.created_at) : "—"}</time></List.Item>} />
+          <List size="small" bordered dataSource={analyses} locale={{ emptyText: "还没有 AI 分析记录" }} renderItem={(analysis) => <List.Item><List.Item.Meta title={<Space><Tag color={analysis.status === "COMPLETED" ? "green" : analysis.status === "FAILED" ? "red" : "processing"}>{ANALYSIS_STATUS_LABELS[String(analysis.status || "").toUpperCase()] || "处理中"}</Tag><span>{ANALYSIS_MODE_LABELS[String(analysis.mode || "").toUpperCase()] || "Evidence 分析"}</span>{analysis.input_state !== "CURRENT" && <Tag color="warning">{analysis.input_state === "STALE_INPUT" ? "输入已变更" : analysis.input_state === "EXCLUDED_INPUT" ? "输入已排除" : analysis.input_state}</Tag>}</Space>} description={(analysis.facts || []).map((fact) => fact.claim).filter(Boolean).join("；") || (analysis.limitations || []).join("；") || "分析结果尚未生成"} /><time>{analysis.created_at ? formatBeijingDateTime(analysis.created_at) : "—"}</time></List.Item>} />
+          <Divider orientation="left"><HistoryOutlined /> 人工审查历史</Divider>
+          <List size="small" bordered dataSource={reviews} locale={{ emptyText: "还没有人工审查记录" }} renderItem={(review) => <List.Item><List.Item.Meta title={<Space><Tag color={evidenceTrust(review.decision).color}>{labelOf(REVIEW_LABELS, review.decision, "状态未标注")}</Tag><span>审查修订 r{review.review_revision || "—"}</span></Space>} description={`${review.reason || "未填写审查说明"}`} /><time>{review.created_at ? formatBeijingDateTime(review.created_at) : "—"}</time></List.Item>} />
           <Divider orientation="left">证据链影响与可解释置信度</Divider>
           <List size="small" bordered dataSource={(chainImpact?.chains || []).filter((chain) => (chain.ledger || []).some((item) => item.evidence_id === evidenceId))} locale={{ emptyText: "当前证据尚未进入可解释链路" }} renderItem={(chain) => <List.Item actions={[<Button key="adjust" size="small" onClick={() => { adjustmentForm.resetFields(); setAdjustment(chain); }}>提高置信度</Button>]}><List.Item.Meta title={<Space><Tag color={chain.status === "ACTIVE" ? "green" : chain.status === "INVALIDATED" ? "red" : "gold"}>{chain.status}</Tag><Typography.Text code>{chain.chain_type}:{chain.chain_id}</Typography.Text><span>{Number(chain.computed_confidence || 0).toFixed(2)} → {Number(chain.effective_confidence || 0).toFixed(2)}</span></Space>} description={<Space direction="vertical" size={0}><span>{chain.confidence_reason}</span><span>失效：{(chain.invalidated_evidence_refs || []).join(", ") || "无"}；剩余支持：{(chain.remaining_active_support || []).join(", ") || "无"}</span><Typography.Text type="secondary">模型 {chain.calculation_version} · Revision {chain.revision || 0}</Typography.Text></Space>} /></List.Item>} />
         </Space>}

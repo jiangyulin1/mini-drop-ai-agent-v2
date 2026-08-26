@@ -330,7 +330,7 @@ function InformationGoalsTab({ goals, plan, error, onRetry, onExplain, onOpenEvi
         <div className="ccw-step-main">
           <div><strong>{step.title || step.expected_information || step.purpose || `信息目标 ${index + 1}`}</strong><Space size={4} wrap><Tag color={status.color}>{status.label}</Tag>{step.risk && <Tooltip title={risk.description}><Tag color={risk.color}>{risk.label}</Tag></Tooltip>}<Tag>{step.source === "gap" ? "证据缺口" : step.source === "analysis" ? "分析建议" : step.source === "proposal" ? "采集提案" : "调查计划"}</Tag>{step.user_locked && <Tag icon={<SafetyCertificateOutlined />}>用户锁定</Tag>}</Space></div>
           <p>{step.reason || step.purpose || "等待 Agent 说明为什么需要补充这项信息"}</p>
-          <div className="ccw-step-details"><span>采集器 <b>{step.collector_id || step.kind || "待选择"}</b></span><span>Request <b>{step.collection_request_id || "-"}</b></span><span>Evidence <b>{array(step.evidence_ids).length}</b></span>{showInternals && <span>Task <b>{step.task_id || "-"}</b></span>}</div>
+          <div className="ccw-step-details"><span>采集器 <b>{collectorLabel(step.collector_id || step.kind) || "待选择"}</b></span><span>请求 <b>{step.collection_request_id || "-"}</b></span><span>证据 <b>{array(step.evidence_ids).length}</b></span>{showInternals && <span>任务 <b>{step.task_id || "-"}</b></span>}</div>
           <Space wrap><Button size="small" type="link" onClick={() => onExplain(step)}>查看依据</Button>{step.proposal_id && <Button size="small" onClick={() => onNavigate("collections")}>{step.status === "WAITING_APPROVAL" ? "处理审批" : "查看采集"}</Button>}{array(step.evidence_ids).map((id) => <Button size="small" key={id} onClick={() => onOpenEvidence(id)}>查看 Evidence</Button>)}</Space>
         </div>
       </div>;
@@ -377,7 +377,7 @@ function CollectionActivityTab({ proposals, requests, evidence, showInternals, c
           <Button size="small" danger icon={<CloseOutlined />} disabled={Boolean(deciding)} onClick={() => void decide(proposal, "REJECT")}>拒绝</Button>
         </Space>}
         {evidenceIds.length > 0 && <Space wrap>{evidenceIds.map((id) => <Button size="small" key={id} onClick={() => onOpenEvidence(id)}>查看产出 Evidence</Button>)}</Space>}
-        {showInternals && <div className="ccw-step-details"><span>Proposal <b>{proposal.proposal_id}</b></span><span>Request <b>{request?.collection_request_id || "-"}</b></span><span>Task <b>{request?.task_id || "-"}</b></span></div>}
+        {showInternals && <div className="ccw-step-details"><span>提案 ID <b>{proposal.proposal_id}</b></span><span>请求 ID <b>{request?.collection_request_id || "-"}</b></span><span>任务 ID <b>{request?.task_id || "-"}</b></span></div>}
       </div>
     </div>;
   })}{requests.filter((request) => !proposals.some((proposal) => proposal.proposal_id === request.proposal_id)).map((request) => <div className="ccw-collection-row" key={request.collection_request_id}><div className="ccw-collection-icon"><DatabaseOutlined /></div><div className="ccw-collection-main"><div><strong>{collectorLabel(request.collector_id)}</strong><Space><Tag>服务端采集请求</Tag><Tag color={isCollectionFailure(request.status) ? "red" : "processing"}>{collectionStatusLabel(request.status)}<span style={{ display: "none" }}>{request.status}</span></Tag></Space></div><p>服务端已接受的权威采集请求</p><div className="ccw-step-details"><span>Request <b>{request.collection_request_id}</b></span><span>Task <b>{request.task_id || "-"}</b></span></div></div></div>)}</div>;
@@ -497,7 +497,7 @@ function AnalysisTab({ analyses, evidence, onOpenEvidence, onOpenCitation, onNav
     ["processing", "处理中", newestFirst.filter((item) => ["QUEUED", "RUNNING"].includes(item.status))],
     ["history", "历史与失效", newestFirst.filter((item) => !(["QUEUED", "RUNNING"].includes(item.status)) && !(item.status === "COMPLETED" && (!item.input_state || item.input_state === "CURRENT")))],
   ];
-  return <div className="ccw-analysis-groups"><Alert type="info" showIcon message="单条 Evidence 分析" description="只对选定 Evidence 的当前投影生成可引用事实，不创建采集 Task，也不会单独替代整案根因结论。" />{groups.filter(([, , items]) => items.length).map(([key, label, items]) => <section className="ccw-analysis-group" key={key}>
+  return <div className="ccw-analysis-groups"><Alert type="info" showIcon message="证据级 AI 分析（单条 Evidence）" description="针对选定 Evidence 的当前投影做一次可引用事实核验：会输出事实、确定性和引用位置，但不会创建采集任务，也不会单独替代整案根因结论。" />{groups.filter(([, , items]) => items.length).map(([key, label, items]) => <section className="ccw-analysis-group" key={key}>
     <header><strong>{label}</strong><Badge count={items.length} showZero /></header>
     <div className="ccw-analysis-list">{items.map((analysis) => <AnalysisCard key={analysis.analysis_run_id} analysis={analysis} evidenceIds={evidenceIds} onOpenEvidence={onOpenEvidence} onOpenCitation={onOpenCitation} onNavigate={onNavigate} />)}</div>
   </section>)}</div>;
@@ -693,7 +693,8 @@ function ConclusionTab({ conclusion, history, caseId, onOpenEvidence, onExplain 
 function ExecutionTab({ units, fanoutRuns, requests }) {
   const items = [...requests.map((item) => ({ ...item, _kind: "CollectionRequest" })), ...units.map((item) => ({ ...item, _kind: "Execution" })), ...fanoutRuns.map((item) => ({ ...item, _kind: "Fanout" }))];
   if (!items.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有采集请求或执行记录。" />;
-  return <div className="ccw-expert-list">{items.map((item, index) => <div className="ccw-expert-row" key={item.collection_request_id || item.execution_unit_id || item.run_id || index}><NodeIndexOutlined className="ccw-expert-icon" /><div><div><strong>{item.purpose || item.collector_id || item._kind}</strong><Space><Tag>{item._kind}</Tag><Tag color={["COMPLETED", "DONE"].includes(item.status) ? "green" : isCollectionFailure(item.status) ? "red" : "processing"}>{item.status}</Tag></Space></div><div className="ccw-step-details"><span>目标 <b>{item.target_ref || item.cluster_id || compact(item.resolved_target_identity)}</b></span><span>Task <b>{item.task_id || "-"}</b></span><span>覆盖 <b>{item.coverage_ratio ?? item.coverage ?? (item.task_id ? "已调度" : "待调度")}</b></span></div></div></div>)}</div>;
+  const kindLabels = { CollectionRequest: "采集请求", Execution: "执行单元", Fanout: "批量分发" };
+  return <div className="ccw-expert-list">{items.map((item, index) => <div className="ccw-expert-row" key={item.collection_request_id || item.execution_unit_id || item.run_id || index}><NodeIndexOutlined className="ccw-expert-icon" /><div><div><strong>{item.purpose || collectorLabel(item.collector_id) || kindLabels[item._kind] || item._kind}</strong><Space><Tag>{kindLabels[item._kind] || item._kind}</Tag><Tag color={["COMPLETED", "DONE"].includes(item.status) ? "green" : isCollectionFailure(item.status) ? "red" : "processing"}>{collectionStatusLabel(item.status)}</Tag></Space></div><div className="ccw-step-details"><span>目标 <b>{item.target_ref || item.cluster_id || compact(item.resolved_target_identity)}</b></span><span>任务 <b>{item.task_id || "-"}</b></span><span>覆盖 <b>{item.coverage_ratio ?? item.coverage ?? (item.task_id ? "已调度" : "待调度")}</b></span></div></div></div>)}</div>;
 }
 
 function RecommendationsTab({ recommendations, onDiscuss, onCreateRecovery }) {
