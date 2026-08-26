@@ -101,6 +101,19 @@ def _proposal_kwargs(case: dict, **overrides) -> dict:
     return values
 
 
+@pytest.mark.parametrize(("collector_id", "requested", "expected_index"), [
+    ("runtime_snapshot", "识别运行时类型、线程状态、锁等待/futex/park，判断是否阻塞", 1),
+    ("process_scan", "确认目标 PID 身份、命令、CPU 和内存，并检查同机竞争", 0),
+    ("sys_metrics", "获取 CPU、负载、线程、FD、网络和 I/O 基线", 1),
+    ("log_scan", "读取近期日志，提取错误、警告、超时和时间线", 1),
+])
+def test_collector_goal_accepts_agent_paraphrase(collector_id, requested, expected_index):
+    spec = get_collector_spec(collector_id)
+    assert spec is not None
+    canonical = CollectionSupervisor._canonical_information_goal(spec, requested)
+    assert canonical == spec.information_goals[expected_index]
+
+
 class _DirectHealthStub:
     def __init__(self):
         self._service = HealthCheckService(repo)

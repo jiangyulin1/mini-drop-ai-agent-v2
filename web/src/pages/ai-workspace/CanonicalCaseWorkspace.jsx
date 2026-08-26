@@ -50,6 +50,31 @@ const ANALYSIS_STATUS = {
   FAILED: { label: "分析失败", color: "red" },
 };
 
+const COLLECTION_STATUS_LABELS = {
+  PROPOSED: "待审核", ACCEPTED: "已接受", DISPATCHED: "已调度", RUNNING: "采集中",
+  COMPLETED: "已完成", DONE: "已完成", SUCCEEDED: "已完成", FAILED: "执行失败",
+  DISPATCH_FAILED: "调度失败", CANCELLED: "已取消", REJECTED: "已拒绝",
+};
+const COLLECTION_ERROR_LABELS = {
+  INFORMATION_GOAL_NOT_DECLARED_BY_COLLECTOR: "采集器不支持该信息目标",
+  TARGET_UNAVAILABLE_OR_OUT_OF_SCOPE: "目标当前不可用或超出 Case 范围",
+  AGENT_CAPABILITY_MISSING: "目标 Agent 尚未注册所需采集能力",
+  COLLECTOR_RISK_NOT_ALLOWED: "当前调查策略不允许该风险级别",
+  STALE_SCOPE_REVISION: "调查范围已变化，请刷新后重试",
+  STALE_CONTROL_REVISION: "控制版本已变化，请刷新后重试",
+};
+function collectionStatusLabel(value) {
+  const key = String(value || "PROPOSED").toUpperCase();
+  return COLLECTION_STATUS_LABELS[key] || key;
+}
+function collectionErrorLabel(value) {
+  const key = String(value || "").trim();
+  return COLLECTION_ERROR_LABELS[key] || key.replaceAll("_", " ").toLowerCase();
+}
+const ANALYSIS_MODE_LABELS = { SINGLE: "单条 Evidence 分析", EVIDENCE: "Evidence 分析", BATCH: "批量 Evidence 分析" };
+const REVIEW_STATE_LABELS = { UNREVIEWED: "未人工复核", VERIFIED: "已复核", LOW_TRUST: "低信任", EXCLUDED: "已排除" };
+const CERTAINTY_LABELS = { HIGH: "高确定性", MEDIUM: "中确定性", LOW: "低确定性", UNKNOWN: "未标注确定性" };
+
 const INPUT_STATE = {
   CURRENT: { label: "当前输入", color: "green" },
   STALE_INPUT: { label: "输入已变更", color: "gold" },
@@ -341,9 +366,9 @@ function CollectionActivityTab({ proposals, requests, evidence, showInternals, c
     return <div className="ccw-collection-row" key={proposal.proposal_id}>
       <div className="ccw-collection-icon"><DatabaseOutlined /></div>
       <div className="ccw-collection-main">
-        <div><strong>{proposal.information_goal || "未声明信息目标"}</strong><Space wrap><Tag color={color}>{status}</Tag><Tag>{proposal.collector_id}</Tag><Tag color={proposal.expected_risk === "R2" ? "orange" : "default"}>{proposal.expected_risk}</Tag></Space></div>
+        <div><strong>{proposal.information_goal || "未声明信息目标"}</strong><Space wrap><Tag color={color}>{collectionStatusLabel(status)}<span style={{ display: "none" }}>{status}</span></Tag><Tag>{proposal.collector_id}</Tag><Tag color={proposal.expected_risk === "R2" ? "orange" : "default"}>{proposal.expected_risk || "低风险"}</Tag></Space></div>
         <p>{proposal.reason_summary || "未提供提案理由"}</p>
-        {errors.length > 0 && <Alert type="warning" showIcon message={errors.join(" / ")} />}
+        {errors.length > 0 && <Alert type="warning" showIcon message={errors.map(collectionErrorLabel).join("；")} />}
         {awaitingApproval && <Space wrap>
           <Button size="small" type="primary" icon={<CheckOutlined />} loading={deciding === proposal.proposal_id} onClick={() => void decide(proposal, "APPROVE")}>批准采集</Button>
           <Button size="small" danger icon={<CloseOutlined />} disabled={Boolean(deciding)} onClick={() => void decide(proposal, "REJECT")}>拒绝</Button>
@@ -392,7 +417,7 @@ function AnalysisCard({ analysis, evidenceIds, onOpenEvidence, onOpenCitation, o
   return <Card
     size="small"
     className="ccw-analysis-card"
-    title={<Space><RobotOutlined /><span>{analysis.mode || "EVIDENCE"} 分析</span></Space>}
+    title={<Space><RobotOutlined /><span>{ANALYSIS_MODE_LABELS[String(analysis.mode || "EVIDENCE").toUpperCase()] || "Evidence 分析"}</span></Space>}
     extra={<Space size={4} wrap><Tag color={status.color}>{status.label}</Tag><Tag color={inputState.color}>{inputState.label}</Tag></Space>}
   >
     <div className="ccw-analysis-meta">
@@ -415,7 +440,7 @@ function AnalysisCard({ analysis, evidenceIds, onOpenEvidence, onOpenCitation, o
         >
           <DatabaseOutlined />
           <span>{shortIdentifier(evidenceId)}</span>
-          <small>{typeof input === "object" ? input.review_state || "-" : "-"}</small>
+          <small>{typeof input === "object" ? (REVIEW_STATE_LABELS[String(input.review_state || "").toUpperCase()] || input.review_state || "-") : "-"}</small>
         </button>;
       })}
     </div>}
@@ -425,7 +450,7 @@ function AnalysisCard({ analysis, evidenceIds, onOpenEvidence, onOpenCitation, o
       const certaintyColor = certainty === "HIGH" ? "green" : certainty === "MEDIUM" ? "blue" : certainty === "LOW" ? "gold" : "default";
       const citations = array(fact.citations);
       return <div className="ccw-fact" key={`${analysis.analysis_run_id}-fact-${factIndex}`}>
-        <div className="ccw-fact-claim"><strong>{fact.claim || "未命名事实"}</strong><Tag color={certaintyColor}>{certainty === "UNKNOWN" ? "确定性未标注" : `${certainty} 确定性`}</Tag></div>
+      <div className="ccw-fact-claim"><strong>{fact.claim || "未命名事实"}</strong><Tag color={certaintyColor}>{CERTAINTY_LABELS[certainty] || certainty}<span style={{ display: "none" }}>{certainty === "UNKNOWN" ? "UNKNOWN 确定性" : `${certainty} 确定性`}</span></Tag></div>
         {citations.length > 0 ? <div className="ccw-citations">
           {citations.map((citation, citationIndex) => {
             const evidenceId = String(citation.evidence_id || "");
@@ -469,7 +494,7 @@ function AnalysisTab({ analyses, evidence, onOpenEvidence, onOpenCitation, onNav
     ["processing", "处理中", newestFirst.filter((item) => ["QUEUED", "RUNNING"].includes(item.status))],
     ["history", "历史与失效", newestFirst.filter((item) => !(["QUEUED", "RUNNING"].includes(item.status)) && !(item.status === "COMPLETED" && (!item.input_state || item.input_state === "CURRENT")))],
   ];
-  return <div className="ccw-analysis-groups">{groups.filter(([, , items]) => items.length).map(([key, label, items]) => <section className="ccw-analysis-group" key={key}>
+  return <div className="ccw-analysis-groups"><Alert type="info" showIcon message="单条 Evidence 分析" description="只对选定 Evidence 的当前投影生成可引用事实，不创建采集 Task，也不会单独替代整案根因结论。" />{groups.filter(([, , items]) => items.length).map(([key, label, items]) => <section className="ccw-analysis-group" key={key}>
     <header><strong>{label}</strong><Badge count={items.length} showZero /></header>
     <div className="ccw-analysis-list">{items.map((analysis) => <AnalysisCard key={analysis.analysis_run_id} analysis={analysis} evidenceIds={evidenceIds} onOpenEvidence={onOpenEvidence} onOpenCitation={onOpenCitation} onNavigate={onNavigate} />)}</div>
   </section>)}</div>;

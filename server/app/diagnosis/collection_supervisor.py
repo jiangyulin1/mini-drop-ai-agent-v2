@@ -519,6 +519,7 @@ class CollectionSupervisor:
         input_evidence_refs = input_evidence_refs or []
         case = self._repo.get_incident_case(case_id, tenant_id)
         spec = get_collector_spec(collector_id)
+        information_goal = self._canonical_information_goal(spec, information_goal)
         if existing_proposal_id:
             proposal = self._repo.get_collection_proposal(
                 existing_proposal_id, case_id, tenant_id,
@@ -1193,6 +1194,29 @@ class CollectionSupervisor:
             proposal_id, str(approved.get("status") or "ACCEPTED"), approved_validation,
         )
         return result
+
+    @staticmethod
+    def _canonical_information_goal(spec: Any, requested: str) -> str:
+        """Map common Agent paraphrases to the catalog's declared goal.
+
+        The catalog remains the authority. This only prevents a semantically
+        valid Chinese paraphrase from being rejected before dispatch; unknown
+        or unrelated goals still fail the exact declaration check below.
+        """
+        text = " ".join(str(requested or "").lower().split())
+        if spec is None or not text or text in {str(item).lower() for item in spec.information_goals}:
+            return requested
+        keywords: dict[str, tuple[tuple[str, ...], int]] = {
+            "runtime_snapshot": (("锁", "futex", "park", "阻塞", "停顿"), 1),
+            "process_scan": (("进程", "pid", "命令", "身份", "cpu", "内存"), 0),
+            "sys_metrics": (("基线", "资源", "饱和", "负载", "fd", "网络", "i/o"), 1),
+            "log_scan": (("日志", "错误", "警告", "超时", "时间线"), 1),
+        }
+        rule = keywords.get(str(getattr(spec, "collector_id", "")))
+        if rule and any(token in text for token in rule[0]):
+            index = min(rule[1], len(spec.information_goals) - 1)
+            return spec.information_goals[index]
+        return requested
 
     def find_reusable_collection_candidates(
         self,
