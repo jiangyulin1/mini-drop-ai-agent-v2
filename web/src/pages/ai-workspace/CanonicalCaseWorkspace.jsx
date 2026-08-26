@@ -63,6 +63,8 @@ const COLLECTION_ERROR_LABELS = {
   STALE_SCOPE_REVISION: "调查范围已变化，请刷新后重试",
   STALE_CONTROL_REVISION: "控制版本已变化，请刷新后重试",
 };
+const COLLECTOR_LABELS = { runtime_snapshot: "运行时快照", process_scan: "进程扫描", sys_metrics: "系统指标", log_scan: "日志扫描", network_discovery: "网络拓扑快照", connection_probe: "下游连通性探针", perf_cpu: "CPU 热点采样", pyspy: "Python 热点采样" };
+const RISK_LABELS = { R0: "无风险只读", R1: "低风险只读", R2: "中风险只读", R3: "高风险变更" };
 function collectionStatusLabel(value) {
   const key = String(value || "PROPOSED").toUpperCase();
   return COLLECTION_STATUS_LABELS[key] || key;
@@ -71,6 +73,7 @@ function collectionErrorLabel(value) {
   const key = String(value || "").trim();
   return COLLECTION_ERROR_LABELS[key] || key.replaceAll("_", " ").toLowerCase();
 }
+function collectorLabel(value) { return COLLECTOR_LABELS[String(value || "")] || String(value || "未指定采集器"); }
 const ANALYSIS_MODE_LABELS = { SINGLE: "单条 Evidence 分析", EVIDENCE: "Evidence 分析", BATCH: "批量 Evidence 分析" };
 const REVIEW_STATE_LABELS = { UNREVIEWED: "未人工复核", VERIFIED: "已复核", LOW_TRUST: "低信任", EXCLUDED: "已排除" };
 const CERTAINTY_LABELS = { HIGH: "高确定性", MEDIUM: "中确定性", LOW: "低确定性", UNKNOWN: "未标注确定性" };
@@ -366,7 +369,7 @@ function CollectionActivityTab({ proposals, requests, evidence, showInternals, c
     return <div className="ccw-collection-row" key={proposal.proposal_id}>
       <div className="ccw-collection-icon"><DatabaseOutlined /></div>
       <div className="ccw-collection-main">
-        <div><strong>{proposal.information_goal || "未声明信息目标"}</strong><Space wrap><Tag color={color}>{collectionStatusLabel(status)}<span style={{ display: "none" }}>{status}</span></Tag><Tag>{proposal.collector_id}</Tag><Tag color={proposal.expected_risk === "R2" ? "orange" : "default"}>{proposal.expected_risk || "低风险"}</Tag></Space></div>
+        <div><strong>{proposal.information_goal || "未声明信息目标"}</strong><Space wrap><Tag color={color}>{collectionStatusLabel(status)}<span style={{ display: "none" }}>{status}</span></Tag><Tag>{collectorLabel(proposal.collector_id)}</Tag><Tag color={proposal.expected_risk === "R2" ? "orange" : "default"}>{RISK_LABELS[proposal.expected_risk] || proposal.expected_risk || "低风险只读"}</Tag></Space></div>
         <p>{proposal.reason_summary || "未提供提案理由"}</p>
         {errors.length > 0 && <Alert type="warning" showIcon message={errors.map(collectionErrorLabel).join("；")} />}
         {awaitingApproval && <Space wrap>
@@ -377,7 +380,7 @@ function CollectionActivityTab({ proposals, requests, evidence, showInternals, c
         {showInternals && <div className="ccw-step-details"><span>Proposal <b>{proposal.proposal_id}</b></span><span>Request <b>{request?.collection_request_id || "-"}</b></span><span>Task <b>{request?.task_id || "-"}</b></span></div>}
       </div>
     </div>;
-  })}{requests.filter((request) => !proposals.some((proposal) => proposal.proposal_id === request.proposal_id)).map((request) => <div className="ccw-collection-row" key={request.collection_request_id}><div className="ccw-collection-icon"><DatabaseOutlined /></div><div className="ccw-collection-main"><div><strong>{request.collector_id}</strong><Space><Tag>CollectionRequest</Tag><Tag color={isCollectionFailure(request.status) ? "red" : "processing"}>{request.status}</Tag></Space></div><p>服务端已接受的权威采集请求</p><div className="ccw-step-details"><span>Request <b>{request.collection_request_id}</b></span><span>Task <b>{request.task_id || "-"}</b></span></div></div></div>)}</div>;
+  })}{requests.filter((request) => !proposals.some((proposal) => proposal.proposal_id === request.proposal_id)).map((request) => <div className="ccw-collection-row" key={request.collection_request_id}><div className="ccw-collection-icon"><DatabaseOutlined /></div><div className="ccw-collection-main"><div><strong>{collectorLabel(request.collector_id)}</strong><Space><Tag>服务端采集请求</Tag><Tag color={isCollectionFailure(request.status) ? "red" : "processing"}>{collectionStatusLabel(request.status)}<span style={{ display: "none" }}>{request.status}</span></Tag></Space></div><p>服务端已接受的权威采集请求</p><div className="ccw-step-details"><span>Request <b>{request.collection_request_id}</b></span><span>Task <b>{request.task_id || "-"}</b></span></div></div></div>)}</div>;
 }
 
 function EvidenceTab({ evidence, reviews, goals, hypothesisGraph, error, onRetry, onOpen, onExplain, showInternals }) {
