@@ -22,7 +22,9 @@ import {
   MoreOutlined,
   PauseOutlined,
   PlayCircleOutlined,
+  RobotOutlined,
   SendOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
 import styles from "../AIDiagnosis.module.css";
 import { confidenceGuide, findingSummaries, humanDiagnosis } from "../../utils/diagnosisHumanize";
@@ -40,12 +42,12 @@ import {
 } from "./workspaceUtils";
 
 function Avatar({ ai = false }) {
-  return <div className={`${styles.avatar} ${ai ? styles.avatarAi : ""}`}>{ai ? "AI" : "我"}</div>;
+  return <div className={`${styles.avatar} ${ai ? styles.avatarAi : ""}`} aria-label={ai ? "AI" : "用户"}>{ai ? <RobotOutlined /> : <UserOutlined />}</div>;
 }
 
 function Message({ ai = false, author, time, children }) {
   return (
-    <article className={styles.message}>
+    <article className={`${styles.message} ${ai ? styles.messageAi : styles.messageUser}`}>
       <Avatar ai={ai} />
       <div className={styles.messageBody}>
         <div className={styles.messageAuthor}>{author}<span className={styles.messageTime}>{formatTime(time)}</span></div>

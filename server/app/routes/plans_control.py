@@ -1003,6 +1003,7 @@ def append_incident_case_message(
             actor_id=_request_principal(request),
             content=payload.content,
             kind=payload.kind,
+            branch_id=payload.branch_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1182,6 +1183,7 @@ def run_incident_case_agent_turn(
         actor_id=principal_id,
         content=payload.message,
         kind=message_kind,
+        branch_id=payload.branch_id,
     )
     case = repo.get_incident_case(case_id, tenant_id) or case
     deterministic_turn_id = f"turn_{secrets.token_hex(12)}"
@@ -1246,13 +1248,19 @@ def run_incident_case_agent_turn(
             content=assistant_message,
             trigger_turn_id=deterministic_turn_id,
             origin_turn_id=deterministic_turn_id,
+            branch_id=payload.branch_id,
             limitation_refs=result.limitations,
         )
         repo.record_case_event(
             case_id,
             tenant_id,
             event_type="agent_control_applied",
-            payload=jsonable_encoder({**result.model_dump(mode="json"), "control": control_result, "message_id": persisted_message["message_id"]}),
+            payload=jsonable_encoder({
+                **result.model_dump(mode="json"),
+                "branch_id": payload.branch_id,
+                "control": control_result,
+                "message_id": persisted_message["message_id"],
+            }),
             actor_id=principal_id,
         )
         return APIResponse(data=result.model_dump(mode="json"))
@@ -1586,6 +1594,7 @@ def run_incident_case_agent_turn(
         content=assistant_message,
         trigger_turn_id=deterministic_turn_id,
         origin_turn_id=deterministic_turn_id,
+        branch_id=payload.branch_id,
         evidence_refs=[
             str(item.get("evidence_id"))
             for item in evidence_chain
@@ -1599,6 +1608,7 @@ def run_incident_case_agent_turn(
         event_type="agent_turn_completed",
         payload={
             **result.model_dump(mode="json"),
+            "branch_id": payload.branch_id,
             "message_id": persisted_message["message_id"],
         },
         actor_id="mini-drop-agent-runtime",

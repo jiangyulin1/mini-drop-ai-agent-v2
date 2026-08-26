@@ -486,6 +486,35 @@ def test_case_branch_workspace_can_be_created_and_selected(client: TestClient):
     assert workspace.json()["data"]["hypothesis_graph"]["hypotheses"] == []
 
 
+def test_case_branch_keeps_user_message_in_branch_event_stream(client: TestClient):
+    case = _create_case(client)
+    created = client.post(
+        f"/api/v1/cases/{case['case_id']}/branches",
+        json={"label": "分支消息", "reason": "branch_message_scope"},
+    )
+    assert created.status_code == 200, created.text
+    branch_id = created.json()["data"]["branch_id"]
+
+    message = client.post(
+        f"/api/v1/cases/{case['case_id']}/messages",
+        json={"branch_id": branch_id, "content": "只在这个分支讨论", "kind": "message"},
+    )
+    assert message.status_code == 200, message.text
+    payload = message.json()["data"]["payload"]
+    assert payload["branch_id"] == branch_id
+
+    branch_events = client.get(
+        f"/api/v1/cases/{case['case_id']}/events",
+        params={"branch_id": branch_id},
+    )
+    assert branch_events.status_code == 200, branch_events.text
+    assert any(
+        item["event_type"] == "user_message"
+        and item["payload"].get("branch_id") == branch_id
+        for item in branch_events.json()["data"]["items"]
+    )
+
+
 def test_branch_evidence_visibility_is_isolated(client: TestClient):
     case = _create_case(client)
     common = {

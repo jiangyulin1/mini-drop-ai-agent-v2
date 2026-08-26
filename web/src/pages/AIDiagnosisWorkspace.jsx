@@ -930,6 +930,7 @@ export default function AIDiagnosisWorkspace() {
       await appendIncidentCaseMessage(caseDetail.case_id, {
         content: `[collection:${group.collectionId}] 请比较这次多机采集数据并更新结论。`,
         kind: "explanation_request",
+        branch_id: activeBranchId || undefined,
       });
       let current = await getIncidentCase(caseDetail.case_id);
       const linkedInstances = buildInstancesFromTasks(group.tasks, agents, current);
@@ -1052,7 +1053,7 @@ export default function AIDiagnosisWorkspace() {
         <WorkerStatus agents={agents} loading={workerLoading} onRefresh={refreshWorkers} />
       </header>
 
-      <div className={styles.body}>
+      <div className={`${styles.body} ${mode === "data" ? styles.dataBody : ""}`}>
         <aside className={styles.rail}>
           <div className={styles.railHeader}>
             <Button block icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>新建诊断</Button>

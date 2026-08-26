@@ -149,6 +149,7 @@ class RecoveryPlanExecuteRequest(StrictModel):
 
 
 class CaseMessageRequest(StrictModel):
+    branch_id: Optional[str] = Field(default=None, max_length=128)
     content: str = Field(min_length=1, max_length=8000)
     kind: Literal["message", "answer", "explanation_request"] = "message"
 

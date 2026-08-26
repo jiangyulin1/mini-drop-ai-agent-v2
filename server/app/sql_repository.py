@@ -1353,6 +1353,7 @@ class SqlRepository(SqlRepositoryV6Mixin):
         actor_id: str,
         content: str,
         kind: str,
+        branch_id: str | None = None,
     ) -> dict[str, Any] | None:
         now = now_utc()
         with self._write_session() as session:
@@ -1366,7 +1367,11 @@ class SqlRepository(SqlRepositoryV6Mixin):
                 tenant_id=case.tenant_id,
                 event_type="user_message",
                 actor_id=actor_id,
-                payload_json={"kind": kind, "content": content},
+                payload_json={
+                    "kind": kind,
+                    "content": content,
+                    **({"branch_id": branch_id} if branch_id else {}),
+                },
                 created_at=now,
             )
             session.add(event)

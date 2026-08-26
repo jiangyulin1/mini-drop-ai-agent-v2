@@ -267,7 +267,7 @@ export default function DiagnosisDataConsole({
 
         <main className={styles.consolePreview}>
           {!selected ? (
-            <div className={styles.previewPanel}><Empty description="选择一个采集会话" /></div>
+            <div className={`${styles.previewPanel} ${styles.previewEmpty}`}><Empty description="选择一个采集会话" /></div>
           ) : (
             <div className={styles.previewPanel}>
               <div className={styles.previewHeader}>

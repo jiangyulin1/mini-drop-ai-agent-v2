@@ -521,7 +521,14 @@ def main() -> int:
         "actual_pi_version": pi_version(staging),
         "migration_head": migration_head(staging),
         "migration_plan_digest": sha256_file(migration_plan) if migration_plan.is_file() else None,
-        "prompt_digest": sha256_file(ROOT / "docs/ai_agent_feature_complete_demo_prompt_v6.md"),
+        # The v6 planning prompt was intentionally retired from the current
+        # release. Keep the manifest field for schema compatibility, but do
+        # not make packaging depend on a deleted historical document.
+        "prompt_digest": (
+            sha256_file(ROOT / "docs/ai_agent_feature_complete_demo_prompt_v6.md")
+            if (ROOT / "docs/ai_agent_feature_complete_demo_prompt_v6.md").is_file()
+            else None
+        ),
         "public_contract_digest": sha256_file(ROOT / "benchmarks/agent_beta/contracts/public-contract-v1.json"),
         "source_date_epoch": source_date_epoch,
     }

@@ -8,7 +8,7 @@
 }
 
 .ccw-header {
-  padding: 14px 16px;
+  padding: 11px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -52,14 +52,67 @@
 
 .ccw-case-banner {
   margin: 0;
-  border-radius: 0;
-  border-left: none;
-  border-right: none;
-  border-top: none;
+}
+
+.ccw-inline-banner {
+  min-height: 24px;
+  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #b7eb8f;
+  border-radius: 999px;
+  color: #237804;
+  background: #f6ffed;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.ccw-header .ccw-inline-banner {
+  color: #237804;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ccw-inline-banner-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ccw-header .ccw-inline-banner-dot {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.ccw-inline-banner-running {
+  border-color: #91caff;
+  color: #0958d9;
+  background: #e6f4ff;
+}
+
+.ccw-header .ccw-inline-banner-running {
+  color: #0958d9;
+}
+
+.ccw-inline-banner-stale,
+.ccw-inline-banner-user {
+  border-color: #ffd591;
+  color: #ad4e00;
+  background: #fff7e6;
+}
+
+.ccw-header .ccw-inline-banner-stale,
+.ccw-header .ccw-inline-banner-user {
+  color: #ad4e00;
 }
 
 .ccw-overview {
-  padding: 16px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--app-border);
   background: color-mix(in srgb, var(--app-surface) 96%, var(--app-accent-surface, #eaf1ff));
 }
@@ -111,7 +164,7 @@
 }
 
 .ccw-path {
-  margin-top: 14px;
+  margin-top: 10px;
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 5px;
@@ -126,8 +179,8 @@
 .ccw-path-node {
   min-width: 0;
   width: 100%;
-  min-height: 72px;
-  padding: 8px 9px;
+  min-height: 62px;
+  padding: 7px 8px;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   grid-template-rows: auto auto;
@@ -211,7 +264,7 @@
 }
 
 .ccw-brief-grid {
-  margin-top: 12px;
+  margin-top: 9px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
@@ -219,7 +272,7 @@
 
 .ccw-brief-block {
   min-width: 0;
-  padding: 10px 11px;
+  padding: 8px 9px;
   border: 1px solid var(--app-border);
   border-radius: 7px;
   background: var(--app-surface);
@@ -294,7 +347,7 @@
 }
 
 .ccw-tab-panel {
-  padding: 14px 16px 18px;
+  padding: 10px 14px 14px;
 }
 
 .ccw-plan,
@@ -686,6 +739,14 @@
 
 .ccw-edges svg {
   color: #7c3aed;
+  flex: 0 0 auto;
+}
+
+.ccw-edges > div > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ccw-fact {
@@ -824,7 +885,7 @@
 }
 
 .ccw-stagebar {
-  padding: 8px 12px;
+  padding: 6px 10px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
@@ -1226,7 +1287,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@container (max-width: 900px) {
   .ccw-evidence-grid,
   .ccw-hypotheses,
   .ccw-causal {
@@ -1241,7 +1302,7 @@
   }
 }
 
-@media (max-width: 700px) {
+@container (max-width: 700px) {
   .ccw-kv {
     grid-template-columns: 1fr;
   }
@@ -1271,6 +1332,10 @@
   }
 
   .ccw-status > span {
+    display: none;
+  }
+
+  .ccw-inline-banner {
     display: none;
   }
 

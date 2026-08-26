@@ -2919,6 +2919,7 @@ def internal_runtime_events(
             payload={
                 "message_id": message["message_id"],
                 "trigger_turn_id": final_turn_id,
+                "branch_id": event_branch_id,
                 "content": final_content,
                 "evidence_refs": evidence_refs,
             },
@@ -2929,7 +2930,11 @@ def internal_runtime_events(
                 case_id,
                 tenant_id,
                 event_type="turn.completed",
-                payload={"turn_id": final_turn_id, "message_id": message["message_id"]},
+                payload={
+                    "turn_id": final_turn_id,
+                    "branch_id": event_branch_id,
+                    "message_id": message["message_id"],
+                },
                 actor_id="mini-drop-agent-runtime",
             )
     return APIResponse(data={
